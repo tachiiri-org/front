@@ -1,0 +1,132 @@
+button,
+input,
+select,
+textarea {
+  font: inherit;
+}
+
+button,
+input,
+select,
+textarea {
+  transition:
+    background-color 120ms ease,
+    border-color 120ms ease,
+    color 120ms ease;
+}
+
+button:focus-visible,
+input:focus-visible,
+select:focus-visible,
+textarea:focus-visible {
+  outline: 1px solid var(--editor-focus);
+  outline-offset: -1px;
+}
+
+.editor-panel,
+.editor-canvas-shell {
+  border: 1px solid var(--editor-border);
+  background: var(--editor-surface);
+  border-radius: 0;
+  box-shadow: none;
+}
+
+.editor-panel,
+.editor-canvas-shell {
+  padding: 12px;
+}
+
+.editor-panel--compact {
+  gap: 10px;
+}
+
+.editor-panel__header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+  margin-bottom: 12px;
+  color: var(--editor-text-subtle);
+  font-size: 11px;
+  text-transform: uppercase;
+  letter-spacing: 0.08em;
+}
+
+.editor-input,
+.editor-select,
+.editor-textarea,
+.editor-panel button,
+.editor-segmented button {
+  width: 100%;
+  border: 1px solid var(--editor-border-strong);
+  background: var(--editor-surface-alt);
+  color: var(--editor-text);
+  border-radius: 0;
+  padding: 8px 10px;
+}
+
+.editor-input::placeholder,
+.editor-textarea::placeholder {
+  color: var(--editor-text-subtle);
+}
+
+.editor-input:hover,
+.editor-select:hover,
+.editor-textarea:hover,
+.editor-panel button:hover,
+.editor-segmented button:hover,
+.editor-topbar__actions button:hover,
+.editor-dropdown__trigger:hover {
+  background: var(--editor-surface-muted);
+}
+
+.editor-panel button:disabled,
+.editor-segmented button:disabled {
+  opacity: 0.45;
+  cursor: default;
+}
+
+.editor-panel button,
+.editor-segmented button,
+.editor-topbar__actions button {
+  width: auto;
+  cursor: pointer;
+}
+
+.editor-topbar__actions button,
+.editor-segmented button.is-active,
+.editor-select-list__item.is-selected,
+.component-tree__item.is-selected {
+  border-color: var(--editor-accent);
+}
+
+.editor-topbar__actions button,
+.editor-segmented button.is-active {
+  background: var(--editor-accent);
+  color: var(--editor-text-on-accent);
+}
+
+.editor-topbar__actions button:hover,
+.editor-segmented button.is-active:hover {
+  background: var(--editor-accent-hover);
+}
+
+.editor-empty,
+.editor-error {
+  margin: 0;
+  color: var(--editor-text-muted);
+  font-size: 12px;
+}
+
+.editor-error {
+  color: var(--editor-error);
+}
+
+.editor-textarea {
+  resize: vertical;
+}
+
+.editor-textarea--export {
+  min-height: 180px;
+  background: var(--editor-bg-deep);
+}

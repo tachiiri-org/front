@@ -1,0 +1,18 @@
+.diagnostics-grid {
+  margin: 0;
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 12px;
+}
+
+.diagnostics-grid dt {
+  color: var(--editor-text-subtle);
+  margin-bottom: 4px;
+  font-size: 11px;
+  text-transform: uppercase;
+  letter-spacing: 0.06em;
+}
+
+.diagnostics-grid dd {
+  margin: 0;
+}

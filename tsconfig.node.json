@@ -1,0 +1,27 @@
+{
+  "compilerOptions": {
+    "composite": true,
+    "target": "ES2022",
+    "lib": [
+      "ES2022"
+    ],
+    "module": "CommonJS",
+    "moduleResolution": "node",
+    "strict": true,
+    "skipLibCheck": true,
+    "resolveJsonModule": true,
+    "types": [
+      "node"
+    ],
+    "baseUrl": ".",
+    "paths": {
+      "@shared/*": [
+        "src/shared/*"
+      ]
+    }
+  },
+  "include": [
+    "vite.config.ts",
+    "vitest.config.ts"
+  ]
+}

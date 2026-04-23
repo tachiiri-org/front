@@ -1,0 +1,150 @@
+.editor-layout--spec {
+  grid-template-columns: 340px minmax(0, 1fr) 320px;
+}
+
+.editor-panel--spec-outline {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  min-height: 0;
+  overflow: auto;
+  background: var(--editor-surface);
+  padding: 10px 10px 12px;
+}
+
+.editor-panel--spec-sidebar {
+  overflow: hidden;
+}
+
+.editor-panel--spec-global {
+  display: grid;
+  grid-template-rows: minmax(0, auto) minmax(0, auto);
+  gap: 10px;
+  min-height: 240px;
+  overflow: visible;
+  flex: 0 0 240px;
+}
+
+.editor-panel--spec-node,
+.editor-panel--trace-links {
+  min-height: 0;
+  overflow: auto;
+}
+
+.spec-outline-tree {
+  margin: 0;
+  padding: 0;
+  list-style: none;
+  display: grid;
+  gap: 2px;
+  align-content: start;
+}
+
+.spec-outline-tree ul {
+  margin: 0;
+  padding-left: 18px;
+  list-style: none;
+  display: grid;
+  gap: 2px;
+}
+
+.spec-outline-tree__item {
+  display: grid;
+  grid-template-columns: auto minmax(0, 1fr) auto;
+  align-items: center;
+  gap: 6px;
+  padding: 2px 6px;
+}
+
+.spec-outline-tree__item:hover {
+  background: var(--editor-surface-hover);
+}
+
+.spec-outline-tree__item.is-selected {
+  background: var(--editor-surface-active);
+}
+
+.spec-outline-tree__toggle {
+  width: 12px;
+  min-width: unset;
+  min-height: unset;
+  padding: 0;
+  border: 0;
+  background: transparent;
+  color: var(--editor-text-muted);
+  text-align: center;
+  cursor: pointer;
+}
+
+.spec-outline-tree__toggle:disabled {
+  visibility: hidden;
+}
+
+.spec-outline-tree__toggle:focus-visible {
+  outline: none;
+}
+
+.spec-outline-tree__label,
+.spec-outline-tree__input {
+  width: 100%;
+  text-align: left;
+  border: 0;
+  background: transparent;
+  color: inherit;
+  padding: 0;
+}
+
+.spec-outline-tree__label {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  cursor: pointer;
+  appearance: none;
+  -webkit-appearance: none;
+}
+
+.spec-outline-tree__label:focus-visible,
+.spec-outline-tree__input:focus-visible {
+  outline: none;
+  background: transparent;
+}
+
+.spec-outline-tree__actions {
+  display: flex;
+  gap: 4px;
+}
+
+.spec-outline-tree__actions button {
+  border: 0;
+  background: transparent;
+  color: var(--editor-text-muted);
+  padding: 0 2px;
+  font-size: 12px;
+  line-height: 1;
+  min-width: unset;
+  min-height: unset;
+  cursor: pointer;
+}
+
+.spec-outline-tree__actions button:hover:not(:disabled) {
+  color: var(--editor-text);
+}
+
+.spec-outline-tree__actions button:disabled {
+  opacity: 0.3;
+  cursor: default;
+}
+
+.spec-node-editor__quick-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+  margin-bottom: 12px;
+}
+
+.trace-link-inspector__item {
+  padding: 10px;
+  margin-bottom: 10px;
+  border: 1px solid var(--editor-border);
+  background: var(--editor-bg);
+}
