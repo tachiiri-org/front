@@ -88,7 +88,7 @@ export const createRuntimeViewModel = (
 
   return {
     bootstrapError,
-    eyebrow: snapshot.app.runtime === 'electron' ? 'Electron Runtime' : 'Pages Runtime',
+    eyebrow: snapshot.app.runtime === 'electron' ? 'Electron Runtime' : 'Workers Runtime',
     metadata: [
       { id: 'app-name', label: 'Name', value: snapshot.app.name },
       { id: 'app-channel', label: 'Channel', value: snapshot.app.channel },

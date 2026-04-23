@@ -6,7 +6,7 @@ import type {
   ViewportSpec,
 } from './spec-document';
 
-export type SurfaceRuntime = 'electron' | 'cloudflare-pages';
+export type SurfaceRuntime = 'electron' | 'cloudflare-workers';
 
 export type SurfaceIntentAction = 'review' | 'implement' | 'generate';
 

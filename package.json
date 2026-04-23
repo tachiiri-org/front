@@ -10,8 +10,8 @@
     "preview": "vite preview",
     "typecheck": "tsc -p tsconfig.node.json --noEmit && tsc -p tsconfig.json --noEmit",
     "test": "vitest run",
-    "deploy:dev": "bun run build && wrangler pages deploy dist --project-name front --branch dev",
-    "deploy": "bun run build && wrangler pages deploy dist --project-name front --branch main"
+    "deploy:dev": "bun run build && wrangler deploy --env dev",
+    "deploy": "bun run build && wrangler deploy"
   },
   "dependencies": {
     "@fontsource/noto-sans-jp": "^5.2.7",

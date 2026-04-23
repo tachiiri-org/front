@@ -4,7 +4,7 @@ declare const __APP_VERSION__: string | undefined;
 
 export type AppChannel = 'dev' | 'stable';
 export type AppEnvironment = 'development' | 'production';
-export type AppRuntime = 'electron' | 'cloudflare-pages';
+export type AppRuntime = 'electron' | 'cloudflare-workers';
 export type UpdateProvider = 'github' | 'none';
 
 export type AppMetadata = {

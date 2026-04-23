@@ -1,0 +1,16 @@
+name = "front"
+main = "src/worker.ts"
+compatibility_date = "2026-04-24"
+workers_dev = false
+
+[assets]
+directory = "./dist"
+binding = "ASSETS"
+not_found_handling = "single-page-application"
+
+[env.dev]
+name = "front-dev"
+workers_dev = true
+
+[env.production]
+workers_dev = false

@@ -8,7 +8,7 @@ import { createWebUiShellSettingsRepository } from './ui-shell-settings-reposito
 const readApiOrigin = (): string => import.meta.env.VITE_APP_API_ORIGIN ?? '';
 
 export const createWebRuntimeServices = (): RuntimeServices => {
-  const appMetadata = getAppMetadata('cloudflare-pages');
+  const appMetadata = getAppMetadata('cloudflare-workers');
   const apiOrigin = readApiOrigin();
 
   return {
