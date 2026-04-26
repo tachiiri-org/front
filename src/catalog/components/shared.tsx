@@ -36,7 +36,7 @@ export type ComponentDefinition = {
   readonly fields: readonly PropField[];
   readonly primaryTextProp?: string;
   readonly propsSchema: z.ZodType<Record<string, unknown>>;
-  readonly render: (props: Record<string, unknown>) => ReactNode;
+  readonly render: (props: Record<string, unknown>, children?: ReactNode) => ReactNode;
   readonly type: string;
 };
 

@@ -33,13 +33,14 @@ export const inputComponents = [
       ...createTextStyleFields(),
     ],
     primaryTextProp: 'title',
-    render: (props) => (
+    render: (props, children) => (
       <button
         className={`spec-button spec-button--${String(props.emphasis ?? 'primary')}`}
         style={getTextStyle(props)}
         type="button"
       >
         {String(props.title ?? '')}
+        {children ? <div className="spec-card__children">{children}</div> : null}
       </button>
     ),
   },
@@ -54,8 +55,11 @@ export const inputComponents = [
     }),
     defaultProps: { placeholder: 'Type here' },
     fields: [{ kind: 'text', name: 'placeholder', label: 'Placeholder' }],
-    render: (props) => (
-      <input className="spec-input" placeholder={String(props.placeholder ?? '')} readOnly />
+    render: (props, children) => (
+      <div>
+        <input className="spec-input" placeholder={String(props.placeholder ?? '')} readOnly />
+        {children ? <div className="spec-card__children">{children}</div> : null}
+      </div>
     ),
   },
   {
@@ -69,13 +73,16 @@ export const inputComponents = [
     }),
     defaultProps: { placeholder: 'Write details' },
     fields: [{ kind: 'text', name: 'placeholder', label: 'Placeholder' }],
-    render: (props) => (
-      <textarea
-        className="spec-textarea"
-        placeholder={String(props.placeholder ?? '')}
-        readOnly
-        rows={3}
-      />
+    render: (props, children) => (
+      <div>
+        <textarea
+          className="spec-textarea"
+          placeholder={String(props.placeholder ?? '')}
+          readOnly
+          rows={3}
+        />
+        {children ? <div className="spec-card__children">{children}</div> : null}
+      </div>
     ),
   },
 ] as const satisfies readonly ComponentDefinition[];

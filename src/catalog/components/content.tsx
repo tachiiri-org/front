@@ -29,10 +29,11 @@ export const contentComponents = [
       ...createTextStyleFields(),
     ],
     primaryTextProp: 'title',
-    render: (props) => (
+    render: (props, children) => (
       <div className="spec-dialog">
         <span className="spec-card__eyebrow">{String(props.state ?? 'open')}</span>
         <strong style={getTextStyle(props)}>{String(props.title ?? '')}</strong>
+        {children ? <div className="spec-card__children">{children}</div> : null}
       </div>
     ),
   },
@@ -60,7 +61,12 @@ export const contentComponents = [
       ...createTextStyleFields(),
     ],
     primaryTextProp: 'title',
-    render: (props) => <strong style={getTextStyle(props)}>{String(props.title ?? '')}</strong>,
+    render: (props, children) => (
+      <div className="spec-heading">
+        <strong style={getTextStyle(props)}>{String(props.title ?? '')}</strong>
+        {children ? <div className="spec-card__children">{children}</div> : null}
+      </div>
+    ),
   },
   {
     type: 'Text',
@@ -80,7 +86,12 @@ export const contentComponents = [
     },
     fields: [{ kind: 'textarea', name: 'title', label: 'Title' }, ...createTextStyleFields()],
     primaryTextProp: 'title',
-    render: (props) => <p style={getTextStyle(props)}>{String(props.title ?? '')}</p>,
+    render: (props, children) => (
+      <div className="spec-text">
+        <p style={getTextStyle(props)}>{String(props.title ?? '')}</p>
+        {children ? <div className="spec-card__children">{children}</div> : null}
+      </div>
+    ),
   },
   {
     type: 'List',
@@ -93,15 +104,18 @@ export const contentComponents = [
     }),
     defaultProps: { items: 'First item\nSecond item\nThird item' },
     fields: [{ kind: 'textarea', name: 'items', label: 'Items' }],
-    render: (props) => (
-      <ul className="spec-list">
-        {String(props.items ?? '')
-          .split('\n')
-          .filter(Boolean)
-          .map((item) => (
-            <li key={item}>{item}</li>
-          ))}
-      </ul>
+    render: (props, children) => (
+      <div className="spec-list-wrap">
+        <ul className="spec-list">
+          {String(props.items ?? '')
+            .split('\n')
+            .filter(Boolean)
+            .map((item) => (
+              <li key={item}>{item}</li>
+            ))}
+        </ul>
+        {children ? <div className="spec-card__children">{children}</div> : null}
+      </div>
     ),
   },
 ] as const satisfies readonly ComponentDefinition[];

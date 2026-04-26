@@ -2,13 +2,81 @@
 .spec-header,
 .spec-footer,
 .spec-dialog,
-.spec-image {
+.spec-image,
+.spec-heading,
+.spec-text,
+.spec-list-wrap {
   height: 100%;
   border-radius: 0;
   padding: 10px;
   border: 1px solid var(--editor-border-strong);
   background: var(--editor-surface-alt);
   color: var(--editor-text);
+  position: relative;
+  overflow: hidden;
+}
+
+.spec-canvas {
+  height: 100%;
+  border: 1px solid var(--editor-border-strong);
+  background:
+    radial-gradient(circle at top left, rgba(255, 255, 255, 0.06), transparent 36%),
+    linear-gradient(180deg, rgba(255, 255, 255, 0.02), transparent 28%),
+    var(--editor-surface-alt);
+  color: var(--editor-text);
+  display: grid;
+  grid-template-rows: minmax(0, 1fr);
+  padding: 10px;
+  position: relative;
+}
+
+.spec-canvas__chrome {
+  position: absolute;
+  top: 10px;
+  left: 10px;
+  z-index: 2;
+  display: grid;
+  gap: 6px;
+  max-width: calc(100% - 20px);
+  padding: 8px 10px;
+  border: 1px solid var(--editor-border-strong);
+  background: rgba(37, 37, 38, 0.9);
+  box-shadow: 0 10px 24px rgba(0, 0, 0, 0.18);
+}
+
+.spec-canvas__meta {
+  color: var(--editor-text-subtle);
+  font-size: 12px;
+}
+
+.spec-canvas__viewport {
+  min-height: 0;
+  width: 100%;
+  aspect-ratio: 12 / 9;
+  min-height: 0;
+  border: 1px solid var(--editor-border-strong);
+  background: var(--editor-bg);
+  box-shadow: 0 12px 28px rgba(0, 0, 0, 0.22);
+  position: relative;
+  overflow: hidden;
+}
+
+.spec-canvas__viewport-grid {
+  position: absolute;
+  inset: 0;
+  z-index: 0;
+  background-image:
+    linear-gradient(var(--editor-grid-line) 1px, transparent 1px),
+    linear-gradient(90deg, var(--editor-grid-line) 1px, transparent 1px);
+  background-size: 24px 24px;
+  opacity: 0.8;
+}
+
+.spec-canvas__children,
+.spec-card__children {
+  position: absolute;
+  inset: 0;
+  z-index: 1;
 }
 
 .spec-card--paper,

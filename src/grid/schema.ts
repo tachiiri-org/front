@@ -1,4 +1,5 @@
 import { z } from 'zod';
+import { editorFormsSchema } from './editor-form';
 
 const viewportSchema = z.object({
   label: z.string().min(1),
@@ -11,13 +12,6 @@ const gridSchema = z.object({
   rows: z.number().int().min(1),
 });
 
-const canvasThemeSchema = z.object({
-  background: z.string(),
-  gridLine: z.string(),
-  border: z.string(),
-  shadow: z.string().optional(),
-});
-
 const gridFrameSchema = z.object({
   x: z.number().int().min(0),
   y: z.number().int().min(0),
@@ -27,6 +21,7 @@ const gridFrameSchema = z.object({
 
 export const gridCellSchema = z.object({
   id: z.string().min(1),
+  parentId: z.string().min(1).optional(),
   frame: gridFrameSchema,
   type: z.string().min(1),
   props: z.record(z.string(), z.unknown()).default({}),
@@ -36,7 +31,7 @@ export const gridLayoutSchema = z.object({
   id: z.string().min(1),
   viewport: viewportSchema,
   grid: gridSchema,
-  canvas: canvasThemeSchema,
+  editorForms: editorFormsSchema.default({}),
   cells: z.array(gridCellSchema),
 });
 

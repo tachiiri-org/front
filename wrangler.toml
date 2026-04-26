@@ -8,9 +8,21 @@ directory = "./dist"
 binding = "ASSETS"
 not_found_handling = "single-page-application"
 
+[[r2_buckets]]
+binding = "LAYOUTS"
+bucket_name = "layouts-dev"
+
 [env.dev]
 name = "front-dev"
 workers_dev = true
+
+[[env.dev.r2_buckets]]
+binding = "LAYOUTS"
+bucket_name = "layouts-dev"
+
+[[env.production.r2_buckets]]
+binding = "LAYOUTS"
+bucket_name = "layouts-prod"
 
 [env.production]
 workers_dev = false

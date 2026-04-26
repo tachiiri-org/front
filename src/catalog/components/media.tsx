@@ -14,6 +14,11 @@ export const mediaComponents = [
     }),
     defaultProps: { alt: 'Preview image' },
     fields: [{ kind: 'text', name: 'alt', label: 'Alt text' }],
-    render: (props) => <div className="spec-image">{String(props.alt ?? '')}</div>,
+    render: (props, children) => (
+      <div className="spec-image">
+        {String(props.alt ?? '')}
+        {children ? <div className="spec-card__children">{children}</div> : null}
+      </div>
+    ),
   },
 ] as const satisfies readonly ComponentDefinition[];

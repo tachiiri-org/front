@@ -41,10 +41,11 @@ export const structureComponents = [
       ...createTextStyleFields(),
     ],
     primaryTextProp: 'title',
-    render: (props) => (
+    render: (props, children) => (
       <div className={`spec-card spec-card--${String(props.surface ?? 'canvas')}`}>
         <span className="spec-card__eyebrow">Page</span>
         <strong style={getTextStyle(props)}>{String(props.title ?? '')}</strong>
+        {children ? <div className="spec-card__children">{children}</div> : null}
       </div>
     ),
   },
@@ -73,10 +74,11 @@ export const structureComponents = [
       ...createTextStyleFields(),
     ],
     primaryTextProp: 'title',
-    render: (props) => (
+    render: (props, children) => (
       <div className={`spec-card spec-card--${String(props.tone ?? 'default')}`}>
         <span className="spec-card__eyebrow">Panel</span>
-        <strong style={getTextStyle(props)}>{String(props.title ?? '')}</strong>
+        <strong style={getTextStyle(props)}>{String(props.tone ?? '')}</strong>
+        {children ? <div className="spec-card__children">{children}</div> : null}
       </div>
     ),
   },
@@ -99,9 +101,10 @@ export const structureComponents = [
     },
     fields: [{ kind: 'textarea', name: 'title', label: 'Title' }, ...createTextStyleFields()],
     primaryTextProp: 'title',
-    render: (props) => (
+    render: (props, children) => (
       <div className="spec-header">
         <strong style={getTextStyle(props)}>{String(props.title ?? '')}</strong>
+        {children ? <div className="spec-card__children">{children}</div> : null}
       </div>
     ),
   },
@@ -119,8 +122,11 @@ export const structureComponents = [
     fields: [
       { kind: 'select', name: 'tone', label: 'Tone', options: ['default', 'muted', 'inverse'] },
     ],
-    render: (props) => (
-      <div className={`spec-footer spec-footer--${String(props.tone ?? 'default')}`}>Footer</div>
+    render: (props, children) => (
+      <div className={`spec-footer spec-footer--${String(props.tone ?? 'default')}`}>
+        Footer
+        {children ? <div className="spec-card__children">{children}</div> : null}
+      </div>
     ),
   },
 ] as const satisfies readonly ComponentDefinition[];

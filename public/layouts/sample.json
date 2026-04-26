@@ -1,19 +1,148 @@
 {
   "id": "sample",
-  "viewport": {
-    "label": "Desktop",
-    "width": 12,
-    "height": 9
+  "viewport": { "label": "Desktop", "width": 16, "height": 9 },
+  "grid": { "columns": 160, "rows": 90 },
+  "editorForms": {
+    "EditorShell": {
+      "sections": [
+        {
+          "kind": "fields",
+          "title": "Shell",
+          "fields": [
+            { "kind": "color", "scope": "props", "name": "background", "label": "Background" }
+          ]
+        }
+      ]
+    },
+    "EditorStage": {
+      "sections": [
+        {
+          "kind": "fields",
+          "title": "Stage",
+          "fields": [
+            { "kind": "color", "scope": "props", "name": "background", "label": "Background" }
+          ]
+        }
+      ]
+    },
+    "EditorSidebar": {
+      "sections": [
+        {
+          "kind": "fields",
+          "title": "Sidebar",
+          "fields": [
+            { "kind": "color", "scope": "props", "name": "background", "label": "Background" },
+            { "kind": "text", "scope": "props", "name": "borderLeft", "label": "Border Left" }
+          ]
+        }
+      ]
+    },
+    "Canvas": {
+      "sections": [
+        {
+          "kind": "fields",
+          "title": "Canvas",
+          "fields": [
+            { "kind": "color", "scope": "props", "name": "background", "label": "Background" },
+            { "kind": "text", "scope": "props", "name": "gridLine", "label": "Grid Line" },
+            { "kind": "color", "scope": "props", "name": "border", "label": "Border" },
+            { "kind": "text", "scope": "props", "name": "shadow", "label": "Shadow" }
+          ]
+        }
+      ]
+    },
+    "Heading": {
+      "sections": [
+        {
+          "kind": "fields",
+          "title": "Frame",
+          "fields": [
+            { "kind": "number", "scope": "frame", "name": "x", "label": "x", "min": 0 },
+            { "kind": "number", "scope": "frame", "name": "y", "label": "y", "min": 0 },
+            { "kind": "number", "scope": "frame", "name": "w", "label": "w", "min": 1 },
+            { "kind": "number", "scope": "frame", "name": "h", "label": "h", "min": 1 }
+          ]
+        },
+        {
+          "kind": "fields",
+          "title": "Props",
+          "fields": [
+            { "kind": "textarea", "scope": "props", "name": "title", "label": "Title" },
+            { "kind": "select", "scope": "props", "name": "level", "label": "Level", "options": ["1", "2", "3"] },
+            { "kind": "select", "scope": "props", "name": "textAlign", "label": "Text Align", "options": ["left", "center", "right"] },
+            { "kind": "number", "scope": "props", "name": "fontSize", "label": "Font Size", "min": 10, "max": 48 },
+            { "kind": "color", "scope": "props", "name": "color", "label": "Color" }
+          ]
+        }
+      ]
+    },
+    "Text": {
+      "sections": [
+        {
+          "kind": "fields",
+          "title": "Frame",
+          "fields": [
+            { "kind": "number", "scope": "frame", "name": "x", "label": "x", "min": 0 },
+            { "kind": "number", "scope": "frame", "name": "y", "label": "y", "min": 0 },
+            { "kind": "number", "scope": "frame", "name": "w", "label": "w", "min": 1 },
+            { "kind": "number", "scope": "frame", "name": "h", "label": "h", "min": 1 }
+          ]
+        },
+        {
+          "kind": "fields",
+          "title": "Props",
+          "fields": [
+            { "kind": "textarea", "scope": "props", "name": "title", "label": "Text" },
+            { "kind": "select", "scope": "props", "name": "textAlign", "label": "Text Align", "options": ["left", "center", "right"] },
+            { "kind": "number", "scope": "props", "name": "fontSize", "label": "Font Size", "min": 10, "max": 48 },
+            { "kind": "color", "scope": "props", "name": "color", "label": "Color" }
+          ]
+        }
+      ]
+    }
   },
-  "grid": {
-    "columns": 120,
-    "rows": 120
-  },
-  "canvas": {
-    "background": "#252526",
-    "gridLine": "rgba(255, 255, 255, 0.04)",
-    "border": "#4f4f4f",
-    "shadow": "0 0 0 1px rgba(0, 0, 0, 0.25), 0 16px 40px rgba(0, 0, 0, 0.22)"
-  },
-  "cells": []
+  "cells": [
+    {
+      "id": "shell",
+      "type": "EditorShell",
+      "frame": { "x": 0, "y": 0, "w": 160, "h": 90 },
+      "props": { "background": "#2b2b2d" }
+    },
+    {
+      "id": "stage",
+      "type": "EditorStage",
+      "frame": { "x": 0, "y": 0, "w": 131, "h": 90 },
+      "props": { "background": "#2b2b2d" }
+    },
+    {
+      "id": "sidebar",
+      "type": "EditorSidebar",
+      "frame": { "x": 131, "y": 0, "w": 29, "h": 90 },
+      "props": { "background": "#252526", "borderLeft": "1px solid #3c3c3c", "footerBackground": "#252526" }
+    },
+    {
+      "id": "canvas",
+      "type": "Canvas",
+      "frame": { "x": 3, "y": 3, "w": 125, "h": 84 },
+      "props": {
+        "background": "#252526",
+        "gridLine": "rgba(255, 255, 255, 0.04)",
+        "border": "#4f4f4f",
+        "shadow": "0 0 0 1px rgba(0, 0, 0, 0.25), 0 16px 40px rgba(0, 0, 0, 0.22)"
+      }
+    },
+    {
+      "id": "heading-1",
+      "parentId": "canvas",
+      "type": "Heading",
+      "frame": { "x": 10, "y": 10, "w": 100, "h": 15 },
+      "props": {
+        "title": "UI Spec Editor",
+        "level": "1",
+        "textAlign": "center",
+        "fontSize": 18,
+        "color": "#cccccc"
+      }
+    }
+  ]
 }
