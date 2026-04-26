@@ -2,28 +2,15 @@
   "compilerOptions": {
     "composite": true,
     "target": "ES2022",
-    "lib": [
-      "ES2022",
-      "DOM",
-      "DOM.Iterable"
-    ],
-    "jsx": "react-jsx",
-    "module": "ESNext",
-    "moduleResolution": "Bundler",
+    "lib": ["ES2022"],
+    "module": "CommonJS",
+    "moduleResolution": "node",
     "strict": true,
     "skipLibCheck": true,
-    "resolveJsonModule": true,
-    "baseUrl": ".",
-    "paths": {
-      "@shared/*": [
-        "src/shared/*"
-      ]
-    }
+    "types": ["node"]
   },
   "include": [
-    "src/**/*"
-  ],
-  "exclude": [
-    "src/worker.ts"
+    "vite.config.ts",
+    "vitest.config.ts"
   ]
 }
