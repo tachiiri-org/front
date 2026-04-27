@@ -19,6 +19,9 @@ const applyPadding = (el: HTMLElement, documentValue: ComponentDocument): void =
   }
 };
 
+const isPositiveInteger = (value: unknown): value is number =>
+  typeof value === 'number' && Number.isInteger(value) && value > 0;
+
 const renderInlineComponent = (component: InlineComponent): HTMLElement => {
   const el = document.createElement(component.tag);
   Object.assign(el.style, component.style);
@@ -62,6 +65,34 @@ const renderResolvedDocument = (component: Component, documentValue: ComponentDo
     }
     applyPadding(button, documentValue);
     return button;
+  }
+
+  if (documentValue.kind === 'grid') {
+    const rows = isPositiveInteger(documentValue.rows) ? documentValue.rows : 1;
+    const columns = isPositiveInteger(documentValue.columns) ? documentValue.columns : 1;
+    const grid = document.createElement('div');
+    grid.dataset.componentId = component.id;
+    grid.style.display = 'grid';
+    grid.style.gridTemplateColumns = `repeat(${columns}, minmax(0, 1fr))`;
+    grid.style.gridTemplateRows = `repeat(${rows}, minmax(48px, auto))`;
+    grid.style.boxSizing = 'border-box';
+    grid.style.border = '1px solid rgba(0, 0, 0, 0.12)';
+    grid.style.backgroundColor = 'rgba(255, 255, 255, 0.9)';
+
+    for (let row = 1; row <= rows; row += 1) {
+      for (let column = 1; column <= columns; column += 1) {
+        const cell = document.createElement('div');
+        cell.dataset.gridCellRow = String(row);
+        cell.dataset.gridCellColumn = String(column);
+        cell.style.minHeight = '48px';
+        cell.style.borderRight = column < columns ? '1px solid rgba(0, 0, 0, 0.08)' : 'none';
+        cell.style.borderBottom = row < rows ? '1px solid rgba(0, 0, 0, 0.08)' : 'none';
+        grid.appendChild(cell);
+      }
+    }
+
+    applyPadding(grid, documentValue);
+    return grid;
   }
 
   if (documentValue.kind === 'select') {

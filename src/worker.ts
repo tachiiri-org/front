@@ -1,4 +1,16 @@
-import { isComponent, isComponentDocument, isLayout, isSelectDocument } from './layout';
+import {
+  isComponent,
+  isComponentDocument,
+  isGridDocument,
+  isGridLayout,
+  isLayout,
+  isPlacedComponent,
+  isSelectDocument,
+  type Component,
+  type Layout,
+  type Placement,
+  type PlacedComponent,
+} from './layout';
 
 type Env = {
   readonly ASSETS: {
@@ -7,33 +19,130 @@ type Env = {
   readonly LAYOUTS: R2Bucket;
 };
 
-const DEFAULT_COMPONENTS: Record<string, Record<string, unknown>> = {
-  'sample/components/editor/layout-select': {
-    kind: 'select',
-    source: {
-      kind: 'endpoint',
-      url: '/api/layouts/json-files',
-      itemsPath: 'items',
-    },
-  },
-  'sample/components/editor/select': {
-    kind: 'select',
-    source: {
-      kind: 'endpoint',
-      url: '/api/layouts/{{layout-select}}/json-files?prefix=components/',
-      itemsPath: 'items',
-    },
-  },
-  'sample/components/editor/form': {
-    kind: 'form',
-    sourceComponentId: 'component-select',
-    excludeKeys: ['kind'],
-  },
-};
-
 type ListItem = {
   value: string;
   label: string;
+};
+
+const isStringRecord = (value: unknown): value is Record<string, string> => {
+  if (typeof value !== 'object' || value === null || Array.isArray(value)) {
+    return false;
+  }
+
+  return Object.values(value).every((entry) => typeof entry === 'string');
+};
+
+const isMetaTag = (value: unknown): value is { name: string; content: string } => {
+  if (typeof value !== 'object' || value === null || Array.isArray(value)) {
+    return false;
+  }
+
+  const candidate = value as Record<string, unknown>;
+  return typeof candidate.name === 'string' && typeof candidate.content === 'string';
+};
+
+const isHeadLike = (value: unknown): value is Layout['head'] => {
+  if (typeof value !== 'object' || value === null || Array.isArray(value)) {
+    return false;
+  }
+
+  const candidate = value as Record<string, unknown>;
+  return (
+    typeof candidate.title === 'string' &&
+    Array.isArray(candidate.meta) &&
+    candidate.meta.every(isMetaTag)
+  );
+};
+
+const isPositiveInteger = (value: unknown): value is number =>
+  typeof value === 'number' && Number.isInteger(value) && value > 0;
+
+const deriveColumns = (components: Component[]): number => Math.max(1, Math.ceil(Math.sqrt(Math.max(components.length, 1))));
+
+const cellKey = (x: number, y: number): string => `${x}:${y}`;
+
+const occupiesCells = (placement: Placement): Array<[number, number]> => {
+  const cells: Array<[number, number]> = [];
+  for (let row = placement.y; row < placement.y + placement.height; row += 1) {
+    for (let column = placement.x; column < placement.x + placement.width; column += 1) {
+      cells.push([column, row]);
+    }
+  }
+  return cells;
+};
+
+const collectOccupiedCells = (components: PlacedComponent[]): Set<string> => {
+  const occupied = new Set<string>();
+  for (const component of components) {
+    for (const [x, y] of occupiesCells(component.placement)) {
+      occupied.add(cellKey(x, y));
+    }
+  }
+  return occupied;
+};
+
+const findNextPlacement = (occupied: Set<string>, columns: number): Placement => {
+  for (let row = 1; ; row += 1) {
+    for (let column = 1; column <= columns; column += 1) {
+      const key = cellKey(column, row);
+      if (occupied.has(key)) {
+        continue;
+      }
+
+      occupied.add(key);
+      return { x: column, y: row, width: 1, height: 1 };
+    }
+  }
+};
+
+const normalizeLayout = (value: unknown): Layout | null => {
+  if (typeof value !== 'object' || value === null || Array.isArray(value)) {
+    return null;
+  }
+
+  const candidate = value as Record<string, unknown>;
+  if (!isHeadLike(candidate.head)) {
+    return null;
+  }
+
+  if (!isStringRecord(candidate.shell) || !Array.isArray(candidate.components) || !candidate.components.every(isComponent)) {
+    return null;
+  }
+
+  const components = candidate.components as Component[];
+  const placedComponents = components.filter(isPlacedComponent);
+  const existingMaxColumn = placedComponents.reduce(
+    (max, component) => Math.max(max, component.placement.x + component.placement.width - 1),
+    1,
+  );
+  const columns = Math.max(
+    isGridLayout(candidate.grid) ? candidate.grid.columns : deriveColumns(components),
+    existingMaxColumn,
+  );
+  const occupied = collectOccupiedCells(placedComponents);
+
+  const normalizedComponents = components.map((component) => {
+    if (isPlacedComponent(component) && isPositiveInteger(component.placement.width) && isPositiveInteger(component.placement.height)) {
+      return component;
+    }
+
+    return {
+      ...component,
+      placement: findNextPlacement(occupied, columns),
+    };
+  });
+
+  const normalized: Layout = {
+    head: candidate.head as Layout['head'],
+    shell: candidate.shell,
+    grid: {
+      kind: 'grid',
+      columns,
+    },
+    components: normalizedComponents,
+  };
+
+  return isLayout(normalized) ? normalized : null;
 };
 
 const buildJsonFileItems = async (
@@ -76,9 +185,26 @@ const handleLayoutGet = async (env: Env, id: string): Promise<Response> => {
     return new Response('Not Found', { status: 404 });
   }
 
-  return new Response(object.body, {
-    headers: { 'Content-Type': 'application/json' },
-  });
+  const body = await object.text();
+  try {
+    const value = JSON.parse(body) as unknown;
+    const normalized = normalizeLayout(value);
+    if (!normalized) {
+      return new Response('Invalid layout', { status: 400 });
+    }
+
+    if (JSON.stringify(value) !== JSON.stringify(normalized)) {
+      await env.LAYOUTS.put(`${id}.json`, JSON.stringify(normalized), {
+        httpMetadata: { contentType: 'application/json' },
+      });
+    }
+
+    return new Response(JSON.stringify(normalized), {
+      headers: { 'Content-Type': 'application/json' },
+    });
+  } catch {
+    return new Response('Invalid JSON', { status: 400 });
+  }
 };
 
 const handleLayoutsJsonFilesGet = async (env: Env): Promise<Response> => {
@@ -91,14 +217,7 @@ const handleLayoutsJsonFilesGet = async (env: Env): Promise<Response> => {
 const handleComponentGet = async (env: Env, layoutId: string, componentId: string): Promise<Response> => {
   const object = await env.LAYOUTS.get(`${layoutId}/components/${componentId}.json`);
   if (!object) {
-    const fallback = DEFAULT_COMPONENTS[`${layoutId}/components/${componentId}`];
-    if (!fallback) {
-      return new Response('Not Found', { status: 404 });
-    }
-
-    return new Response(JSON.stringify(fallback), {
-      headers: { 'Content-Type': 'application/json' },
-    });
+    return new Response('Not Found', { status: 404 });
   }
 
   return new Response(object.body, {
@@ -118,17 +237,36 @@ const handleLayoutPut = async (request: Request, env: Env, id: string): Promise<
 
   try {
     const value = JSON.parse(body) as unknown;
-    if (!isLayout(value)) {
+    const normalized = normalizeLayout(value);
+    if (!normalized) {
       return new Response('Invalid layout', { status: 400 });
     }
+
+    await env.LAYOUTS.put(`${id}.json`, JSON.stringify(normalized), {
+      httpMetadata: { contentType: 'application/json' },
+    });
   } catch {
     return new Response('Invalid JSON', { status: 400 });
   }
 
-  await env.LAYOUTS.put(`${id}.json`, body, {
-    httpMetadata: { contentType: 'application/json' },
-  });
+  return new Response(null, { status: 204 });
+};
 
+const deleteLayoutObjects = async (env: Env, layoutId: string): Promise<void> => {
+  await env.LAYOUTS.delete(`${layoutId}.json`);
+
+  let cursor: string | undefined;
+  do {
+    const result = await env.LAYOUTS.list({ prefix: `${layoutId}/components/`, cursor });
+    if (result.objects.length > 0) {
+      await env.LAYOUTS.delete(result.objects.map((object) => object.key));
+    }
+    cursor = result.truncated ? result.cursor : undefined;
+  } while (cursor);
+};
+
+const handleLayoutDelete = async (env: Env, id: string): Promise<Response> => {
+  await deleteLayoutObjects(env, id);
   return new Response(null, { status: 204 });
 };
 
@@ -148,7 +286,12 @@ const handleComponentPut = async (
         value !== null &&
         !Array.isArray(value) &&
         (value as Record<string, unknown>).kind === 'select' &&
-        !isSelectDocument(value))
+        !isSelectDocument(value)) ||
+      (typeof value === 'object' &&
+        value !== null &&
+        !Array.isArray(value) &&
+        (value as Record<string, unknown>).kind === 'grid' &&
+        !isGridDocument(value))
     ) {
       return new Response('Invalid component', { status: 400 });
     }
@@ -202,6 +345,7 @@ export default {
       const id = decodeURIComponent(layoutMatch[1]);
       if (request.method === 'GET') return handleLayoutGet(env, id);
       if (request.method === 'PUT') return handleLayoutPut(request, env, id);
+      if (request.method === 'DELETE') return handleLayoutDelete(env, id);
       return new Response('Method Not Allowed', { status: 405 });
     }
 

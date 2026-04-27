@@ -58,10 +58,33 @@ export type FormDocument = ComponentDocument & {
   excludeKeys?: string[];
 };
 
+export type GridDocument = ComponentDocument & {
+  kind: 'grid';
+  rows: number;
+  columns: number;
+};
+
+export type Placement = {
+  x: number;
+  y: number;
+  width: number;
+  height: number;
+};
+
+export type GridLayout = {
+  kind: 'grid';
+  columns: number;
+};
+
+export type PlacedComponent = Component & {
+  placement: Placement;
+};
+
 export type Layout = {
   head: Head;
   shell: Record<string, string>;
-  components: Component[];
+  grid: GridLayout;
+  components: PlacedComponent[];
 };
 
 const isStyle = (value: unknown): value is Record<string, string> => {
@@ -176,6 +199,66 @@ export const isFormDocument = (value: unknown): value is FormDocument => {
   );
 };
 
+export const isGridDocument = (value: unknown): value is GridDocument => {
+  if (typeof value !== 'object' || value === null || Array.isArray(value)) {
+    return false;
+  }
+
+  const candidate = value as Record<string, unknown>;
+  return (
+    candidate.kind === 'grid' &&
+    typeof candidate.rows === 'number' &&
+    Number.isInteger(candidate.rows) &&
+    candidate.rows > 0 &&
+    typeof candidate.columns === 'number' &&
+    Number.isInteger(candidate.columns) &&
+    candidate.columns > 0
+  );
+};
+
+export const isPlacement = (value: unknown): value is Placement => {
+  if (typeof value !== 'object' || value === null || Array.isArray(value)) {
+    return false;
+  }
+
+  const candidate = value as Record<string, unknown>;
+  return (
+    typeof candidate.x === 'number' &&
+    Number.isInteger(candidate.x) &&
+    candidate.x > 0 &&
+    typeof candidate.y === 'number' &&
+    Number.isInteger(candidate.y) &&
+    candidate.y > 0 &&
+    typeof candidate.width === 'number' &&
+    Number.isInteger(candidate.width) &&
+    candidate.width > 0 &&
+    typeof candidate.height === 'number' &&
+    Number.isInteger(candidate.height) &&
+    candidate.height > 0
+  );
+};
+
+export const isGridLayout = (value: unknown): value is GridLayout => {
+  if (typeof value !== 'object' || value === null || Array.isArray(value)) {
+    return false;
+  }
+
+  const candidate = value as Record<string, unknown>;
+  return candidate.kind === 'grid' && typeof candidate.columns === 'number' && Number.isInteger(candidate.columns) && candidate.columns > 0;
+};
+
+export const isPlacedComponent = (value: unknown): value is PlacedComponent => {
+  if (!isComponent(value)) {
+    return false;
+  }
+
+  if (typeof value !== 'object' || value === null || Array.isArray(value)) {
+    return false;
+  }
+
+  return isPlacement((value as Record<string, unknown>).placement);
+};
+
 const isMetaTag = (value: unknown): value is MetaTag => {
   if (typeof value !== 'object' || value === null) return false;
   const m = value as Partial<MetaTag>;
@@ -199,7 +282,8 @@ export const isLayout = (value: unknown): value is Layout => {
   return (
     isHead(candidate.head) &&
     isStyle(candidate.shell) &&
+    isGridLayout(candidate.grid) &&
     Array.isArray(candidate.components) &&
-    candidate.components.every(isComponent)
+    candidate.components.every(isPlacedComponent)
   );
 };

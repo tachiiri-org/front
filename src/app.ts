@@ -8,6 +8,7 @@ import {
   type ComponentDocument,
   type FormDocument,
   type Layout,
+  type PlacedComponent,
   type SelectDocument,
   type SelectOption,
   type SelectSource,
@@ -23,12 +24,19 @@ const root = document.createElement('div');
 document.body.appendChild(root);
 
 type ResolvedComponent = {
-  component: Component;
+  component: PlacedComponent;
   document: ComponentDocument | null;
 };
 
 const isComponentRef = (component: Component): component is Extract<Component, { src: string }> =>
   'src' in component;
+
+const applyPlacement = (el: HTMLElement, component: PlacedComponent): void => {
+  el.style.gridColumn = `${component.placement.x} / span ${component.placement.width}`;
+  el.style.gridRow = `${component.placement.y} / span ${component.placement.height}`;
+  el.style.minWidth = '0';
+  el.style.minHeight = '0';
+};
 
 const isStringRecord = (value: unknown): value is Record<string, string> => {
   if (typeof value !== 'object' || value === null || Array.isArray(value)) {
@@ -184,6 +192,15 @@ const renderLayout = async (layoutId: string): Promise<ResolvedComponent[] | nul
   }
 
   Object.assign(root.style, store.layout.shell);
+  const canvas = document.createElement('div');
+  canvas.style.display = 'grid';
+  canvas.style.width = '100%';
+  canvas.style.boxSizing = 'border-box';
+  canvas.style.gridTemplateColumns = `repeat(${store.layout.grid.columns}, minmax(0, 1fr))`;
+  canvas.style.gridAutoRows = 'auto';
+  canvas.style.alignItems = 'stretch';
+  root.appendChild(canvas);
+
   const resolvedComponents = await Promise.all(
     store.layout.components.map(async (component) => {
       if (!isComponentRef(component)) {
@@ -203,7 +220,8 @@ const renderLayout = async (layoutId: string): Promise<ResolvedComponent[] | nul
     const state: ComponentState = store.components.get(component.id) ?? {};
     const resolved = resolvedComponents.find((entry) => entry.component.id === component.id)?.document ?? null;
     const el = renderComponent(component, state, resolved);
-    root.appendChild(el);
+    applyPlacement(el, component);
+    canvas.appendChild(el);
     domMap.set(component.id, el);
   }
 
@@ -359,6 +377,7 @@ export const rerender = (id: string): void => {
   if (!oldEl) return;
   const state: ComponentState = store.components.get(id) ?? {};
   const newEl = renderComponent(component, state, store.componentDocuments.get(id) ?? null);
+  applyPlacement(newEl, component);
   oldEl.replaceWith(newEl);
   domMap.set(id, newEl);
 };
