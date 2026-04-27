@@ -1,4 +1,17 @@
-import { isComponentDocument, isLayout, type Component, type ComponentDocument, type Layout } from './layout';
+import {
+  isComponentDocument,
+  isFormDocument,
+  isLayout,
+  isSelectDocument,
+  isSelectOption,
+  type Component,
+  type ComponentDocument,
+  type FormDocument,
+  type Layout,
+  type SelectDocument,
+  type SelectOption,
+  type SelectSource,
+} from './layout';
 import { createStore, type ComponentState } from './store';
 import { renderComponent } from './render';
 import { renderForm } from './renderForm';
@@ -9,100 +22,97 @@ const domMap = new Map<string, HTMLElement>();
 const root = document.createElement('div');
 document.body.appendChild(root);
 
-const EDITOR_SHELL_COMPONENTS = [
-  { id: 'editor-picker', kind: 'select', src: 'editor/picker' },
-] as const;
-
-type SelectOption = {
-  value: string;
-  label: string;
-};
-
-type EditorDocument = ComponentDocument & {
-  selected: string;
-  options: SelectOption[];
-  variants: Record<string, ComponentDocument>;
+type ResolvedComponent = {
+  component: Component;
+  document: ComponentDocument | null;
 };
 
 const isComponentRef = (component: Component): component is Extract<Component, { src: string }> =>
   'src' in component;
 
-const isSelectOption = (value: unknown): value is SelectOption => {
+const isStringRecord = (value: unknown): value is Record<string, string> => {
   if (typeof value !== 'object' || value === null || Array.isArray(value)) {
     return false;
   }
 
-  const candidate = value as Partial<SelectOption>;
-  return typeof candidate.value === 'string' && typeof candidate.label === 'string';
+  return Object.values(value).every((entry) => typeof entry === 'string');
 };
 
-const isEditorDocument = (value: unknown): value is EditorDocument => {
+const getComponentSelection = (componentId: string): string | null => {
+  const state = store.components.get(componentId);
+  if (!state) return null;
+  return typeof state.selectedValue === 'string' ? state.selectedValue : null;
+};
+
+const setComponentSelection = (componentId: string, value: string): void => {
+  const current = store.components.get(componentId) ?? {};
+  store.components.set(componentId, { ...current, selectedValue: value });
+};
+
+const resolveTemplate = (value: string): string | null => {
+  let missing = false;
+  const resolved = value.replace(/\{\{([^}]+)\}\}/g, (_match, rawKey: string) => {
+    const key = rawKey.trim();
+    const selected = getComponentSelection(key);
+    if (selected === null) {
+      missing = true;
+      return '';
+    }
+    return selected;
+  });
+
+  return missing ? null : resolved;
+};
+
+const getAtPath = (value: unknown, path?: string): unknown => {
+  if (!path) return value;
+  return path.split('.').reduce<unknown>((acc, key) => {
+    if (acc === null || typeof acc !== 'object') return undefined;
+    if (Array.isArray(acc)) {
+      const index = Number.parseInt(key, 10);
+      return Number.isNaN(index) ? undefined : acc[index];
+    }
+    return (acc as Record<string, unknown>)[key];
+  }, value);
+};
+
+const normalizeOption = (value: unknown, source: SelectSource): SelectOption | null => {
+  if (typeof value === 'string') {
+    return { value, label: value };
+  }
+
   if (typeof value !== 'object' || value === null || Array.isArray(value)) {
-    return false;
+    return null;
   }
 
   const candidate = value as Record<string, unknown>;
-  return (
-    candidate.kind === 'select' &&
-    typeof candidate.selected === 'string' &&
-    Array.isArray(candidate.options) &&
-    candidate.options.every(isSelectOption) &&
-    typeof candidate.variants === 'object' &&
-    candidate.variants !== null &&
-    !Array.isArray(candidate.variants)
-  );
-};
-
-const getSelectedVariantKey = (editorDocument: EditorDocument): string => {
-  if (editorDocument.selected in editorDocument.variants) {
-    return editorDocument.selected;
+  const rawValue = candidate[typeof source.valueKey === 'string' ? source.valueKey : 'value'];
+  if (typeof rawValue !== 'string') {
+    return null;
   }
 
-  const [firstKey] = Object.keys(editorDocument.variants);
-  return firstKey ?? editorDocument.selected;
-};
-
-const getSelectedVariant = (editorDocument: EditorDocument): ComponentDocument | null => {
-  const key = getSelectedVariantKey(editorDocument);
-  const variant = editorDocument.variants[key];
-  return variant && isComponentDocument(variant) ? variant : null;
-};
-
-const persistEditorDocument = async (layoutId: string, editorDocument: EditorDocument): Promise<void> => {
-  const res = await fetch(`/api/layouts/${layoutId}/components/editor/picker`, {
-    method: 'PUT',
-    headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify(editorDocument),
-  });
-  if (!res.ok) throw new Error(`HTTP ${res.status}`);
-};
-
-const loadEditorDocument = async (layoutId: string): Promise<EditorDocument> => {
-  const response = await fetch(`/api/layouts/${layoutId}/components/editor/picker`);
-  const value = response.ok ? (await response.json()) as unknown : null;
-  if (isEditorDocument(value)) {
-    return value;
-  }
-
+  const rawLabel = candidate[typeof source.labelKey === 'string' ? source.labelKey : 'label'];
   return {
-    kind: 'select',
-    selected: 'editor-form',
-    options: [
-      { value: 'editor-heading', label: 'Components' },
-      { value: 'editor-form', label: 'Sample Form' },
-    ],
-    variants: {
-      'editor-heading': {
-        kind: 'heading',
-        level: 1,
-        text: 'Components',
-      },
-      'editor-form': {
-        kind: 'form',
-        title: 'Sample Form',
-      },
-    },
+    value: rawValue,
+    label: typeof rawLabel === 'string' ? rawLabel : rawValue,
   };
+};
+
+const fetchSelectOptions = async (source: SelectSource): Promise<SelectOption[]> => {
+  const url = resolveTemplate(source.url);
+  if (!url) return [];
+
+  const response = await fetch(url, {
+    headers: isStringRecord(source.headers) ? source.headers : undefined,
+  });
+  if (!response.ok) return [];
+
+  const payload = (await response.json()) as unknown;
+  const items = getAtPath(payload, source.itemsPath);
+  const values = Array.isArray(items) ? items : Array.isArray(payload) ? payload : [];
+  return values
+    .map((entry) => normalizeOption(entry, source))
+    .filter((entry): entry is SelectOption => entry !== null && isSelectOption(entry));
 };
 
 const fetchComponentDocument = async (
@@ -116,24 +126,53 @@ const fetchComponentDocument = async (
   return isComponentDocument(value) ? value : null;
 };
 
-export const rerender = (id: string): void => {
-  const component = store.layout?.components.find((c) => c.id === id);
-  if (!component) return;
-  const oldEl = domMap.get(id);
-  if (!oldEl) return;
-  const state: ComponentState = store.components.get(id) ?? {};
-  const newEl = renderComponent(component, state, store.componentDocuments.get(id) ?? null);
-  oldEl.replaceWith(newEl);
-  domMap.set(id, newEl);
+const fetchLayoutIds = async (): Promise<string[]> => {
+  const response = await fetch('/api/layouts/json-files');
+  if (!response.ok) return [];
+
+  const value = (await response.json()) as unknown;
+  if (typeof value !== 'object' || value === null || Array.isArray(value)) return [];
+
+  const items = (value as Record<string, unknown>).items;
+  if (!Array.isArray(items)) return [];
+
+  return items
+    .map((entry) => {
+      if (typeof entry !== 'object' || entry === null || Array.isArray(entry)) return null;
+      const value = (entry as Record<string, unknown>).value;
+      return typeof value === 'string' ? value : null;
+    })
+    .filter((entry): entry is string => entry !== null);
 };
 
-const loadViewer = async (layoutId: string): Promise<void> => {
+const isEditorShellLayout = (layout: Layout): boolean =>
+  layout.components.some((component) => 'src' in component && component.id === 'layout-select');
+
+const findEditorLayoutId = async (): Promise<string | null> => {
+  const layoutIds = await fetchLayoutIds();
+  for (const layoutId of layoutIds) {
+    const response = await fetch(`/api/layouts/${layoutId}`);
+    if (!response.ok) continue;
+
+    const value = (await response.json()) as unknown;
+    if (isLayout(value) && isEditorShellLayout(value)) {
+      return layoutId;
+    }
+  }
+
+  return layoutIds[0] ?? null;
+};
+
+const renderLayout = async (layoutId: string): Promise<ResolvedComponent[] | null> => {
   const response = await fetch(`/api/layouts/${layoutId}`);
-  if (!response.ok) return;
+  if (!response.ok) return null;
+
   const value = (await response.json()) as unknown;
-  if (!isLayout(value)) return;
+  if (!isLayout(value)) return null;
+
   store.layout = value;
   store.componentDocuments.clear();
+  domMap.clear();
 
   root.innerHTML = '';
   document.title = store.layout.head.title;
@@ -145,9 +184,8 @@ const loadViewer = async (layoutId: string): Promise<void> => {
   }
 
   Object.assign(root.style, store.layout.shell);
-  const currentLayout = store.layout;
   const resolvedComponents = await Promise.all(
-    currentLayout.components.map(async (component) => {
+    store.layout.components.map(async (component) => {
       if (!isComponentRef(component)) {
         return { component, document: null };
       }
@@ -168,62 +206,182 @@ const loadViewer = async (layoutId: string): Promise<void> => {
     root.appendChild(el);
     domMap.set(component.id, el);
   }
+
+  return resolvedComponents;
+};
+
+const updateEditorForm = async (
+  layoutId: string,
+  formComponent: Component,
+  formDocument: FormDocument,
+  selectedKey: string,
+): Promise<void> => {
+  const host = domMap.get(formComponent.id);
+  if (!host) return;
+
+  if (!selectedKey) {
+    host.replaceChildren();
+    return;
+  }
+
+  const selectedVariant = await fetchComponentDocument(layoutId, selectedKey);
+  if (!selectedVariant) {
+    host.replaceChildren();
+    return;
+  }
+
+  const form = renderForm(
+    selectedVariant as Record<string, unknown>,
+    async (draft) => {
+      await fetch(`/api/layouts/${layoutId}/components/${selectedKey}`, {
+        method: 'PUT',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(draft),
+      });
+    },
+    { excludeKeys: formDocument.excludeKeys ?? ['kind'] },
+  );
+
+  host.replaceWith(form);
+  domMap.set(formComponent.id, form);
+};
+
+const hydrateEditorSelect = async (
+  layoutId: string,
+  selectComponent: Component,
+  selectDocument: SelectDocument,
+): Promise<string> => {
+  const selectEl = domMap.get(selectComponent.id);
+  if (!(selectEl instanceof HTMLSelectElement)) {
+    return '';
+  }
+
+  selectEl.disabled = true;
+  const options = await fetchSelectOptions(selectDocument.source);
+  selectEl.innerHTML = '';
+
+  if (options.length === 0) {
+    const empty = document.createElement('option');
+    empty.value = '';
+    empty.textContent = 'No options';
+    selectEl.appendChild(empty);
+  } else {
+    for (const optionValue of options) {
+      const option = document.createElement('option');
+      option.value = optionValue.value;
+      option.textContent = optionValue.label;
+      selectEl.appendChild(option);
+    }
+  }
+
+  const storedSelection = getComponentSelection(selectComponent.id);
+  const selectedKey =
+    options.find((option) => option.value === storedSelection)?.value ??
+    options[0]?.value ??
+    '';
+
+  selectEl.value = selectedKey;
+  if (selectedKey !== storedSelection) {
+    setComponentSelection(selectComponent.id, selectedKey);
+  }
+  selectEl.disabled = false;
+
+  return selectedKey;
+};
+
+const hydrateEditor = async (layoutId: string, resolvedComponents: ResolvedComponent[]): Promise<void> => {
+  if (!store.layout) {
+    return;
+  }
+
+  const componentById = new Map(store.layout.components.map((component) => [component.id, component]));
+  const documentsById = new Map(
+    resolvedComponents.map((entry) => [entry.component.id, entry.document] as const),
+  );
+  const formComponents = resolvedComponents
+    .filter((entry): entry is ResolvedComponent & { document: FormDocument } =>
+      entry.document !== null && isFormDocument(entry.document),
+    )
+    .map((entry) => ({
+      component: entry.component,
+      document: entry.document,
+    }));
+
+  const formBySource = new Map<string, { component: Component; document: FormDocument }>();
+  for (const entry of formComponents) {
+    if (entry.document.sourceComponentId) {
+      formBySource.set(entry.document.sourceComponentId, entry);
+    }
+  }
+
+  const selectComponents = resolvedComponents
+    .filter((entry): entry is ResolvedComponent & { document: SelectDocument } =>
+      entry.document !== null && isSelectDocument(entry.document),
+    )
+    .map((entry) => ({
+      component: entry.component,
+      document: entry.document,
+    }));
+
+  for (const entry of selectComponents) {
+    const selectComponent = entry.component;
+    const selectDocument = entry.document;
+
+    const selectedKey = await hydrateEditorSelect(layoutId, selectComponent, selectDocument);
+    const targetComponentId = selectDocument.targetComponentId ?? formBySource.get(selectComponent.id)?.component.id;
+    if (targetComponentId) {
+      const targetComponent = componentById.get(targetComponentId);
+      const targetDocument = documentsById.get(targetComponentId);
+      if (targetComponent && targetDocument && isFormDocument(targetDocument)) {
+        if (!targetDocument.sourceComponentId || targetDocument.sourceComponentId === selectComponent.id) {
+          await updateEditorForm(layoutId, targetComponent, targetDocument, selectedKey);
+        }
+      }
+    }
+
+    const selectEl = domMap.get(selectComponent.id);
+    if (selectEl instanceof HTMLSelectElement) {
+      selectEl.onchange = () => {
+        void (async () => {
+          const nextSelectedKey = selectEl.value;
+          setComponentSelection(selectComponent.id, nextSelectedKey);
+          await hydrateEditor(layoutId, resolvedComponents);
+        })();
+      };
+    }
+  }
+};
+
+export const rerender = (id: string): void => {
+  const component = store.layout?.components.find((c) => c.id === id);
+  if (!component) return;
+  const oldEl = domMap.get(id);
+  if (!oldEl) return;
+  const state: ComponentState = store.components.get(id) ?? {};
+  const newEl = renderComponent(component, state, store.componentDocuments.get(id) ?? null);
+  oldEl.replaceWith(newEl);
+  domMap.set(id, newEl);
+};
+
+const loadViewer = async (layoutId: string): Promise<void> => {
+  await renderLayout(layoutId);
 };
 
 const loadEditor = async (layoutId: string): Promise<void> => {
-  root.innerHTML = '';
-  const editorDocument = await loadEditorDocument(layoutId);
-  const shellHost = document.createElement('section');
-  const selector = renderComponent(EDITOR_SHELL_COMPONENTS[0], {}, editorDocument);
-  shellHost.appendChild(selector);
+  const resolvedComponents = await renderLayout(layoutId);
+  if (!resolvedComponents) return;
 
-  const previewHost = document.createElement('section');
-  const formHost = document.createElement('section');
-  root.appendChild(shellHost);
-  root.appendChild(previewHost);
-  root.appendChild(formHost);
+  await hydrateEditor(layoutId, resolvedComponents);
+};
 
-  let currentEditorDocument = editorDocument;
+const loadEditorBootstrap = async (): Promise<void> => {
+  const layoutId = await findEditorLayoutId();
+  if (!layoutId) {
+    root.replaceChildren();
+    return;
+  }
 
-  const renderSelectedComponent = async (): Promise<void> => {
-    const selectedKey = getSelectedVariantKey(currentEditorDocument);
-    currentEditorDocument.selected = selectedKey;
-    previewHost.innerHTML = '';
-    formHost.innerHTML = '';
-    const selectedVariant = getSelectedVariant(currentEditorDocument);
-    if (!selectedVariant) return;
-
-    const syntheticComponent = { id: selectedKey, kind: selectedVariant.kind, src: 'editor/picker' };
-    previewHost.appendChild(renderComponent(syntheticComponent, {}, selectedVariant));
-
-    formHost.appendChild(
-      renderForm(selectedVariant as Record<string, unknown>, async (draft) => {
-        currentEditorDocument = {
-          ...currentEditorDocument,
-          variants: {
-            ...currentEditorDocument.variants,
-            [selectedKey]: draft as ComponentDocument,
-          },
-        };
-        await persistEditorDocument(layoutId, currentEditorDocument);
-        previewHost.innerHTML = '';
-        previewHost.appendChild(renderComponent(syntheticComponent, {}, draft as ComponentDocument));
-      }, { excludeKeys: ['kind'] }),
-    );
-  };
-
-  selector.addEventListener('change', () => {
-    void (async () => {
-      currentEditorDocument = {
-        ...currentEditorDocument,
-        selected: (selector as HTMLSelectElement).value,
-      };
-      await persistEditorDocument(layoutId, currentEditorDocument);
-      await renderSelectedComponent();
-    })();
-  });
-
-  await renderSelectedComponent();
+  await loadEditor(layoutId);
 };
 
 const pathname = window.location.pathname;
@@ -235,5 +393,5 @@ if (editMatch) {
 } else if (viewMatch) {
   void loadViewer(viewMatch[1]);
 } else {
-  void loadEditor('sample');
+  void loadEditorBootstrap();
 }

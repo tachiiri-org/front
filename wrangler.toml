@@ -1,5 +1,5 @@
 name = "front"
-main = "worker.ts"
+main = "src/worker.ts"
 compatibility_date = "2026-04-23"
 workers_dev = false
 

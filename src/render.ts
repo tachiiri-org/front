@@ -1,4 +1,8 @@
-import type { Component, ComponentDocument, InlineComponent } from './layout';
+import type {
+  Component,
+  ComponentDocument,
+  InlineComponent,
+} from './layout';
 import type { ComponentState } from './store';
 
 const isStringRecord = (value: unknown): value is Record<string, string> => {
@@ -7,6 +11,12 @@ const isStringRecord = (value: unknown): value is Record<string, string> => {
   }
 
   return Object.values(value).every((entry) => typeof entry === 'string');
+};
+
+const applyPadding = (el: HTMLElement, documentValue: ComponentDocument): void => {
+  if (typeof documentValue.padding === 'string') {
+    el.style.padding = documentValue.padding;
+  }
 };
 
 const renderInlineComponent = (component: InlineComponent): HTMLElement => {
@@ -25,6 +35,7 @@ const renderResolvedDocument = (component: Component, documentValue: ComponentDo
     const heading = document.createElement(`h${level}`);
     heading.dataset.componentId = component.id;
     if (typeof documentValue.text === 'string') heading.textContent = documentValue.text;
+    applyPadding(heading, documentValue);
     return heading;
   }
 
@@ -37,6 +48,7 @@ const renderResolvedDocument = (component: Component, documentValue: ComponentDo
     Object.assign(el.style, documentValue.style);
     el.dataset.componentId = component.id;
     if (typeof documentValue.text === 'string') el.textContent = documentValue.text;
+    applyPadding(el, documentValue);
     return el;
   }
 
@@ -48,39 +60,39 @@ const renderResolvedDocument = (component: Component, documentValue: ComponentDo
     } else {
       button.textContent = component.kind;
     }
+    applyPadding(button, documentValue);
     return button;
-  }
-
-  if (documentValue.kind === 'form') {
-    const form = document.createElement('form');
-    form.dataset.componentId = component.id;
-    const heading = document.createElement('p');
-    heading.textContent = typeof documentValue.title === 'string' ? documentValue.title : 'Form';
-    form.appendChild(heading);
-    return form;
   }
 
   if (documentValue.kind === 'select') {
     const select = document.createElement('select');
     select.dataset.componentId = component.id;
-    const options = Array.isArray(documentValue.options) ? documentValue.options : [];
-    for (const optionValue of options) {
-      if (typeof optionValue !== 'object' || optionValue === null || Array.isArray(optionValue)) continue;
-      const optionRecord = optionValue as Record<string, unknown>;
-      const option = document.createElement('option');
-      if (typeof optionRecord.value === 'string') option.value = optionRecord.value;
-      if (typeof optionRecord.label === 'string') option.textContent = optionRecord.label;
-      select.appendChild(option);
+    if (typeof documentValue.targetComponentId === 'string') {
+      select.dataset.targetComponentId = documentValue.targetComponentId;
     }
-    if (typeof documentValue.selected === 'string') {
-      select.value = documentValue.selected;
-    }
+    applyPadding(select, documentValue);
     return select;
+  }
+
+  if (documentValue.kind === 'form') {
+    const form = document.createElement('form');
+    form.dataset.componentId = component.id;
+    if (typeof documentValue.sourceComponentId === 'string') {
+      form.dataset.sourceComponentId = documentValue.sourceComponentId;
+    }
+    if (typeof documentValue.title === 'string' && documentValue.title !== '') {
+      const heading = document.createElement('p');
+      heading.textContent = documentValue.title;
+      form.appendChild(heading);
+    }
+    applyPadding(form, documentValue);
+    return form;
   }
 
   const pre = document.createElement('pre');
   pre.dataset.componentId = component.id;
   pre.textContent = JSON.stringify(documentValue, null, 2);
+  applyPadding(pre, documentValue);
   return pre;
 };
 

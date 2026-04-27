@@ -29,6 +29,35 @@ export type ComponentDocument = {
   [key: string]: unknown;
 };
 
+export type SelectOption = {
+  value: string;
+  label: string;
+};
+
+export type SelectEndpointSource = {
+  kind: 'endpoint';
+  url: string;
+  itemsPath?: string;
+  valueKey?: string;
+  labelKey?: string;
+  headers?: Record<string, string>;
+};
+
+export type SelectSource = SelectEndpointSource;
+
+export type SelectDocument = ComponentDocument & {
+  kind: 'select';
+  source: SelectSource;
+  targetComponentId?: string;
+};
+
+export type FormDocument = ComponentDocument & {
+  kind: 'form';
+  title?: string;
+  sourceComponentId?: string;
+  excludeKeys?: string[];
+};
+
 export type Layout = {
   head: Head;
   shell: Record<string, string>;
@@ -41,6 +70,42 @@ const isStyle = (value: unknown): value is Record<string, string> => {
   }
 
   return Object.values(value).every((entry) => typeof entry === 'string');
+};
+
+const isStringRecord = (value: unknown): value is Record<string, string> => {
+  if (typeof value !== 'object' || value === null || Array.isArray(value)) {
+    return false;
+  }
+
+  return Object.values(value).every((entry) => typeof entry === 'string');
+};
+
+export const isSelectOption = (value: unknown): value is SelectOption => {
+  if (typeof value !== 'object' || value === null || Array.isArray(value)) {
+    return false;
+  }
+
+  const candidate = value as Partial<SelectOption>;
+  return typeof candidate.value === 'string' && typeof candidate.label === 'string';
+};
+
+export const isSelectSource = (value: unknown): value is SelectSource => {
+  if (typeof value !== 'object' || value === null || Array.isArray(value)) {
+    return false;
+  }
+
+  const candidate = value as Record<string, unknown>;
+  if (candidate.kind === 'endpoint') {
+    return (
+      typeof candidate.url === 'string' &&
+      (candidate.itemsPath === undefined || typeof candidate.itemsPath === 'string') &&
+      (candidate.valueKey === undefined || typeof candidate.valueKey === 'string') &&
+      (candidate.labelKey === undefined || typeof candidate.labelKey === 'string') &&
+      (candidate.headers === undefined || isStringRecord(candidate.headers))
+    );
+  }
+
+  return false;
 };
 
 const isComponentRef = (value: unknown): value is ComponentRef => {
@@ -68,12 +133,47 @@ export const isComponent = (value: unknown): value is Component => {
   );
 };
 
+export const isSelectDocument = (value: unknown): value is SelectDocument => {
+  if (typeof value !== 'object' || value === null || Array.isArray(value)) {
+    return false;
+  }
+
+  const candidate = value as Record<string, unknown>;
+  if (candidate.kind !== 'select') {
+    return false;
+  }
+
+  return (
+    isSelectSource(candidate.source) &&
+    (candidate.targetComponentId === undefined || typeof candidate.targetComponentId === 'string')
+  );
+};
+
 export const isComponentDocument = (value: unknown): value is ComponentDocument => {
   if (typeof value !== 'object' || value === null || Array.isArray(value)) {
     return false;
   }
 
   return typeof (value as Partial<ComponentDocument>).kind === 'string';
+};
+
+export const isFormDocument = (value: unknown): value is FormDocument => {
+  if (typeof value !== 'object' || value === null || Array.isArray(value)) {
+    return false;
+  }
+
+  const candidate = value as Record<string, unknown>;
+  if (candidate.kind !== 'form') {
+    return false;
+  }
+
+  return (
+    (candidate.title === undefined || typeof candidate.title === 'string') &&
+    (candidate.sourceComponentId === undefined || typeof candidate.sourceComponentId === 'string') &&
+    (candidate.excludeKeys === undefined ||
+      (Array.isArray(candidate.excludeKeys) &&
+        candidate.excludeKeys.every((entry) => typeof entry === 'string')))
+  );
 };
 
 const isMetaTag = (value: unknown): value is MetaTag => {

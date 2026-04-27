@@ -199,9 +199,6 @@ function renderObjectList(label: string, path: string, draft: Record<string, unk
 
 function renderObject(label: string, path: string, value: Record<string, unknown>, draft: Record<string, unknown>): HTMLElement {
   const wrapper = mk('div');
-  const heading = mk('p');
-  heading.textContent = label;
-  wrapper.appendChild(heading);
   for (const key of Object.keys(value)) {
     wrapper.appendChild(renderField(key, `${path}.${key}`, draft));
   }
@@ -212,7 +209,7 @@ function renderField(label: string, path: string, draft: Record<string, unknown>
   const value = getAtPath(draft, path);
   if (typeof value === 'string') return renderTextField(label, path, draft);
   if (typeof value === 'number') return renderNumberField(label, path, draft);
-  if (isStringRecord(value)) return renderStyleMap(label, path, draft);
+  if (label === 'style' && isStringRecord(value)) return renderStyleMap(label, path, draft);
   if (Array.isArray(value)) return renderObjectList(label, path, draft);
   if (typeof value === 'object' && value !== null) {
     return renderObject(label, path, value as Record<string, unknown>, draft);
