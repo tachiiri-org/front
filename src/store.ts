@@ -1,15 +1,16 @@
-import type { ComponentDocument, Layout } from './layout';
+import type { Screen } from './screen';
+import type { Component } from './component';
 
-export type ComponentState = Record<string, unknown>;
+export type FrameState = Record<string, unknown>;
 
 export type RootStore = {
-  layout: Layout | null;
-  components: Map<string, ComponentState>;
-  componentDocuments: Map<string, ComponentDocument>;
+  screen: Screen | null;
+  frameStates: Map<string, FrameState>;
+  frameComponents: Map<string, Component>;
 };
 
 export const createStore = (): RootStore => ({
-  layout: null,
-  components: new Map(),
-  componentDocuments: new Map(),
+  screen: null,
+  frameStates: new Map(),
+  frameComponents: new Map(),
 });
