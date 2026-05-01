@@ -21,6 +21,12 @@ export type TextareaComponent = {
   style?: Record<string, string>;
 };
 
+export type BooleanFieldComponent = {
+  kind: 'boolean-field';
+  key: string;
+  label?: string;
+};
+
 export type StyleMapFieldComponent = {
   kind: 'style-map-field';
   key: string;
@@ -39,12 +45,15 @@ export type FieldGroupComponent = {
   key?: string;
   label?: string;
   fields: FieldComponent[];
+  collapsible?: boolean;
+  defaultCollapsed?: boolean;
 };
 
 export type FieldComponent =
   | TextFieldComponent
   | NumberFieldComponent
   | TextareaComponent
+  | BooleanFieldComponent
   | StyleMapFieldComponent
   | ObjectListFieldComponent
   | FieldGroupComponent;
@@ -76,6 +85,12 @@ export const isTextareaComponent = (v: unknown): v is TextareaComponent => {
   return c.kind === 'textarea' && hasStringKey(c) && hasOptionalLabel(c) && hasOptionalStyle(c);
 };
 
+export const isBooleanFieldComponent = (v: unknown): v is BooleanFieldComponent => {
+  if (typeof v !== 'object' || v === null || Array.isArray(v)) return false;
+  const c = v as Record<string, unknown>;
+  return c.kind === 'boolean-field' && hasStringKey(c) && hasOptionalLabel(c);
+};
+
 export const isStyleMapFieldComponent = (v: unknown): v is StyleMapFieldComponent => {
   if (typeof v !== 'object' || v === null || Array.isArray(v)) return false;
   const c = v as Record<string, unknown>;
@@ -102,7 +117,9 @@ export const isFieldGroupComponent = (v: unknown): v is FieldGroupComponent => {
     (c.key === undefined || typeof c.key === 'string') &&
     hasOptionalLabel(c) &&
     Array.isArray(c.fields) &&
-    (c.fields as unknown[]).every((f) => isFieldComponent(f))
+    (c.fields as unknown[]).every((f) => isFieldComponent(f)) &&
+    (c.collapsible === undefined || typeof c.collapsible === 'boolean') &&
+    (c.defaultCollapsed === undefined || typeof c.defaultCollapsed === 'boolean')
   );
 };
 
@@ -110,6 +127,7 @@ export const isFieldComponent = (v: unknown): v is FieldComponent =>
   isTextFieldComponent(v) ||
   isNumberFieldComponent(v) ||
   isTextareaComponent(v) ||
+  isBooleanFieldComponent(v) ||
   isStyleMapFieldComponent(v) ||
   isObjectListFieldComponent(v) ||
   isFieldGroupComponent(v);

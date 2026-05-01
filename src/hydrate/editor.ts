@@ -2,7 +2,9 @@ import { isScreen, isFrameRef } from '../screen';
 import { isComponent } from '../component';
 import type { EditorFrame, Screen } from '../screen';
 import type { EditorSection } from '../component/editor';
-import { renderFormFromSchema } from './form';
+import type { FieldComponent } from '../component/fields';
+import { renderFormFromSchema, inferFieldsFromData, mergeWithSchema } from './form';
+import { buildFieldStyleContext, type FieldStyleContext } from './field';
 import { domMap } from '../state';
 import { fetchSchema } from '../api';
 
@@ -10,6 +12,66 @@ const DEFAULT_SECTIONS: EditorSection[] = [
   { label: 'Placement', source: 'placement' },
   { label: 'Properties', source: 'properties' },
 ];
+
+const SECTION_SUMMARY_STYLE: Record<string, string> = {
+  fontSize: '11px',
+  fontWeight: '500',
+  color: 'rgba(0,0,0,0.75)',
+  padding: '6px 8px 4px',
+  cursor: 'pointer',
+  listStyle: 'none',
+  userSelect: 'none',
+  letterSpacing: '0.02em',
+};
+
+const SECTION_HEADING_STYLE: Record<string, string> = {
+  fontSize: '11px',
+  fontWeight: '500',
+  color: 'rgba(0,0,0,0.75)',
+  padding: '6px 8px 4px',
+  margin: '0',
+  letterSpacing: '0.02em',
+};
+
+const renderSectionContent = (
+  data: Record<string, unknown>,
+  schema: FieldComponent[] | null,
+  onSave: (draft: unknown) => Promise<void>,
+  ctx: FieldStyleContext,
+): HTMLElement => {
+  const inferred = inferFieldsFromData(data);
+  const fields = schema ? mergeWithSchema(inferred, schema) : inferred;
+  return renderFormFromSchema(data, fields, onSave, ctx);
+};
+
+const appendSection = (
+  parent: HTMLElement,
+  section: EditorSection,
+  contentEl: HTMLElement,
+): void => {
+  if (section.collapsible) {
+    const details = document.createElement('details');
+    if (!section.defaultCollapsed) details.open = true;
+    if (section.label) {
+      const summary = document.createElement('summary');
+      summary.textContent = section.label;
+      Object.assign(summary.style, SECTION_SUMMARY_STYLE);
+      details.appendChild(summary);
+    }
+    details.appendChild(contentEl);
+    parent.appendChild(details);
+  } else {
+    const sectionEl = document.createElement('div');
+    if (section.label) {
+      const heading = document.createElement('p');
+      Object.assign(heading.style, SECTION_HEADING_STYLE);
+      heading.textContent = section.label;
+      sectionEl.appendChild(heading);
+    }
+    sectionEl.appendChild(contentEl);
+    parent.appendChild(sectionEl);
+  }
+};
 
 export const hydrateComponentEditor = async (
   selectedScreenId: string | null,
@@ -59,17 +121,12 @@ export const hydrateComponentEditor = async (
   ]);
 
   const sections = editorFrame.sections ?? DEFAULT_SECTIONS;
+  const ctx = buildFieldStyleContext(editorFrame.fieldStyle);
 
   editorEl.replaceChildren();
 
   for (const section of sections) {
-    const sectionEl = document.createElement('div');
-
-    if (section.label) {
-      const heading = document.createElement('p');
-      heading.textContent = section.label;
-      sectionEl.appendChild(heading);
-    }
+    let contentEl: HTMLElement | null = null;
 
     if (section.source === 'placement') {
       const placementData = JSON.parse(JSON.stringify(frame.placement)) as Record<string, unknown>;
@@ -90,9 +147,7 @@ export const hydrateComponentEditor = async (
         });
         onAfterSave();
       };
-      if (placementSchema) {
-        sectionEl.appendChild(renderFormFromSchema(placementData, placementSchema, onSave));
-      }
+      contentEl = renderSectionContent(placementData, placementSchema, onSave, ctx);
     } else if (section.source === 'properties' && componentData) {
       if (componentSrc !== null) {
         const src = componentSrc;
@@ -105,9 +160,7 @@ export const hydrateComponentEditor = async (
           });
           onAfterSave();
         };
-        if (propertiesSchema) {
-          sectionEl.appendChild(renderFormFromSchema(propsData, propertiesSchema, onSave));
-        }
+        contentEl = renderSectionContent(propsData, propertiesSchema, onSave, ctx);
       } else {
         const inlineProps: Record<string, unknown> = {};
         for (const [key, val] of Object.entries(componentData)) {
@@ -135,14 +188,13 @@ export const hydrateComponentEditor = async (
             });
             onAfterSave();
           };
-          if (propertiesSchema) {
-            sectionEl.appendChild(renderFormFromSchema(inlineProps, propertiesSchema, onSave));
-          }
+          contentEl = renderSectionContent(inlineProps, propertiesSchema, onSave, ctx);
         }
       }
     }
 
-    editorEl.appendChild(sectionEl);
+    if (!contentEl) continue;
+    appendSection(editorEl, section, contentEl);
   }
 };
 
@@ -182,6 +234,7 @@ export const renderEditorPreview = async (
   ]);
 
   const sections = frame.sections ?? DEFAULT_SECTIONS;
+  const ctx = buildFieldStyleContext(frame.fieldStyle);
 
   const container = document.createElement('div');
   if (frame.style) Object.assign(container.style, frame.style);
@@ -189,26 +242,18 @@ export const renderEditorPreview = async (
   const noop = async (): Promise<void> => {};
 
   for (const section of sections) {
-    const sectionEl = document.createElement('div');
-    if (section.label) {
-      const heading = document.createElement('p');
-      heading.textContent = section.label;
-      sectionEl.appendChild(heading);
-    }
+    let contentEl: HTMLElement | null = null;
 
     if (section.source === 'placement') {
       const placementData = JSON.parse(JSON.stringify(targetFrame.placement)) as Record<string, unknown>;
-      if (placementSchema) {
-        sectionEl.appendChild(renderFormFromSchema(placementData, placementSchema, noop));
-      }
+      contentEl = renderSectionContent(placementData, placementSchema, noop, ctx);
     } else if (section.source === 'properties' && componentData) {
       const propsData = JSON.parse(JSON.stringify(componentData)) as Record<string, unknown>;
-      if (propertiesSchema) {
-        sectionEl.appendChild(renderFormFromSchema(propsData, propertiesSchema, noop));
-      }
+      contentEl = renderSectionContent(propsData, propertiesSchema, noop, ctx);
     }
 
-    container.appendChild(sectionEl);
+    if (!contentEl) continue;
+    appendSection(container, section, contentEl);
   }
 
   wrapper.replaceChildren(container);
@@ -228,30 +273,27 @@ export const hydrateScreenEditor = async (
   if (!isScreen(value)) { editorEl.replaceChildren(); return; }
 
   const screenSchema = await fetchSchema('screen');
+  const ctx = buildFieldStyleContext(editorFrame.fieldStyle);
+
+  const screenData = { head: value.head, shell: value.shell, grid: value.grid } as Record<string, unknown>;
+  const onSave = async (draft: unknown): Promise<void> => {
+    const freshResponse = await fetch(`/api/layouts/${screenId}`);
+    if (!freshResponse.ok) return;
+    const freshScreen = (await freshResponse.json()) as unknown;
+    if (!isScreen(freshScreen)) return;
+    await fetch(`/api/layouts/${screenId}`, {
+      method: 'PUT',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ ...freshScreen, ...(draft as Record<string, unknown>) }),
+    });
+    onAfterSave();
+  };
 
   editorEl.replaceChildren();
 
   const heading = document.createElement('p');
+  Object.assign(heading.style, SECTION_HEADING_STYLE);
   heading.textContent = 'Screen';
   editorEl.appendChild(heading);
-
-  if (screenSchema) {
-    const onSave = async (draft: unknown): Promise<void> => {
-      const freshResponse = await fetch(`/api/layouts/${screenId}`);
-      if (!freshResponse.ok) return;
-      const freshScreen = (await freshResponse.json()) as unknown;
-      if (!isScreen(freshScreen)) return;
-      await fetch(`/api/layouts/${screenId}`, {
-        method: 'PUT',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ ...freshScreen, ...(draft as Record<string, unknown>) }),
-      });
-      onAfterSave();
-    };
-    editorEl.appendChild(renderFormFromSchema(
-      { head: value.head, shell: value.shell, grid: value.grid } as Record<string, unknown>,
-      screenSchema,
-      onSave,
-    ));
-  }
+  editorEl.appendChild(renderSectionContent(screenData, screenSchema, onSave, ctx));
 };
