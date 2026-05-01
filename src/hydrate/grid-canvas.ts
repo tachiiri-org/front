@@ -91,7 +91,13 @@ export const hydrateGridCanvas = async (
   canvasEl.style.gridTemplateRows = `repeat(${rows}, minmax(0, 1fr))`;
   canvasEl.style.border = '1px solid rgba(0, 0, 0, 0.12)';
   canvasEl.style.boxSizing = 'border-box';
+  canvasEl.style.backgroundImage = [
+    'linear-gradient(to right, rgba(0,0,0,0.06) 1px, transparent 1px)',
+    'linear-gradient(to bottom, rgba(0,0,0,0.06) 1px, transparent 1px)',
+  ].join(', ');
+  canvasEl.style.backgroundSize = `calc(100% / ${cols}) calc(100% / ${rows})`;
   canvasEl.style.cursor = 'default';
+  canvasEl.style.position = 'relative';
   canvasEl.replaceChildren();
 
   const resolvedComponents = new Map<string, Component>();
@@ -107,8 +113,26 @@ export const hydrateGridCanvas = async (
   const currentSelection = getFrameSelection(canvasFrame.id);
   const screenId = selectedScreenId;
 
-  const applySelectedStyle = (el: HTMLElement, selected: boolean): void => {
-    el.style.outline = selected ? '2px solid rgba(0, 100, 220, 0.6)' : '';
+  const selectionOverlay = document.createElement('div');
+  selectionOverlay.style.position = 'absolute';
+  selectionOverlay.style.inset = '0';
+  selectionOverlay.style.pointerEvents = 'none';
+  selectionOverlay.style.zIndex = '9999';
+
+  const updateSelectionOverlay = (selectedCell: HTMLElement | null): void => {
+    selectionOverlay.replaceChildren();
+    if (!selectedCell) return;
+    const canvasRect = canvasEl.getBoundingClientRect();
+    const cellRect = selectedCell.getBoundingClientRect();
+    const indicator = document.createElement('div');
+    indicator.style.position = 'absolute';
+    indicator.style.left = `${cellRect.left - canvasRect.left}px`;
+    indicator.style.top = `${cellRect.top - canvasRect.top}px`;
+    indicator.style.width = `${cellRect.width}px`;
+    indicator.style.height = `${cellRect.height}px`;
+    indicator.style.outline = '2px solid rgba(0, 100, 220, 0.8)';
+    indicator.style.boxSizing = 'border-box';
+    selectionOverlay.appendChild(indicator);
   };
 
   const applyCanvasSelectedStyle = (selected: boolean): void => {
@@ -180,13 +204,13 @@ export const hydrateGridCanvas = async (
   }, { signal: canvasInteractionController.signal });
 
   canvasEl.onclick = () => {
-    for (const child of canvasEl.children) {
-      applySelectedStyle(child as HTMLElement, false);
-    }
+    updateSelectionOverlay(null);
     applyCanvasSelectedStyle(true);
     setFrameSelection(canvasFrame.id, '');
     void onCanvasSelect(screenId);
   };
+
+  let initiallySelectedCell: HTMLElement | null = null;
 
   for (const frame of screen.frames) {
     const resolved = resolvedComponents.get(frame.id) ?? null;
@@ -198,8 +222,15 @@ export const hydrateGridCanvas = async (
     cell.style.gridColumn = `${frame.placement.x} / span ${frame.placement.width}`;
     cell.style.gridRow = `${frame.placement.y} / span ${frame.placement.height}`;
     cell.style.position = 'relative';
+    cell.style.backgroundColor = 'white';
     if (canvasFrame.cellStyle) Object.assign(cell.style, canvasFrame.cellStyle);
-    applySelectedStyle(cell, frame.id === currentSelection);
+    const resolvedStyle = resolved
+      ? (resolved as Record<string, unknown>).style as Record<string, string> | undefined
+      : undefined;
+    const frameStyle = (frame as Record<string, unknown>).style as Record<string, string> | undefined;
+    const bgColor = resolvedStyle?.backgroundColor ?? frameStyle?.backgroundColor;
+    if (bgColor !== undefined) cell.style.backgroundColor = bgColor;
+    if (frame.id === currentSelection) initiallySelectedCell = cell;
 
     const previewWrapper = renderFramePreview(frame, resolved, effectiveKind);
     cell.appendChild(previewWrapper);
@@ -265,6 +296,7 @@ export const hydrateGridCanvas = async (
           const dy = moveEvent.clientY - startY;
           if (!isDragging && Math.abs(dx) < 4 && Math.abs(dy) < 4) return;
           isDragging = true;
+          selectionOverlay.style.display = 'none';
           const p = calcPlacement(moveEvent.clientX, moveEvent.clientY);
           cell.style.gridColumn = `${p.x} / span ${p.width}`;
           cell.style.gridRow = `${p.y} / span ${p.height}`;
@@ -277,7 +309,12 @@ export const hydrateGridCanvas = async (
           if (!isDragging) return;
           cell.style.opacity = '';
           const p = calcPlacement(upEvent.clientX, upEvent.clientY);
-          if (p.x === startPlacement.x && p.y === startPlacement.y && p.width === startPlacement.width && p.height === startPlacement.height) { isDragging = false; return; }
+          if (p.x === startPlacement.x && p.y === startPlacement.y && p.width === startPlacement.width && p.height === startPlacement.height) {
+            isDragging = false;
+            selectionOverlay.style.display = '';
+            updateSelectionOverlay(cell);
+            return;
+          }
           void (async () => {
             const freshRes = await fetch(`/api/layouts/${screenId}`);
             if (!freshRes.ok) return;
@@ -305,6 +342,7 @@ export const hydrateGridCanvas = async (
           const dy = moveEvent.clientY - startY;
           if (!isDragging && Math.abs(dx) < 4 && Math.abs(dy) < 4) return;
           isDragging = true;
+          selectionOverlay.style.display = 'none';
           const rect = canvasEl.getBoundingClientRect();
           const newX = Math.max(1, Math.min(cols - startPlacement.width + 1, startPlacement.x + Math.round(dx / (rect.width / cols))));
           const newY = Math.max(1, startPlacement.y + Math.round(dy / (rect.height / rows)));
@@ -323,7 +361,12 @@ export const hydrateGridCanvas = async (
           const rect = canvasEl.getBoundingClientRect();
           const newX = Math.max(1, Math.min(cols - startPlacement.width + 1, startPlacement.x + Math.round((upEvent.clientX - startX) / (rect.width / cols))));
           const newY = Math.max(1, startPlacement.y + Math.round((upEvent.clientY - startY) / (rect.height / rows)));
-          if (newX === startPlacement.x && newY === startPlacement.y) { isDragging = false; return; }
+          if (newX === startPlacement.x && newY === startPlacement.y) {
+            isDragging = false;
+            selectionOverlay.style.display = '';
+            updateSelectionOverlay(cell);
+            return;
+          }
           void (async () => {
             const freshRes = await fetch(`/api/layouts/${screenId}`);
             if (!freshRes.ok) return;
@@ -352,10 +395,7 @@ export const hydrateGridCanvas = async (
       e.stopPropagation();
       if (isDragging) { isDragging = false; return; }
       applyCanvasSelectedStyle(false);
-      for (const child of canvasEl.children) {
-        applySelectedStyle(child as HTMLElement, false);
-      }
-      applySelectedStyle(cell, true);
+      updateSelectionOverlay(cell);
       setFrameSelection(canvasFrame.id, frame.id);
       void onFrameSelect(screenId, frame.id);
     });
@@ -370,4 +410,7 @@ export const hydrateGridCanvas = async (
       void renderEditorPreview(previewWrapper, frame as EditorFrame, screen, screenId);
     }
   }
+
+  canvasEl.appendChild(selectionOverlay);
+  updateSelectionOverlay(initiallySelectedCell);
 };
