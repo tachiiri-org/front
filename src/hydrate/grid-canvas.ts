@@ -9,6 +9,9 @@ import { renderEditorPreview } from './editor';
 
 const EDITOR_ONLY_KINDS = new Set(['grid-canvas', 'screen-list', 'component-editor']);
 
+const previewScaleRafs = new Map<string, number>();
+let previewResizeObserver: ResizeObserver | null = null;
+
 const renderGridCanvasPreview = (
   wrapper: HTMLElement,
   frame: GridCanvasFrame,
@@ -53,6 +56,77 @@ const renderFramePreview = (frame: Frame, resolved: Component | null, effectiveK
   return wrapper;
 };
 
+const isPositiveInteger = (value: unknown): value is number =>
+  typeof value === 'number' && Number.isInteger(value) && value > 0;
+
+const computePreviewScale = (
+  canvasEl: HTMLElement,
+  canvasFrame: GridCanvasFrame,
+  wrapper: HTMLElement,
+  content: HTMLElement,
+  effectiveKind: string,
+): number => {
+  if (effectiveKind === 'grid' || effectiveKind === 'grid-canvas') return 1;
+
+  const viewportWidth = canvasFrame.viewportWidth;
+  const viewportHeight = canvasFrame.viewportHeight;
+
+  if (isPositiveInteger(viewportWidth) && isPositiveInteger(viewportHeight)) {
+    const canvasRect = canvasEl.getBoundingClientRect();
+    if (canvasRect.width > 0 && canvasRect.height > 0) {
+      return Math.min(canvasRect.width / viewportWidth, canvasRect.height / viewportHeight);
+    }
+  }
+
+  const wrapperRect = wrapper.getBoundingClientRect();
+  const contentRect = content.getBoundingClientRect();
+  const widthRatio = wrapperRect.width > 0 && contentRect.width > 0
+    ? wrapperRect.width / contentRect.width
+    : 1;
+  const heightRatio = wrapperRect.height > 0 && contentRect.height > 0
+    ? wrapperRect.height / contentRect.height
+    : 1;
+  return Math.min(widthRatio, heightRatio);
+};
+
+const updatePreviewScale = (
+  frameId: string,
+  wrappers: Map<string, HTMLElement>,
+  canvasEl: HTMLElement,
+  canvasFrame: GridCanvasFrame,
+  effectiveKind: string,
+): void => {
+  const wrapper = wrappers.get(frameId);
+  if (!wrapper) return;
+
+  const content = wrapper.firstElementChild as HTMLElement | null;
+  if (!content) return;
+
+  content.style.transformOrigin = 'top left';
+  content.style.transform = 'none';
+  const scale = computePreviewScale(canvasEl, canvasFrame, wrapper, content, effectiveKind);
+
+  content.style.transform = scale > 0 && Number.isFinite(scale)
+    ? `scale(${scale})`
+    : '';
+};
+
+const schedulePreviewScale = (
+  frameId: string,
+  wrappers: Map<string, HTMLElement>,
+  canvasEl: HTMLElement,
+  canvasFrame: GridCanvasFrame,
+  effectiveKind: string,
+): void => {
+  const existing = previewScaleRafs.get(frameId);
+  if (existing !== undefined) cancelAnimationFrame(existing);
+  const rafId = requestAnimationFrame(() => {
+    previewScaleRafs.delete(frameId);
+    updatePreviewScale(frameId, wrappers, canvasEl, canvasFrame, effectiveKind);
+  });
+  previewScaleRafs.set(frameId, rafId);
+};
+
 let canvasInteractionController: AbortController | null = null;
 
 const directionMap: Record<string, [number, number]> = {
@@ -62,12 +136,17 @@ const directionMap: Record<string, [number, number]> = {
 export const hydrateGridCanvas = async (
   selectedScreenId: string | null,
   canvasFrame: GridCanvasFrame,
-  onFrameSelect: (screenId: string, frameId: string) => Promise<void>,
+  onFrameSelect: (screenId: string, frameId: string | null) => Promise<void>,
   onCanvasSelect: (screenId: string) => Promise<void>,
   onReload: () => void,
 ): Promise<void> => {
   const canvasEl = domMap.get(canvasFrame.id);
   if (!canvasEl) return;
+
+  previewResizeObserver?.disconnect();
+  previewResizeObserver = null;
+  for (const rafId of previewScaleRafs.values()) cancelAnimationFrame(rafId);
+  previewScaleRafs.clear();
 
   if (!selectedScreenId) {
     canvasEl.replaceChildren();
@@ -79,9 +158,9 @@ export const hydrateGridCanvas = async (
   const value = (await response.json()) as unknown;
   if (!isScreen(value)) { canvasEl.replaceChildren(); return; }
 
-  const screen = value;
+  let screen = value;
   const cols = screen.grid.columns;
-  const rows = screen.grid.rows ?? screen.frames.reduce(
+  let rows = screen.grid.rows ?? screen.frames.reduce(
     (m, f) => Math.max(m, f.placement.y + f.placement.height - 1),
     1,
   );
@@ -112,6 +191,8 @@ export const hydrateGridCanvas = async (
 
   const currentSelection = getFrameSelection(canvasFrame.id);
   const screenId = selectedScreenId;
+  const frameCells = new Map<string, HTMLElement>();
+  const previewWrappers = new Map<string, HTMLElement>();
 
   const selectionOverlay = document.createElement('div');
   selectionOverlay.style.position = 'absolute';
@@ -139,84 +220,78 @@ export const hydrateGridCanvas = async (
     canvasEl.style.outline = selected ? '2px solid rgba(0, 100, 220, 0.4)' : '';
   };
 
-  canvasInteractionController?.abort();
-  canvasInteractionController = new AbortController();
-  window.addEventListener('keydown', (e: KeyboardEvent) => {
-    if (isEditableTarget(e.target)) return;
-    const selectedId = getFrameSelection(canvasFrame.id);
-    if (!selectedId) return;
+  const syncCanvasBounds = (): void => {
+    rows = screen.grid.rows ?? screen.frames.reduce(
+      (m, f) => Math.max(m, f.placement.y + f.placement.height - 1),
+      1,
+    );
+    canvasEl.style.gridTemplateRows = `repeat(${rows}, minmax(0, 1fr))`;
+    canvasEl.style.backgroundSize = `calc(100% / ${cols}) calc(100% / ${rows})`;
+  };
 
-    if (e.key === 'Delete') {
-      e.preventDefault();
-      void (async () => {
-        const freshRes = await fetch(`/api/layouts/${screenId}`);
-        if (!freshRes.ok) return;
-        const freshScreen = (await freshRes.json()) as unknown;
-        if (!isScreen(freshScreen)) return;
-        await fetch(`/api/layouts/${screenId}`, {
-          method: 'PUT',
-          headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({
-            ...freshScreen,
-            frames: freshScreen.frames.filter((f) => f.id !== selectedId),
-          }),
-        });
-        setFrameSelection(canvasFrame.id, '');
-        onReload();
-      })();
+  const getEffectiveKind = (frame: Frame): string => {
+    const resolved = resolvedComponents.get(frame.id);
+    return resolved
+      ? String((resolved as Record<string, unknown>).kind ?? '')
+      : String((frame as Record<string, unknown>).kind ?? '');
+  };
+
+  const refreshPreview = async (frame: Frame): Promise<void> => {
+    const wrapper = previewWrappers.get(frame.id);
+    if (!wrapper) return;
+
+    const resolved = resolvedComponents.get(frame.id) ?? null;
+    const effectiveKind = getEffectiveKind(frame);
+
+    if (effectiveKind === 'screen-list') {
+      await renderScreenListPreview(wrapper, frame as ScreenListFrame);
+      schedulePreviewScale(frame.id, previewWrappers, canvasEl, canvasFrame, effectiveKind);
       return;
     }
 
-    const dir = directionMap[e.key];
-    if (!dir) return;
-    e.preventDefault();
-    const [dx, dy] = dir;
-    void (async () => {
-      const freshRes = await fetch(`/api/layouts/${screenId}`);
-      if (!freshRes.ok) return;
-      const freshScreen = (await freshRes.json()) as unknown;
-      if (!isScreen(freshScreen)) return;
-      const frame = freshScreen.frames.find((f) => f.id === selectedId);
-      if (!frame) return;
-      const p = { ...frame.placement };
-      if (e.shiftKey) {
-        p.width = Math.max(1, p.width + dx);
-        p.height = Math.max(1, p.height + dy);
-      } else if (e.ctrlKey) {
-        if (dx < 0) p.x = 1;
-        if (dx > 0) p.x = Math.max(1, cols - p.width + 1);
-        if (dy < 0) p.y = 1;
-        if (dy > 0) p.y = Math.max(1, rows - p.height + 1);
-      } else {
-        p.x = Math.max(1, Math.min(cols - p.width + 1, p.x + dx));
-        p.y = Math.max(1, p.y + dy);
-      }
-      await fetch(`/api/layouts/${screenId}`, {
-        method: 'PUT',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({
-          ...freshScreen,
-          frames: freshScreen.frames.map((f) => f.id === selectedId ? { ...f, placement: p } : f),
-        }),
-      });
-      onReload();
-    })();
-  }, { signal: canvasInteractionController.signal });
+    if (effectiveKind === 'grid-canvas') {
+      renderGridCanvasPreview(wrapper, frame as GridCanvasFrame, screen);
+      schedulePreviewScale(frame.id, previewWrappers, canvasEl, canvasFrame, effectiveKind);
+      return;
+    }
 
-  canvasEl.onclick = () => {
-    updateSelectionOverlay(null);
-    applyCanvasSelectedStyle(true);
-    setFrameSelection(canvasFrame.id, '');
-    void onCanvasSelect(screenId);
+    if (effectiveKind === 'component-editor') {
+      await renderEditorPreview(wrapper, frame as EditorFrame, screen, screenId);
+      schedulePreviewScale(frame.id, previewWrappers, canvasEl, canvasFrame, effectiveKind);
+      return;
+    }
+
+    wrapper.replaceChildren();
+    if (!EDITOR_ONLY_KINDS.has(effectiveKind)) {
+      wrapper.appendChild(renderComponent(frame, {}, resolved));
+    }
+    schedulePreviewScale(frame.id, previewWrappers, canvasEl, canvasFrame, effectiveKind);
   };
 
-  let initiallySelectedCell: HTMLElement | null = null;
+  const refreshDependentPreviews = async (): Promise<void> => {
+    await Promise.all(
+      screen.frames
+        .filter((frame) => {
+          const kind = getEffectiveKind(frame);
+          return kind === 'screen-list' || kind === 'grid-canvas' || kind === 'component-editor';
+        })
+        .map((frame) => refreshPreview(frame)),
+    );
+    const selectedId = getFrameSelection(canvasFrame.id);
+    updateSelectionOverlay(selectedId ? frameCells.get(selectedId) ?? null : null);
+  };
 
-  for (const frame of screen.frames) {
+  const appendFrameCell = (cell: HTMLElement): void => {
+    if (selectionOverlay.parentNode === canvasEl) {
+      canvasEl.insertBefore(cell, selectionOverlay);
+      return;
+    }
+    canvasEl.appendChild(cell);
+  };
+
+  const buildFrameCell = (frame: Frame): HTMLElement => {
     const resolved = resolvedComponents.get(frame.id) ?? null;
-    const effectiveKind = resolved
-      ? String((resolved as Record<string, unknown>).kind ?? '')
-      : String((frame as Record<string, unknown>).kind ?? '');
+    const effectiveKind = getEffectiveKind(frame);
 
     const cell = document.createElement('div');
     cell.style.gridColumn = `${frame.placement.x} / span ${frame.placement.width}`;
@@ -230,10 +305,14 @@ export const hydrateGridCanvas = async (
     const frameStyle = (frame as Record<string, unknown>).style as Record<string, string> | undefined;
     const bgColor = resolvedStyle?.backgroundColor ?? frameStyle?.backgroundColor;
     if (bgColor !== undefined) cell.style.backgroundColor = bgColor;
-    if (frame.id === currentSelection) initiallySelectedCell = cell;
 
     const previewWrapper = renderFramePreview(frame, resolved, effectiveKind);
+    previewWrappers.set(frame.id, previewWrapper);
     cell.appendChild(previewWrapper);
+    if (effectiveKind === 'screen-list' || effectiveKind === 'grid-canvas' || effectiveKind === 'component-editor') {
+      void refreshPreview(frame);
+    }
+    schedulePreviewScale(frame.id, previewWrappers, canvasEl, canvasFrame, effectiveKind);
 
     let isDragging = false;
 
@@ -400,17 +479,217 @@ export const hydrateGridCanvas = async (
       void onFrameSelect(screenId, frame.id);
     });
 
-    canvasEl.appendChild(cell);
+    return cell;
+  };
 
-    if (effectiveKind === 'screen-list') {
-      void renderScreenListPreview(previewWrapper, frame as ScreenListFrame);
-    } else if (effectiveKind === 'grid-canvas') {
-      renderGridCanvasPreview(previewWrapper, frame as GridCanvasFrame, screen);
-    } else if (effectiveKind === 'component-editor') {
-      void renderEditorPreview(previewWrapper, frame as EditorFrame, screen, screenId);
+  const insertFrameCell = (frame: Frame): void => {
+    const cell = buildFrameCell(frame);
+    frameCells.set(frame.id, cell);
+    appendFrameCell(cell);
+  };
+
+  canvasInteractionController?.abort();
+  canvasInteractionController = new AbortController();
+  window.addEventListener('keydown', (e: KeyboardEvent) => {
+    if (isEditableTarget(e.target)) return;
+    const selectedId = getFrameSelection(canvasFrame.id);
+    if (!selectedId) return;
+
+    if (e.key === 'Delete') {
+      e.preventDefault();
+      void (async () => {
+        const freshRes = await fetch(`/api/layouts/${screenId}`);
+        if (!freshRes.ok) return;
+        const freshScreen = (await freshRes.json()) as unknown;
+        if (!isScreen(freshScreen)) return;
+        await fetch(`/api/layouts/${screenId}`, {
+          method: 'PUT',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({
+            ...freshScreen,
+            frames: freshScreen.frames.filter((f) => f.id !== selectedId),
+          }),
+        });
+        frameCells.get(selectedId)?.remove();
+        frameCells.delete(selectedId);
+        previewWrappers.delete(selectedId);
+        resolvedComponents.delete(selectedId);
+        screen = {
+          ...freshScreen,
+          frames: freshScreen.frames.filter((f) => f.id !== selectedId),
+        };
+        syncCanvasBounds();
+        setFrameSelection(canvasFrame.id, '');
+        updateSelectionOverlay(null);
+        await refreshDependentPreviews();
+        await onFrameSelect(screenId, null);
+      })();
+      return;
     }
+
+    const dir = directionMap[e.key];
+    if (!dir) return;
+    e.preventDefault();
+    const [dx, dy] = dir;
+    void (async () => {
+      const freshRes = await fetch(`/api/layouts/${screenId}`);
+      if (!freshRes.ok) return;
+      const freshScreen = (await freshRes.json()) as unknown;
+      if (!isScreen(freshScreen)) return;
+      const frame = freshScreen.frames.find((f) => f.id === selectedId);
+      if (!frame) return;
+      const p = { ...frame.placement };
+      if (e.shiftKey) {
+        p.width = Math.max(1, p.width + dx);
+        p.height = Math.max(1, p.height + dy);
+      } else if (e.ctrlKey) {
+        if (dx < 0) p.x = 1;
+        if (dx > 0) p.x = Math.max(1, cols - p.width + 1);
+        if (dy < 0) p.y = 1;
+        if (dy > 0) p.y = Math.max(1, rows - p.height + 1);
+      } else {
+        p.x = Math.max(1, Math.min(cols - p.width + 1, p.x + dx));
+        p.y = Math.max(1, p.y + dy);
+      }
+      await fetch(`/api/layouts/${screenId}`, {
+        method: 'PUT',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          ...freshScreen,
+          frames: freshScreen.frames.map((f) => f.id === selectedId ? { ...f, placement: p } : f),
+          }),
+        });
+      onReload();
+    })();
+  }, { signal: canvasInteractionController.signal });
+
+  let suppressCanvasClick = false;
+  canvasEl.addEventListener('click', () => {
+    if (suppressCanvasClick) { suppressCanvasClick = false; return; }
+    updateSelectionOverlay(null);
+    applyCanvasSelectedStyle(true);
+    setFrameSelection(canvasFrame.id, '');
+    void onCanvasSelect(screenId);
+  });
+
+  canvasEl.addEventListener('pointerdown', (e: PointerEvent) => {
+    if (e.button !== 0 || e.target !== canvasEl) return;
+
+    const rect = canvasEl.getBoundingClientRect();
+    const startCol = Math.max(1, Math.min(cols, Math.ceil((e.clientX - rect.left) / (rect.width / cols))));
+    const startRow = Math.max(1, Math.min(rows, Math.ceil((e.clientY - rect.top) / (rect.height / rows))));
+
+    let isCreating = false;
+
+    const ghost = document.createElement('div');
+    ghost.style.position = 'absolute';
+    ghost.style.pointerEvents = 'none';
+    ghost.style.zIndex = '9998';
+    ghost.style.backgroundColor = 'rgba(0, 100, 220, 0.12)';
+    ghost.style.border = '2px dashed rgba(0, 100, 220, 0.5)';
+    ghost.style.boxSizing = 'border-box';
+    ghost.style.display = 'none';
+    canvasEl.appendChild(ghost);
+
+    canvasEl.setPointerCapture(e.pointerId);
+
+    const getCell = (cx: number, cy: number): { col: number; row: number } => {
+      const r = canvasEl.getBoundingClientRect();
+      return {
+        col: Math.max(1, Math.min(cols, Math.ceil((cx - r.left) / (r.width / cols)))),
+        row: Math.max(1, Math.min(rows, Math.ceil((cy - r.top) / (r.height / rows)))),
+      };
+    };
+
+    const refreshGhost = (col: number, row: number): void => {
+      const r = canvasEl.getBoundingClientRect();
+      const cw = r.width / cols;
+      const ch = r.height / rows;
+      const x = Math.min(startCol, col);
+      const y = Math.min(startRow, row);
+      ghost.style.left = `${(x - 1) * cw}px`;
+      ghost.style.top = `${(y - 1) * ch}px`;
+      ghost.style.width = `${(Math.abs(col - startCol) + 1) * cw}px`;
+      ghost.style.height = `${(Math.abs(row - startRow) + 1) * ch}px`;
+      ghost.style.display = '';
+    };
+
+    const onMove = (me: PointerEvent): void => {
+      if (!isCreating && Math.abs(me.clientX - e.clientX) < 4 && Math.abs(me.clientY - e.clientY) < 4) return;
+      isCreating = true;
+      const { col, row } = getCell(me.clientX, me.clientY);
+      refreshGhost(col, row);
+    };
+
+    const onUp = (ue: PointerEvent): void => {
+      canvasEl.removeEventListener('pointermove', onMove);
+      canvasEl.removeEventListener('pointerup', onUp);
+      ghost.remove();
+      if (!isCreating) return;
+      suppressCanvasClick = true;
+
+      const { col: endCol, row: endRow } = getCell(ue.clientX, ue.clientY);
+      const x = Math.min(startCol, endCol);
+      const y = Math.min(startRow, endRow);
+      const width = Math.abs(endCol - startCol) + 1;
+      const height = Math.abs(endRow - startRow) + 1;
+      const newId = crypto.randomUUID();
+
+      void (async () => {
+        const freshRes = await fetch(`/api/layouts/${screenId}`);
+        if (!freshRes.ok) return;
+        const freshScreen = (await freshRes.json()) as unknown;
+        if (!isScreen(freshScreen)) return;
+        setFrameSelection(canvasFrame.id, newId);
+        await fetch(`/api/layouts/${screenId}`, {
+          method: 'PUT',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({
+            ...freshScreen,
+            frames: [
+              ...freshScreen.frames,
+              { id: newId, placement: { x, y, width, height }, kind: 'element', tag: 'div', style: {} },
+            ],
+          }),
+        });
+        const newFrame = { id: newId, placement: { x, y, width, height }, kind: 'element', tag: 'div', style: {} } as Frame;
+        screen = {
+          ...freshScreen,
+          frames: [
+            ...freshScreen.frames,
+            newFrame,
+          ],
+        };
+        syncCanvasBounds();
+        insertFrameCell(newFrame);
+        setFrameSelection(canvasFrame.id, newId);
+        updateSelectionOverlay(frameCells.get(newId) ?? null);
+        await refreshDependentPreviews();
+        void onFrameSelect(screenId, newId);
+      })();
+    };
+
+    canvasEl.addEventListener('pointermove', onMove);
+    canvasEl.addEventListener('pointerup', onUp);
+  });
+
+  for (const frame of screen.frames) {
+    const cell = buildFrameCell(frame);
+    frameCells.set(frame.id, cell);
+    appendFrameCell(cell);
   }
 
   canvasEl.appendChild(selectionOverlay);
-  updateSelectionOverlay(initiallySelectedCell);
+  updateSelectionOverlay(currentSelection ? frameCells.get(currentSelection) ?? null : null);
+
+  if (typeof ResizeObserver !== 'undefined') {
+    previewResizeObserver = new ResizeObserver(() => {
+      for (const frameId of previewWrappers.keys()) {
+        const frame = screen.frames.find((f) => f.id === frameId);
+        if (!frame) continue;
+        schedulePreviewScale(frameId, previewWrappers, canvasEl, canvasFrame, getEffectiveKind(frame));
+      }
+    });
+    previewResizeObserver.observe(canvasEl);
+  }
 };

@@ -32,7 +32,7 @@ export const hydrateEditor = async (onReload: () => void): Promise<void> => {
       ? editorFrames.find((f) => f.id === canvasFrame.targetComponentId)
       : undefined;
 
-    const onFrameSelect = async (screenId: string, frameId: string): Promise<void> => {
+    const onFrameSelect = async (screenId: string, frameId: string | null): Promise<void> => {
       if (editorFrame) await hydrateComponentEditor(screenId, frameId, editorFrame, onReload);
     };
 

@@ -53,6 +53,11 @@ const isHeadLike = (value: unknown): value is Screen['head'] => {
 const isPositiveInteger = (value: unknown): value is number =>
   typeof value === 'number' && Number.isInteger(value) && value > 0;
 
+const DEFAULT_GRID_CANVAS_VIEWPORT = {
+  width: 1920,
+  height: 1080,
+} as const;
+
 type FrameCandidate = { id: string; kind: string } & Record<string, unknown>;
 
 const isFrameCandidate = (value: unknown): value is FrameCandidate => {
@@ -121,7 +126,26 @@ const normalizeScreen = (value: unknown): Screen | null => {
   const normalizedFrames = frames.map((frame) => {
     const p = (frame as Record<string, unknown>).placement;
     if (isPlacement(p) && isPositiveInteger((p as Placement).width) && isPositiveInteger((p as Placement).height)) {
+      if ((frame as Record<string, unknown>).kind === 'grid-canvas') {
+        return {
+          ...frame,
+          viewportWidth: isPositiveInteger((frame as Record<string, unknown>).viewportWidth)
+            ? (frame as Record<string, unknown>).viewportWidth
+            : DEFAULT_GRID_CANVAS_VIEWPORT.width,
+          viewportHeight: isPositiveInteger((frame as Record<string, unknown>).viewportHeight)
+            ? (frame as Record<string, unknown>).viewportHeight
+            : DEFAULT_GRID_CANVAS_VIEWPORT.height,
+        } as Frame;
+      }
       return frame as Frame;
+    }
+    if ((frame as Record<string, unknown>).kind === 'grid-canvas') {
+      return {
+        ...frame,
+        placement: findNextPlacement(occupied, columns),
+        viewportWidth: DEFAULT_GRID_CANVAS_VIEWPORT.width,
+        viewportHeight: DEFAULT_GRID_CANVAS_VIEWPORT.height,
+      } as Frame;
     }
     return { ...frame, placement: findNextPlacement(occupied, columns) } as Frame;
   });
