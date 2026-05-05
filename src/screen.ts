@@ -5,16 +5,9 @@ import type { EditorComponent } from './component/kind/editor';
 import { isScreenListComponent } from './component/kind/screen-list';
 import { isGridCanvasComponent } from './component/kind/grid-canvas';
 import { isEditorComponent } from './component/kind/editor';
+import { type Head, isHead, headDefaults } from './head';
 
-export type MetaTag = {
-  name: string;
-  content: string;
-};
-
-export type Head = {
-  title: string;
-  meta: MetaTag[];
-};
+export type { MetaTag, Head } from './head';
 
 export type GridLayout = {
   kind: 'grid';
@@ -47,22 +40,6 @@ export type Screen = {
   shell: Record<string, string>;
   grid: GridLayout;
   frames: Frame[];
-};
-
-const isMetaTag = (value: unknown): value is MetaTag => {
-  if (typeof value !== 'object' || value === null) return false;
-  const m = value as Partial<MetaTag>;
-  return typeof m.name === 'string' && typeof m.content === 'string';
-};
-
-const isHead = (value: unknown): value is Head => {
-  if (typeof value !== 'object' || value === null) return false;
-  const c = value as Partial<Head>;
-  return (
-    typeof c.title === 'string' &&
-    Array.isArray(c.meta) &&
-    c.meta.every(isMetaTag)
-  );
 };
 
 export const isGridLayout = (value: unknown): value is GridLayout => {
@@ -126,3 +103,10 @@ export const isScreen = (value: unknown): value is Screen => {
 export const isScreenListFrame = (f: Frame): f is ScreenListFrame => isScreenListComponent(f);
 export const isGridCanvasFrame = (f: Frame): f is GridCanvasFrame => isGridCanvasComponent(f);
 export const isEditorFrame = (f: Frame): f is EditorFrame => isEditorComponent(f);
+
+export const screenDefaults: Screen = {
+  head: headDefaults,
+  shell: { width: '100%', height: '100%' },
+  grid: { kind: 'grid', columns: 120, rows: 120 },
+  frames: [],
+};

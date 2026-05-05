@@ -10,6 +10,7 @@ import {
   type Frame,
   type Placement,
 } from './screen';
+import { isHead } from './head';
 import placementSchema from './schemas/placement.json';
 import gridSchema from './schemas/grid.json';
 
@@ -37,25 +38,6 @@ const isStringRecord = (value: unknown): value is Record<string, string> => {
   return Object.values(value).every((entry) => typeof entry === 'string');
 };
 
-const isMetaTag = (value: unknown): value is { name: string; content: string } => {
-  if (typeof value !== 'object' || value === null || Array.isArray(value)) {
-    return false;
-  }
-  const candidate = value as Record<string, unknown>;
-  return typeof candidate.name === 'string' && typeof candidate.content === 'string';
-};
-
-const isHeadLike = (value: unknown): value is Screen['head'] => {
-  if (typeof value !== 'object' || value === null || Array.isArray(value)) {
-    return false;
-  }
-  const candidate = value as Record<string, unknown>;
-  return (
-    typeof candidate.title === 'string' &&
-    Array.isArray(candidate.meta) &&
-    candidate.meta.every(isMetaTag)
-  );
-};
 
 const isPositiveInteger = (value: unknown): value is number =>
   typeof value === 'number' && Number.isInteger(value) && value > 0;
@@ -115,7 +97,7 @@ const normalizeScreen = (value: unknown): Screen | null => {
   }
 
   const candidate = value as Record<string, unknown>;
-  if (!isHeadLike(candidate.head)) return null;
+  if (!isHead(candidate.head)) return null;
   if (!isStringRecord(candidate.shell)) return null;
   if (!Array.isArray(candidate.frames) || !candidate.frames.every(isFrameCandidate)) return null;
 
