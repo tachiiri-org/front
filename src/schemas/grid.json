@@ -1,0 +1,6 @@
+{
+  "fields": [
+    { "kind": "number-field", "key": "rows", "label": "rows" },
+    { "kind": "number-field", "key": "columns", "label": "columns" }
+  ]
+}

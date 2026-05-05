@@ -1,4 +1,4 @@
-import { isStyle } from './validator';
+import { isStyle } from '../validator';
 
 export type ScreenListComponent = {
   kind: 'screen-list';
@@ -6,6 +6,8 @@ export type ScreenListComponent = {
   style?: Record<string, string>;
   itemStyle?: Record<string, string>;
 };
+
+export const screenListDefaults: ScreenListComponent = { kind: 'screen-list' };
 
 export const isScreenListComponent = (value: unknown): value is ScreenListComponent => {
   if (typeof value !== 'object' || value === null || Array.isArray(value)) return false;

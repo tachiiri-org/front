@@ -1,10 +1,10 @@
 import { type Component, isComponent, isStyle } from './component';
-import type { ScreenListComponent } from './component/screen-list';
-import type { GridCanvasComponent } from './component/grid-canvas';
-import type { EditorComponent } from './component/editor';
-import { isScreenListComponent } from './component/screen-list';
-import { isGridCanvasComponent } from './component/grid-canvas';
-import { isEditorComponent } from './component/editor';
+import type { ScreenListComponent } from './component/kind/screen-list';
+import type { GridCanvasComponent } from './component/kind/grid-canvas';
+import type { EditorComponent } from './component/kind/editor';
+import { isScreenListComponent } from './component/kind/screen-list';
+import { isGridCanvasComponent } from './component/kind/grid-canvas';
+import { isEditorComponent } from './component/kind/editor';
 
 export type MetaTag = {
   name: string;

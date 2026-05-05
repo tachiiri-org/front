@@ -1,0 +1,8 @@
+{
+  "fields": [
+    { "kind": "number-field", "key": "x", "label": "x" },
+    { "kind": "number-field", "key": "y", "label": "y" },
+    { "kind": "number-field", "key": "width", "label": "width" },
+    { "kind": "number-field", "key": "height", "label": "height" }
+  ]
+}

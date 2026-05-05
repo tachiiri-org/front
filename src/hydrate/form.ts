@@ -1,4 +1,4 @@
-import type { FieldComponent } from '../component/fields';
+import type { FieldComponent } from '../component/kind/fields';
 import { renderFieldFromSchema, buildFieldStyleContext, type FieldStyleContext } from './field';
 
 function inferField(key: string, value: unknown): FieldComponent {

@@ -11,7 +11,27 @@ import { hydrateScreenList } from './screen-list';
 import { hydrateGridCanvas } from './grid-canvas';
 import { hydrateComponentEditor, hydrateScreenEditor } from './editor';
 
-export const hydrateEditor = async (onReload: () => void): Promise<void> => {
+const findDefaultEditableFrameId = (): string | null => {
+  const screen = store.screen;
+  if (!screen) return null;
+  const frame = screen.frames.find(
+    (f) => !isScreenListFrame(f) && !isGridCanvasFrame(f) && !isEditorFrame(f),
+  );
+  return frame?.id ?? null;
+};
+
+const resolveEditorTargetFrameId = (canvasFrameId: string | null): string | null => {
+  if (canvasFrameId) {
+    const selectedFrameId = getFrameSelection(canvasFrameId);
+    if (selectedFrameId) return selectedFrameId;
+  }
+  return findDefaultEditableFrameId();
+};
+
+export const hydrateEditor = async (
+  onReload: () => void,
+  initialScreenId: string | null = null,
+): Promise<void> => {
   if (!store.screen) return;
 
   const screenListFrames = store.screen.frames.filter(
@@ -45,8 +65,20 @@ export const hydrateEditor = async (onReload: () => void): Promise<void> => {
         setFrameSelection(canvasFrame.id, '');
         await hydrateGridCanvas(screenId, canvasFrame, onFrameSelect, onCanvasSelect, onReload);
       }
-      if (editorFrame) await hydrateComponentEditor(null, null, editorFrame, onReload);
+      if (editorFrame) {
+        const targetFrameId = resolveEditorTargetFrameId(canvasFrame?.id ?? null);
+        if (targetFrameId && canvasFrame) {
+          setFrameSelection(canvasFrame.id, targetFrameId);
+          await hydrateComponentEditor(screenId, targetFrameId, editorFrame, onReload);
+        } else {
+          await hydrateComponentEditor(null, null, editorFrame, onReload);
+        }
+      }
     };
+
+    if (initialScreenId && !getFrameSelection(screenListFrame.id)) {
+      setFrameSelection(screenListFrame.id, initialScreenId);
+    }
 
     await hydrateScreenList(
       screenListFrame,
@@ -55,12 +87,17 @@ export const hydrateEditor = async (onReload: () => void): Promise<void> => {
       canvasFrame ? () => !!getFrameSelection(canvasFrame.id) : undefined,
     );
 
-    const savedScreenId = getFrameSelection(screenListFrame.id);
+    const savedScreenId = getFrameSelection(screenListFrame.id) || initialScreenId;
     if (savedScreenId && canvasFrame) {
       await hydrateGridCanvas(savedScreenId, canvasFrame, onFrameSelect, onCanvasSelect, onReload);
-      const savedFrameId = getFrameSelection(canvasFrame.id);
-      if (savedFrameId && editorFrame) {
-        await hydrateComponentEditor(savedScreenId, savedFrameId, editorFrame, onReload);
+      if (editorFrame) {
+        const targetFrameId = resolveEditorTargetFrameId(canvasFrame.id);
+        if (targetFrameId) {
+          setFrameSelection(canvasFrame.id, targetFrameId);
+          await hydrateComponentEditor(savedScreenId, targetFrameId, editorFrame, onReload);
+        } else {
+          await hydrateComponentEditor(null, null, editorFrame, onReload);
+        }
       }
     }
   }

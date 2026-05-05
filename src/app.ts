@@ -94,7 +94,7 @@ const reloadEditor = (): void => {
 const loadEditor = async (screenId: string): Promise<void> => {
   currentEditorScreenId = screenId;
   await renderScreen(screenId);
-  await hydrateEditor(reloadEditor);
+  await hydrateEditor(reloadEditor, screenId);
 };
 
 const loadEditorBootstrap = async (): Promise<void> => {

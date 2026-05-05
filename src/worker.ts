@@ -1,6 +1,6 @@
 import { isComponent, type Component, isFieldComponent } from './component';
-import { isGridComponent } from './component/grid';
-import { isSelectComponent } from './component/select';
+import { isGridComponent } from './component/kind/grid';
+import { isSelectComponent } from './component/kind/select';
 import {
   isScreen,
   isGridLayout,
@@ -10,6 +10,8 @@ import {
   type Frame,
   type Placement,
 } from './screen';
+import placementSchema from './schemas/placement.json';
+import gridSchema from './schemas/grid.json';
 
 type Env = {
   readonly ASSETS: {
@@ -21,6 +23,11 @@ type Env = {
 type ListItem = {
   value: string;
   label: string;
+};
+
+const BUILTIN_SCHEMAS: Record<string, unknown> = {
+  placement: placementSchema,
+  grid: gridSchema,
 };
 
 const isStringRecord = (value: unknown): value is Record<string, string> => {
@@ -351,7 +358,15 @@ const isComponentSchema = (value: unknown): boolean => {
 
 const handleSchemaGet = async (env: Env, kind: string): Promise<Response> => {
   const object = await env.LAYOUTS.get(`schemas/${kind}.json`);
-  if (!object) return new Response('Not Found', { status: 404 });
+  if (!object) {
+    const builtin = BUILTIN_SCHEMAS[kind];
+    if (!builtin) return new Response('Not Found', { status: 404 });
+    const body = JSON.stringify(builtin);
+    await env.LAYOUTS.put(`schemas/${kind}.json`, body, {
+      httpMetadata: { contentType: 'application/json' },
+    });
+    return new Response(body, { headers: { 'Content-Type': 'application/json' } });
+  }
   return new Response(object.body, { headers: { 'Content-Type': 'application/json' } });
 };
 

@@ -1,4 +1,4 @@
-import { isStyle } from './validator';
+import { isStyle } from '../validator';
 
 export type FieldStyleConfig = {
   wrapper?: Record<string, string>;
@@ -41,6 +41,8 @@ const isEditorSection = (v: unknown): v is EditorSection => {
     (c.defaultCollapsed === undefined || typeof c.defaultCollapsed === 'boolean')
   );
 };
+
+export const editorDefaults: EditorComponent = { kind: 'component-editor' };
 
 export const isEditorComponent = (value: unknown): value is EditorComponent => {
   if (typeof value !== 'object' || value === null || Array.isArray(value)) return false;

@@ -3,12 +3,13 @@
 - create dom from json without html
 - edit json
 - edit component layout in screen
+- overwrite some values of components
 - generate various front from json
 
 ## Constrains
 
 - Do not use remote R2 in local dev. Use Local R2
-- Do not define fixed valut in script. All values should be in json
+- Define initial value of components in script
 
 ## Quality
 

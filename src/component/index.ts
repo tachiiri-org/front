@@ -1,10 +1,10 @@
 export { isStyle } from './validator';
-export { type ElementComponent, isElementComponent, elementDefaults } from './element';
-export { type HeadingComponent, isHeadingComponent, headingDefaults } from './heading';
-export { type ButtonComponent, isButtonComponent, buttonDefaults } from './button';
-export { type ScreenListComponent, isScreenListComponent } from './screen-list';
-export { type GridCanvasComponent, isGridCanvasComponent } from './grid-canvas';
-export { type EditorComponent, isEditorComponent } from './editor';
+export { type ElementComponent, isElementComponent, elementDefaults } from './kind/element';
+export { type HeadingComponent, isHeadingComponent, headingDefaults } from './kind/heading';
+export { type ButtonComponent, isButtonComponent, buttonDefaults } from './kind/button';
+export { type ScreenListComponent, isScreenListComponent, screenListDefaults } from './kind/screen-list';
+export { type GridCanvasComponent, isGridCanvasComponent, gridCanvasDefaults } from './kind/grid-canvas';
+export { type EditorComponent, isEditorComponent, editorDefaults } from './kind/editor';
 export {
   type SelectComponent,
   type SelectOption,
@@ -14,9 +14,9 @@ export {
   isSelectOption,
   isSelectSource,
   selectDefaults,
-} from './select';
-export { type FormComponent, isFormComponent, formDefaults } from './form';
-export { type GridComponent, isGridComponent, gridDefaults } from './grid';
+} from './kind/select';
+export { type FormComponent, isFormComponent, formDefaults } from './kind/form';
+export { type GridComponent, isGridComponent, gridDefaults } from './kind/grid';
 export {
   type FieldComponent,
   type TextFieldComponent,
@@ -32,17 +32,18 @@ export {
   isStyleMapFieldComponent,
   isObjectListFieldComponent,
   isFieldGroupComponent,
-} from './fields';
+  textFieldDefaults,
+} from './kind/fields';
 
-import type { ElementComponent } from './element';
-import type { HeadingComponent } from './heading';
-import type { ButtonComponent } from './button';
-import type { ScreenListComponent } from './screen-list';
-import type { GridCanvasComponent } from './grid-canvas';
-import type { EditorComponent } from './editor';
-import type { SelectComponent } from './select';
-import type { FormComponent } from './form';
-import type { GridComponent } from './grid';
+import type { ElementComponent } from './kind/element';
+import type { HeadingComponent } from './kind/heading';
+import type { ButtonComponent } from './kind/button';
+import type { ScreenListComponent } from './kind/screen-list';
+import type { GridCanvasComponent } from './kind/grid-canvas';
+import type { EditorComponent } from './kind/editor';
+import type { SelectComponent } from './kind/select';
+import type { FormComponent } from './kind/form';
+import type { GridComponent } from './kind/grid';
 import type {
   TextFieldComponent,
   NumberFieldComponent,
@@ -50,16 +51,16 @@ import type {
   StyleMapFieldComponent,
   ObjectListFieldComponent,
   FieldGroupComponent,
-} from './fields';
-import { isElementComponent, elementDefaults } from './element';
-import { isHeadingComponent, headingDefaults } from './heading';
-import { isButtonComponent, buttonDefaults } from './button';
-import { isScreenListComponent } from './screen-list';
-import { isGridCanvasComponent } from './grid-canvas';
-import { isEditorComponent } from './editor';
-import { isSelectComponent, selectDefaults } from './select';
-import { isFormComponent, formDefaults } from './form';
-import { isGridComponent, gridDefaults } from './grid';
+} from './kind/fields';
+import { isElementComponent, elementDefaults } from './kind/element';
+import { isHeadingComponent, headingDefaults } from './kind/heading';
+import { isButtonComponent, buttonDefaults } from './kind/button';
+import { isScreenListComponent, screenListDefaults } from './kind/screen-list';
+import { isGridCanvasComponent, gridCanvasDefaults } from './kind/grid-canvas';
+import { isEditorComponent, editorDefaults } from './kind/editor';
+import { isSelectComponent, selectDefaults } from './kind/select';
+import { isFormComponent, formDefaults } from './kind/form';
+import { isGridComponent, gridDefaults } from './kind/grid';
 import {
   isTextFieldComponent,
   isNumberFieldComponent,
@@ -67,7 +68,8 @@ import {
   isStyleMapFieldComponent,
   isObjectListFieldComponent,
   isFieldGroupComponent,
-} from './fields';
+  textFieldDefaults,
+} from './kind/fields';
 
 export type Component =
   | ElementComponent
@@ -110,6 +112,10 @@ export const componentDefaults: Record<string, Record<string, unknown>> = {
   form: formDefaults as Record<string, unknown>,
   select: selectDefaults as Record<string, unknown>,
   grid: gridDefaults as Record<string, unknown>,
+  'component-editor': editorDefaults as Record<string, unknown>,
+  'grid-canvas': gridCanvasDefaults as Record<string, unknown>,
+  'screen-list': screenListDefaults as Record<string, unknown>,
+  'text-field': textFieldDefaults as Record<string, unknown>,
 };
 
 export const COMPONENT_KINDS = Object.keys(componentDefaults);

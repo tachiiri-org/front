@@ -1,8 +1,8 @@
 import { isScreen, isFrameRef } from '../screen';
 import { isComponent, componentDefaults, COMPONENT_KINDS } from '../component';
 import type { EditorFrame, Screen } from '../screen';
-import type { EditorSection } from '../component/editor';
-import type { FieldComponent } from '../component/fields';
+import type { EditorSection } from '../component/kind/editor';
+import type { FieldComponent } from '../component/kind/fields';
 import { renderFormFromSchema, inferFieldsFromData, mergeWithSchema } from './form';
 import { buildFieldStyleContext, type FieldStyleContext } from './field';
 import { domMap } from '../state';

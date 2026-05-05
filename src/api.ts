@@ -1,5 +1,5 @@
 import { isScreen, type Screen } from './screen';
-import { isScreenListComponent } from './component/screen-list';
+import { isScreenListComponent } from './component/kind/screen-list';
 import { isComponent, type Component, isFieldComponent, type FieldComponent } from './component';
 
 export const fetchSchema = async (kind: string): Promise<FieldComponent[] | null> => {

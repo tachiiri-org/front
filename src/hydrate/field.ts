@@ -1,4 +1,4 @@
-import type { FieldComponent } from '../component/fields';
+import type { FieldComponent } from '../component/kind/fields';
 
 export type FieldStyleContext = {
   wrapper: Record<string, string>;

@@ -1,4 +1,4 @@
-import { isStyle } from './validator';
+import { isStyle } from '../validator';
 
 export type TextFieldComponent = {
   kind: 'text-field';
@@ -122,6 +122,8 @@ export const isFieldGroupComponent = (v: unknown): v is FieldGroupComponent => {
     (c.defaultCollapsed === undefined || typeof c.defaultCollapsed === 'boolean')
   );
 };
+
+export const textFieldDefaults: TextFieldComponent = { kind: 'text-field', key: '' };
 
 export const isFieldComponent = (v: unknown): v is FieldComponent =>
   isTextFieldComponent(v) ||

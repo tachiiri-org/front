@@ -1,4 +1,4 @@
-import { isStyle } from './validator';
+import { isStyle } from '../validator';
 
 export type SelectOption = {
   value: string;
