@@ -1,7 +1,7 @@
 export { isStyle } from './validator';
-export { type ElementComponent, isElementComponent } from './element';
-export { type HeadingComponent, isHeadingComponent } from './heading';
-export { type ButtonComponent, isButtonComponent } from './button';
+export { type ElementComponent, isElementComponent, elementDefaults } from './element';
+export { type HeadingComponent, isHeadingComponent, headingDefaults } from './heading';
+export { type ButtonComponent, isButtonComponent, buttonDefaults } from './button';
 export { type ScreenListComponent, isScreenListComponent } from './screen-list';
 export { type GridCanvasComponent, isGridCanvasComponent } from './grid-canvas';
 export { type EditorComponent, isEditorComponent } from './editor';
@@ -13,9 +13,10 @@ export {
   isSelectComponent,
   isSelectOption,
   isSelectSource,
+  selectDefaults,
 } from './select';
-export { type FormComponent, isFormComponent } from './form';
-export { type GridComponent, isGridComponent } from './grid';
+export { type FormComponent, isFormComponent, formDefaults } from './form';
+export { type GridComponent, isGridComponent, gridDefaults } from './grid';
 export {
   type FieldComponent,
   type TextFieldComponent,
@@ -50,15 +51,15 @@ import type {
   ObjectListFieldComponent,
   FieldGroupComponent,
 } from './fields';
-import { isElementComponent } from './element';
-import { isHeadingComponent } from './heading';
-import { isButtonComponent } from './button';
+import { isElementComponent, elementDefaults } from './element';
+import { isHeadingComponent, headingDefaults } from './heading';
+import { isButtonComponent, buttonDefaults } from './button';
 import { isScreenListComponent } from './screen-list';
 import { isGridCanvasComponent } from './grid-canvas';
 import { isEditorComponent } from './editor';
-import { isSelectComponent } from './select';
-import { isFormComponent } from './form';
-import { isGridComponent } from './grid';
+import { isSelectComponent, selectDefaults } from './select';
+import { isFormComponent, formDefaults } from './form';
+import { isGridComponent, gridDefaults } from './grid';
 import {
   isTextFieldComponent,
   isNumberFieldComponent,
@@ -101,3 +102,14 @@ export const isComponent = (value: unknown): value is Component =>
   isStyleMapFieldComponent(value) ||
   isObjectListFieldComponent(value) ||
   isFieldGroupComponent(value);
+
+export const componentDefaults: Record<string, Record<string, unknown>> = {
+  element: elementDefaults as Record<string, unknown>,
+  heading: headingDefaults as Record<string, unknown>,
+  button: buttonDefaults as Record<string, unknown>,
+  form: formDefaults as Record<string, unknown>,
+  select: selectDefaults as Record<string, unknown>,
+  grid: gridDefaults as Record<string, unknown>,
+};
+
+export const COMPONENT_KINDS = Object.keys(componentDefaults);

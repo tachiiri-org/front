@@ -6,6 +6,8 @@ export type FormComponent = {
   padding?: string;
 };
 
+export const formDefaults: FormComponent = { kind: 'form', title: '' };
+
 export const isFormComponent = (value: unknown): value is FormComponent => {
   if (typeof value !== 'object' || value === null || Array.isArray(value)) return false;
   const c = value as Record<string, unknown>;

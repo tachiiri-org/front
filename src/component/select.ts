@@ -42,6 +42,11 @@ export const isSelectSource = (value: unknown): value is SelectSource => {
   );
 };
 
+export const selectDefaults: SelectComponent = {
+  kind: 'select',
+  source: { kind: 'endpoint', url: '' },
+};
+
 export const isSelectComponent = (value: unknown): value is SelectComponent => {
   if (typeof value !== 'object' || value === null || Array.isArray(value)) return false;
   const c = value as Record<string, unknown>;

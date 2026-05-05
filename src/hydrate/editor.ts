@@ -1,5 +1,5 @@
 import { isScreen, isFrameRef } from '../screen';
-import { isComponent } from '../component';
+import { isComponent, componentDefaults, COMPONENT_KINDS } from '../component';
 import type { EditorFrame, Screen } from '../screen';
 import type { EditorSection } from '../component/editor';
 import type { FieldComponent } from '../component/fields';
@@ -124,6 +124,81 @@ export const hydrateComponentEditor = async (
   const ctx = buildFieldStyleContext(editorFrame.fieldStyle);
 
   editorEl.replaceChildren();
+
+  if (componentKind && COMPONENT_KINDS.includes(componentKind)) {
+    const kindRow = document.createElement('div');
+    Object.assign(kindRow.style, {
+      display: 'flex',
+      alignItems: 'center',
+      padding: '2px 8px',
+      gap: '4px',
+      minHeight: '24px',
+      borderBottom: '1px solid rgba(0,0,0,0.06)',
+      marginBottom: '2px',
+    });
+    const kindLabel = document.createElement('span');
+    kindLabel.textContent = 'kind';
+    Object.assign(kindLabel.style, {
+      fontSize: '10px',
+      color: 'rgba(0,0,0,0.65)',
+      width: '80px',
+      flexShrink: '0',
+    });
+    const kindSelect = document.createElement('select');
+    Object.assign(kindSelect.style, {
+      flex: '1',
+      fontSize: '12px',
+      border: 'none',
+      borderBottom: '1px solid rgba(0,0,0,0.12)',
+      background: 'transparent',
+      padding: '1px 2px',
+      minWidth: '0',
+      outline: 'none',
+      cursor: 'pointer',
+    });
+    for (const k of COMPONENT_KINDS) {
+      const option = document.createElement('option');
+      option.value = k;
+      option.textContent = k;
+      option.selected = k === componentKind;
+      kindSelect.appendChild(option);
+    }
+    kindSelect.addEventListener('change', () => {
+      const newKind = kindSelect.value;
+      const defaults = componentDefaults[newKind];
+      if (!defaults) return;
+      void (async () => {
+        if (componentSrc !== null) {
+          await fetch(`/api/layouts/${selectedScreenId}/components/${componentSrc}`, {
+            method: 'PUT',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify(defaults),
+          });
+        } else {
+          const freshRes = await fetch(`/api/layouts/${selectedScreenId}`);
+          if (!freshRes.ok) return;
+          const freshScreen = (await freshRes.json()) as unknown;
+          if (!isScreen(freshScreen)) return;
+          await fetch(`/api/layouts/${selectedScreenId}`, {
+            method: 'PUT',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({
+              ...freshScreen,
+              frames: freshScreen.frames.map((f) =>
+                f.id === selectedFrameId
+                  ? { id: f.id, placement: f.placement, ...defaults }
+                  : f,
+              ),
+            }),
+          });
+        }
+        onAfterSave();
+      })();
+    });
+    kindRow.appendChild(kindLabel);
+    kindRow.appendChild(kindSelect);
+    editorEl.appendChild(kindRow);
+  }
 
   for (const section of sections) {
     let contentEl: HTMLElement | null = null;

@@ -5,6 +5,8 @@ export type GridComponent = {
   padding?: string;
 };
 
+export const gridDefaults: GridComponent = { kind: 'grid', rows: 1, columns: 1 };
+
 export const isGridComponent = (value: unknown): value is GridComponent => {
   if (typeof value !== 'object' || value === null || Array.isArray(value)) return false;
   const c = value as Record<string, unknown>;

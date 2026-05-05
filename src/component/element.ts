@@ -8,6 +8,8 @@ export type ElementComponent = {
   padding?: string;
 };
 
+export const elementDefaults: ElementComponent = { kind: 'element', tag: 'div', style: {} };
+
 export const isElementComponent = (value: unknown): value is ElementComponent => {
   if (typeof value !== 'object' || value === null || Array.isArray(value)) return false;
   const c = value as Record<string, unknown>;

@@ -1,6 +1,7 @@
 import { isScreen, isFrameRef } from '../screen';
 import type { Frame, GridCanvasFrame, Screen, ScreenListFrame, EditorFrame } from '../screen';
 import type { Component } from '../component';
+import { componentDefaults } from '../component';
 import { renderComponent } from '../render/component';
 import { domMap, getFrameSelection, setFrameSelection, isEditableTarget } from '../state';
 import { fetchFrameComponent } from '../api';
@@ -641,18 +642,16 @@ export const hydrateGridCanvas = async (
         const freshScreen = (await freshRes.json()) as unknown;
         if (!isScreen(freshScreen)) return;
         setFrameSelection(canvasFrame.id, newId);
+        const newFrameData = { id: newId, placement: { x, y, width, height }, ...componentDefaults.element };
         await fetch(`/api/layouts/${screenId}`, {
           method: 'PUT',
           headers: { 'Content-Type': 'application/json' },
           body: JSON.stringify({
             ...freshScreen,
-            frames: [
-              ...freshScreen.frames,
-              { id: newId, placement: { x, y, width, height }, kind: 'element', tag: 'div', style: {} },
-            ],
+            frames: [...freshScreen.frames, newFrameData],
           }),
         });
-        const newFrame = { id: newId, placement: { x, y, width, height }, kind: 'element', tag: 'div', style: {} } as Frame;
+        const newFrame = newFrameData as Frame;
         screen = {
           ...freshScreen,
           frames: [
