@@ -1,4 +1,8 @@
-import { isStyle } from '../validator';
+const isStyle = (value: unknown): value is Record<string, string> =>
+  typeof value === 'object' &&
+  value !== null &&
+  !Array.isArray(value) &&
+  Object.values(value as Record<string, unknown>).every((x) => typeof x === 'string');
 
 export type SelectOption = {
   value: string;
@@ -44,7 +48,9 @@ export const isSelectSource = (value: unknown): value is SelectSource => {
 
 export const selectDefaults: SelectComponent = {
   kind: 'select',
-  source: { kind: 'endpoint', url: '' },
+  source: { kind: 'endpoint', url: '', itemsPath: '', valueKey: '', labelKey: '', headers: {} },
+  targetComponentId: '',
+  padding: '',
 };
 
 export const isSelectComponent = (value: unknown): value is SelectComponent => {

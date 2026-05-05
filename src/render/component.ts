@@ -1,13 +1,14 @@
 import {
-  isElementComponent,
-  isScreenListComponent,
-  isGridCanvasComponent,
+  isListComponent,
+  isCanvasComponent,
   isEditorComponent,
+  isTextareaComponent,
+  applyDefaults,
   type Component,
 } from '../component';
 import { type Frame, type FrameRef, isFrameRef } from '../screen';
 import type { FrameState } from '../store';
-import { renderScreenList, renderGridCanvas, renderEditor } from './frame';
+import { renderList, renderCanvas, renderEditor } from './frame';
 
 const applyPadding = (el: HTMLElement, c: Record<string, unknown>): void => {
   if (typeof c.padding === 'string') el.style.padding = c.padding;
@@ -22,7 +23,7 @@ const isStringRecord = (v: unknown): v is Record<string, string> =>
 
 const renderResolved = (
   id: string,
-  component: Component | { kind: string; [key: string]: unknown },
+  component: Record<string, unknown>,
 ): HTMLElement => {
   const c = component as Record<string, unknown>;
 
@@ -52,32 +53,6 @@ const renderResolved = (
     return button;
   }
 
-  if (c.kind === 'grid') {
-    const rows = isPositiveInteger(c.rows) ? (c.rows as number) : 1;
-    const columns = isPositiveInteger(c.columns) ? (c.columns as number) : 1;
-    const grid = document.createElement('div');
-    grid.dataset.frameId = id;
-    grid.style.display = 'grid';
-    grid.style.gridTemplateColumns = `repeat(${columns}, minmax(0, 1fr))`;
-    grid.style.gridTemplateRows = `repeat(${rows}, minmax(48px, auto))`;
-    grid.style.boxSizing = 'border-box';
-    grid.style.border = '1px solid rgba(0, 0, 0, 0.12)';
-    grid.style.backgroundColor = 'rgba(255, 255, 255, 0.9)';
-    for (let row = 1; row <= rows; row += 1) {
-      for (let col = 1; col <= columns; col += 1) {
-        const cell = document.createElement('div');
-        cell.dataset.gridCellRow = String(row);
-        cell.dataset.gridCellColumn = String(col);
-        cell.style.minHeight = '48px';
-        cell.style.borderRight = col < columns ? '1px solid rgba(0, 0, 0, 0.08)' : 'none';
-        cell.style.borderBottom = row < rows ? '1px solid rgba(0, 0, 0, 0.08)' : 'none';
-        grid.appendChild(cell);
-      }
-    }
-    applyPadding(grid, c);
-    return grid;
-  }
-
   if (c.kind === 'select') {
     const select = document.createElement('select');
     select.dataset.frameId = id;
@@ -86,59 +61,6 @@ const renderResolved = (
     }
     applyPadding(select, c);
     return select;
-  }
-
-  if (c.kind === 'text-field') {
-    const wrapper = document.createElement('div');
-    wrapper.dataset.frameId = id;
-    if (typeof c.label === 'string' || typeof c.key === 'string') {
-      const lbl = document.createElement('label');
-      lbl.textContent = typeof c.label === 'string' ? c.label : String(c.key);
-      wrapper.appendChild(lbl);
-    }
-    const input = document.createElement('input');
-    input.type = 'text';
-    wrapper.appendChild(input);
-    return wrapper;
-  }
-
-  if (c.kind === 'number-field') {
-    const wrapper = document.createElement('div');
-    wrapper.dataset.frameId = id;
-    if (typeof c.label === 'string' || typeof c.key === 'string') {
-      const lbl = document.createElement('label');
-      lbl.textContent = typeof c.label === 'string' ? c.label : String(c.key);
-      wrapper.appendChild(lbl);
-    }
-    const input = document.createElement('input');
-    input.type = 'number';
-    wrapper.appendChild(input);
-    return wrapper;
-  }
-
-  if (c.kind === 'textarea') {
-    const wrapper = document.createElement('div');
-    wrapper.dataset.frameId = id;
-    if (typeof c.label === 'string' || typeof c.key === 'string') {
-      const lbl = document.createElement('label');
-      lbl.textContent = typeof c.label === 'string' ? c.label : String(c.key);
-      wrapper.appendChild(lbl);
-    }
-    const ta = document.createElement('textarea');
-    wrapper.appendChild(ta);
-    return wrapper;
-  }
-
-  if (c.kind === 'style-map-field' || c.kind === 'object-list-field' || c.kind === 'field-group') {
-    const div = document.createElement('div');
-    div.dataset.frameId = id;
-    const lbl = document.createElement('span');
-    lbl.textContent = typeof c.label === 'string' ? c.label : String(c.kind);
-    lbl.style.fontSize = '11px';
-    lbl.style.color = 'rgba(0,0,0,0.4)';
-    lbl.style.fontFamily = 'monospace';
-    div.appendChild(lbl);
-    return div;
   }
 
   if (c.kind === 'form') {
@@ -163,6 +85,73 @@ const renderResolved = (
   return pre;
 };
 
+const renderTextareaComponent = (id: string, c: Record<string, unknown>): HTMLElement => {
+  const wrapper = document.createElement('div');
+  wrapper.dataset.frameId = id;
+  wrapper.style.display = 'flex';
+  wrapper.style.flexDirection = 'column';
+  wrapper.style.gap = '4px';
+  if (isStringRecord(c.style)) Object.assign(wrapper.style, c.style);
+
+  const ta = document.createElement('textarea');
+  ta.style.flex = '1';
+  ta.style.fontFamily = 'monospace';
+  ta.style.fontSize = '13px';
+  ta.style.resize = 'vertical';
+  ta.style.boxSizing = 'border-box';
+  ta.style.width = '100%';
+  if (isPositiveInteger(c.rows)) ta.rows = c.rows as number;
+  if (typeof c.value === 'string') ta.value = c.value;
+  wrapper.appendChild(ta);
+
+  if (c.language !== 'json') return wrapper;
+
+  const status = document.createElement('div');
+  status.style.fontSize = '11px';
+  status.style.fontFamily = 'monospace';
+  status.style.minHeight = '16px';
+  status.style.color = '#c0392b';
+
+  const toolbar = document.createElement('div');
+  toolbar.style.display = 'flex';
+  toolbar.style.alignItems = 'center';
+  toolbar.style.gap = '6px';
+
+  const formatBtn = document.createElement('button');
+  formatBtn.type = 'button';
+  formatBtn.textContent = 'Format';
+  formatBtn.style.fontSize = '11px';
+  formatBtn.style.padding = '1px 8px';
+  formatBtn.style.cursor = 'pointer';
+
+  toolbar.appendChild(formatBtn);
+  toolbar.appendChild(status);
+  wrapper.appendChild(toolbar);
+
+  const validate = (): void => {
+    if (ta.value.trim() === '') { status.textContent = ''; return; }
+    try {
+      JSON.parse(ta.value);
+      status.textContent = '';
+    } catch (e) {
+      status.textContent = e instanceof SyntaxError ? e.message : 'Invalid JSON';
+    }
+  };
+
+  ta.addEventListener('input', validate);
+
+  formatBtn.addEventListener('click', () => {
+    try {
+      ta.value = JSON.stringify(JSON.parse(ta.value), null, 2);
+      status.textContent = '';
+    } catch (e) {
+      status.textContent = e instanceof SyntaxError ? e.message : 'Invalid JSON';
+    }
+  });
+
+  return wrapper;
+};
+
 export const renderComponent = (
   frame: Frame,
   _state: FrameState,
@@ -171,20 +160,23 @@ export const renderComponent = (
   const { id } = frame;
 
   if (isFrameRef(frame)) {
-    const fallback: { kind: string; [key: string]: unknown } = { kind: (frame as FrameRef).kind };
-    return resolvedComponent ? renderResolved(id, resolvedComponent) : renderResolved(id, fallback);
+    if (resolvedComponent) {
+      const kind = (resolvedComponent as Record<string, unknown>).kind as string;
+      const resolved = applyDefaults(kind, resolvedComponent as Record<string, unknown>);
+      if (kind === 'textarea') return renderTextareaComponent(id, resolved);
+      return renderResolved(id, resolved);
+    }
+    return renderResolved(id, { kind: (frame as FrameRef).kind });
   }
 
-  if (isScreenListComponent(frame)) return renderScreenList(id, frame);
-  if (isGridCanvasComponent(frame)) return renderGridCanvas(id, frame);
+  if (isListComponent(frame)) return renderList(id, frame);
+  if (isCanvasComponent(frame)) return renderCanvas(id, frame);
   if (isEditorComponent(frame)) return renderEditor(id, frame);
-  if (isElementComponent(frame)) {
-    const el = document.createElement(frame.tag as keyof HTMLElementTagNameMap);
-    Object.assign(el.style, frame.style);
-    el.dataset.frameId = id;
-    if (frame.text !== undefined) el.textContent = frame.text;
-    return el;
+  if (isTextareaComponent(frame)) {
+    const kind = (frame as Record<string, unknown>).kind as string;
+    return renderTextareaComponent(id, applyDefaults(kind, frame as Record<string, unknown>));
   }
 
-  return renderResolved(id, frame as Component);
+  const kind = (frame as Record<string, unknown>).kind as string;
+  return renderResolved(id, applyDefaults(kind, frame as Record<string, unknown>));
 };

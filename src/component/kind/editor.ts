@@ -1,4 +1,8 @@
-import { isStyle } from '../validator';
+const isStyle = (value: unknown): value is Record<string, string> =>
+  typeof value === 'object' &&
+  value !== null &&
+  !Array.isArray(value) &&
+  Object.values(value as Record<string, unknown>).every((x) => typeof x === 'string');
 
 export type FieldStyleConfig = {
   wrapper?: Record<string, string>;
@@ -42,7 +46,15 @@ const isEditorSection = (v: unknown): v is EditorSection => {
   );
 };
 
-export const editorDefaults: EditorComponent = { kind: 'component-editor' };
+export const editorDefaults: EditorComponent = {
+  kind: 'component-editor',
+  sections: [
+    { label: 'Placement', source: 'placement' },
+    { label: 'Properties', source: 'properties' },
+  ],
+  style: {},
+  fieldStyle: { wrapper: {}, label: {}, input: {} },
+};
 
 export const isEditorComponent = (value: unknown): value is EditorComponent => {
   if (typeof value !== 'object' || value === null || Array.isArray(value)) return false;

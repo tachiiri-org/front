@@ -4,7 +4,7 @@ export type ButtonComponent = {
   padding?: string;
 };
 
-export const buttonDefaults: ButtonComponent = { kind: 'button', text: '' };
+export const buttonDefaults: ButtonComponent = { kind: 'button', text: '', padding: '' };
 
 export const isButtonComponent = (value: unknown): value is ButtonComponent => {
   if (typeof value !== 'object' || value === null || Array.isArray(value)) return false;

@@ -1,4 +1,4 @@
-import type { FieldComponent } from '../component/kind/fields';
+import type { FormField } from '../component/kind/form/field';
 
 export type FieldStyleContext = {
   wrapper: Record<string, string>;
@@ -96,13 +96,13 @@ const isStringRecord = (v: unknown): v is Record<string, string> =>
   !Array.isArray(v) &&
   Object.values(v as Record<string, unknown>).every((x) => typeof x === 'string');
 
-const blankFromSchema = (fields: FieldComponent[]): Record<string, unknown> => {
+const blankFromSchema = (fields: FormField[]): Record<string, unknown> => {
   const obj: Record<string, unknown> = {};
   for (const field of fields) {
     if (!('key' in field) || !field.key) continue;
     if (field.kind === 'number-field') obj[field.key] = 0;
     else if (field.kind === 'boolean-field') obj[field.key] = false;
-    else if (field.kind === 'text-field' || field.kind === 'textarea') obj[field.key] = '';
+    else if (field.kind === 'text-field' || field.kind === 'textarea-field') obj[field.key] = '';
     else if (field.kind === 'style-map-field') obj[field.key] = {};
     else if (field.kind === 'object-list-field') obj[field.key] = [];
   }
@@ -253,7 +253,7 @@ function renderStyleMap(label: string, path: string, draft: Record<string, unkno
   return wrapper;
 }
 
-export function renderFieldFromSchema(field: FieldComponent, draft: Record<string, unknown>, ctx: FieldStyleContext): HTMLElement {
+export function renderFieldFromSchema(field: FormField, draft: Record<string, unknown>, ctx: FieldStyleContext): HTMLElement {
   const label: string = ('label' in field && field.label) ? field.label : (('key' in field && field.key) ? field.key : '');
 
   switch (field.kind) {
@@ -261,7 +261,7 @@ export function renderFieldFromSchema(field: FieldComponent, draft: Record<strin
       return renderTextField(label, field.key, draft, ctx);
     case 'number-field':
       return renderNumberField(label, field.key, draft, ctx);
-    case 'textarea':
+    case 'textarea-field':
       return renderTextarea(label, field.key, draft, ctx);
     case 'boolean-field':
       return renderBooleanField(label, field.key, draft, ctx);

@@ -6,7 +6,13 @@ export type FormComponent = {
   padding?: string;
 };
 
-export const formDefaults: FormComponent = { kind: 'form', title: '' };
+export const formDefaults: FormComponent = {
+  kind: 'form',
+  title: '',
+  sourceComponentId: '',
+  excludeKeys: [],
+  padding: '',
+};
 
 export const isFormComponent = (value: unknown): value is FormComponent => {
   if (typeof value !== 'object' || value === null || Array.isArray(value)) return false;

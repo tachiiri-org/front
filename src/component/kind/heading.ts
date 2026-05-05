@@ -5,7 +5,7 @@ export type HeadingComponent = {
   padding?: string;
 };
 
-export const headingDefaults: HeadingComponent = { kind: 'heading', level: 1, text: '' };
+export const headingDefaults: HeadingComponent = { kind: 'heading', level: 1, text: '', padding: '' };
 
 export const isHeadingComponent = (value: unknown): value is HeadingComponent => {
   if (typeof value !== 'object' || value === null || Array.isArray(value)) return false;

@@ -1,12 +1,12 @@
-import type { FieldComponent } from '../component/kind/fields';
+import type { FormField } from '../component/kind/form/field';
 import { renderFieldFromSchema, buildFieldStyleContext, type FieldStyleContext } from './field';
 
-function inferField(key: string, value: unknown): FieldComponent {
+function inferField(key: string, value: unknown): FormField {
   if (typeof value === 'boolean') return { kind: 'boolean-field', key };
   if (typeof value === 'number') return { kind: 'number-field', key };
   if (typeof value === 'string') {
     return value.includes('\n') || value.length >= 100
-      ? { kind: 'textarea', key }
+      ? { kind: 'textarea-field', key }
       : { kind: 'text-field', key };
   }
   if (Array.isArray(value)) {
@@ -20,30 +20,30 @@ function inferField(key: string, value: unknown): FieldComponent {
         fields: inferFieldsFromData(value[0] as Record<string, unknown>),
       };
     }
-    return { kind: 'textarea', key };
+    return { kind: 'textarea-field', key };
   }
   if (typeof value === 'object' && value !== null) {
     return { kind: 'field-group', key, fields: inferFieldsFromData(value as Record<string, unknown>) };
   }
-  return { kind: 'textarea', key };
+  return { kind: 'textarea-field', key };
 }
 
-export function inferFieldsFromData(data: Record<string, unknown>): FieldComponent[] {
+export function inferFieldsFromData(data: Record<string, unknown>): FormField[] {
   return Object.entries(data).map(([key, value]) => inferField(key, value));
 }
 
 export function mergeWithSchema(
-  inferred: FieldComponent[],
-  schema: FieldComponent[],
-): FieldComponent[] {
-  const schemaByKey = new Map<string, FieldComponent>();
+  inferred: FormField[],
+  schema: FormField[],
+): FormField[] {
+  const schemaByKey = new Map<string, FormField>();
   for (const f of schema) {
     const key = 'key' in f && f.key ? f.key : undefined;
     if (key) schemaByKey.set(key, f);
   }
 
   const usedKeys = new Set<string>();
-  const result: FieldComponent[] = [];
+  const result: FormField[] = [];
 
   for (const f of inferred) {
     const key = 'key' in f && f.key ? f.key : undefined;
@@ -68,7 +68,7 @@ const mk = <K extends keyof HTMLElementTagNameMap>(tag: K): HTMLElementTagNameMa
 
 export function renderFormFromSchema(
   data: Record<string, unknown>,
-  fields: FieldComponent[],
+  fields: FormField[],
   onSave: (draft: unknown) => Promise<void>,
   ctx?: FieldStyleContext,
 ): HTMLElement {

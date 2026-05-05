@@ -1,9 +1,9 @@
 import { type Component, isComponent, isStyle } from './component';
-import type { ScreenListComponent } from './component/kind/screen-list';
-import type { GridCanvasComponent } from './component/kind/grid-canvas';
+import type { ListComponent } from './component/kind/list';
+import type { CanvasComponent } from './component/kind/canvas';
 import type { EditorComponent } from './component/kind/editor';
-import { isScreenListComponent } from './component/kind/screen-list';
-import { isGridCanvasComponent } from './component/kind/grid-canvas';
+import { isListComponent } from './component/kind/list';
+import { isCanvasComponent } from './component/kind/canvas';
 import { isEditorComponent } from './component/kind/editor';
 import { type Head, isHead, headDefaults } from './head';
 
@@ -31,8 +31,8 @@ export type FrameRef = {
 
 export type Frame = FrameRef | ({ id: string; placement: Placement } & Component);
 
-export type ScreenListFrame = { id: string; placement: Placement } & ScreenListComponent;
-export type GridCanvasFrame = { id: string; placement: Placement } & GridCanvasComponent;
+export type ListFrame = { id: string; placement: Placement } & ListComponent;
+export type CanvasFrame = { id: string; placement: Placement } & CanvasComponent;
 export type EditorFrame = { id: string; placement: Placement } & EditorComponent;
 
 export type Screen = {
@@ -76,7 +76,8 @@ export const isFrameRef = (value: unknown): value is FrameRef => {
     typeof c.id === 'string' &&
     typeof c.kind === 'string' &&
     typeof c.src === 'string' &&
-    isPlacement(c.placement)
+    isPlacement(c.placement) &&
+    !isComponent(value)
   );
 };
 
@@ -100,8 +101,8 @@ export const isScreen = (value: unknown): value is Screen => {
   );
 };
 
-export const isScreenListFrame = (f: Frame): f is ScreenListFrame => isScreenListComponent(f);
-export const isGridCanvasFrame = (f: Frame): f is GridCanvasFrame => isGridCanvasComponent(f);
+export const isListFrame = (f: Frame): f is ListFrame => isListComponent(f);
+export const isCanvasFrame = (f: Frame): f is CanvasFrame => isCanvasComponent(f);
 export const isEditorFrame = (f: Frame): f is EditorFrame => isEditorComponent(f);
 
 export const screenDefaults: Screen = {

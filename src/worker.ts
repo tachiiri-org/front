@@ -1,5 +1,4 @@
-import { isComponent, type Component, isFieldComponent } from './component';
-import { isGridComponent } from './component/kind/grid';
+import { isComponent, type Component, isFormField } from './component';
 import { isSelectComponent } from './component/kind/select';
 import {
   isScreen,
@@ -91,6 +90,26 @@ const findNextPlacement = (occupied: Set<string>, columns: number): Placement =>
   }
 };
 
+const KIND_MIGRATIONS: Record<string, string> = {
+  'screen-list': 'list',
+  'grid-canvas': 'canvas',
+};
+
+const migrateFrameKind = (frame: FrameCandidate): FrameCandidate => {
+  const f = frame as Record<string, unknown>;
+  let kind = frame.kind;
+  if (kind === 'grid' && typeof f.src !== 'string' && typeof f.targetComponentId === 'string') {
+    kind = 'canvas';
+  } else {
+    kind = KIND_MIGRATIONS[kind] ?? kind;
+  }
+  const result: Record<string, unknown> = { ...f, kind };
+  if (result.kind === 'list' && typeof result.src !== 'string') {
+    result.src = '/api/layouts/json-files';
+  }
+  return result as FrameCandidate;
+};
+
 const normalizeScreen = (value: unknown): Screen | null => {
   if (typeof value !== 'object' || value === null || Array.isArray(value)) {
     return null;
@@ -101,7 +120,7 @@ const normalizeScreen = (value: unknown): Screen | null => {
   if (!isStringRecord(candidate.shell)) return null;
   if (!Array.isArray(candidate.frames) || !candidate.frames.every(isFrameCandidate)) return null;
 
-  const frames = candidate.frames as FrameCandidate[];
+  const frames = (candidate.frames as FrameCandidate[]).map(migrateFrameKind);
   const placedFrames = frames.filter((f) => isFrame(f)) as Frame[];
   const existingMaxColumn = placedFrames.reduce(
     (max, f) => Math.max(max, f.placement.x + f.placement.width - 1),
@@ -115,7 +134,7 @@ const normalizeScreen = (value: unknown): Screen | null => {
   const normalizedFrames = frames.map((frame) => {
     const p = (frame as Record<string, unknown>).placement;
     if (isPlacement(p) && isPositiveInteger((p as Placement).width) && isPositiveInteger((p as Placement).height)) {
-      if ((frame as Record<string, unknown>).kind === 'grid-canvas') {
+      if ((frame as Record<string, unknown>).kind === 'canvas') {
         return {
           ...frame,
           viewportWidth: isPositiveInteger((frame as Record<string, unknown>).viewportWidth)
@@ -128,7 +147,7 @@ const normalizeScreen = (value: unknown): Screen | null => {
       }
       return frame as Frame;
     }
-    if ((frame as Record<string, unknown>).kind === 'grid-canvas') {
+    if ((frame as Record<string, unknown>).kind === 'canvas') {
       return {
         ...frame,
         placement: findNextPlacement(occupied, columns),
@@ -312,10 +331,7 @@ const handleComponentPut = async (
   try {
     const value = JSON.parse(body) as unknown;
     if (!isComponent(value)) return new Response('Invalid component', { status: 400 });
-    if (
-      (value as Record<string, unknown>).kind === 'select' && !isSelectComponent(value) ||
-      (value as Record<string, unknown>).kind === 'grid' && !isGridComponent(value)
-    ) {
+    if ((value as Record<string, unknown>).kind === 'select' && !isSelectComponent(value)) {
       return new Response('Invalid component', { status: 400 });
     }
   } catch {
@@ -335,7 +351,7 @@ const handleComponentDelete = async (env: Env, screenId: string, componentId: st
 const isComponentSchema = (value: unknown): boolean => {
   if (typeof value !== 'object' || value === null || Array.isArray(value)) return false;
   const c = value as Record<string, unknown>;
-  return Array.isArray(c.fields) && (c.fields as unknown[]).every(isFieldComponent);
+  return Array.isArray(c.fields) && (c.fields as unknown[]).every(isFormField);
 };
 
 const handleSchemaGet = async (env: Env, kind: string): Promise<Response> => {

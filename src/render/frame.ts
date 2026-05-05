@@ -1,17 +1,17 @@
 import {
-  type ScreenListComponent,
-  type GridCanvasComponent,
+  type ListComponent,
+  type CanvasComponent,
   type EditorComponent,
 } from '../component';
 
-export const renderScreenList = (id: string, component: ScreenListComponent): HTMLElement => {
+export const renderList = (id: string, component: ListComponent): HTMLElement => {
   const ul = document.createElement('ul');
   ul.dataset.frameId = id;
   if (component.style) Object.assign(ul.style, component.style);
   return ul;
 };
 
-export const renderGridCanvas = (id: string, component: GridCanvasComponent): HTMLElement => {
+export const renderCanvas = (id: string, component: CanvasComponent): HTMLElement => {
   const div = document.createElement('div');
   div.dataset.frameId = id;
   if (component.style) Object.assign(div.style, component.style);

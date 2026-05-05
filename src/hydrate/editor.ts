@@ -1,17 +1,12 @@
 import { isScreen, isFrameRef } from '../screen';
-import { isComponent, componentDefaults, COMPONENT_KINDS } from '../component';
+import { isComponent, componentDefaults, COMPONENT_KINDS, applyDefaults } from '../component';
 import type { EditorFrame, Screen } from '../screen';
-import type { EditorSection } from '../component/kind/editor';
-import type { FieldComponent } from '../component/kind/fields';
+import type { EditorSection, FieldStyleConfig } from '../component/kind/editor';
+import type { FormField } from '../component/kind/form/field';
 import { renderFormFromSchema, inferFieldsFromData, mergeWithSchema } from './form';
 import { buildFieldStyleContext, type FieldStyleContext } from './field';
 import { domMap } from '../state';
 import { fetchSchema } from '../api';
-
-const DEFAULT_SECTIONS: EditorSection[] = [
-  { label: 'Placement', source: 'placement' },
-  { label: 'Properties', source: 'properties' },
-];
 
 const SECTION_SUMMARY_STYLE: Record<string, string> = {
   fontSize: '11px',
@@ -35,7 +30,7 @@ const SECTION_HEADING_STYLE: Record<string, string> = {
 
 const renderSectionContent = (
   data: Record<string, unknown>,
-  schema: FieldComponent[] | null,
+  schema: FormField[] | null,
   onSave: (draft: unknown) => Promise<void>,
   ctx: FieldStyleContext,
 ): HTMLElement => {
@@ -120,8 +115,9 @@ export const hydrateComponentEditor = async (
     componentKind ? fetchSchema(componentKind) : Promise.resolve(null),
   ]);
 
-  const sections = editorFrame.sections ?? DEFAULT_SECTIONS;
-  const ctx = buildFieldStyleContext(editorFrame.fieldStyle);
+  const editorConfig = applyDefaults('component-editor', editorFrame as unknown as Record<string, unknown>);
+  const sections = editorConfig.sections as EditorSection[];
+  const ctx = buildFieldStyleContext(editorConfig.fieldStyle as FieldStyleConfig);
 
   editorEl.replaceChildren();
 
@@ -273,7 +269,7 @@ export const hydrateComponentEditor = async (
   }
 };
 
-const EDITOR_ONLY_KINDS = new Set(['grid-canvas', 'screen-list', 'component-editor']);
+const EDITOR_ONLY_KINDS = new Set(['canvas', 'list', 'component-editor']);
 
 export const renderEditorPreview = async (
   wrapper: HTMLElement,
@@ -308,8 +304,9 @@ export const renderEditorPreview = async (
     componentKind ? fetchSchema(componentKind) : Promise.resolve(null),
   ]);
 
-  const sections = frame.sections ?? DEFAULT_SECTIONS;
-  const ctx = buildFieldStyleContext(frame.fieldStyle);
+  const frameConfig = applyDefaults('component-editor', frame as unknown as Record<string, unknown>);
+  const sections = frameConfig.sections as EditorSection[];
+  const ctx = buildFieldStyleContext(frameConfig.fieldStyle as FieldStyleConfig);
 
   const container = document.createElement('div');
   if (frame.style) Object.assign(container.style, frame.style);

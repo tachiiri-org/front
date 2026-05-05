@@ -1,15 +1,16 @@
 import { isScreen, type Screen } from './screen';
-import { isScreenListComponent } from './component/kind/screen-list';
-import { isComponent, type Component, isFieldComponent, type FieldComponent } from './component';
+import { isListComponent } from './component/kind/list';
+import { isComponent, type Component } from './component';
+import { isFormField, type FormField } from './component/kind/form/field';
 
-export const fetchSchema = async (kind: string): Promise<FieldComponent[] | null> => {
+export const fetchSchema = async (kind: string): Promise<FormField[] | null> => {
   const response = await fetch(`/api/schemas/${encodeURIComponent(kind)}`);
   if (!response.ok) return null;
   const value = (await response.json()) as unknown;
   if (typeof value !== 'object' || value === null) return null;
   const fields = (value as Record<string, unknown>).fields;
   if (!Array.isArray(fields)) return null;
-  return (fields as unknown[]).every(isFieldComponent) ? (fields as FieldComponent[]) : null;
+  return (fields as unknown[]).every(isFormField) ? (fields as FormField[]) : null;
 };
 
 export const fetchFrameComponent = async (
@@ -39,7 +40,7 @@ export const fetchScreenIds = async (): Promise<string[]> => {
 };
 
 const isEditorScreen = (screen: Screen): boolean =>
-  screen.frames.some((f) => isScreenListComponent(f));
+  screen.frames.some((f) => isListComponent(f));
 
 export const findEditorScreenId = async (): Promise<string | null> => {
   const screenIds = await fetchScreenIds();

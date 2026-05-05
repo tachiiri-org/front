@@ -1,4 +1,8 @@
-import { isStyle } from '../validator';
+const isStyle = (value: unknown): value is Record<string, string> =>
+  typeof value === 'object' &&
+  value !== null &&
+  !Array.isArray(value) &&
+  Object.values(value as Record<string, unknown>).every((x) => typeof x === 'string');
 
 export type ElementComponent = {
   kind: 'element';
@@ -8,7 +12,7 @@ export type ElementComponent = {
   padding?: string;
 };
 
-export const elementDefaults: ElementComponent = { kind: 'element', tag: 'div', style: {} };
+export const elementDefaults: ElementComponent = { kind: 'element', tag: 'div', style: {}, text: '', padding: '' };
 
 export const isElementComponent = (value: unknown): value is ElementComponent => {
   if (typeof value !== 'object' || value === null || Array.isArray(value)) return false;

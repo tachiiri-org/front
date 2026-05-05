@@ -1,21 +1,21 @@
 import { isScreen, isFrameRef } from '../screen';
-import type { Frame, GridCanvasFrame, Screen, ScreenListFrame, EditorFrame } from '../screen';
+import type { Frame, CanvasFrame, Screen, ListFrame, EditorFrame } from '../screen';
 import type { Component } from '../component';
 import { componentDefaults } from '../component';
 import { renderComponent } from '../render/component';
 import { domMap, getFrameSelection, setFrameSelection, isEditableTarget } from '../state';
 import { fetchFrameComponent } from '../api';
-import { renderScreenListPreview } from './screen-list';
+import { renderListPreview } from './list';
 import { renderEditorPreview } from './editor';
 
-const EDITOR_ONLY_KINDS = new Set(['grid-canvas', 'screen-list', 'component-editor']);
+const EDITOR_ONLY_KINDS = new Set(['canvas', 'list', 'component-editor']);
 
 const previewScaleRafs = new Map<string, number>();
 let previewResizeObserver: ResizeObserver | null = null;
 
-const renderGridCanvasPreview = (
+const renderCanvasPreview = (
   wrapper: HTMLElement,
-  frame: GridCanvasFrame,
+  frame: CanvasFrame,
   screen: Screen,
 ): void => {
   const cols = screen.grid.columns;
@@ -62,12 +62,12 @@ const isPositiveInteger = (value: unknown): value is number =>
 
 const computePreviewScale = (
   canvasEl: HTMLElement,
-  canvasFrame: GridCanvasFrame,
+  canvasFrame: CanvasFrame,
   wrapper: HTMLElement,
   content: HTMLElement,
   effectiveKind: string,
 ): number => {
-  if (effectiveKind === 'grid' || effectiveKind === 'grid-canvas') return 1;
+  if (effectiveKind === 'canvas') return 1;
 
   const viewportWidth = canvasFrame.viewportWidth;
   const viewportHeight = canvasFrame.viewportHeight;
@@ -94,7 +94,7 @@ const updatePreviewScale = (
   frameId: string,
   wrappers: Map<string, HTMLElement>,
   canvasEl: HTMLElement,
-  canvasFrame: GridCanvasFrame,
+  canvasFrame: CanvasFrame,
   effectiveKind: string,
 ): void => {
   const wrapper = wrappers.get(frameId);
@@ -116,7 +116,7 @@ const schedulePreviewScale = (
   frameId: string,
   wrappers: Map<string, HTMLElement>,
   canvasEl: HTMLElement,
-  canvasFrame: GridCanvasFrame,
+  canvasFrame: CanvasFrame,
   effectiveKind: string,
 ): void => {
   const existing = previewScaleRafs.get(frameId);
@@ -134,9 +134,9 @@ const directionMap: Record<string, [number, number]> = {
   ArrowLeft: [-1, 0], ArrowRight: [1, 0], ArrowUp: [0, -1], ArrowDown: [0, 1],
 };
 
-export const hydrateGridCanvas = async (
+export const hydrateCanvas = async (
   selectedScreenId: string | null,
-  canvasFrame: GridCanvasFrame,
+  canvasFrame: CanvasFrame,
   onFrameSelect: (screenId: string, frameId: string | null) => Promise<void>,
   onCanvasSelect: (screenId: string) => Promise<void>,
   onReload: () => void,
@@ -244,14 +244,14 @@ export const hydrateGridCanvas = async (
     const resolved = resolvedComponents.get(frame.id) ?? null;
     const effectiveKind = getEffectiveKind(frame);
 
-    if (effectiveKind === 'screen-list') {
-      await renderScreenListPreview(wrapper, frame as ScreenListFrame);
+    if (effectiveKind === 'list') {
+      await renderListPreview(wrapper, frame as ListFrame);
       schedulePreviewScale(frame.id, previewWrappers, canvasEl, canvasFrame, effectiveKind);
       return;
     }
 
-    if (effectiveKind === 'grid-canvas') {
-      renderGridCanvasPreview(wrapper, frame as GridCanvasFrame, screen);
+    if (effectiveKind === 'canvas') {
+      renderCanvasPreview(wrapper, frame as CanvasFrame, screen);
       schedulePreviewScale(frame.id, previewWrappers, canvasEl, canvasFrame, effectiveKind);
       return;
     }
@@ -274,7 +274,7 @@ export const hydrateGridCanvas = async (
       screen.frames
         .filter((frame) => {
           const kind = getEffectiveKind(frame);
-          return kind === 'screen-list' || kind === 'grid-canvas' || kind === 'component-editor';
+          return kind === 'list' || kind === 'canvas' || kind === 'component-editor';
         })
         .map((frame) => refreshPreview(frame)),
     );
@@ -310,7 +310,7 @@ export const hydrateGridCanvas = async (
     const previewWrapper = renderFramePreview(frame, resolved, effectiveKind);
     previewWrappers.set(frame.id, previewWrapper);
     cell.appendChild(previewWrapper);
-    if (effectiveKind === 'screen-list' || effectiveKind === 'grid-canvas' || effectiveKind === 'component-editor') {
+    if (effectiveKind === 'list' || effectiveKind === 'canvas' || effectiveKind === 'component-editor') {
       void refreshPreview(frame);
     }
     schedulePreviewScale(frame.id, previewWrappers, canvasEl, canvasFrame, effectiveKind);
