@@ -1,11 +1,11 @@
-import { isScreen, isFrameRef } from '../screen';
+import { isScreen, isFrameRef, isCanvasFrame } from '../screen';
 import { isComponent, componentDefaults, COMPONENT_KINDS, applyDefaults } from '../component';
 import type { EditorFrame, Screen } from '../screen';
 import type { EditorSection } from '../component/kind/component-editor';
 import type { FormField } from '../component/kind/form/field';
 import { renderFormFromSchema, inferFieldsFromData, mergeWithSchema } from './form';
 import { buildFieldStyleContext, type FieldStyleContext } from './field';
-import { domMap } from '../state';
+import { domMap, getFrameSelection } from '../state';
 import { getSchema } from '../api';
 
 const SECTION_SUMMARY_STYLE: Record<string, string> = {
@@ -66,6 +66,31 @@ const appendSection = (
     sectionEl.appendChild(contentEl);
     parent.appendChild(sectionEl);
   }
+};
+
+const createLabeledRow = (label: string): HTMLDivElement => {
+  const row = document.createElement('div');
+  Object.assign(row.style, {
+    display: 'flex',
+    alignItems: 'center',
+    padding: '6px 8px',
+    gap: '4px',
+    minHeight: '30px',
+    borderBottom: '1px solid rgba(0,0,0,0.06)',
+    marginBottom: '4px',
+  });
+
+  const rowLabel = document.createElement('span');
+  rowLabel.textContent = label;
+  Object.assign(rowLabel.style, {
+    fontSize: '10px',
+    color: 'rgba(0,0,0,0.65)',
+    width: '80px',
+    flexShrink: '0',
+  });
+  row.appendChild(rowLabel);
+
+  return row;
 };
 
 const PLACEMENT_FIELDS: { key: string; label: string }[] = [
@@ -180,25 +205,37 @@ export const hydrateComponentEditor = async (
 
   editorEl.replaceChildren();
 
+  const saveSelectedFrameUpdate = async (patch: Record<string, unknown>): Promise<void> => {
+    if (componentSrc !== null) {
+      await fetch(`/api/layouts/${selectedScreenId}/components/${componentSrc}`, {
+        method: 'PUT',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ ...(componentData ?? {}), ...patch }),
+      });
+      onAfterSave();
+      return;
+    }
+
+    const freshRes = await fetch(`/api/layouts/${selectedScreenId}`);
+    if (!freshRes.ok) return;
+    const freshScreen = (await freshRes.json()) as unknown;
+    if (!isScreen(freshScreen)) return;
+
+    await fetch(`/api/layouts/${selectedScreenId}`, {
+      method: 'PUT',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        ...freshScreen,
+        frames: freshScreen.frames.map((f) =>
+          f.id === selectedFrameId ? { ...(f as Record<string, unknown>), ...patch } : f,
+        ),
+      }),
+    });
+    onAfterSave();
+  };
+
   if (componentKind && COMPONENT_KINDS.includes(componentKind)) {
-    const kindRow = document.createElement('div');
-    Object.assign(kindRow.style, {
-      display: 'flex',
-      alignItems: 'center',
-      padding: '2px 8px',
-      gap: '4px',
-      minHeight: '24px',
-      borderBottom: '1px solid rgba(0,0,0,0.06)',
-      marginBottom: '2px',
-    });
-    const kindLabel = document.createElement('span');
-    kindLabel.textContent = 'kind';
-    Object.assign(kindLabel.style, {
-      fontSize: '10px',
-      color: 'rgba(0,0,0,0.65)',
-      width: '80px',
-      flexShrink: '0',
-    });
+    const kindRow = createLabeledRow('kind');
     const kindSelect = document.createElement('select');
     Object.assign(kindSelect.style, {
       flex: '1',
@@ -206,7 +243,7 @@ export const hydrateComponentEditor = async (
       border: 'none',
       borderBottom: '1px solid rgba(0,0,0,0.12)',
       background: 'transparent',
-      padding: '1px 2px',
+      padding: '3px 2px',
       minWidth: '0',
       outline: 'none',
       cursor: 'pointer',
@@ -250,9 +287,57 @@ export const hydrateComponentEditor = async (
         onAfterSave();
       })();
     });
-    kindRow.appendChild(kindLabel);
     kindRow.appendChild(kindSelect);
     editorEl.appendChild(kindRow);
+  }
+
+  if (componentKind === 'component-editor' && componentData) {
+    const sourceCanvasRow = createLabeledRow('sourceCanvasId');
+    const sourceCanvasSelect = document.createElement('select');
+    Object.assign(sourceCanvasSelect.style, {
+      flex: '1',
+      fontSize: '12px',
+      border: 'none',
+      borderBottom: '1px solid rgba(0,0,0,0.12)',
+      background: 'transparent',
+      padding: '3px 2px',
+      minWidth: '0',
+      outline: 'none',
+      cursor: 'pointer',
+    });
+
+    const currentSourceCanvasId = typeof componentData.sourceCanvasId === 'string'
+      ? componentData.sourceCanvasId
+      : '';
+    const canvasFrames = screenValue.frames.filter(isCanvasFrame);
+    const knownCanvasIds = new Set(canvasFrames.map((canvasFrame) => canvasFrame.id));
+
+    const noneOption = document.createElement('option');
+    noneOption.value = '';
+    noneOption.textContent = '(none)';
+    sourceCanvasSelect.appendChild(noneOption);
+
+    if (currentSourceCanvasId && !knownCanvasIds.has(currentSourceCanvasId)) {
+      const option = document.createElement('option');
+      option.value = currentSourceCanvasId;
+      option.textContent = `${currentSourceCanvasId} (missing)`;
+      sourceCanvasSelect.appendChild(option);
+    }
+
+    for (const canvasFrame of canvasFrames) {
+      const option = document.createElement('option');
+      option.value = canvasFrame.id;
+      option.textContent = canvasFrame.id;
+      sourceCanvasSelect.appendChild(option);
+    }
+
+    sourceCanvasSelect.value = currentSourceCanvasId;
+    sourceCanvasSelect.addEventListener('change', () => {
+      void saveSelectedFrameUpdate({ sourceCanvasId: sourceCanvasSelect.value });
+    });
+
+    sourceCanvasRow.appendChild(sourceCanvasSelect);
+    editorEl.appendChild(sourceCanvasRow);
   }
 
   for (const section of sections) {
@@ -287,9 +372,17 @@ export const renderEditorPreview = async (
   screen: Screen,
   screenId: string,
 ): Promise<void> => {
-  const targetFrame = screen.frames.find(
-    (f) => f.id !== frame.id && !EDITOR_ONLY_KINDS.has(String((f as Record<string, unknown>).kind ?? '')),
-  ) ?? frame;
+  const sourceCanvasId = typeof frame.sourceCanvasId === 'string' ? frame.sourceCanvasId : '';
+  const targetFrameFromCanvas = sourceCanvasId
+    ? screen.frames.find((f) => f.id === getFrameSelection(sourceCanvasId))
+    : undefined;
+  const targetFrame = targetFrameFromCanvas && !EDITOR_ONLY_KINDS.has(
+    String((targetFrameFromCanvas as Record<string, unknown>).kind ?? ''),
+  )
+    ? targetFrameFromCanvas
+    : screen.frames.find(
+        (f) => f.id !== frame.id && !EDITOR_ONLY_KINDS.has(String((f as Record<string, unknown>).kind ?? '')),
+      ) ?? frame;
 
   const frameConfig = applyDefaults('component-editor', frame as unknown as Record<string, unknown>);
   const sections = frameConfig.sections as EditorSection[];
