@@ -49,7 +49,7 @@ export const hydrateEditor = async (
       (f) => f.id === listFrame.targetComponentId,
     );
     const editorFrame = canvasFrame
-      ? editorFrames.find((f) => f.id === canvasFrame.targetComponentId)
+      ? editorFrames.find((f) => f.sourceCanvasId === canvasFrame.id)
       : undefined;
 
     const onFrameSelect = async (screenId: string, frameId: string | null): Promise<void> => {

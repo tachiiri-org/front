@@ -8,7 +8,7 @@
 
 ## Constrains
 
-- Do not use remote R2 in local dev. Use Local R2
+- Local dev goes through `authorize-local` and the same R2 API path as deployed environments
 - Define initial value of components in script
 
 ## Quality
@@ -20,4 +20,4 @@
 
 - Use api to create, edit, delete json
 - Basically local dev server runs in other terminal
-- local r2 stores data in `.wrangler/state`
+- local layouts data is still available through the configured R2 bucket

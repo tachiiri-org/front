@@ -1,3 +1,5 @@
+import type { FormField } from './form/field';
+
 export type ButtonComponent = {
   kind: 'button';
   text?: string;
@@ -5,6 +7,11 @@ export type ButtonComponent = {
 };
 
 export const buttonDefaults: ButtonComponent = { kind: 'button', text: '', padding: '' };
+
+export const buttonSchema: FormField[] = [
+  { kind: 'text-field', key: 'text', label: 'text' },
+  { kind: 'text-field', key: 'padding', label: 'padding' },
+];
 
 export const isButtonComponent = (value: unknown): value is ButtonComponent => {
   if (typeof value !== 'object' || value === null || Array.isArray(value)) return false;

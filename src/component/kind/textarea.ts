@@ -1,3 +1,5 @@
+import type { FormField } from './form/field';
+
 const isStyle = (value: unknown): value is Record<string, string> =>
   typeof value === 'object' &&
   value !== null &&
@@ -19,6 +21,12 @@ export const textareaDefaults: TextareaComponent = {
   rows: 4,
   style: {},
 };
+
+export const textareaSchema: FormField[] = [
+  { kind: 'text-field', key: 'language', label: 'language' },
+  { kind: 'number-field', key: 'rows', label: 'rows' },
+  { kind: 'style-map-field', key: 'style', label: 'style' },
+];
 
 export const isTextareaComponent = (value: unknown): value is TextareaComponent => {
   if (typeof value !== 'object' || value === null || Array.isArray(value)) return false;

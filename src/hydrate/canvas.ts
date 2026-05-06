@@ -67,7 +67,7 @@ const computePreviewScale = (
   content: HTMLElement,
   effectiveKind: string,
 ): number => {
-  if (effectiveKind === 'canvas') return 1;
+  if (effectiveKind === 'canvas' || effectiveKind === 'component-editor') return 1;
 
   const viewportWidth = canvasFrame.viewportWidth;
   const viewportHeight = canvasFrame.viewportHeight;

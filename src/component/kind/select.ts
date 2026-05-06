@@ -1,3 +1,5 @@
+import type { FormField } from './form/field';
+
 const isStyle = (value: unknown): value is Record<string, string> =>
   typeof value === 'object' &&
   value !== null &&
@@ -52,6 +54,23 @@ export const selectDefaults: SelectComponent = {
   targetComponentId: '',
   padding: '',
 };
+
+export const selectSchema: FormField[] = [
+  {
+    kind: 'field-group',
+    key: 'source',
+    label: 'source',
+    fields: [
+      { kind: 'text-field', key: 'url', label: 'url' },
+      { kind: 'text-field', key: 'itemsPath', label: 'itemsPath' },
+      { kind: 'text-field', key: 'valueKey', label: 'valueKey' },
+      { kind: 'text-field', key: 'labelKey', label: 'labelKey' },
+      { kind: 'style-map-field', key: 'headers', label: 'headers' },
+    ],
+  },
+  { kind: 'text-field', key: 'targetComponentId', label: 'targetComponentId' },
+  { kind: 'text-field', key: 'padding', label: 'padding' },
+];
 
 export const isSelectComponent = (value: unknown): value is SelectComponent => {
   if (typeof value !== 'object' || value === null || Array.isArray(value)) return false;

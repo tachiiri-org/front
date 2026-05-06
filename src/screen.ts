@@ -1,10 +1,11 @@
 import { type Component, isComponent, isStyle } from './component';
+import type { FormField } from './component/kind/form/field';
 import type { ListComponent } from './component/kind/list';
 import type { CanvasComponent } from './component/kind/canvas';
-import type { EditorComponent } from './component/kind/editor';
+import type { EditorComponent } from './component/kind/component-editor';
 import { isListComponent } from './component/kind/list';
 import { isCanvasComponent } from './component/kind/canvas';
-import { isEditorComponent } from './component/kind/editor';
+import { isEditorComponent } from './component/kind/component-editor';
 import { type Head, isHead, headDefaults } from './head';
 
 export type { MetaTag, Head } from './head';
@@ -111,3 +112,15 @@ export const screenDefaults: Screen = {
   grid: { kind: 'grid', columns: 120, rows: 120 },
   frames: [],
 };
+
+export const placementSchema: FormField[] = [
+  { kind: 'number-field', key: 'x', label: 'x' },
+  { kind: 'number-field', key: 'y', label: 'y' },
+  { kind: 'number-field', key: 'width', label: 'width' },
+  { kind: 'number-field', key: 'height', label: 'height' },
+];
+
+export const gridSchema: FormField[] = [
+  { kind: 'number-field', key: 'rows', label: 'rows' },
+  { kind: 'number-field', key: 'columns', label: 'columns' },
+];

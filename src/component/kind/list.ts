@@ -1,3 +1,5 @@
+import type { FormField } from './form/field';
+
 const isStyle = (value: unknown): value is Record<string, string> =>
   typeof value === 'object' &&
   value !== null &&
@@ -19,6 +21,13 @@ export const listDefaults: ListComponent = {
   style: {},
   itemStyle: {},
 };
+
+export const listSchema: FormField[] = [
+  { kind: 'text-field', key: 'src', label: 'src' },
+  { kind: 'text-field', key: 'targetComponentId', label: 'targetComponentId' },
+  { kind: 'style-map-field', key: 'style', label: 'style' },
+  { kind: 'style-map-field', key: 'itemStyle', label: 'itemStyle' },
+];
 
 export const isListComponent = (value: unknown): value is ListComponent => {
   if (typeof value !== 'object' || value === null || Array.isArray(value)) return false;

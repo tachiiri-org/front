@@ -1,17 +1,14 @@
-import { isScreen, type Screen } from './screen';
+import { isScreen, placementSchema, gridSchema, type Screen } from './screen';
 import { isListComponent } from './component/kind/list';
-import { isComponent, type Component } from './component';
-import { isFormField, type FormField } from './component/kind/form/field';
+import { isComponent, componentSchemas, type Component, type FormField } from './component';
 
-export const fetchSchema = async (kind: string): Promise<FormField[] | null> => {
-  const response = await fetch(`/api/schemas/${encodeURIComponent(kind)}`);
-  if (!response.ok) return null;
-  const value = (await response.json()) as unknown;
-  if (typeof value !== 'object' || value === null) return null;
-  const fields = (value as Record<string, unknown>).fields;
-  if (!Array.isArray(fields)) return null;
-  return (fields as unknown[]).every(isFormField) ? (fields as FormField[]) : null;
+const allSchemas: Record<string, FormField[]> = {
+  placement: placementSchema,
+  grid: gridSchema,
+  ...componentSchemas,
 };
+
+export const getSchema = (kind: string): FormField[] | null => allSchemas[kind] ?? null;
 
 export const fetchFrameComponent = async (
   screenId: string,

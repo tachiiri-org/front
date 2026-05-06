@@ -1,4 +1,4 @@
-import { isComponent, type Component, isFormField } from './component';
+import { isComponent, type Component } from './component';
 import { isSelectComponent } from './component/kind/select';
 import {
   isScreen,
@@ -10,24 +10,17 @@ import {
   type Placement,
 } from './screen';
 import { isHead } from './head';
-import placementSchema from './schemas/placement.json';
-import gridSchema from './schemas/grid.json';
+import { createLayoutsBackend, type LayoutsEnv } from './layouts';
 
 type Env = {
   readonly ASSETS: {
     fetch(request: Request): Promise<Response>;
   };
-  readonly LAYOUTS: R2Bucket;
-};
+} & LayoutsEnv;
 
 type ListItem = {
   value: string;
   label: string;
-};
-
-const BUILTIN_SCHEMAS: Record<string, unknown> = {
-  placement: placementSchema,
-  grid: gridSchema,
 };
 
 const isStringRecord = (value: unknown): value is Record<string, string> => {
@@ -110,6 +103,32 @@ const migrateFrameKind = (frame: FrameCandidate): FrameCandidate => {
   return result as FrameCandidate;
 };
 
+const migrateEditorSource = (frames: FrameCandidate[]): FrameCandidate[] => {
+  const canvasToEditorId = new Map<string, string>();
+  for (const frame of frames) {
+    if (frame.kind === 'canvas') {
+      const targetId = (frame as Record<string, unknown>).targetComponentId;
+      if (typeof targetId === 'string' && targetId) {
+        canvasToEditorId.set(targetId, frame.id);
+      }
+    }
+  }
+  return frames.map((frame) => {
+    const f = frame as Record<string, unknown>;
+    if (frame.kind === 'canvas' && typeof f.targetComponentId === 'string') {
+      const { targetComponentId: _, ...rest } = f;
+      return rest as FrameCandidate;
+    }
+    if (frame.kind === 'component-editor' && typeof f.sourceCanvasId !== 'string') {
+      const canvasId = canvasToEditorId.get(frame.id);
+      if (canvasId !== undefined) {
+        return { ...frame, sourceCanvasId: canvasId };
+      }
+    }
+    return frame;
+  });
+};
+
 const normalizeScreen = (value: unknown): Screen | null => {
   if (typeof value !== 'object' || value === null || Array.isArray(value)) {
     return null;
@@ -120,7 +139,7 @@ const normalizeScreen = (value: unknown): Screen | null => {
   if (!isStringRecord(candidate.shell)) return null;
   if (!Array.isArray(candidate.frames) || !candidate.frames.every(isFrameCandidate)) return null;
 
-  const frames = (candidate.frames as FrameCandidate[]).map(migrateFrameKind);
+  const frames = migrateEditorSource((candidate.frames as FrameCandidate[]).map(migrateFrameKind));
   const placedFrames = frames.filter((f) => isFrame(f)) as Frame[];
   const existingMaxColumn = placedFrames.reduce(
     (max, f) => Math.max(max, f.placement.x + f.placement.width - 1),
@@ -173,7 +192,7 @@ const normalizeScreen = (value: unknown): Screen | null => {
 };
 
 const buildJsonFileItems = async (
-  env: Env,
+  backend: ReturnType<typeof createLayoutsBackend>,
   prefixKey: string,
   options?: { excludeNested?: boolean },
 ): Promise<ListItem[]> => {
@@ -181,7 +200,7 @@ const buildJsonFileItems = async (
 
   let cursor: string | undefined;
   do {
-    const result = await env.LAYOUTS.list({ prefix: prefixKey, cursor });
+    const result = await backend.list(prefixKey, cursor);
     for (const object of result.objects) {
       if (!object.key.endsWith('.json')) continue;
       const relative = object.key.slice(prefixKey.length);
@@ -201,20 +220,16 @@ const isNavigationRequest = (request: Request): boolean => {
   return accept.includes('text/html');
 };
 
-const handleScreenGet = async (env: Env, id: string): Promise<Response> => {
-  const object = await env.LAYOUTS.get(`${id}.json`);
-  if (!object) return new Response('Not Found', { status: 404 });
-
-  const body = await object.text();
+const handleScreenGet = async (backend: ReturnType<typeof createLayoutsBackend>, id: string): Promise<Response> => {
+  const body = await backend.getText(`${id}.json`);
+  if (body === null) return new Response('Not Found', { status: 404 });
   try {
     const value = JSON.parse(body) as unknown;
     const normalized = normalizeScreen(value);
     if (!normalized) return new Response('Invalid screen', { status: 400 });
 
     if (JSON.stringify(value) !== JSON.stringify(normalized)) {
-      await env.LAYOUTS.put(`${id}.json`, JSON.stringify(normalized), {
-        httpMetadata: { contentType: 'application/json' },
-      });
+      await backend.putText(`${id}.json`, JSON.stringify(normalized));
     }
 
     return new Response(JSON.stringify(normalized), {
@@ -225,57 +240,55 @@ const handleScreenGet = async (env: Env, id: string): Promise<Response> => {
   }
 };
 
-const handleScreensJsonFilesGet = async (env: Env): Promise<Response> => {
-  const items = await buildJsonFileItems(env, '', { excludeNested: true });
+const handleScreensJsonFilesGet = async (backend: ReturnType<typeof createLayoutsBackend>): Promise<Response> => {
+  const items = await buildJsonFileItems(backend, '', { excludeNested: true });
   return new Response(JSON.stringify({ items }), {
     headers: { 'Content-Type': 'application/json' },
   });
 };
 
-const handleComponentGet = async (env: Env, screenId: string, componentId: string): Promise<Response> => {
-  const object = await env.LAYOUTS.get(`${screenId}/components/${componentId}.json`);
-  if (!object) return new Response('Not Found', { status: 404 });
-  return new Response(object.body, { headers: { 'Content-Type': 'application/json' } });
+const handleComponentGet = async (backend: ReturnType<typeof createLayoutsBackend>, screenId: string, componentId: string): Promise<Response> => {
+  const body = await backend.getText(`${screenId}/components/${componentId}.json`);
+  if (body === null) return new Response('Not Found', { status: 404 });
+  return new Response(body, { headers: { 'Content-Type': 'application/json' } });
 };
 
-const handleJsonFilesGet = async (env: Env, screenId: string, prefix: string): Promise<Response> => {
-  const items = await buildJsonFileItems(env, `${screenId}/${prefix}`);
+const handleJsonFilesGet = async (backend: ReturnType<typeof createLayoutsBackend>, screenId: string, prefix: string): Promise<Response> => {
+  const items = await buildJsonFileItems(backend, `${screenId}/${prefix}`);
   return new Response(JSON.stringify({ items }), { headers: { 'Content-Type': 'application/json' } });
 };
 
-const handleScreenPut = async (request: Request, env: Env, id: string): Promise<Response> => {
+const handleScreenPut = async (request: Request, backend: ReturnType<typeof createLayoutsBackend>, id: string): Promise<Response> => {
   const body = await request.text();
   try {
     const value = JSON.parse(body) as unknown;
     const normalized = normalizeScreen(value);
     if (!normalized) return new Response('Invalid screen', { status: 400 });
-    await env.LAYOUTS.put(`${id}.json`, JSON.stringify(normalized), {
-      httpMetadata: { contentType: 'application/json' },
-    });
+    await backend.putText(`${id}.json`, JSON.stringify(normalized));
   } catch {
     return new Response('Invalid JSON', { status: 400 });
   }
   return new Response(null, { status: 204 });
 };
 
-const deleteScreenObjects = async (env: Env, screenId: string): Promise<void> => {
-  await env.LAYOUTS.delete(`${screenId}.json`);
+const deleteScreenObjects = async (backend: ReturnType<typeof createLayoutsBackend>, screenId: string): Promise<void> => {
+  await backend.deleteKey(`${screenId}.json`);
   let cursor: string | undefined;
   do {
-    const result = await env.LAYOUTS.list({ prefix: `${screenId}/components/`, cursor });
+    const result = await backend.list(`${screenId}/components/`, cursor);
     if (result.objects.length > 0) {
-      await env.LAYOUTS.delete(result.objects.map((o) => o.key));
+      await Promise.all(result.objects.map((o) => backend.deleteKey(o.key)));
     }
     cursor = result.truncated ? result.cursor : undefined;
   } while (cursor);
 };
 
-const handleScreenDelete = async (env: Env, id: string): Promise<Response> => {
-  await deleteScreenObjects(env, id);
+const handleScreenDelete = async (backend: ReturnType<typeof createLayoutsBackend>, id: string): Promise<Response> => {
+  await deleteScreenObjects(backend, id);
   return new Response(null, { status: 204 });
 };
 
-const handleScreenRename = async (request: Request, env: Env, id: string): Promise<Response> => {
+const handleScreenRename = async (request: Request, backend: ReturnType<typeof createLayoutsBackend>, id: string): Promise<Response> => {
   const body = await request.text();
   let to: string;
   try {
@@ -290,40 +303,37 @@ const handleScreenRename = async (request: Request, env: Env, id: string): Promi
 
   if (!to || to === id || to.includes('/')) return new Response('Invalid target name', { status: 400 });
 
-  const source = await env.LAYOUTS.get(`${id}.json`);
+  const source = await backend.getText(`${id}.json`);
   if (!source) return new Response('Not Found', { status: 404 });
 
-  const existing = await env.LAYOUTS.get(`${to}.json`);
+  const existing = await backend.getText(`${to}.json`);
   if (existing) return new Response('Conflict', { status: 409 });
 
-  await env.LAYOUTS.put(`${to}.json`, await source.text(), {
-    httpMetadata: { contentType: 'application/json' },
-  });
+  await backend.putText(`${to}.json`, source);
 
   const prefix = `${id}/components/`;
   let cursor: string | undefined;
   do {
-    const result = await env.LAYOUTS.list({ prefix, cursor });
+    const result = await backend.list(prefix, cursor);
     for (const object of result.objects) {
-      const file = await env.LAYOUTS.get(object.key);
+      const file = await backend.getText(object.key);
       if (file) {
-        await env.LAYOUTS.put(
+        await backend.putText(
           `${to}/components/${object.key.slice(prefix.length)}`,
-          await file.arrayBuffer(),
-          { httpMetadata: { contentType: 'application/json' } },
+          file,
         );
       }
     }
     cursor = result.truncated ? result.cursor : undefined;
   } while (cursor);
 
-  await deleteScreenObjects(env, id);
+  await deleteScreenObjects(backend, id);
   return new Response(null, { status: 204 });
 };
 
 const handleComponentPut = async (
   request: Request,
-  env: Env,
+  backend: ReturnType<typeof createLayoutsBackend>,
   screenId: string,
   componentId: string,
 ): Promise<Response> => {
@@ -337,75 +347,32 @@ const handleComponentPut = async (
   } catch {
     return new Response('Invalid JSON', { status: 400 });
   }
-  await env.LAYOUTS.put(`${screenId}/components/${componentId}.json`, body, {
-    httpMetadata: { contentType: 'application/json' },
-  });
+  await backend.putText(`${screenId}/components/${componentId}.json`, body);
   return new Response(null, { status: 204 });
 };
 
-const handleComponentDelete = async (env: Env, screenId: string, componentId: string): Promise<Response> => {
-  await env.LAYOUTS.delete(`${screenId}/components/${componentId}.json`);
-  return new Response(null, { status: 204 });
-};
-
-const isComponentSchema = (value: unknown): boolean => {
-  if (typeof value !== 'object' || value === null || Array.isArray(value)) return false;
-  const c = value as Record<string, unknown>;
-  return Array.isArray(c.fields) && (c.fields as unknown[]).every(isFormField);
-};
-
-const handleSchemaGet = async (env: Env, kind: string): Promise<Response> => {
-  const object = await env.LAYOUTS.get(`schemas/${kind}.json`);
-  if (!object) {
-    const builtin = BUILTIN_SCHEMAS[kind];
-    if (!builtin) return new Response('Not Found', { status: 404 });
-    const body = JSON.stringify(builtin);
-    await env.LAYOUTS.put(`schemas/${kind}.json`, body, {
-      httpMetadata: { contentType: 'application/json' },
-    });
-    return new Response(body, { headers: { 'Content-Type': 'application/json' } });
-  }
-  return new Response(object.body, { headers: { 'Content-Type': 'application/json' } });
-};
-
-const handleSchemaPut = async (request: Request, env: Env, kind: string): Promise<Response> => {
-  const body = await request.text();
-  try {
-    const value = JSON.parse(body) as unknown;
-    if (!isComponentSchema(value)) return new Response('Invalid schema', { status: 400 });
-    await env.LAYOUTS.put(`schemas/${kind}.json`, body, {
-      httpMetadata: { contentType: 'application/json' },
-    });
-  } catch {
-    return new Response('Invalid JSON', { status: 400 });
-  }
+const handleComponentDelete = async (backend: ReturnType<typeof createLayoutsBackend>, screenId: string, componentId: string): Promise<Response> => {
+  await backend.deleteKey(`${screenId}/components/${componentId}.json`);
   return new Response(null, { status: 204 });
 };
 
 export default {
   async fetch(request: Request, env: Env): Promise<Response> {
     const url = new URL(request.url);
-
-    const schemaMatch = url.pathname.match(/^\/api\/schemas\/([^/]+)$/);
-    if (schemaMatch) {
-      const kind = decodeURIComponent(schemaMatch[1]);
-      if (request.method === 'GET') return handleSchemaGet(env, kind);
-      if (request.method === 'PUT') return handleSchemaPut(request, env, kind);
-      return new Response('Method Not Allowed', { status: 405 });
-    }
+    const layouts = createLayoutsBackend(env);
 
     const componentMatch = url.pathname.match(/^\/api\/layouts\/([^/]+)\/components\/(.+)$/);
     if (componentMatch) {
       const screenId = decodeURIComponent(componentMatch[1]);
       const componentId = decodeURIComponent(componentMatch[2]);
-      if (request.method === 'GET') return handleComponentGet(env, screenId, componentId);
-      if (request.method === 'PUT') return handleComponentPut(request, env, screenId, componentId);
-      if (request.method === 'DELETE') return handleComponentDelete(env, screenId, componentId);
+      if (request.method === 'GET') return handleComponentGet(layouts, screenId, componentId);
+      if (request.method === 'PUT') return handleComponentPut(request, layouts, screenId, componentId);
+      if (request.method === 'DELETE') return handleComponentDelete(layouts, screenId, componentId);
       return new Response('Method Not Allowed', { status: 405 });
     }
 
     if (url.pathname === '/api/layouts/json-files') {
-      if (request.method === 'GET') return handleScreensJsonFilesGet(env);
+      if (request.method === 'GET') return handleScreensJsonFilesGet(layouts);
       return new Response('Method Not Allowed', { status: 405 });
     }
 
@@ -414,7 +381,7 @@ export default {
       const screenId = decodeURIComponent(jsonFilesMatch[1]);
       if (request.method === 'GET') {
         const prefix = url.searchParams.get('prefix') ?? 'components/';
-        return handleJsonFilesGet(env, screenId, prefix);
+        return handleJsonFilesGet(layouts, screenId, prefix);
       }
       return new Response('Method Not Allowed', { status: 405 });
     }
@@ -422,16 +389,16 @@ export default {
     const renameMatch = url.pathname.match(/^\/api\/layouts\/([^/]+)\/rename$/);
     if (renameMatch) {
       const id = decodeURIComponent(renameMatch[1]);
-      if (request.method === 'POST') return handleScreenRename(request, env, id);
+      if (request.method === 'POST') return handleScreenRename(request, layouts, id);
       return new Response('Method Not Allowed', { status: 405 });
     }
 
     const screenMatch = url.pathname.match(/^\/api\/layouts\/([^/]+)$/);
     if (screenMatch) {
       const id = decodeURIComponent(screenMatch[1]);
-      if (request.method === 'GET') return handleScreenGet(env, id);
-      if (request.method === 'PUT') return handleScreenPut(request, env, id);
-      if (request.method === 'DELETE') return handleScreenDelete(env, id);
+      if (request.method === 'GET') return handleScreenGet(layouts, id);
+      if (request.method === 'PUT') return handleScreenPut(request, layouts, id);
+      if (request.method === 'DELETE') return handleScreenDelete(layouts, id);
       return new Response('Method Not Allowed', { status: 405 });
     }
 

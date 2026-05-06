@@ -10,5 +10,12 @@
     "resolveJsonModule": true,
     "types": ["@cloudflare/workers-types"]
   },
-  "include": ["src/worker.ts", "src/screen.ts", "src/component/**/*.ts"]
+  "include": [
+    "src/worker.ts",
+    "src/authorize.ts",
+    "src/layouts.ts",
+    "src/head.ts",
+    "src/screen.ts",
+    "src/component/**/*.ts"
+  ]
 }

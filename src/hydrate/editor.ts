@@ -1,12 +1,12 @@
 import { isScreen, isFrameRef } from '../screen';
 import { isComponent, componentDefaults, COMPONENT_KINDS, applyDefaults } from '../component';
 import type { EditorFrame, Screen } from '../screen';
-import type { EditorSection, FieldStyleConfig } from '../component/kind/editor';
+import type { EditorSection } from '../component/kind/component-editor';
 import type { FormField } from '../component/kind/form/field';
 import { renderFormFromSchema, inferFieldsFromData, mergeWithSchema } from './form';
 import { buildFieldStyleContext, type FieldStyleContext } from './field';
 import { domMap } from '../state';
-import { fetchSchema } from '../api';
+import { getSchema } from '../api';
 
 const SECTION_SUMMARY_STYLE: Record<string, string> = {
   fontSize: '11px',
@@ -68,6 +68,71 @@ const appendSection = (
   }
 };
 
+const PLACEMENT_FIELDS: { key: string; label: string }[] = [
+  { key: 'x', label: 'X' },
+  { key: 'y', label: 'Y' },
+  { key: 'width', label: 'W' },
+  { key: 'height', label: 'H' },
+];
+
+const renderPlacementRow = (
+  data: Record<string, unknown>,
+  onSave: (draft: unknown) => Promise<void>,
+): HTMLElement => {
+  const draft = { ...data };
+  // layout: margin(1) | X(2) | gap(1) | Y(2) | gap(1) | W(2) | gap(1) | H(2) | margin(1)
+  const container = document.createElement('div');
+  Object.assign(container.style, {
+    display: 'grid',
+    gridTemplateColumns: '1fr 2fr 1fr 2fr 1fr 2fr 1fr 2fr 1fr',
+    rowGap: '2px',
+    padding: '6px 0',
+  });
+
+  PLACEMENT_FIELDS.forEach(({ key, label }, i) => {
+    const col = String(2 + i * 2);
+
+    const lbl = document.createElement('span');
+    lbl.textContent = label;
+    Object.assign(lbl.style, {
+      gridColumn: col,
+      gridRow: '1',
+      fontSize: '10px',
+      fontWeight: '500',
+      color: 'rgba(0,0,0,0.45)',
+      letterSpacing: '0.06em',
+    });
+
+    const input = document.createElement('input');
+    input.type = 'number';
+    const current = data[key];
+    input.value = typeof current === 'number' ? String(current) : '';
+    Object.assign(input.style, {
+      gridColumn: col,
+      gridRow: '2',
+      minWidth: '0',
+      fontSize: '12px',
+      border: 'none',
+      borderBottom: '1px solid rgba(0,0,0,0.15)',
+      background: 'transparent',
+      padding: '2px 4px',
+      outline: 'none',
+      textAlign: 'center',
+      boxSizing: 'border-box',
+    });
+    input.addEventListener('input', () => {
+      const next = input.value.trim();
+      draft[key] = next === '' ? 0 : Number(next);
+    });
+    input.addEventListener('blur', () => { void onSave(draft); });
+
+    container.appendChild(lbl);
+    container.appendChild(input);
+  });
+
+  return container;
+};
+
 export const hydrateComponentEditor = async (
   selectedScreenId: string | null,
   selectedFrameId: string | null,
@@ -110,14 +175,8 @@ export const hydrateComponentEditor = async (
     componentData = frameObj;
   }
 
-  const [placementSchema, propertiesSchema] = await Promise.all([
-    fetchSchema('placement'),
-    componentKind ? fetchSchema(componentKind) : Promise.resolve(null),
-  ]);
-
   const editorConfig = applyDefaults('component-editor', editorFrame as unknown as Record<string, unknown>);
   const sections = editorConfig.sections as EditorSection[];
-  const ctx = buildFieldStyleContext(editorConfig.fieldStyle as FieldStyleConfig);
 
   editorEl.replaceChildren();
 
@@ -197,75 +256,26 @@ export const hydrateComponentEditor = async (
   }
 
   for (const section of sections) {
-    let contentEl: HTMLElement | null = null;
-
-    if (section.source === 'placement') {
-      const placementData = JSON.parse(JSON.stringify(frame.placement)) as Record<string, unknown>;
-      const onSave = async (draft: unknown): Promise<void> => {
-        const freshRes = await fetch(`/api/layouts/${selectedScreenId}`);
-        if (!freshRes.ok) return;
-        const freshScreen = (await freshRes.json()) as unknown;
-        if (!isScreen(freshScreen)) return;
-        await fetch(`/api/layouts/${selectedScreenId}`, {
-          method: 'PUT',
-          headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({
-            ...freshScreen,
-            frames: freshScreen.frames.map((f) =>
-              f.id === selectedFrameId ? { ...f, placement: draft } : f,
-            ),
-          }),
-        });
-        onAfterSave();
-      };
-      contentEl = renderSectionContent(placementData, placementSchema, onSave, ctx);
-    } else if (section.source === 'properties' && componentData) {
-      if (componentSrc !== null) {
-        const src = componentSrc;
-        const propsData = JSON.parse(JSON.stringify(componentData)) as Record<string, unknown>;
-        const onSave = async (draft: unknown): Promise<void> => {
-          await fetch(`/api/layouts/${selectedScreenId}/components/${src}`, {
-            method: 'PUT',
-            headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify(draft),
-          });
-          onAfterSave();
-        };
-        contentEl = renderSectionContent(propsData, propertiesSchema, onSave, ctx);
-      } else {
-        const inlineProps: Record<string, unknown> = {};
-        for (const [key, val] of Object.entries(componentData)) {
-          if (key !== 'id' && key !== 'kind' && key !== 'placement') {
-            inlineProps[key] = val;
-          }
-        }
-        if (Object.keys(inlineProps).length > 0) {
-          const onSave = async (draft: unknown): Promise<void> => {
-            const freshRes = await fetch(`/api/layouts/${selectedScreenId}`);
-            if (!freshRes.ok) return;
-            const freshScreen = (await freshRes.json()) as unknown;
-            if (!isScreen(freshScreen)) return;
-            await fetch(`/api/layouts/${selectedScreenId}`, {
-              method: 'PUT',
-              headers: { 'Content-Type': 'application/json' },
-              body: JSON.stringify({
-                ...freshScreen,
-                frames: freshScreen.frames.map((f) =>
-                  f.id === selectedFrameId
-                    ? { ...(f as Record<string, unknown>), ...(draft as Record<string, unknown>) }
-                    : f,
-                ),
-              }),
-            });
-            onAfterSave();
-          };
-          contentEl = renderSectionContent(inlineProps, propertiesSchema, onSave, ctx);
-        }
-      }
-    }
-
-    if (!contentEl) continue;
-    appendSection(editorEl, section, contentEl);
+    if (section.source !== 'placement') continue;
+    const placementData = JSON.parse(JSON.stringify(frame.placement)) as Record<string, unknown>;
+    const onSave = async (draft: unknown): Promise<void> => {
+      const freshRes = await fetch(`/api/layouts/${selectedScreenId}`);
+      if (!freshRes.ok) return;
+      const freshScreen = (await freshRes.json()) as unknown;
+      if (!isScreen(freshScreen)) return;
+      await fetch(`/api/layouts/${selectedScreenId}`, {
+        method: 'PUT',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          ...freshScreen,
+          frames: freshScreen.frames.map((f) =>
+            f.id === selectedFrameId ? { ...f, placement: draft } : f,
+          ),
+        }),
+      });
+      onAfterSave();
+    };
+    appendSection(editorEl, { ...section, label: undefined }, renderPlacementRow(placementData, onSave));
   }
 };
 
@@ -281,32 +291,8 @@ export const renderEditorPreview = async (
     (f) => f.id !== frame.id && !EDITOR_ONLY_KINDS.has(String((f as Record<string, unknown>).kind ?? '')),
   ) ?? frame;
 
-  const frameObj = targetFrame as Record<string, unknown>;
-  let componentKind: string | null = null;
-  let componentData: Record<string, unknown> | null = null;
-
-  if (isFrameRef(targetFrame)) {
-    const compRes = await fetch(`/api/layouts/${screenId}/components/${targetFrame.src}`);
-    if (compRes.ok) {
-      const compValue = (await compRes.json()) as unknown;
-      if (isComponent(compValue)) {
-        componentKind = (compValue as Record<string, unknown>).kind as string;
-        componentData = compValue as Record<string, unknown>;
-      }
-    }
-  } else {
-    componentKind = frameObj.kind as string;
-    componentData = frameObj;
-  }
-
-  const [placementSchema, propertiesSchema] = await Promise.all([
-    fetchSchema('placement'),
-    componentKind ? fetchSchema(componentKind) : Promise.resolve(null),
-  ]);
-
   const frameConfig = applyDefaults('component-editor', frame as unknown as Record<string, unknown>);
   const sections = frameConfig.sections as EditorSection[];
-  const ctx = buildFieldStyleContext(frameConfig.fieldStyle as FieldStyleConfig);
 
   const container = document.createElement('div');
   if (frame.style) Object.assign(container.style, frame.style);
@@ -314,18 +300,9 @@ export const renderEditorPreview = async (
   const noop = async (): Promise<void> => {};
 
   for (const section of sections) {
-    let contentEl: HTMLElement | null = null;
-
-    if (section.source === 'placement') {
-      const placementData = JSON.parse(JSON.stringify(targetFrame.placement)) as Record<string, unknown>;
-      contentEl = renderSectionContent(placementData, placementSchema, noop, ctx);
-    } else if (section.source === 'properties' && componentData) {
-      const propsData = JSON.parse(JSON.stringify(componentData)) as Record<string, unknown>;
-      contentEl = renderSectionContent(propsData, propertiesSchema, noop, ctx);
-    }
-
-    if (!contentEl) continue;
-    appendSection(container, section, contentEl);
+    if (section.source !== 'placement') continue;
+    const placementData = JSON.parse(JSON.stringify(targetFrame.placement)) as Record<string, unknown>;
+    appendSection(container, { ...section, label: undefined }, renderPlacementRow(placementData, noop));
   }
 
   wrapper.replaceChildren(container);
@@ -344,7 +321,7 @@ export const hydrateScreenEditor = async (
   const value = (await response.json()) as unknown;
   if (!isScreen(value)) { editorEl.replaceChildren(); return; }
 
-  const screenSchema = await fetchSchema('screen');
+  const screenSchema = getSchema('screen');
   const ctx = buildFieldStyleContext(editorFrame.fieldStyle);
 
   const screenData = { head: value.head, shell: value.shell, grid: value.grid } as Record<string, unknown>;

@@ -1,3 +1,5 @@
+import type { FormField } from './form/field';
+
 const isStyle = (value: unknown): value is Record<string, string> =>
   typeof value === 'object' &&
   value !== null &&
@@ -19,6 +21,7 @@ export type EditorSection = {
 
 export type EditorComponent = {
   kind: 'component-editor';
+  sourceCanvasId?: string;
   sections?: EditorSection[];
   excludeKeys?: string[];
   style?: Record<string, string>;
@@ -48,19 +51,25 @@ const isEditorSection = (v: unknown): v is EditorSection => {
 
 export const editorDefaults: EditorComponent = {
   kind: 'component-editor',
+  sourceCanvasId: '',
   sections: [
-    { label: 'Placement', source: 'placement' },
-    { label: 'Properties', source: 'properties' },
+    { source: 'placement' },
   ],
   style: {},
   fieldStyle: { wrapper: {}, label: {}, input: {} },
 };
+
+export const editorSchema: FormField[] = [
+  { kind: 'text-field', key: 'sourceCanvasId', label: 'sourceCanvasId' },
+  { kind: 'style-map-field', key: 'style', label: 'style' },
+];
 
 export const isEditorComponent = (value: unknown): value is EditorComponent => {
   if (typeof value !== 'object' || value === null || Array.isArray(value)) return false;
   const c = value as Record<string, unknown>;
   return (
     c.kind === 'component-editor' &&
+    (c.sourceCanvasId === undefined || typeof c.sourceCanvasId === 'string') &&
     (c.sections === undefined ||
       (Array.isArray(c.sections) && c.sections.every(isEditorSection))) &&
     (c.excludeKeys === undefined ||

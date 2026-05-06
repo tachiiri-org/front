@@ -1,3 +1,5 @@
+import type { FormField } from './form/field';
+
 const isStyle = (value: unknown): value is Record<string, string> =>
   typeof value === 'object' &&
   value !== null &&
@@ -6,7 +8,6 @@ const isStyle = (value: unknown): value is Record<string, string> =>
 
 export type CanvasComponent = {
   kind: 'canvas';
-  targetComponentId?: string;
   viewportWidth?: number;
   viewportHeight?: number;
   style?: Record<string, string>;
@@ -15,12 +16,18 @@ export type CanvasComponent = {
 
 export const canvasDefaults: CanvasComponent = {
   kind: 'canvas',
-  targetComponentId: '',
   viewportWidth: 1200,
   viewportHeight: 800,
   style: {},
   cellStyle: {},
 };
+
+export const canvasSchema: FormField[] = [
+  { kind: 'number-field', key: 'viewportWidth', label: 'viewportWidth' },
+  { kind: 'number-field', key: 'viewportHeight', label: 'viewportHeight' },
+  { kind: 'style-map-field', key: 'style', label: 'style' },
+  { kind: 'style-map-field', key: 'cellStyle', label: 'cellStyle' },
+];
 
 const isPositiveInteger = (value: unknown): value is number =>
   typeof value === 'number' && Number.isInteger(value) && value > 0;
@@ -30,7 +37,6 @@ export const isCanvasComponent = (value: unknown): value is CanvasComponent => {
   const c = value as Record<string, unknown>;
   return (
     c.kind === 'canvas' &&
-    (c.targetComponentId === undefined || typeof c.targetComponentId === 'string') &&
     (c.viewportWidth === undefined || isPositiveInteger(c.viewportWidth)) &&
     (c.viewportHeight === undefined || isPositiveInteger(c.viewportHeight)) &&
     (c.style === undefined || isStyle(c.style)) &&
