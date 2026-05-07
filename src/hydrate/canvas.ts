@@ -1,12 +1,13 @@
 import { isScreen, isFrameRef } from '../screen';
 import type { Frame, CanvasFrame, Screen, ListFrame, EditorFrame } from '../screen';
 import type { Component } from '../component';
-import { componentDefaults } from '../component';
+import { componentDefaults, elementDefaults } from '../component';
 import { renderComponent } from '../render/component';
 import { domMap, getFrameSelection, setFrameSelection, isEditableTarget } from '../state';
 import { fetchFrameComponent } from '../api';
 import { renderListPreview } from './list';
 import { renderEditorPreview } from './editor';
+import { allocateDefaultEntityName } from '../name';
 
 const EDITOR_ONLY_KINDS = new Set(['canvas', 'list', 'component-editor']);
 
@@ -642,7 +643,16 @@ export const hydrateCanvas = async (
         const freshScreen = (await freshRes.json()) as unknown;
         if (!isScreen(freshScreen)) return;
         setFrameSelection(canvasFrame.id, newId);
-        const newFrameData = { id: newId, placement: { x, y, width, height }, ...componentDefaults.element };
+        const newFrameData = {
+          ...elementDefaults,
+          id: newId,
+          kind: 'element',
+          placement: { x, y, width, height },
+          name: allocateDefaultEntityName(
+            freshScreen.frames as Array<{ id: string; kind: string; name?: unknown }>,
+            elementDefaults.kind,
+          ),
+        } as Frame;
         await fetch(`/api/layouts/${screenId}`, {
           method: 'PUT',
           headers: { 'Content-Type': 'application/json' },

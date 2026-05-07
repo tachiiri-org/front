@@ -24,6 +24,7 @@ export type SelectSource = SelectEndpointSource;
 
 export type SelectComponent = {
   kind: 'select';
+  name?: string;
   source: SelectSource;
   targetComponentId?: string;
   padding?: string;
@@ -50,6 +51,7 @@ export const isSelectSource = (value: unknown): value is SelectSource => {
 
 export const selectDefaults: SelectComponent = {
   kind: 'select',
+  name: '',
   source: { kind: 'endpoint', url: '', itemsPath: '', valueKey: '', labelKey: '', headers: {} },
   targetComponentId: '',
   padding: '',
@@ -77,6 +79,7 @@ export const isSelectComponent = (value: unknown): value is SelectComponent => {
   const c = value as Record<string, unknown>;
   return (
     c.kind === 'select' &&
+    (c.name === undefined || typeof c.name === 'string') &&
     isSelectSource(c.source) &&
     (c.targetComponentId === undefined || typeof c.targetComponentId === 'string') &&
     (c.padding === undefined || typeof c.padding === 'string')

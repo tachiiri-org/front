@@ -21,6 +21,7 @@ export type EditorSection = {
 
 export type EditorComponent = {
   kind: 'component-editor';
+  name?: string;
   sourceCanvasId?: string;
   sections?: EditorSection[];
   excludeKeys?: string[];
@@ -51,8 +52,10 @@ const isEditorSection = (v: unknown): v is EditorSection => {
 
 export const editorDefaults: EditorComponent = {
   kind: 'component-editor',
+  name: '',
   sourceCanvasId: '',
   sections: [
+    { source: 'properties', label: 'properties' },
     { source: 'placement' },
   ],
   style: {},
@@ -60,7 +63,7 @@ export const editorDefaults: EditorComponent = {
 };
 
 export const editorSchema: FormField[] = [
-  { kind: 'text-field', key: 'sourceCanvasId', label: 'sourceCanvasId' },
+  { kind: 'text-field', key: 'name', label: 'name' },
   { kind: 'style-map-field', key: 'style', label: 'style' },
 ];
 
@@ -69,6 +72,7 @@ export const isEditorComponent = (value: unknown): value is EditorComponent => {
   const c = value as Record<string, unknown>;
   return (
     c.kind === 'component-editor' &&
+    (c.name === undefined || typeof c.name === 'string') &&
     (c.sourceCanvasId === undefined || typeof c.sourceCanvasId === 'string') &&
     (c.sections === undefined ||
       (Array.isArray(c.sections) && c.sections.every(isEditorSection))) &&

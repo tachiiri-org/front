@@ -2,6 +2,7 @@ import type { FormField } from './form/field';
 
 export type FormComponent = {
   kind: 'form';
+  name?: string;
   title?: string;
   sourceComponentId?: string;
   excludeKeys?: string[];
@@ -10,6 +11,7 @@ export type FormComponent = {
 
 export const formDefaults: FormComponent = {
   kind: 'form',
+  name: '',
   title: '',
   sourceComponentId: '',
   excludeKeys: [],
@@ -27,6 +29,7 @@ export const isFormComponent = (value: unknown): value is FormComponent => {
   const c = value as Record<string, unknown>;
   return (
     c.kind === 'form' &&
+    (c.name === undefined || typeof c.name === 'string') &&
     (c.title === undefined || typeof c.title === 'string') &&
     (c.sourceComponentId === undefined || typeof c.sourceComponentId === 'string') &&
     (c.excludeKeys === undefined ||

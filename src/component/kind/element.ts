@@ -8,13 +8,14 @@ const isStyle = (value: unknown): value is Record<string, string> =>
 
 export type ElementComponent = {
   kind: 'element';
+  name?: string;
   tag: string;
   style: Record<string, string>;
   text?: string;
   padding?: string;
 };
 
-export const elementDefaults: ElementComponent = { kind: 'element', tag: 'div', style: {}, text: '', padding: '' };
+export const elementDefaults: ElementComponent = { kind: 'element', name: '', tag: 'div', style: {}, text: '', padding: '' };
 
 export const elementSchema: FormField[] = [
   { kind: 'text-field', key: 'tag', label: 'tag' },
@@ -28,6 +29,7 @@ export const isElementComponent = (value: unknown): value is ElementComponent =>
   const c = value as Record<string, unknown>;
   return (
     c.kind === 'element' &&
+    (c.name === undefined || typeof c.name === 'string') &&
     typeof c.tag === 'string' &&
     isStyle(c.style) &&
     (c.text === undefined || typeof c.text === 'string') &&

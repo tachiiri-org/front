@@ -3,6 +3,7 @@ import { isComponent, componentDefaults, COMPONENT_KINDS, applyDefaults } from '
 import type { EditorFrame, Screen } from '../screen';
 import type { EditorSection } from '../component/kind/component-editor';
 import type { FormField } from '../component/kind/form/field';
+import { getEntityDisplayName } from '../name';
 import { renderFormFromSchema, inferFieldsFromData, mergeWithSchema } from './form';
 import { buildFieldStyleContext, type FieldStyleContext } from './field';
 import { domMap, getFrameSelection } from '../state';
@@ -37,6 +38,44 @@ const renderSectionContent = (
   const inferred = inferFieldsFromData(data);
   const fields = schema ? mergeWithSchema(inferred, schema) : inferred;
   return renderFormFromSchema(data, fields, onSave, ctx);
+};
+
+const PROTECTED_PROPERTY_KEYS = new Set(['kind', 'id', 'placement']);
+const EDITOR_SPECIAL_PROPERTY_KEYS = new Set(['sourceCanvasId']);
+
+const getEditableComponentData = (
+  componentKind: string,
+  data: Record<string, unknown>,
+  extraExcludes: readonly string[] = [],
+): Record<string, unknown> => {
+  const excluded = new Set<string>([...PROTECTED_PROPERTY_KEYS, ...extraExcludes]);
+  if (componentKind === 'component-editor') {
+    for (const key of EDITOR_SPECIAL_PROPERTY_KEYS) excluded.add(key);
+  }
+
+  const editable: Record<string, unknown> = {};
+  for (const [key, value] of Object.entries(data)) {
+    if (excluded.has(key)) continue;
+    editable[key] = value;
+  }
+  return editable;
+};
+
+const renderPropertiesSection = (
+  componentKind: string,
+  componentData: Record<string, unknown>,
+  extraExcludes: readonly string[],
+  onSave: (patch: Record<string, unknown>) => Promise<void>,
+  ctx: FieldStyleContext,
+): HTMLElement => {
+  const schema = getSchema(componentKind);
+  const editableData = getEditableComponentData(componentKind, componentData, extraExcludes);
+  return renderSectionContent(
+    editableData,
+    schema,
+    async (draft) => onSave(draft as Record<string, unknown>),
+    ctx,
+  );
 };
 
 const appendSection = (
@@ -202,6 +241,10 @@ export const hydrateComponentEditor = async (
 
   const editorConfig = applyDefaults('component-editor', editorFrame as unknown as Record<string, unknown>);
   const sections = editorConfig.sections as EditorSection[];
+  const editorExcludeKeys = Array.isArray(editorConfig.excludeKeys)
+    ? editorConfig.excludeKeys.filter((key): key is string => typeof key === 'string')
+    : [];
+  const ctx = buildFieldStyleContext(editorFrame.fieldStyle);
 
   editorEl.replaceChildren();
 
@@ -292,7 +335,7 @@ export const hydrateComponentEditor = async (
   }
 
   if (componentKind === 'component-editor' && componentData) {
-    const sourceCanvasRow = createLabeledRow('sourceCanvasId');
+    const sourceCanvasRow = createLabeledRow('source');
     const sourceCanvasSelect = document.createElement('select');
     Object.assign(sourceCanvasSelect.style, {
       flex: '1',
@@ -327,7 +370,8 @@ export const hydrateComponentEditor = async (
     for (const canvasFrame of canvasFrames) {
       const option = document.createElement('option');
       option.value = canvasFrame.id;
-      option.textContent = canvasFrame.id;
+      option.textContent = getEntityDisplayName(canvasFrame as Record<string, unknown> & { id: string });
+      option.title = canvasFrame.id;
       sourceCanvasSelect.appendChild(option);
     }
 
@@ -340,6 +384,7 @@ export const hydrateComponentEditor = async (
     editorEl.appendChild(sourceCanvasRow);
   }
 
+  let renderedProperties = false;
   for (const section of sections) {
     if (section.source !== 'placement') continue;
     const placementData = JSON.parse(JSON.stringify(frame.placement)) as Record<string, unknown>;
@@ -361,6 +406,37 @@ export const hydrateComponentEditor = async (
       onAfterSave();
     };
     appendSection(editorEl, { ...section, label: undefined }, renderPlacementRow(placementData, onSave));
+  }
+
+  for (const section of sections) {
+    if (section.source !== 'properties') continue;
+    if (!componentKind || !componentData) continue;
+    const onSave = async (draft: unknown): Promise<void> => {
+      await saveSelectedFrameUpdate(draft as Record<string, unknown>);
+    };
+    const editableData = getEditableComponentData(componentKind, componentData, editorExcludeKeys);
+    const propertiesSchema = getSchema(componentKind);
+    appendSection(
+      editorEl,
+      section,
+      renderSectionContent(editableData, propertiesSchema, onSave, ctx),
+    );
+    renderedProperties = true;
+  }
+
+  if (!renderedProperties && componentKind && componentData) {
+    const editableData = getEditableComponentData(componentKind, componentData, editorExcludeKeys);
+    const onSave = async (draft: unknown): Promise<void> => {
+      await saveSelectedFrameUpdate(draft as Record<string, unknown>);
+    };
+    const propertiesSection = renderPropertiesSection(
+      componentKind,
+      editableData,
+      editorExcludeKeys,
+      onSave,
+      ctx,
+    );
+    appendSection(editorEl, { source: 'properties', label: 'properties' }, propertiesSection);
   }
 };
 

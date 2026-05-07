@@ -8,6 +8,7 @@ const isStyle = (value: unknown): value is Record<string, string> =>
 
 export type ListComponent = {
   kind: 'list';
+  name?: string;
   src?: string;
   targetComponentId?: string;
   style?: Record<string, string>;
@@ -16,6 +17,7 @@ export type ListComponent = {
 
 export const listDefaults: ListComponent = {
   kind: 'list',
+  name: '',
   src: '',
   targetComponentId: '',
   style: {},
@@ -34,6 +36,7 @@ export const isListComponent = (value: unknown): value is ListComponent => {
   const c = value as Record<string, unknown>;
   return (
     c.kind === 'list' &&
+    (c.name === undefined || typeof c.name === 'string') &&
     (c.src === undefined || typeof c.src === 'string') &&
     (c.targetComponentId === undefined || typeof c.targetComponentId === 'string') &&
     (c.style === undefined || isStyle(c.style)) &&

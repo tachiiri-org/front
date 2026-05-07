@@ -8,6 +8,7 @@ const isStyle = (value: unknown): value is Record<string, string> =>
 
 export type TextareaComponent = {
   kind: 'textarea';
+  name?: string;
   language?: 'json' | 'plain';
   value?: string;
   rows?: number;
@@ -16,6 +17,7 @@ export type TextareaComponent = {
 
 export const textareaDefaults: TextareaComponent = {
   kind: 'textarea',
+  name: '',
   language: 'plain',
   value: '',
   rows: 4,
@@ -33,6 +35,7 @@ export const isTextareaComponent = (value: unknown): value is TextareaComponent 
   const c = value as Record<string, unknown>;
   return (
     c.kind === 'textarea' &&
+    (c.name === undefined || typeof c.name === 'string') &&
     (c.language === undefined || c.language === 'json' || c.language === 'plain') &&
     (c.value === undefined || typeof c.value === 'string') &&
     (c.rows === undefined || (typeof c.rows === 'number' && Number.isInteger(c.rows) && c.rows > 0)) &&

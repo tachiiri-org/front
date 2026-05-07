@@ -1,5 +1,6 @@
 import { isComponent, type Component } from './component';
 import { isSelectComponent } from './component/kind/select';
+import { allocateDefaultEntityName, assignDefaultEntityNames } from './name';
 import {
   isScreen,
   isGridLayout,
@@ -88,6 +89,8 @@ const KIND_MIGRATIONS: Record<string, string> = {
   'grid-canvas': 'canvas',
 };
 
+const LEGACY_CANVAS_IDS = new Set(['canvas']);
+
 const migrateFrameKind = (frame: FrameCandidate): FrameCandidate => {
   const f = frame as Record<string, unknown>;
   let kind = frame.kind;
@@ -105,8 +108,10 @@ const migrateFrameKind = (frame: FrameCandidate): FrameCandidate => {
 
 const migrateEditorSource = (frames: FrameCandidate[]): FrameCandidate[] => {
   const canvasToEditorId = new Map<string, string>();
+  const canvasIds = new Set<string>();
   for (const frame of frames) {
     if (frame.kind === 'canvas') {
+      canvasIds.add(frame.id);
       const targetId = (frame as Record<string, unknown>).targetComponentId;
       if (typeof targetId === 'string' && targetId) {
         canvasToEditorId.set(targetId, frame.id);
@@ -119,11 +124,41 @@ const migrateEditorSource = (frames: FrameCandidate[]): FrameCandidate[] => {
       const { targetComponentId: _, ...rest } = f;
       return rest as FrameCandidate;
     }
-    if (frame.kind === 'component-editor' && typeof f.sourceCanvasId !== 'string') {
+    if (frame.kind === 'component-editor') {
+      const currentSourceCanvasId = typeof f.sourceCanvasId === 'string' ? f.sourceCanvasId : '';
+      if (currentSourceCanvasId && canvasIds.has(currentSourceCanvasId)) return frame;
       const canvasId = canvasToEditorId.get(frame.id);
-      if (canvasId !== undefined) {
-        return { ...frame, sourceCanvasId: canvasId };
-      }
+      if (canvasId !== undefined) return { ...frame, sourceCanvasId: canvasId };
+    }
+    return frame;
+  });
+};
+
+const migrateLegacyCanvasIds = (frames: FrameCandidate[]): FrameCandidate[] => {
+  const canvasIdMap = new Map<string, string>();
+  for (const frame of frames) {
+    if (frame.kind === 'canvas' && LEGACY_CANVAS_IDS.has(frame.id)) {
+      canvasIdMap.set(frame.id, crypto.randomUUID());
+    }
+  }
+  if (canvasIdMap.size === 0) return frames;
+
+  return frames.map((frame) => {
+    const f = frame as Record<string, unknown>;
+    if (frame.kind === 'canvas' && canvasIdMap.has(frame.id)) {
+      const nextId = canvasIdMap.get(frame.id) as string;
+      const { targetComponentId: _, ...rest } = f;
+      return { ...rest, id: nextId } as FrameCandidate;
+    }
+    if (frame.kind === 'list' && typeof f.targetComponentId === 'string' && canvasIdMap.has(f.targetComponentId)) {
+      return { ...frame, targetComponentId: canvasIdMap.get(f.targetComponentId) } as FrameCandidate;
+    }
+    if (
+      frame.kind === 'component-editor' &&
+      typeof f.sourceCanvasId === 'string' &&
+      canvasIdMap.has(f.sourceCanvasId)
+    ) {
+      return { ...frame, sourceCanvasId: canvasIdMap.get(f.sourceCanvasId) } as FrameCandidate;
     }
     return frame;
   });
@@ -139,18 +174,21 @@ const normalizeScreen = (value: unknown): Screen | null => {
   if (!isStringRecord(candidate.shell)) return null;
   if (!Array.isArray(candidate.frames) || !candidate.frames.every(isFrameCandidate)) return null;
 
-  const frames = migrateEditorSource((candidate.frames as FrameCandidate[]).map(migrateFrameKind));
-  const placedFrames = frames.filter((f) => isFrame(f)) as Frame[];
+  const frames = migrateEditorSource(
+    migrateLegacyCanvasIds((candidate.frames as FrameCandidate[]).map(migrateFrameKind)),
+  );
+  const namedFrames = assignDefaultEntityNames(frames);
+  const placedFrames = namedFrames.filter((f) => isFrame(f)) as Frame[];
   const existingMaxColumn = placedFrames.reduce(
     (max, f) => Math.max(max, f.placement.x + f.placement.width - 1),
     1,
   );
   const inputGrid = isGridLayout(candidate.grid) ? candidate.grid : null;
-  const columns = Math.max(inputGrid ? inputGrid.columns : deriveColumns(frames), existingMaxColumn);
+  const columns = Math.max(inputGrid ? inputGrid.columns : deriveColumns(namedFrames), existingMaxColumn);
   const rows = inputGrid?.rows;
   const occupied = collectOccupiedCells(placedFrames);
 
-  const normalizedFrames = frames.map((frame) => {
+  const normalizedFrames = namedFrames.map((frame) => {
     const p = (frame as Record<string, unknown>).placement;
     if (isPlacement(p) && isPositiveInteger((p as Placement).width) && isPositiveInteger((p as Placement).height)) {
       if ((frame as Record<string, unknown>).kind === 'canvas') {
@@ -189,6 +227,81 @@ const normalizeScreen = (value: unknown): Screen | null => {
   };
 
   return isScreen(normalized) ? normalized : null;
+};
+
+const isMeaningfulString = (value: unknown): value is string =>
+  typeof value === 'string' && value.trim().length > 0;
+
+const listScreenComponents = async (
+  backend: ReturnType<typeof createLayoutsBackend>,
+  screenId: string,
+  excludeKey?: string,
+): Promise<Array<{ id: string; kind: string; name?: unknown }>> => {
+  const result: Array<{ id: string; kind: string; name?: unknown }> = [];
+  let cursor: string | undefined;
+  const prefix = `${screenId}/components/`;
+  do {
+    const page = await backend.list(prefix, cursor);
+    for (const object of page.objects) {
+      if (!object.key.endsWith('.json')) continue;
+      if (excludeKey && object.key === excludeKey) continue;
+      const id = object.key.slice(prefix.length, -'.json'.length);
+      const body = await backend.getText(object.key);
+      if (!body) continue;
+      try {
+        const value = JSON.parse(body) as unknown;
+        if (!isComponent(value)) continue;
+        result.push({
+          id,
+          kind: (value as Record<string, unknown>).kind as string,
+          name: (value as Record<string, unknown>).name,
+        });
+      } catch {
+        continue;
+      }
+    }
+    cursor = page.truncated ? page.cursor : undefined;
+  } while (cursor);
+  return result;
+};
+
+const normalizeComponentValue = async (
+  backend: ReturnType<typeof createLayoutsBackend>,
+  screenId: string,
+  componentId: string,
+  value: unknown,
+): Promise<Record<string, unknown> | null> => {
+  if (!isComponent(value)) return null;
+
+  const component = value as Record<string, unknown>;
+  if (isMeaningfulString(component.name)) return component;
+
+  const componentKey = `${screenId}/components/${componentId}.json`;
+  const hasNameKey = Object.prototype.hasOwnProperty.call(component, 'name');
+
+  if (!hasNameKey) {
+    const existingBody = await backend.getText(componentKey);
+    if (existingBody) {
+      try {
+        const existingValue = JSON.parse(existingBody) as unknown;
+        if (isComponent(existingValue)) {
+          const existingName = (existingValue as Record<string, unknown>).name;
+          if (isMeaningfulString(existingName)) {
+            return { ...component, name: existingName };
+          }
+        }
+      } catch {
+        // Fall through to auto-allocation.
+      }
+    }
+  }
+
+  const siblings = await listScreenComponents(backend, screenId, componentKey);
+  const kind = component.kind as string;
+  return {
+    ...component,
+    name: allocateDefaultEntityName(siblings, kind),
+  };
 };
 
 const buildJsonFileItems = async (
@@ -250,7 +363,18 @@ const handleScreensJsonFilesGet = async (backend: ReturnType<typeof createLayout
 const handleComponentGet = async (backend: ReturnType<typeof createLayoutsBackend>, screenId: string, componentId: string): Promise<Response> => {
   const body = await backend.getText(`${screenId}/components/${componentId}.json`);
   if (body === null) return new Response('Not Found', { status: 404 });
-  return new Response(body, { headers: { 'Content-Type': 'application/json' } });
+  try {
+    const value = JSON.parse(body) as unknown;
+    const normalized = await normalizeComponentValue(backend, screenId, componentId, value);
+    if (!normalized) return new Response('Invalid component', { status: 400 });
+    const normalizedBody = JSON.stringify(normalized);
+    if (body !== normalizedBody) {
+      await backend.putText(`${screenId}/components/${componentId}.json`, normalizedBody);
+    }
+    return new Response(normalizedBody, { headers: { 'Content-Type': 'application/json' } });
+  } catch {
+    return new Response('Invalid JSON', { status: 400 });
+  }
 };
 
 const handleJsonFilesGet = async (backend: ReturnType<typeof createLayoutsBackend>, screenId: string, prefix: string): Promise<Response> => {
@@ -340,14 +464,15 @@ const handleComponentPut = async (
   const body = await request.text();
   try {
     const value = JSON.parse(body) as unknown;
-    if (!isComponent(value)) return new Response('Invalid component', { status: 400 });
-    if ((value as Record<string, unknown>).kind === 'select' && !isSelectComponent(value)) {
+    const normalized = await normalizeComponentValue(backend, screenId, componentId, value);
+    if (!normalized) return new Response('Invalid component', { status: 400 });
+    if (normalized.kind === 'select' && !isSelectComponent(normalized)) {
       return new Response('Invalid component', { status: 400 });
     }
+    await backend.putText(`${screenId}/components/${componentId}.json`, JSON.stringify(normalized));
   } catch {
     return new Response('Invalid JSON', { status: 400 });
   }
-  await backend.putText(`${screenId}/components/${componentId}.json`, body);
   return new Response(null, { status: 204 });
 };
 
