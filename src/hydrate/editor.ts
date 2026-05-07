@@ -1,4 +1,4 @@
-import { isScreen, isFrameRef, isCanvasFrame } from '../screen';
+import { isScreen, isFrameRef, isCanvasFrame, DEVICE_PRESETS, screenEditSchema } from '../screen';
 import { isComponent, componentDefaults, COMPONENT_KINDS, applyDefaults } from '../component';
 import type { EditorFrame, Screen } from '../screen';
 import type { EditorSection } from '../component/kind/component-editor';
@@ -7,7 +7,7 @@ import { getEntityDisplayName } from '../name';
 import { renderFormFromSchema, inferFieldsFromData, mergeWithSchema } from './form';
 import { buildFieldStyleContext, type FieldStyleContext } from './field';
 import { domMap, getFrameSelection } from '../state';
-import { getSchema } from '../api';
+
 
 const SECTION_SUMMARY_STYLE: Record<string, string> = {
   fontSize: '11px',
@@ -472,19 +472,33 @@ export const hydrateScreenEditor = async (
   const value = (await response.json()) as unknown;
   if (!isScreen(value)) { editorEl.replaceChildren(); return; }
 
-  const screenSchema = getSchema('screen');
   const ctx = buildFieldStyleContext(editorFrame.fieldStyle);
 
-  const screenData = { head: value.head, shell: value.shell, grid: value.grid } as Record<string, unknown>;
+  const editData: Record<string, unknown> = {
+    title: value.head.title,
+    columns: value.grid.columns,
+    rows: value.grid.rows,
+  };
+
   const onSave = async (draft: unknown): Promise<void> => {
+    const d = draft as Record<string, unknown>;
     const freshResponse = await fetch(`/api/layouts/${screenId}`);
     if (!freshResponse.ok) return;
     const freshScreen = (await freshResponse.json()) as unknown;
     if (!isScreen(freshScreen)) return;
+    const updated: Screen = {
+      ...freshScreen,
+      head: { ...freshScreen.head, title: typeof d.title === 'string' ? d.title : freshScreen.head.title },
+      grid: {
+        kind: 'grid',
+        columns: typeof d.columns === 'number' && d.columns > 0 ? d.columns : freshScreen.grid.columns,
+        ...(typeof d.rows === 'number' && d.rows > 0 ? { rows: d.rows } : {}),
+      },
+    };
     await fetch(`/api/layouts/${screenId}`, {
       method: 'PUT',
       headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ ...freshScreen, ...(draft as Record<string, unknown>) }),
+      body: JSON.stringify(updated),
     });
     onAfterSave();
   };
@@ -495,5 +509,72 @@ export const hydrateScreenEditor = async (
   Object.assign(heading.style, SECTION_HEADING_STYLE);
   heading.textContent = 'Screen';
   editorEl.appendChild(heading);
-  editorEl.appendChild(renderSectionContent(screenData, screenSchema, onSave, ctx, true));
+
+  const deviceRow = document.createElement('div');
+  Object.assign(deviceRow.style, {
+    display: 'flex',
+    alignItems: 'center',
+    padding: '2px 8px',
+    gap: '4px',
+    minHeight: '24px',
+  });
+  const deviceLabel = document.createElement('label');
+  Object.assign(deviceLabel.style, {
+    fontSize: '10px',
+    color: 'rgba(0,0,0,0.65)',
+    width: '80px',
+    flexShrink: '0',
+    overflow: 'hidden',
+    textOverflow: 'ellipsis',
+    whiteSpace: 'nowrap',
+  });
+  deviceLabel.textContent = 'device';
+
+  const deviceSelect = document.createElement('select');
+  Object.assign(deviceSelect.style, {
+    flex: '1',
+    fontSize: '12px',
+    border: 'none',
+    borderBottom: '1px solid rgba(0,0,0,0.12)',
+    background: 'transparent',
+    padding: '1px 2px',
+    minWidth: '0',
+    outline: 'none',
+  });
+
+  const currentPreset = DEVICE_PRESETS.find(
+    (p) => p.shell.width === value.shell.width && p.shell.height === value.shell.height,
+  );
+  for (const preset of DEVICE_PRESETS) {
+    const opt = document.createElement('option');
+    opt.value = preset.label;
+    opt.textContent = preset.label;
+    deviceSelect.appendChild(opt);
+  }
+  const customOpt = document.createElement('option');
+  customOpt.value = 'custom';
+  customOpt.textContent = 'Custom';
+  deviceSelect.appendChild(customOpt);
+  deviceSelect.value = currentPreset?.label ?? 'custom';
+
+  deviceSelect.addEventListener('change', async () => {
+    const preset = DEVICE_PRESETS.find((p) => p.label === deviceSelect.value);
+    if (!preset) return;
+    const freshResponse = await fetch(`/api/layouts/${screenId}`);
+    if (!freshResponse.ok) return;
+    const freshScreen = (await freshResponse.json()) as unknown;
+    if (!isScreen(freshScreen)) return;
+    await fetch(`/api/layouts/${screenId}`, {
+      method: 'PUT',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ ...freshScreen, shell: { ...preset.shell } }),
+    });
+    onAfterSave();
+  });
+
+  deviceRow.appendChild(deviceLabel);
+  deviceRow.appendChild(deviceSelect);
+  editorEl.appendChild(deviceRow);
+
+  editorEl.appendChild(renderSectionContent(editData, screenEditSchema, onSave, ctx, true));
 };

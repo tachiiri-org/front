@@ -124,3 +124,15 @@ export const gridSchema: FormField[] = [
   { kind: 'number-field', key: 'rows', label: 'rows' },
   { kind: 'number-field', key: 'columns', label: 'columns' },
 ];
+
+export const screenEditSchema: FormField[] = [
+  { kind: 'text-field', key: 'title', label: 'title' },
+  { kind: 'number-field', key: 'columns', label: 'columns' },
+  { kind: 'number-field', key: 'rows', label: 'rows' },
+];
+
+export const DEVICE_PRESETS: { label: string; shell: Record<string, string> }[] = [
+  { label: 'Desktop', shell: { width: '1920px', height: '1080px' } },
+  { label: 'Tablet', shell: { width: '768px', height: '1024px' } },
+  { label: 'Mobile', shell: { width: '375px', height: '812px' } },
+];

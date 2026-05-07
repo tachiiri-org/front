@@ -29,6 +29,7 @@ const renderScreen = async (screenId: string): Promise<void> => {
 
   document.body.style.margin = '0';
   document.body.style.padding = '0';
+  document.body.style.overflow = 'hidden';
 
   root.innerHTML = '';
   document.title = store.screen.head.title;
@@ -53,6 +54,20 @@ const renderScreen = async (screenId: string): Promise<void> => {
   }
   canvas.style.alignItems = 'stretch';
   root.appendChild(canvas);
+
+  root.style.transform = '';
+  root.style.transformOrigin = '';
+  requestAnimationFrame(() => {
+    const sw = root.offsetWidth;
+    const sh = root.offsetHeight;
+    const vw = window.innerWidth;
+    const vh = window.innerHeight;
+    if (sw > 0 && sh > 0 && (sw > vw || sh > vh)) {
+      const scale = Math.min(vw / sw, vh / sh);
+      root.style.transformOrigin = '0 0';
+      root.style.transform = `scale(${scale})`;
+    }
+  });
 
   await Promise.all(
     store.screen.frames

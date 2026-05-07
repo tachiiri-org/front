@@ -205,14 +205,12 @@ export const hydrateCanvas = async (
   const updateSelectionOverlay = (selectedCell: HTMLElement | null): void => {
     selectionOverlay.replaceChildren();
     if (!selectedCell) return;
-    const canvasRect = canvasEl.getBoundingClientRect();
-    const cellRect = selectedCell.getBoundingClientRect();
     const indicator = document.createElement('div');
     indicator.style.position = 'absolute';
-    indicator.style.left = `${cellRect.left - canvasRect.left}px`;
-    indicator.style.top = `${cellRect.top - canvasRect.top}px`;
-    indicator.style.width = `${cellRect.width}px`;
-    indicator.style.height = `${cellRect.height}px`;
+    indicator.style.left = `${selectedCell.offsetLeft}px`;
+    indicator.style.top = `${selectedCell.offsetTop}px`;
+    indicator.style.width = `${selectedCell.offsetWidth}px`;
+    indicator.style.height = `${selectedCell.offsetHeight}px`;
     indicator.style.outline = '2px solid rgba(0, 100, 220, 0.8)';
     indicator.style.boxSizing = 'border-box';
     selectionOverlay.appendChild(indicator);
