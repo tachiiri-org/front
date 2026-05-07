@@ -1,38 +1,6 @@
-import type { ListFrame } from '../screen';
-import { domMap, getFrameSelection, setFrameSelection, isEditableTarget } from '../state';
-
-const fetchItems = async (src: string): Promise<string[]> => {
-  const response = await fetch(src);
-  if (!response.ok) return [];
-  const value = (await response.json()) as unknown;
-  if (typeof value !== 'object' || value === null || Array.isArray(value)) return [];
-  const items = (value as Record<string, unknown>).items;
-  if (!Array.isArray(items)) return [];
-  return items
-    .map((entry) => {
-      if (typeof entry !== 'object' || entry === null || Array.isArray(entry)) return null;
-      const v = (entry as Record<string, unknown>).value;
-      return typeof v === 'string' ? v : null;
-    })
-    .filter((entry): entry is string => entry !== null);
-};
-
-export const renderListPreview = async (
-  wrapper: HTMLElement,
-  frame: ListFrame,
-): Promise<void> => {
-  if (!frame.src) { wrapper.replaceChildren(); return; }
-  const items = await fetchItems(frame.src);
-  const ul = document.createElement('ul');
-  if (frame.style) Object.assign(ul.style, frame.style);
-  for (const id of items) {
-    const li = document.createElement('li');
-    li.textContent = id;
-    if (frame.itemStyle) Object.assign(li.style, frame.itemStyle);
-    ul.appendChild(li);
-  }
-  wrapper.replaceChildren(ul);
-};
+import type { ListFrame } from '../../screen';
+import { domMap, getFrameSelection, setFrameSelection, isEditableTarget } from '../../state';
+import { fetchItems } from './fetch';
 
 let listInteractionController: AbortController | null = null;
 

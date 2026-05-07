@@ -6,7 +6,7 @@ import {
   type CanvasFrame,
   type EditorFrame,
 } from '../screen';
-import { store, getFrameSelection, setFrameSelection } from '../state';
+import { store, getFrameSelection, setFrameSelection, getCanvasSelection, setCanvasSelection } from '../state';
 import { hydrateList } from './list';
 import { hydrateCanvas } from './canvas';
 import { hydrateComponentEditor, hydrateScreenEditor } from './editor';
@@ -22,8 +22,8 @@ const findDefaultEditableFrameId = (): string | null => {
 
 const resolveEditorTargetFrameId = (canvasFrameId: string | null): string | null => {
   if (canvasFrameId) {
-    const selectedFrameId = getFrameSelection(canvasFrameId);
-    if (selectedFrameId) return selectedFrameId;
+    const sel = getCanvasSelection(canvasFrameId);
+    if (sel?.kind === 'frame') return sel.id;
   }
   return findDefaultEditableFrameId();
 };
@@ -62,13 +62,13 @@ export const hydrateEditor = async (
 
     const onScreenSelect = async (screenId: string): Promise<void> => {
       if (canvasFrame) {
-        setFrameSelection(canvasFrame.id, '');
+        setCanvasSelection(canvasFrame.id, null);
         await hydrateCanvas(screenId, canvasFrame, onFrameSelect, onCanvasSelect, onReload);
       }
       if (editorFrame) {
         const targetFrameId = resolveEditorTargetFrameId(canvasFrame?.id ?? null);
         if (targetFrameId && canvasFrame) {
-          setFrameSelection(canvasFrame.id, targetFrameId);
+          setCanvasSelection(canvasFrame.id, { kind: 'frame', id: targetFrameId });
           await hydrateComponentEditor(screenId, targetFrameId, editorFrame, onReload);
         } else {
           await hydrateComponentEditor(null, null, editorFrame, onReload);
@@ -84,19 +84,24 @@ export const hydrateEditor = async (
       listFrame,
       onScreenSelect,
       onReload,
-      canvasFrame ? () => !!getFrameSelection(canvasFrame.id) : undefined,
+      canvasFrame ? () => getCanvasSelection(canvasFrame.id) !== null : undefined,
     );
 
     const savedScreenId = getFrameSelection(listFrame.id) || initialScreenId;
     if (savedScreenId && canvasFrame) {
       await hydrateCanvas(savedScreenId, canvasFrame, onFrameSelect, onCanvasSelect, onReload);
       if (editorFrame) {
-        const targetFrameId = resolveEditorTargetFrameId(canvasFrame.id);
-        if (targetFrameId) {
-          setFrameSelection(canvasFrame.id, targetFrameId);
-          await hydrateComponentEditor(savedScreenId, targetFrameId, editorFrame, onReload);
+        const canvasSel = getCanvasSelection(canvasFrame.id);
+        if (canvasSel?.kind === 'canvas') {
+          await hydrateScreenEditor(savedScreenId, editorFrame, onReload);
         } else {
-          await hydrateComponentEditor(null, null, editorFrame, onReload);
+          const targetFrameId = resolveEditorTargetFrameId(canvasFrame.id);
+          if (targetFrameId) {
+            setCanvasSelection(canvasFrame.id, { kind: 'frame', id: targetFrameId });
+            await hydrateComponentEditor(savedScreenId, targetFrameId, editorFrame, onReload);
+          } else {
+            await hydrateComponentEditor(null, null, editorFrame, onReload);
+          }
         }
       }
     }

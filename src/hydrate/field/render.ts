@@ -1,113 +1,6 @@
-import type { FormField } from '../component/kind/form/field';
-
-export type FieldStyleContext = {
-  wrapper: Record<string, string>;
-  label: Record<string, string>;
-  input: Record<string, string>;
-};
-
-const DEFAULT_WRAPPER: Record<string, string> = {
-  display: 'flex',
-  alignItems: 'center',
-  padding: '2px 8px',
-  gap: '4px',
-  minHeight: '24px',
-};
-
-const DEFAULT_LABEL: Record<string, string> = {
-  fontSize: '10px',
-  color: 'rgba(0,0,0,0.65)',
-  width: '80px',
-  flexShrink: '0',
-  overflow: 'hidden',
-  textOverflow: 'ellipsis',
-  whiteSpace: 'nowrap',
-};
-
-const DEFAULT_INPUT: Record<string, string> = {
-  flex: '1',
-  fontSize: '12px',
-  border: 'none',
-  borderBottom: '1px solid rgba(0,0,0,0.12)',
-  background: 'transparent',
-  padding: '1px 2px',
-  minWidth: '0',
-  outline: 'none',
-};
-
-const SUMMARY_STYLE: Record<string, string> = {
-  fontSize: '10px',
-  fontWeight: '500',
-  color: 'rgba(0,0,0,0.7)',
-  padding: '2px 8px',
-  cursor: 'pointer',
-  listStyle: 'none',
-  userSelect: 'none',
-};
-
-export function buildFieldStyleContext(override?: {
-  wrapper?: Record<string, string>;
-  label?: Record<string, string>;
-  input?: Record<string, string>;
-}): FieldStyleContext {
-  return {
-    wrapper: { ...DEFAULT_WRAPPER, ...(override?.wrapper ?? {}) },
-    label: { ...DEFAULT_LABEL, ...(override?.label ?? {}) },
-    input: { ...DEFAULT_INPUT, ...(override?.input ?? {}) },
-  };
-}
-
-const getAtPath = (obj: unknown, path: string): unknown => {
-  if (!path) return obj;
-  return path.split('.').reduce((acc: unknown, key: string) => {
-    if (acc === null || typeof acc !== 'object') return undefined;
-    if (Array.isArray(acc)) {
-      const idx = parseInt(key, 10);
-      return isNaN(idx) ? undefined : (acc as unknown[])[idx];
-    }
-    return (acc as Record<string, unknown>)[key];
-  }, obj);
-};
-
-const setAtPath = (obj: unknown, path: string, value: unknown): void => {
-  if (!path || obj === null || typeof obj !== 'object') return;
-  const keys = path.split('.');
-  const last = keys.pop()!;
-  const parent = keys.reduce((acc: unknown, key: string): unknown => {
-    if (acc === null || typeof acc !== 'object') return null;
-    if (Array.isArray(acc)) {
-      const idx = parseInt(key, 10);
-      return isNaN(idx) ? null : (acc as unknown[])[idx];
-    }
-    return (acc as Record<string, unknown>)[key] ?? null;
-  }, obj);
-  if (parent === null || typeof parent !== 'object') return;
-  if (Array.isArray(parent)) {
-    const idx = parseInt(last, 10);
-    if (!isNaN(idx)) (parent as unknown[])[idx] = value;
-  } else {
-    (parent as Record<string, unknown>)[last] = value;
-  }
-};
-
-const isStringRecord = (v: unknown): v is Record<string, string> =>
-  typeof v === 'object' &&
-  v !== null &&
-  !Array.isArray(v) &&
-  Object.values(v as Record<string, unknown>).every((x) => typeof x === 'string');
-
-const blankFromSchema = (fields: FormField[]): Record<string, unknown> => {
-  const obj: Record<string, unknown> = {};
-  for (const field of fields) {
-    if (!('key' in field) || !field.key) continue;
-    if (field.kind === 'number-field') obj[field.key] = 0;
-    else if (field.kind === 'boolean-field') obj[field.key] = false;
-    else if (field.kind === 'text-field' || field.kind === 'textarea-field') obj[field.key] = '';
-    else if (field.kind === 'style-map-field') obj[field.key] = {};
-    else if (field.kind === 'object-list-field') obj[field.key] = [];
-  }
-  return obj;
-};
+import type { FormField } from '../../component/kind/form/field';
+import { type FieldStyleContext, SUMMARY_STYLE } from './context';
+import { getAtPath, setAtPath, blankFromSchema } from './path';
 
 const mk = <K extends keyof HTMLElementTagNameMap>(tag: K): HTMLElementTagNameMap[K] =>
   document.createElement(tag);
@@ -210,6 +103,12 @@ function renderBooleanField(
   wrapper.appendChild(input);
   return wrapper;
 }
+
+const isStringRecord = (v: unknown): v is Record<string, string> =>
+  typeof v === 'object' &&
+  v !== null &&
+  !Array.isArray(v) &&
+  Object.values(v as Record<string, unknown>).every((x) => typeof x === 'string');
 
 function renderStyleMap(
   label: string,

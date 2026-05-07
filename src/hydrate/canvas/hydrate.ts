@@ -1,139 +1,23 @@
-import { isScreen, isFrameRef } from '../screen';
-import type { Frame, CanvasFrame, Screen, ListFrame, EditorFrame } from '../screen';
-import type { Component } from '../component';
-import { componentDefaults, elementDefaults } from '../component';
-import { renderComponent } from '../render/component';
-import { domMap, getFrameSelection, setFrameSelection, isEditableTarget } from '../state';
-import { fetchFrameComponent } from '../api';
-import { renderListPreview } from './list';
-import { renderEditorPreview } from './editor';
-import { allocateDefaultEntityName } from '../name';
+import { isScreen, isFrameRef } from '../../screen';
+import type { Frame, CanvasFrame, Screen, ListFrame, EditorFrame } from '../../screen';
+import type { Component } from '../../component';
+import { elementDefaults } from '../../component';
+import { domMap, getCanvasSelection, setCanvasSelection, isEditableTarget } from '../../state';
+import { fetchFrameComponent } from '../../api';
+import { renderListPreview } from '../list';
+import { renderEditorPreview } from '../editor';
+import { allocateDefaultEntityName } from '../../name';
+import { renderComponent } from '../../render/component';
+import { previewScaleRafs, schedulePreviewScale } from './scale';
+import { EDITOR_ONLY_KINDS, renderCanvasPreview, renderFramePreview } from './preview';
 
-const EDITOR_ONLY_KINDS = new Set(['canvas', 'list', 'component-editor']);
-
-const previewScaleRafs = new Map<string, number>();
 let previewResizeObserver: ResizeObserver | null = null;
-
-const CANVAS_PREVIEW_COLS = 50;
-const CANVAS_PREVIEW_ROWS = 50;
-
-const renderCanvasPreview = (
-  wrapper: HTMLElement,
-  frame: CanvasFrame,
-): void => {
-  const cols = CANVAS_PREVIEW_COLS;
-  const rows = CANVAS_PREVIEW_ROWS;
-  const grid = document.createElement('div');
-  grid.style.display = 'grid';
-  grid.style.gridTemplateColumns = `repeat(${cols}, minmax(0, 1fr))`;
-  grid.style.gridTemplateRows = `repeat(${rows}, minmax(0, 1fr))`;
-  grid.style.border = '1px solid rgba(0, 0, 0, 0.12)';
-  grid.style.boxSizing = 'border-box';
-  grid.style.width = '100%';
-  grid.style.height = '100%';
-  if (frame.style) Object.assign(grid.style, frame.style);
-  for (let row = 1; row <= rows; row += 1) {
-    for (let col = 1; col <= cols; col += 1) {
-      const cell = document.createElement('div');
-      cell.style.borderRight = col < cols ? '1px solid rgba(0,0,0,0.06)' : 'none';
-      cell.style.borderBottom = row < rows ? '1px solid rgba(0,0,0,0.06)' : 'none';
-      grid.appendChild(cell);
-    }
-  }
-  wrapper.replaceChildren(grid);
-};
-
-const renderFramePreview = (frame: Frame, resolved: Component | null, effectiveKind: string): HTMLElement => {
-  const wrapper = document.createElement('div');
-  wrapper.style.position = 'absolute';
-  wrapper.style.inset = '0';
-  wrapper.style.overflow = 'hidden';
-  wrapper.style.pointerEvents = 'none';
-  wrapper.style.userSelect = 'none';
-
-  if (!EDITOR_ONLY_KINDS.has(effectiveKind)) {
-    wrapper.appendChild(renderComponent(frame, {}, resolved));
-  }
-
-  return wrapper;
-};
-
-const isPositiveInteger = (value: unknown): value is number =>
-  typeof value === 'number' && Number.isInteger(value) && value > 0;
-
-const computePreviewScale = (
-  canvasEl: HTMLElement,
-  canvasFrame: CanvasFrame,
-  wrapper: HTMLElement,
-  content: HTMLElement,
-  effectiveKind: string,
-): number => {
-  if (effectiveKind === 'canvas' || effectiveKind === 'component-editor') return 1;
-
-  const viewportWidth = canvasFrame.viewportWidth;
-  const viewportHeight = canvasFrame.viewportHeight;
-
-  if (isPositiveInteger(viewportWidth) && isPositiveInteger(viewportHeight)) {
-    const canvasRect = canvasEl.getBoundingClientRect();
-    if (canvasRect.width > 0 && canvasRect.height > 0) {
-      return Math.min(canvasRect.width / viewportWidth, canvasRect.height / viewportHeight);
-    }
-  }
-
-  const wrapperRect = wrapper.getBoundingClientRect();
-  const contentRect = content.getBoundingClientRect();
-  const widthRatio = wrapperRect.width > 0 && contentRect.width > 0
-    ? wrapperRect.width / contentRect.width
-    : 1;
-  const heightRatio = wrapperRect.height > 0 && contentRect.height > 0
-    ? wrapperRect.height / contentRect.height
-    : 1;
-  return Math.min(widthRatio, heightRatio);
-};
-
-const updatePreviewScale = (
-  frameId: string,
-  wrappers: Map<string, HTMLElement>,
-  canvasEl: HTMLElement,
-  canvasFrame: CanvasFrame,
-  effectiveKind: string,
-): void => {
-  const wrapper = wrappers.get(frameId);
-  if (!wrapper) return;
-
-  const content = wrapper.firstElementChild as HTMLElement | null;
-  if (!content) return;
-
-  content.style.transformOrigin = 'top left';
-  content.style.transform = 'none';
-  const scale = computePreviewScale(canvasEl, canvasFrame, wrapper, content, effectiveKind);
-
-  content.style.transform = scale > 0 && Number.isFinite(scale)
-    ? `scale(${scale})`
-    : '';
-};
-
-const schedulePreviewScale = (
-  frameId: string,
-  wrappers: Map<string, HTMLElement>,
-  canvasEl: HTMLElement,
-  canvasFrame: CanvasFrame,
-  effectiveKind: string,
-): void => {
-  const existing = previewScaleRafs.get(frameId);
-  if (existing !== undefined) cancelAnimationFrame(existing);
-  const rafId = requestAnimationFrame(() => {
-    previewScaleRafs.delete(frameId);
-    updatePreviewScale(frameId, wrappers, canvasEl, canvasFrame, effectiveKind);
-  });
-  previewScaleRafs.set(frameId, rafId);
-};
-
-let canvasInteractionController: AbortController | null = null;
 
 const directionMap: Record<string, [number, number]> = {
   ArrowLeft: [-1, 0], ArrowRight: [1, 0], ArrowUp: [0, -1], ArrowDown: [0, 1],
 };
+
+let canvasInteractionController: AbortController | null = null;
 
 export const hydrateCanvas = async (
   selectedScreenId: string | null,
@@ -191,7 +75,8 @@ export const hydrateCanvas = async (
       }),
   );
 
-  const currentSelection = getFrameSelection(canvasFrame.id);
+  const currentSel = getCanvasSelection(canvasFrame.id);
+  const currentFrameId = currentSel?.kind === 'frame' ? currentSel.id : null;
   const screenId = selectedScreenId;
   const frameCells = new Map<string, HTMLElement>();
   const previewWrappers = new Map<string, HTMLElement>();
@@ -277,8 +162,9 @@ export const hydrateCanvas = async (
         })
         .map((frame) => refreshPreview(frame)),
     );
-    const selectedId = getFrameSelection(canvasFrame.id);
-    updateSelectionOverlay(selectedId ? frameCells.get(selectedId) ?? null : null);
+    const depSel = getCanvasSelection(canvasFrame.id);
+    const depFrameId = depSel?.kind === 'frame' ? depSel.id : null;
+    updateSelectionOverlay(depFrameId ? frameCells.get(depFrameId) ?? null : null);
   };
 
   const appendFrameCell = (cell: HTMLElement): void => {
@@ -338,7 +224,8 @@ export const hydrateCanvas = async (
 
     cell.addEventListener('pointermove', (ev: PointerEvent) => {
       if (ev.buttons !== 0) return;
-      const isSelected = getFrameSelection(canvasFrame.id) === frame.id;
+      const sel = getCanvasSelection(canvasFrame.id);
+      const isSelected = sel?.kind === 'frame' && sel.id === frame.id;
       const d = isSelected ? getDir(ev, cell) : null;
       cell.style.cursor = d ? dirCursor(d) : '';
     });
@@ -347,7 +234,8 @@ export const hydrateCanvas = async (
 
     cell.addEventListener('pointerdown', (e: PointerEvent) => {
       if (e.button !== 0) return;
-      const isSelected = getFrameSelection(canvasFrame.id) === frame.id;
+      const sel = getCanvasSelection(canvasFrame.id);
+      const isSelected = sel?.kind === 'frame' && sel.id === frame.id;
       const dir = isSelected ? getDir(e, cell) : null;
       isDragging = false;
       const startX = e.clientX;
@@ -475,7 +363,7 @@ export const hydrateCanvas = async (
       if (isDragging) { isDragging = false; return; }
       applyCanvasSelectedStyle(false);
       updateSelectionOverlay(cell);
-      setFrameSelection(canvasFrame.id, frame.id);
+      setCanvasSelection(canvasFrame.id, { kind: 'frame', id: frame.id });
       void onFrameSelect(screenId, frame.id);
     });
 
@@ -492,8 +380,9 @@ export const hydrateCanvas = async (
   canvasInteractionController = new AbortController();
   window.addEventListener('keydown', (e: KeyboardEvent) => {
     if (isEditableTarget(e.target)) return;
-    const selectedId = getFrameSelection(canvasFrame.id);
-    if (!selectedId) return;
+    const keySel = getCanvasSelection(canvasFrame.id);
+    if (keySel?.kind !== 'frame') return;
+    const selectedId = keySel.id;
 
     if (e.key === 'Delete') {
       e.preventDefault();
@@ -519,7 +408,7 @@ export const hydrateCanvas = async (
           frames: freshScreen.frames.filter((f) => f.id !== selectedId),
         };
         syncCanvasBounds();
-        setFrameSelection(canvasFrame.id, '');
+        setCanvasSelection(canvasFrame.id, null);
         updateSelectionOverlay(null);
         await refreshDependentPreviews();
         await onFrameSelect(screenId, null);
@@ -568,7 +457,7 @@ export const hydrateCanvas = async (
     if (suppressCanvasClick) { suppressCanvasClick = false; return; }
     updateSelectionOverlay(null);
     applyCanvasSelectedStyle(true);
-    setFrameSelection(canvasFrame.id, '');
+    setCanvasSelection(canvasFrame.id, { kind: 'canvas' });
     void onCanvasSelect(screenId);
   });
 
@@ -640,7 +529,7 @@ export const hydrateCanvas = async (
         if (!freshRes.ok) return;
         const freshScreen = (await freshRes.json()) as unknown;
         if (!isScreen(freshScreen)) return;
-        setFrameSelection(canvasFrame.id, newId);
+        setCanvasSelection(canvasFrame.id, { kind: 'frame', id: newId });
         const newFrameData = {
           ...elementDefaults,
           id: newId,
@@ -669,7 +558,7 @@ export const hydrateCanvas = async (
         };
         syncCanvasBounds();
         insertFrameCell(newFrame);
-        setFrameSelection(canvasFrame.id, newId);
+        setCanvasSelection(canvasFrame.id, { kind: 'frame', id: newId });
         updateSelectionOverlay(frameCells.get(newId) ?? null);
         await refreshDependentPreviews();
         void onFrameSelect(screenId, newId);
@@ -687,7 +576,7 @@ export const hydrateCanvas = async (
   }
 
   canvasEl.appendChild(selectionOverlay);
-  updateSelectionOverlay(currentSelection ? frameCells.get(currentSelection) ?? null : null);
+  updateSelectionOverlay(currentFrameId ? frameCells.get(currentFrameId) ?? null : null);
 
   if (typeof ResizeObserver !== 'undefined') {
     previewResizeObserver = new ResizeObserver(() => {
