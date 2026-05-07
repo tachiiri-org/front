@@ -1,6 +1,6 @@
 import type { FormField } from '../../component/kind/form/field';
 import { type FieldStyleContext, SUMMARY_STYLE } from './context';
-import { getAtPath, setAtPath, blankFromSchema } from './path';
+import { getAtPath, setAtPath, blankFromSchema } from '../../hydrate/field/path';
 
 const mk = <K extends keyof HTMLElementTagNameMap>(tag: K): HTMLElementTagNameMap[K] =>
   document.createElement(tag);

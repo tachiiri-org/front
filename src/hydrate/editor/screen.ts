@@ -3,7 +3,7 @@ import type { EditorFrame } from '../../screen';
 import { buildFieldStyleContext } from '../field';
 import { domMap } from '../../state';
 import { fetchScreen, updateScreen } from './save';
-import { SECTION_HEADING_STYLE, renderSectionContent } from './section';
+import { SECTION_HEADING_STYLE, renderSectionContent } from '../../render/editor/section';
 
 export const hydrateScreenEditor = async (
   screenId: string,

@@ -1,7 +1,9 @@
 import type { EditorSection } from '../../component/kind/component-editor';
 import type { FormField } from '../../component/kind/form/field';
-import { renderFormFromSchema, inferFieldsFromData, mergeWithSchema } from '../form';
-import type { FieldStyleContext } from '../field';
+import { renderFormFromSchema } from './form';
+import type { FieldStyleContext } from './context';
+import { inferFieldsFromData } from '../../hydrate/form/infer';
+import { mergeWithSchema } from '../../hydrate/form/merge';
 
 export const SECTION_SUMMARY_STYLE: Record<string, string> = {
   fontSize: '11px',

@@ -1,6 +1,6 @@
 import type { Frame, CanvasFrame } from '../../screen';
 import type { Component } from '../../component';
-import { renderComponent } from '../../render/component';
+import { renderComponent } from '../page/component';
 
 export const EDITOR_ONLY_KINDS = new Set(['canvas', 'list', 'component-editor']);
 

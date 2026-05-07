@@ -2,10 +2,9 @@ import type { EditorFrame, Screen } from '../../screen';
 import { applyDefaults } from '../../component';
 import { getFrameSelection } from '../../state';
 import type { EditorSection } from '../../component/kind/component-editor';
-import { appendSection } from './section';
-import { renderPlacementRow } from './placement';
-
-export const EDITOR_ONLY_KINDS = new Set(['canvas', 'list', 'component-editor']);
+import { EDITOR_ONLY_KINDS } from '../../render/canvas/preview';
+import { appendSection } from '../../render/editor/section';
+import { renderPlacementRow } from '../../render/editor/placement';
 
 export const renderEditorPreview = async (
   wrapper: HTMLElement,

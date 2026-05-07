@@ -7,8 +7,8 @@ import { getEntityDisplayName } from '../../name';
 import { buildFieldStyleContext, type FieldStyleContext } from '../field';
 import { domMap } from '../../state';
 import { putComponent, updateScreen, fetchScreen } from './save';
-import { appendSection, createLabeledRow, renderSectionContent } from './section';
-import { renderPlacementRow } from './placement';
+import { appendSection, createLabeledRow, renderSectionContent } from '../../render/editor/section';
+import { renderPlacementRow } from '../../render/editor/placement';
 
 const NAME_PROPERTY_SCHEMA: FormField[] = [{ kind: 'text-field', key: 'name', label: 'name' }];
 

@@ -1,2 +1,2 @@
-export { buildFieldStyleContext, type FieldStyleContext } from './context';
-export { renderFieldFromSchema } from './render';
+export { buildFieldStyleContext, type FieldStyleContext } from '../../render/editor/context';
+export { renderFieldFromSchema } from '../../render/editor/field';

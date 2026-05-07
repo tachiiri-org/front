@@ -7,9 +7,9 @@ import { fetchFrameComponent } from '../../api';
 import { renderListPreview } from '../list';
 import { renderEditorPreview } from '../editor';
 import { allocateDefaultEntityName } from '../../name';
-import { renderComponent } from '../../render/component';
+import { renderComponent } from '../../render/page/component';
 import { previewScaleRafs, schedulePreviewScale } from './scale';
-import { EDITOR_ONLY_KINDS, renderCanvasPreview, renderFramePreview } from './preview';
+import { EDITOR_ONLY_KINDS, renderCanvasPreview, renderFramePreview } from '../../render/canvas/preview';
 
 let previewResizeObserver: ResizeObserver | null = null;
 
