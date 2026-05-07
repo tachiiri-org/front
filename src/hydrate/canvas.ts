@@ -14,15 +14,15 @@ const EDITOR_ONLY_KINDS = new Set(['canvas', 'list', 'component-editor']);
 const previewScaleRafs = new Map<string, number>();
 let previewResizeObserver: ResizeObserver | null = null;
 
+const CANVAS_PREVIEW_COLS = 50;
+const CANVAS_PREVIEW_ROWS = 50;
+
 const renderCanvasPreview = (
   wrapper: HTMLElement,
   frame: CanvasFrame,
-  screen: Screen,
 ): void => {
-  const cols = screen.grid.columns;
-  const rows = screen.grid.rows ?? screen.frames.reduce(
-    (m, f) => Math.max(m, f.placement.y + f.placement.height - 1), 1,
-  );
+  const cols = CANVAS_PREVIEW_COLS;
+  const rows = CANVAS_PREVIEW_ROWS;
   const grid = document.createElement('div');
   grid.style.display = 'grid';
   grid.style.gridTemplateColumns = `repeat(${cols}, minmax(0, 1fr))`;
@@ -252,7 +252,7 @@ export const hydrateCanvas = async (
     }
 
     if (effectiveKind === 'canvas') {
-      renderCanvasPreview(wrapper, frame as CanvasFrame, screen);
+      renderCanvasPreview(wrapper, frame as CanvasFrame);
       schedulePreviewScale(frame.id, previewWrappers, canvasEl, canvasFrame, effectiveKind);
       return;
     }

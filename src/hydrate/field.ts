@@ -112,7 +112,13 @@ const blankFromSchema = (fields: FormField[]): Record<string, unknown> => {
 const mk = <K extends keyof HTMLElementTagNameMap>(tag: K): HTMLElementTagNameMap[K] =>
   document.createElement(tag);
 
-function renderTextField(label: string, path: string, draft: Record<string, unknown>, ctx: FieldStyleContext): HTMLElement {
+function renderTextField(
+  label: string,
+  path: string,
+  draft: Record<string, unknown>,
+  ctx: FieldStyleContext,
+  onBlurSave?: () => void,
+): HTMLElement {
   const wrapper = mk('div');
   Object.assign(wrapper.style, ctx.wrapper);
   const lbl = mk('label');
@@ -124,12 +130,19 @@ function renderTextField(label: string, path: string, draft: Record<string, unkn
   const current = getAtPath(draft, path);
   input.value = typeof current === 'string' ? current : '';
   input.addEventListener('input', () => { setAtPath(draft, path, input.value); });
+  if (onBlurSave) input.addEventListener('blur', onBlurSave);
   wrapper.appendChild(lbl);
   wrapper.appendChild(input);
   return wrapper;
 }
 
-function renderNumberField(label: string, path: string, draft: Record<string, unknown>, ctx: FieldStyleContext): HTMLElement {
+function renderNumberField(
+  label: string,
+  path: string,
+  draft: Record<string, unknown>,
+  ctx: FieldStyleContext,
+  onBlurSave?: () => void,
+): HTMLElement {
   const wrapper = mk('div');
   Object.assign(wrapper.style, ctx.wrapper);
   const lbl = mk('label');
@@ -144,12 +157,19 @@ function renderNumberField(label: string, path: string, draft: Record<string, un
     const next = input.value.trim();
     setAtPath(draft, path, next === '' ? 0 : Number(next));
   });
+  if (onBlurSave) input.addEventListener('blur', onBlurSave);
   wrapper.appendChild(lbl);
   wrapper.appendChild(input);
   return wrapper;
 }
 
-function renderTextarea(label: string, path: string, draft: Record<string, unknown>, ctx: FieldStyleContext): HTMLElement {
+function renderTextarea(
+  label: string,
+  path: string,
+  draft: Record<string, unknown>,
+  ctx: FieldStyleContext,
+  onBlurSave?: () => void,
+): HTMLElement {
   const wrapper = mk('div');
   Object.assign(wrapper.style, ctx.wrapper);
   const lbl = mk('label');
@@ -162,12 +182,19 @@ function renderTextarea(label: string, path: string, draft: Record<string, unkno
   const current = getAtPath(draft, path);
   ta.value = typeof current === 'string' ? current : '';
   ta.addEventListener('input', () => { setAtPath(draft, path, ta.value); });
+  if (onBlurSave) ta.addEventListener('blur', onBlurSave);
   wrapper.appendChild(lbl);
   wrapper.appendChild(ta);
   return wrapper;
 }
 
-function renderBooleanField(label: string, path: string, draft: Record<string, unknown>, ctx: FieldStyleContext): HTMLElement {
+function renderBooleanField(
+  label: string,
+  path: string,
+  draft: Record<string, unknown>,
+  ctx: FieldStyleContext,
+  onBlurSave?: () => void,
+): HTMLElement {
   const wrapper = mk('div');
   Object.assign(wrapper.style, ctx.wrapper);
   const lbl = mk('label');
@@ -178,12 +205,19 @@ function renderBooleanField(label: string, path: string, draft: Record<string, u
   const current = getAtPath(draft, path);
   input.checked = typeof current === 'boolean' ? current : false;
   input.addEventListener('change', () => { setAtPath(draft, path, input.checked); });
+  if (onBlurSave) input.addEventListener('blur', onBlurSave);
   wrapper.appendChild(lbl);
   wrapper.appendChild(input);
   return wrapper;
 }
 
-function renderStyleMap(label: string, path: string, draft: Record<string, unknown>, ctx: FieldStyleContext): HTMLElement {
+function renderStyleMap(
+  label: string,
+  path: string,
+  draft: Record<string, unknown>,
+  ctx: FieldStyleContext,
+  onBlurSave?: () => void,
+): HTMLElement {
   const wrapper = mk('div');
 
   const raw = getAtPath(draft, path);
@@ -221,6 +255,10 @@ function renderStyleMap(label: string, path: string, draft: Record<string, unkno
         renderRows();
       });
       valInput.addEventListener('input', () => { map[key] = valInput.value; });
+      if (onBlurSave) {
+        keyInput.addEventListener('blur', onBlurSave);
+        valInput.addEventListener('blur', onBlurSave);
+      }
       removeBtn.addEventListener('click', () => { delete map[key]; renderRows(); });
       row.appendChild(keyInput);
       row.appendChild(valInput);
@@ -253,20 +291,25 @@ function renderStyleMap(label: string, path: string, draft: Record<string, unkno
   return wrapper;
 }
 
-export function renderFieldFromSchema(field: FormField, draft: Record<string, unknown>, ctx: FieldStyleContext): HTMLElement {
+export function renderFieldFromSchema(
+  field: FormField,
+  draft: Record<string, unknown>,
+  ctx: FieldStyleContext,
+  onBlurSave?: () => void,
+): HTMLElement {
   const label: string = ('label' in field && field.label) ? field.label : (('key' in field && field.key) ? field.key : '');
 
   switch (field.kind) {
     case 'text-field':
-      return renderTextField(label, field.key, draft, ctx);
+      return renderTextField(label, field.key, draft, ctx, onBlurSave);
     case 'number-field':
-      return renderNumberField(label, field.key, draft, ctx);
+      return renderNumberField(label, field.key, draft, ctx, onBlurSave);
     case 'textarea-field':
-      return renderTextarea(label, field.key, draft, ctx);
+      return renderTextarea(label, field.key, draft, ctx, onBlurSave);
     case 'boolean-field':
-      return renderBooleanField(label, field.key, draft, ctx);
+      return renderBooleanField(label, field.key, draft, ctx, onBlurSave);
     case 'style-map-field':
-      return renderStyleMap(label, field.key, draft, ctx);
+      return renderStyleMap(label, field.key, draft, ctx, onBlurSave);
     case 'object-list-field': {
       const wrapper = mk('div');
       const headingRow = mk('div');
@@ -308,7 +351,7 @@ export function renderFieldFromSchema(field: FormField, draft: Record<string, un
           removeBtn.addEventListener('click', () => { arr.splice(i, 1); renderItems(); });
           section.appendChild(removeBtn);
           for (const subField of field.fields) {
-            section.appendChild(renderFieldFromSchema(subField, item, ctx));
+            section.appendChild(renderFieldFromSchema(subField, item, ctx, onBlurSave));
           }
           list.appendChild(section);
         });
@@ -332,7 +375,7 @@ export function renderFieldFromSchema(field: FormField, draft: Record<string, un
         Object.assign(summary.style, SUMMARY_STYLE);
         details.appendChild(summary);
         for (const subField of field.fields) {
-          details.appendChild(renderFieldFromSchema(subField, subDraft, ctx));
+          details.appendChild(renderFieldFromSchema(subField, subDraft, ctx, onBlurSave));
         }
         return details;
       }
@@ -347,7 +390,7 @@ export function renderFieldFromSchema(field: FormField, draft: Record<string, un
         wrapper.appendChild(headingRow);
       }
       for (const subField of field.fields) {
-        wrapper.appendChild(renderFieldFromSchema(subField, subDraft, ctx));
+        wrapper.appendChild(renderFieldFromSchema(subField, subDraft, ctx, onBlurSave));
       }
       return wrapper;
     }

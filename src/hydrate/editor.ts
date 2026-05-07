@@ -29,52 +29,42 @@ const SECTION_HEADING_STYLE: Record<string, string> = {
   letterSpacing: '0.02em',
 };
 
+const NAME_PROPERTY_SCHEMA: FormField[] = [{ kind: 'text-field', key: 'name', label: 'name' }];
+
 const renderSectionContent = (
   data: Record<string, unknown>,
   schema: FormField[] | null,
   onSave: (draft: unknown) => Promise<void>,
   ctx: FieldStyleContext,
+  saveOnBlur = false,
 ): HTMLElement => {
   const inferred = inferFieldsFromData(data);
   const fields = schema ? mergeWithSchema(inferred, schema) : inferred;
-  return renderFormFromSchema(data, fields, onSave, ctx);
+  return renderFormFromSchema(data, fields, onSave, ctx, { saveOnBlur });
 };
 
-const PROTECTED_PROPERTY_KEYS = new Set(['kind', 'id', 'placement']);
-const EDITOR_SPECIAL_PROPERTY_KEYS = new Set(['sourceCanvasId']);
-
 const getEditableComponentData = (
-  componentKind: string,
   data: Record<string, unknown>,
-  extraExcludes: readonly string[] = [],
 ): Record<string, unknown> => {
-  const excluded = new Set<string>([...PROTECTED_PROPERTY_KEYS, ...extraExcludes]);
-  if (componentKind === 'component-editor') {
-    for (const key of EDITOR_SPECIAL_PROPERTY_KEYS) excluded.add(key);
-  }
-
   const editable: Record<string, unknown> = {};
-  for (const [key, value] of Object.entries(data)) {
-    if (excluded.has(key)) continue;
-    editable[key] = value;
+  if (Object.prototype.hasOwnProperty.call(data, 'name')) {
+    editable.name = data.name;
   }
   return editable;
 };
 
 const renderPropertiesSection = (
-  componentKind: string,
   componentData: Record<string, unknown>,
-  extraExcludes: readonly string[],
   onSave: (patch: Record<string, unknown>) => Promise<void>,
   ctx: FieldStyleContext,
 ): HTMLElement => {
-  const schema = getSchema(componentKind);
-  const editableData = getEditableComponentData(componentKind, componentData, extraExcludes);
+  const editableData = getEditableComponentData(componentData);
   return renderSectionContent(
     editableData,
-    schema,
+    NAME_PROPERTY_SCHEMA,
     async (draft) => onSave(draft as Record<string, unknown>),
     ctx,
+    true,
   );
 };
 
@@ -241,9 +231,6 @@ export const hydrateComponentEditor = async (
 
   const editorConfig = applyDefaults('component-editor', editorFrame as unknown as Record<string, unknown>);
   const sections = editorConfig.sections as EditorSection[];
-  const editorExcludeKeys = Array.isArray(editorConfig.excludeKeys)
-    ? editorConfig.excludeKeys.filter((key): key is string => typeof key === 'string')
-    : [];
   const ctx = buildFieldStyleContext(editorFrame.fieldStyle);
 
   editorEl.replaceChildren();
@@ -414,25 +401,20 @@ export const hydrateComponentEditor = async (
     const onSave = async (draft: unknown): Promise<void> => {
       await saveSelectedFrameUpdate(draft as Record<string, unknown>);
     };
-    const editableData = getEditableComponentData(componentKind, componentData, editorExcludeKeys);
-    const propertiesSchema = getSchema(componentKind);
     appendSection(
       editorEl,
       section,
-      renderSectionContent(editableData, propertiesSchema, onSave, ctx),
+      renderSectionContent(getEditableComponentData(componentData), NAME_PROPERTY_SCHEMA, onSave, ctx, true),
     );
     renderedProperties = true;
   }
 
   if (!renderedProperties && componentKind && componentData) {
-    const editableData = getEditableComponentData(componentKind, componentData, editorExcludeKeys);
     const onSave = async (draft: unknown): Promise<void> => {
       await saveSelectedFrameUpdate(draft as Record<string, unknown>);
     };
     const propertiesSection = renderPropertiesSection(
-      componentKind,
-      editableData,
-      editorExcludeKeys,
+      componentData,
       onSave,
       ctx,
     );
@@ -513,5 +495,5 @@ export const hydrateScreenEditor = async (
   Object.assign(heading.style, SECTION_HEADING_STYLE);
   heading.textContent = 'Screen';
   editorEl.appendChild(heading);
-  editorEl.appendChild(renderSectionContent(screenData, screenSchema, onSave, ctx));
+  editorEl.appendChild(renderSectionContent(screenData, screenSchema, onSave, ctx, true));
 };
