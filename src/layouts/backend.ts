@@ -1,4 +1,4 @@
-import { authorizeFetch, hasAuthorizeConfig, type AuthorizeEnv } from "./authorize";
+import { authorizeFetch, hasAuthorizeConfig, type AuthorizeEnv } from "../authorize";
 
 type LayoutListItem = {
   key: string;

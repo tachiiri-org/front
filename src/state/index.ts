@@ -1,5 +1,7 @@
 import { createStore } from './store';
 
+export type { FrameState } from './store';
+
 export const store = createStore();
 export const domMap = new Map<string, HTMLElement>();
 
@@ -12,6 +14,29 @@ export const getFrameSelection = (frameId: string): string | null => {
 export const setFrameSelection = (frameId: string, value: string): void => {
   const current = store.frameStates.get(frameId) ?? {};
   store.frameStates.set(frameId, { ...current, selectedValue: value });
+};
+
+export type CanvasSelection =
+  | { kind: 'canvas' }
+  | { kind: 'frame'; id: string }
+  | null;
+
+export const getCanvasSelection = (frameId: string): CanvasSelection => {
+  const v = getFrameSelection(frameId);
+  if (v === null) return null;
+  if (v === '') return { kind: 'canvas' };
+  return { kind: 'frame', id: v };
+};
+
+export const setCanvasSelection = (frameId: string, value: CanvasSelection): void => {
+  if (value === null) {
+    const current = store.frameStates.get(frameId) ?? {};
+    store.frameStates.set(frameId, { ...current, selectedValue: undefined });
+  } else if (value.kind === 'canvas') {
+    setFrameSelection(frameId, '');
+  } else {
+    setFrameSelection(frameId, value.id);
+  }
 };
 
 export const isEditableTarget = (target: EventTarget | null): boolean => {

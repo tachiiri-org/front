@@ -3,7 +3,7 @@ import { isComponent, componentDefaults, COMPONENT_KINDS, applyDefaults } from '
 import type { EditorFrame } from '../../screen';
 import type { EditorSection } from '../../component/kind/component-editor';
 import type { FormField } from '../../component/kind/form/field';
-import { getEntityDisplayName } from '../../name';
+import { getEntityDisplayName } from '../../component/name';
 import { buildFieldStyleContext, type FieldStyleContext } from '../field';
 import { domMap } from '../../state';
 import { putComponent, updateScreen, fetchScreen } from './save';

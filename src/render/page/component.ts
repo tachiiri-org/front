@@ -7,7 +7,7 @@ import {
   type Component,
 } from '../../component';
 import { type Frame, type FrameRef, isFrameRef } from '../../screen';
-import type { FrameState } from '../../store';
+import type { FrameState } from '../../state';
 import { renderList, renderCanvas, renderEditor } from './frame';
 
 const applyPadding = (el: HTMLElement, c: Record<string, unknown>): void => {

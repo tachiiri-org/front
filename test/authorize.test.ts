@@ -1,5 +1,5 @@
 import { beforeEach, describe, expect, it, vi } from "vitest";
-import { authorizeFetch, hasAuthorizeConfig, issueInternalToken, type AuthorizeEnv } from "./authorize";
+import { authorizeFetch, hasAuthorizeConfig, issueInternalToken, type AuthorizeEnv } from "../src/authorize";
 
 const encoder = new TextEncoder();
 const decoder = new TextDecoder();

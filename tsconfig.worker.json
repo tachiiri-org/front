@@ -12,10 +12,8 @@
   },
   "include": [
     "src/worker.ts",
-    "src/name.ts",
     "src/authorize.ts",
-    "src/layouts.ts",
-    "src/head.ts",
+    "src/layouts/**/*.ts",
     "src/screen.ts",
     "src/component/**/*.ts"
   ]

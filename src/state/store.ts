@@ -1,5 +1,5 @@
-import type { Screen } from './screen';
-import type { Component } from './component';
+import type { Screen } from '../screen';
+import type { Component } from '../component';
 
 export type FrameState = Record<string, unknown>;
 

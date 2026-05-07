@@ -6,7 +6,7 @@ import { domMap, getCanvasSelection, setCanvasSelection, isEditableTarget } from
 import { fetchFrameComponent } from '../../api';
 import { renderListPreview } from '../list';
 import { renderEditorPreview } from '../editor';
-import { allocateDefaultEntityName } from '../../name';
+import { allocateDefaultEntityName } from '../../component/name';
 import { renderComponent } from '../../render/page/component';
 import { previewScaleRafs, schedulePreviewScale } from './scale';
 import { EDITOR_ONLY_KINDS, renderCanvasPreview, renderFramePreview } from '../../render/canvas/preview';
