@@ -1,14 +1,5 @@
 const encoder = new TextEncoder();
 
-export type AuthorizeEnv = {
-  readonly AUTHORIZE?: {
-    fetch(request: Request): Promise<Response>;
-  };
-  readonly FRONT_TO_AUTHORIZE_TOKEN?: string;
-  readonly INTERNAL_AUTH_SIGNING_KEY?: string;
-  readonly INTERNAL_AUTH_TOKEN_ISSUER?: string;
-};
-
 type InternalTokenClaims = {
   claims_set_version: number;
   actor_id: string;
@@ -47,21 +38,8 @@ async function importSigningKey(jwkJson: string): Promise<CryptoKey> {
   );
 }
 
-export function hasAuthorizeConfig(env: AuthorizeEnv): boolean {
-  return Boolean(
-    env.AUTHORIZE && env.FRONT_TO_AUTHORIZE_TOKEN && env.INTERNAL_AUTH_SIGNING_KEY,
-  );
-}
-
-function sanitizeHeaders(sourceHeaders?: HeadersInit): Headers {
-  const headers = new Headers(sourceHeaders);
-  headers.delete("authorization");
-  headers.delete("x-internal-token");
-  return headers;
-}
-
 export async function issueInternalToken(
-  env: AuthorizeEnv,
+  env: { INTERNAL_AUTH_SIGNING_KEY?: string; INTERNAL_AUTH_TOKEN_ISSUER?: string },
   input: { audience: string },
 ): Promise<string> {
   if (!env.INTERNAL_AUTH_SIGNING_KEY) {
@@ -91,38 +69,4 @@ export async function issueInternalToken(
     encoder.encode(signingInput),
   );
   return `${signingInput}.${toBase64Url(new Uint8Array(signature))}`;
-}
-
-export async function authorizeFetch(
-  env: AuthorizeEnv,
-  input: {
-    path: string;
-    method: string;
-    body?: string;
-    headers?: HeadersInit;
-    audience?: string;
-  },
-): Promise<Response> {
-  if (!env.AUTHORIZE || !env.FRONT_TO_AUTHORIZE_TOKEN || !env.INTERNAL_AUTH_SIGNING_KEY) {
-    return Response.json({ error: "authorize_not_configured" }, { status: 500 });
-  }
-
-  const headers = sanitizeHeaders(input.headers);
-  headers.set("x-internal-token", env.FRONT_TO_AUTHORIZE_TOKEN);
-  headers.set("authorization", `Bearer ${await issueInternalToken(env, {
-    audience: input.audience ?? "authorize",
-  })}`);
-  if (input.body && !headers.has("Content-Type")) {
-    headers.set("Content-Type", "application/json");
-  }
-
-  return env.AUTHORIZE.fetch(
-    new Request(new URL(input.path, "https://authorize.local").toString(), {
-      method: input.method,
-      headers,
-      body: input.body ?? null,
-      ...(input.body ? ({ duplex: "half" } as RequestInit) : {}),
-      redirect: "manual",
-    }),
-  );
 }

@@ -34,6 +34,10 @@ workers_dev = true
 [env.local.vars]
 LAYOUTS_BUCKET_ID = "layouts-dev"
 
+[[env.local.r2_buckets]]
+binding = "LAYOUTS"
+bucket_name = "layouts-dev"
+
 [[env.local.services]]
 binding = "AUTHORIZE"
 service = "authorize-local"

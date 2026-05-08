@@ -70,7 +70,7 @@ export default {
     }
 
     if (isNavigationRequest(request)) {
-      return new Response('<!doctype html><script type="module" src="/app.js"></script>', {
+      return new Response('<!doctype html><script type="module" src="/client.js"></script>', {
         headers: { 'Content-Type': 'text/html; charset=UTF-8' },
       });
     }
