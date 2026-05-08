@@ -1,43 +1,125 @@
-import { isScreen, type Screen } from '../screen';
-import { isListComponent } from '../component/kind/list';
-import { isComponent, type Component } from '../component';
+import { createLayoutsBackend, type LayoutsEnv, type LayoutBackend } from '../storage/layouts/r2';
+import {
+  handleScreenGet,
+  handleComponentGet,
+  handleJsonFilesGet,
+  handleScreenPut,
+  handleScreenDelete,
+  handleScreenRename,
+  handleComponentPut,
+  handleComponentDelete,
+  handleResourceListGet,
+  handleResourceGet,
+  handleResourcePut,
+  handleResourceDelete,
+  handleResourceRename,
+} from '../storage/layouts/http';
 
-export const fetchFrameComponent = async (
-  screenId: string,
-  frameSrc: string,
-): Promise<Component | null> => {
-  const response = await fetch(`/api/layouts/${screenId}/components/${frameSrc}`);
-  if (!response.ok) return null;
-  const value = (await response.json()) as unknown;
-  return isComponent(value) ? value : null;
+type Env = {
+  readonly ASSETS: {
+    fetch(request: Request): Promise<Response>;
+  };
+} & LayoutsEnv;
+
+type ResourceConfig = {
+  name: string;
+  storagePrefix: string;
+  handleGet?: (backend: LayoutBackend, id: string) => Promise<Response>;
+  handlePut?: (request: Request, backend: LayoutBackend, id: string) => Promise<Response>;
+  handleDelete?: (backend: LayoutBackend, id: string) => Promise<Response>;
+  handleRename?: (request: Request, backend: LayoutBackend, id: string) => Promise<Response>;
 };
 
-export const fetchScreenIds = async (): Promise<string[]> => {
-  const response = await fetch('/api/layouts/json-files');
-  if (!response.ok) return [];
-  const value = (await response.json()) as unknown;
-  if (typeof value !== 'object' || value === null || Array.isArray(value)) return [];
-  const items = (value as Record<string, unknown>).items;
-  if (!Array.isArray(items)) return [];
-  return items
-    .map((entry) => {
-      if (typeof entry !== 'object' || entry === null || Array.isArray(entry)) return null;
-      const v = (entry as Record<string, unknown>).value;
-      return typeof v === 'string' ? v : null;
-    })
-    .filter((entry): entry is string => entry !== null);
+const RESOURCE_CONFIGS: ResourceConfig[] = [
+  {
+    name: 'layouts',
+    storagePrefix: '',
+    handleGet: handleScreenGet,
+    handlePut: handleScreenPut,
+    handleDelete: handleScreenDelete,
+    handleRename: handleScreenRename,
+  },
+];
+
+const isNavigationRequest = (request: Request): boolean => {
+  if (request.method !== 'GET' && request.method !== 'HEAD') return false;
+  const accept = request.headers.get('Accept') ?? '';
+  return accept.includes('text/html');
 };
 
-const isEditorScreen = (screen: Screen): boolean =>
-  screen.frames.some((f) => isListComponent(f));
+export const handleApiRequest = async (request: Request, env: Env): Promise<Response> => {
+  const url = new URL(request.url);
+  const backend = createLayoutsBackend(env);
 
-export const findEditorScreenId = async (): Promise<string | null> => {
-  const screenIds = await fetchScreenIds();
-  for (const screenId of screenIds) {
-    const response = await fetch(`/api/layouts/${screenId}`);
-    if (!response.ok) continue;
-    const value = (await response.json()) as unknown;
-    if (isScreen(value) && isEditorScreen(value)) return screenId;
+  const componentMatch = url.pathname.match(/^\/api\/layouts\/([^/]+)\/components\/(.+)$/);
+  if (componentMatch) {
+    const screenId = decodeURIComponent(componentMatch[1]);
+    const componentId = decodeURIComponent(componentMatch[2]);
+    if (request.method === 'GET') return handleComponentGet(backend, screenId, componentId);
+    if (request.method === 'PUT') return handleComponentPut(request, backend, screenId, componentId);
+    if (request.method === 'DELETE') return handleComponentDelete(backend, screenId, componentId);
+    return new Response('Method Not Allowed', { status: 405 });
   }
-  return screenIds[0] ?? null;
+
+  const jsonFilesSubMatch = url.pathname.match(/^\/api\/layouts\/([^/]+)\/json-files$/);
+  if (jsonFilesSubMatch) {
+    const screenId = decodeURIComponent(jsonFilesSubMatch[1]);
+    if (request.method === 'GET') {
+      const prefix = url.searchParams.get('prefix') ?? 'components/';
+      return handleJsonFilesGet(backend, screenId, prefix);
+    }
+    return new Response('Method Not Allowed', { status: 405 });
+  }
+
+  const resourceJsonFilesMatch = url.pathname.match(/^\/api\/([^/]+)\/json-files$/);
+  if (resourceJsonFilesMatch) {
+    const config = RESOURCE_CONFIGS.find((c) => c.name === decodeURIComponent(resourceJsonFilesMatch[1]));
+    if (!config) return new Response('Not Found', { status: 404 });
+    if (request.method === 'GET') return handleResourceListGet(backend, config.storagePrefix);
+    return new Response('Method Not Allowed', { status: 405 });
+  }
+
+  const resourceRenameMatch = url.pathname.match(/^\/api\/([^/]+)\/([^/]+)\/rename$/);
+  if (resourceRenameMatch) {
+    const config = RESOURCE_CONFIGS.find((c) => c.name === decodeURIComponent(resourceRenameMatch[1]));
+    if (!config) return new Response('Not Found', { status: 404 });
+    const id = decodeURIComponent(resourceRenameMatch[2]);
+    if (request.method === 'POST') {
+      return config.handleRename
+        ? config.handleRename(request, backend, id)
+        : handleResourceRename(request, backend, config.storagePrefix, id);
+    }
+    return new Response('Method Not Allowed', { status: 405 });
+  }
+
+  const resourceItemMatch = url.pathname.match(/^\/api\/([^/]+)\/([^/]+)$/);
+  if (resourceItemMatch) {
+    const config = RESOURCE_CONFIGS.find((c) => c.name === decodeURIComponent(resourceItemMatch[1]));
+    if (!config) return new Response('Not Found', { status: 404 });
+    const id = decodeURIComponent(resourceItemMatch[2]);
+    if (request.method === 'GET') {
+      return config.handleGet
+        ? config.handleGet(backend, id)
+        : handleResourceGet(backend, config.storagePrefix, id);
+    }
+    if (request.method === 'PUT') {
+      return config.handlePut
+        ? config.handlePut(request, backend, id)
+        : handleResourcePut(request, backend, config.storagePrefix, id);
+    }
+    if (request.method === 'DELETE') {
+      return config.handleDelete
+        ? config.handleDelete(backend, id)
+        : handleResourceDelete(backend, config.storagePrefix, id);
+    }
+    return new Response('Method Not Allowed', { status: 405 });
+  }
+
+  if (isNavigationRequest(request)) {
+    return new Response('<!doctype html><script type="module" src="/client.js"></script>', {
+      headers: { 'Content-Type': 'text/html; charset=UTF-8' },
+    });
+  }
+
+  return env.ASSETS.fetch(request);
 };

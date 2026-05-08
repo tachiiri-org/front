@@ -1,10 +1,7 @@
-import { isScreen, isFrameRef, type Screen, type Frame } from './screen';
-import type { Component } from './component';
-import { renderComponent } from './render/page/component';
+import { isScreen, isFrameRef, type Screen, type Frame } from './schema/screen/screen';
+import type { Component } from './schema/component';
+import { renderComponent, fetchFrameComponent, findEditorScreenId, hydrateEditor, store, domMap } from './runtime';
 import type { FrameState } from './state';
-import { fetchFrameComponent, findEditorScreenId } from './api/layouts';
-import { hydrateEditor } from './hydrate/index';
-import { store, domMap } from './state';
 
 const root = document.createElement('div');
 document.body.appendChild(root);
