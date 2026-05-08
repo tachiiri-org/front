@@ -9,8 +9,8 @@ const isStyle = (value: unknown): value is Record<string, string> =>
 export type ElementComponent = {
   kind: 'element';
   name?: string;
-  tag: string;
-  style: Record<string, string>;
+  tag?: string;
+  style?: Record<string, string>;
   text?: string;
   padding?: string;
 };
@@ -30,8 +30,8 @@ export const isElementComponent = (value: unknown): value is ElementComponent =>
   return (
     c.kind === 'element' &&
     (c.name === undefined || typeof c.name === 'string') &&
-    typeof c.tag === 'string' &&
-    isStyle(c.style) &&
+    (c.tag === undefined || typeof c.tag === 'string') &&
+    (c.style === undefined || isStyle(c.style)) &&
     (c.text === undefined || typeof c.text === 'string') &&
     (c.padding === undefined || typeof c.padding === 'string')
   );

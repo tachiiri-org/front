@@ -57,7 +57,7 @@ export const normalizeScreen = (value: unknown): Screen | null => {
 
   const candidate = value as Record<string, unknown>;
   if (!isHead(candidate.head)) return null;
-  if (!isStringRecord(candidate.shell)) return null;
+  if (candidate.shell !== undefined && !isStringRecord(candidate.shell)) return null;
   if (!Array.isArray(candidate.frames) || !candidate.frames.every(isFrameCandidate)) return null;
 
   const frames = migrateEditorSource(
@@ -107,7 +107,7 @@ export const normalizeScreen = (value: unknown): Screen | null => {
 
   const normalized: Screen = {
     head: candidate.head as Screen['head'],
-    shell: candidate.shell as Record<string, string>,
+    shell: candidate.shell as Record<string, string> | undefined,
     grid,
     frames: normalizedFrames,
   };

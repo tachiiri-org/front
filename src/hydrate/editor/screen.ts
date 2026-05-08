@@ -90,7 +90,7 @@ export const hydrateScreenEditor = async (
   });
 
   const currentPreset = DEVICE_PRESETS.find(
-    (p) => p.shell.width === value.shell.width && p.shell.height === value.shell.height,
+    (p) => p.shell?.width === value.shell?.width && p.shell?.height === value.shell?.height,
   );
   for (const preset of DEVICE_PRESETS) {
     const opt = document.createElement('option');

@@ -33,14 +33,14 @@ const renderScreen = async (screenId: string): Promise<void> => {
 
   root.innerHTML = '';
   document.title = store.screen.head.title;
-  for (const { name, content } of store.screen.head.meta) {
+  for (const { name, content } of (store.screen.head.meta ?? [])) {
     const meta = document.createElement('meta');
     meta.name = name;
     meta.content = content;
     document.head.appendChild(meta);
   }
 
-  Object.assign(root.style, store.screen.shell);
+  Object.assign(root.style, store.screen.shell ?? {});
   const canvas = document.createElement('div');
   canvas.style.display = 'grid';
   canvas.style.width = '100%';

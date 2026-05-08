@@ -20,7 +20,7 @@ export const computePreviewScale = (
   if (isPositiveInteger(viewportWidth) && isPositiveInteger(viewportHeight)) {
     const canvasRect = canvasEl.getBoundingClientRect();
     if (canvasRect.width > 0 && canvasRect.height > 0) {
-      return Math.min(canvasRect.width / viewportWidth, canvasRect.height / viewportHeight);
+      return Math.min(1, canvasRect.width / viewportWidth, canvasRect.height / viewportHeight);
     }
   }
 
@@ -32,7 +32,7 @@ export const computePreviewScale = (
   const heightRatio = wrapperRect.height > 0 && contentRect.height > 0
     ? wrapperRect.height / contentRect.height
     : 1;
-  return Math.min(widthRatio, heightRatio);
+  return Math.min(1, widthRatio, heightRatio);
 };
 
 export const updatePreviewScale = (

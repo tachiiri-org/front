@@ -1,47 +1,13 @@
-import { type Component, isComponent, isStyle } from './component';
-import type { ListComponent } from './component/kind/list';
-import type { CanvasComponent } from './component/kind/canvas';
-import type { EditorComponent } from './component/kind/component-editor';
-import { isListComponent } from './component/kind/list';
-import { isCanvasComponent } from './component/kind/canvas';
-import { isEditorComponent } from './component/kind/component-editor';
-
-export type MetaTag = {
-  name: string;
-  content: string;
-};
-
-export type Head = {
-  title: string;
-  lang?: string;
-  meta: MetaTag[];
-};
-
-export const headDefaults: Head = {
-  title: '',
-  lang: 'ja',
-  meta: [],
-};
-
-const isMetaTag = (value: unknown): value is MetaTag => {
-  if (typeof value !== 'object' || value === null || Array.isArray(value)) return false;
-  const m = value as Partial<MetaTag>;
-  return typeof m.name === 'string' && typeof m.content === 'string';
-};
-
-export const isHead = (value: unknown): value is Head => {
-  if (typeof value !== 'object' || value === null) return false;
-  const c = value as Partial<Head>;
-  return (
-    typeof c.title === 'string' &&
-    (c.lang === undefined || typeof c.lang === 'string') &&
-    Array.isArray(c.meta) &&
-    c.meta.every(isMetaTag)
-  );
-};
+import { type Component, isComponent } from '../component';
+import type { ListComponent } from '../component/kind/list';
+import type { CanvasComponent } from '../component/kind/canvas';
+import type { EditorComponent } from '../component/kind/component-editor';
+import { isListComponent } from '../component/kind/list';
+import { isCanvasComponent } from '../component/kind/canvas';
+import { isEditorComponent } from '../component/kind/component-editor';
 
 export type GridLayout = {
-  kind: 'grid';
+  kind?: 'grid';
   columns: number;
   rows?: number;
 };
@@ -66,18 +32,11 @@ export type ListFrame = { id: string; placement: Placement } & ListComponent;
 export type CanvasFrame = { id: string; placement: Placement } & CanvasComponent;
 export type EditorFrame = { id: string; placement: Placement } & EditorComponent;
 
-export type Screen = {
-  head: Head;
-  shell: Record<string, string>;
-  grid: GridLayout;
-  frames: Frame[];
-};
-
 export const isGridLayout = (value: unknown): value is GridLayout => {
   if (typeof value !== 'object' || value === null || Array.isArray(value)) return false;
   const c = value as Record<string, unknown>;
   return (
-    c.kind === 'grid' &&
+    (c.kind === undefined || c.kind === 'grid') &&
     typeof c.columns === 'number' &&
     Number.isInteger(c.columns) &&
     c.columns > 0 &&
@@ -120,26 +79,6 @@ export const isFrame = (value: unknown): value is Frame => {
   return isComponent(value);
 };
 
-export const isScreen = (value: unknown): value is Screen => {
-  if (typeof value !== 'object' || value === null) return false;
-  const c = value as Partial<Screen>;
-  return (
-    isHead(c.head) &&
-    isStyle(c.shell) &&
-    isGridLayout(c.grid) &&
-    Array.isArray(c.frames) &&
-    c.frames.every(isFrame)
-  );
-};
-
 export const isListFrame = (f: Frame): f is ListFrame => isListComponent(f);
 export const isCanvasFrame = (f: Frame): f is CanvasFrame => isCanvasComponent(f);
 export const isEditorFrame = (f: Frame): f is EditorFrame => isEditorComponent(f);
-
-export const screenDefaults: Screen = {
-  head: headDefaults,
-  shell: { width: '100%', height: '100%' },
-  grid: { kind: 'grid', columns: 120, rows: 120 },
-  frames: [],
-};
-
