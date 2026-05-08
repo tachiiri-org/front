@@ -1,6 +1,18 @@
-import { DEVICE_PRESETS, screenEditSchema } from '../../screen';
+import type { FormField } from '../../component/kind/form/field';
 import type { EditorFrame } from '../../screen';
 import { buildFieldStyleContext } from '../field';
+
+const DEVICE_PRESETS: { label: string; shell: Record<string, string> }[] = [
+  { label: 'Desktop', shell: { width: '1920px', height: '1080px' } },
+  { label: 'Tablet', shell: { width: '768px', height: '1024px' } },
+  { label: 'Mobile', shell: { width: '375px', height: '812px' } },
+];
+
+const screenEditSchema: FormField[] = [
+  { kind: 'text-field', key: 'title', label: 'title' },
+  { kind: 'number-field', key: 'columns', label: 'columns' },
+  { kind: 'number-field', key: 'rows', label: 'rows' },
+];
 import { domMap } from '../../state';
 import { fetchScreen, updateScreen } from './save';
 import { SECTION_HEADING_STYLE, renderSectionContent } from '../../render/editor/section';

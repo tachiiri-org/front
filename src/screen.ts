@@ -1,5 +1,4 @@
 import { type Component, isComponent, isStyle } from './component';
-import type { FormField } from './component/kind/form/field';
 import type { ListComponent } from './component/kind/list';
 import type { CanvasComponent } from './component/kind/canvas';
 import type { EditorComponent } from './component/kind/component-editor';
@@ -144,26 +143,3 @@ export const screenDefaults: Screen = {
   frames: [],
 };
 
-export const placementSchema: FormField[] = [
-  { kind: 'number-field', key: 'x', label: 'x' },
-  { kind: 'number-field', key: 'y', label: 'y' },
-  { kind: 'number-field', key: 'width', label: 'width' },
-  { kind: 'number-field', key: 'height', label: 'height' },
-];
-
-export const gridSchema: FormField[] = [
-  { kind: 'number-field', key: 'rows', label: 'rows' },
-  { kind: 'number-field', key: 'columns', label: 'columns' },
-];
-
-export const screenEditSchema: FormField[] = [
-  { kind: 'text-field', key: 'title', label: 'title' },
-  { kind: 'number-field', key: 'columns', label: 'columns' },
-  { kind: 'number-field', key: 'rows', label: 'rows' },
-];
-
-export const DEVICE_PRESETS: { label: string; shell: Record<string, string> }[] = [
-  { label: 'Desktop', shell: { width: '1920px', height: '1080px' } },
-  { label: 'Tablet', shell: { width: '768px', height: '1024px' } },
-  { label: 'Mobile', shell: { width: '375px', height: '812px' } },
-];
