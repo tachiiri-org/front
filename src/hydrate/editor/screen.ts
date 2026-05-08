@@ -1,6 +1,6 @@
 import type { FormField } from '../../component/kind/form/field';
 import type { EditorFrame } from '../../screen';
-import { buildFieldStyleContext } from '../field';
+import { buildFieldStyleContext } from '../../render/editor/context';
 
 const DEVICE_PRESETS: { label: string; shell: Record<string, string> }[] = [
   { label: 'Desktop', shell: { width: '1920px', height: '1080px' } },

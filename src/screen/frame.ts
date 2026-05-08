@@ -3,7 +3,7 @@ import type { ListComponent } from '../component/kind/list';
 import type { CanvasComponent } from '../component/kind/canvas';
 import { isListComponent } from '../component/kind/list';
 import { isCanvasComponent } from '../component/kind/canvas';
-import { type EditorComponent, isEditorComponent } from './kind/component-editor';
+import { type EditorComponent, isEditorComponent } from '../editor/component-editor';
 
 export type GridLayout = {
   kind?: 'grid';

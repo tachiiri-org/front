@@ -1,6 +1,19 @@
-import { createStore } from './store';
+import type { Screen } from './screen';
+import type { Component } from './component';
 
-export type { FrameState } from './store';
+export type FrameState = Record<string, unknown>;
+
+type RootStore = {
+  screen: Screen | null;
+  frameStates: Map<string, FrameState>;
+  frameComponents: Map<string, Component>;
+};
+
+const createStore = (): RootStore => ({
+  screen: null,
+  frameStates: new Map(),
+  frameComponents: new Map(),
+});
 
 export const store = createStore();
 export const domMap = new Map<string, HTMLElement>();

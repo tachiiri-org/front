@@ -1,1 +1,0 @@
-export { hydrateCanvas } from './hydrate';

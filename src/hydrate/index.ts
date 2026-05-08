@@ -7,9 +7,10 @@ import {
   type EditorFrame,
 } from '../screen';
 import { store, getFrameSelection, setFrameSelection, getCanvasSelection, setCanvasSelection } from '../state';
-import { hydrateList } from './list';
-import { hydrateCanvas } from './canvas';
-import { hydrateComponentEditor, hydrateScreenEditor } from './editor';
+import { hydrateList } from './list/list';
+import { hydrateCanvas } from './canvas/canvas';
+import { hydrateComponentEditor } from './editor/component';
+import { hydrateScreenEditor } from './editor/screen';
 
 const findDefaultEditableFrameId = (): string | null => {
   const screen = store.screen;

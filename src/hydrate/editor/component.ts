@@ -5,7 +5,7 @@ import type { EditorSection } from '../../screen';
 import { editorDefaults } from '../../screen';
 import type { FormField } from '../../component/kind/form/field';
 import { getEntityDisplayName } from '../../component/name';
-import { buildFieldStyleContext, type FieldStyleContext } from '../field';
+import { buildFieldStyleContext, type FieldStyleContext } from '../../render/editor/context';
 import { domMap } from '../../state';
 import { putComponent, updateScreen, fetchScreen } from './save';
 import { appendSection, createLabeledRow, renderSectionContent } from '../../render/editor/section';
