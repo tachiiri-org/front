@@ -3,7 +3,7 @@ import type { Frame, CanvasFrame, Screen, ListFrame, EditorFrame } from '../../s
 import type { Component } from '../../component';
 import { elementDefaults } from '../../component';
 import { domMap, getCanvasSelection, setCanvasSelection, isEditableTarget } from '../../state';
-import { fetchFrameComponent } from '../../api';
+import { fetchFrameComponent } from '../../api/layouts';
 import { renderListPreview } from '../list';
 import { renderEditorPreview } from '../editor';
 import { allocateDefaultEntityName } from '../../component/name';

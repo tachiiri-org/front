@@ -1,14 +1,6 @@
-import { isScreen, placementSchema, gridSchema, type Screen } from './screen';
-import { isListComponent } from './component/kind/list';
-import { isComponent, componentSchemas, type Component, type FormField } from './component';
-
-const allSchemas: Record<string, FormField[]> = {
-  placement: placementSchema,
-  grid: gridSchema,
-  ...componentSchemas,
-};
-
-export const getSchema = (kind: string): FormField[] | null => allSchemas[kind] ?? null;
+import { isScreen, type Screen } from '../screen';
+import { isListComponent } from '../component/kind/list';
+import { isComponent, type Component } from '../component';
 
 export const fetchFrameComponent = async (
   screenId: string,

@@ -2,7 +2,7 @@ import { isScreen, isFrameRef, type Screen, type Frame } from './screen';
 import type { Component } from './component';
 import { renderComponent } from './render/page/component';
 import type { FrameState } from './state';
-import { fetchFrameComponent, findEditorScreenId } from './api';
+import { fetchFrameComponent, findEditorScreenId } from './api/layouts';
 import { hydrateEditor } from './hydrate/index';
 import { store, domMap } from './state';
 
