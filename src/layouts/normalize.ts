@@ -4,7 +4,7 @@ import { isHead } from '../screen';
 import { allocateDefaultEntityName, assignDefaultEntityNames } from '../component/name';
 import { isStringRecord, isPositiveInteger, isFrameCandidate, type FrameCandidate } from './validate';
 import { migrateFrameKind, migrateEditorSource, migrateLegacyCanvasIds } from './migrate';
-import type { LayoutBackend } from './backend';
+import type { LayoutBackend } from './r2';
 
 const DEFAULT_GRID_CANVAS_VIEWPORT = {
   width: 1920,

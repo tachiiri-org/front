@@ -1,7 +1,6 @@
-import type { EditorFrame, Screen } from '../../screen';
-import { applyDefaults } from '../../component';
+import type { EditorFrame, Screen, EditorSection } from '../../screen';
+import { editorDefaults } from '../../screen';
 import { getFrameSelection } from '../../state';
-import type { EditorSection } from '../../component/kind/component-editor';
 import { EDITOR_ONLY_KINDS } from '../../render/canvas/preview';
 import { appendSection } from '../../render/editor/section';
 import { renderPlacementRow } from '../../render/editor/placement';
@@ -24,8 +23,7 @@ export const renderEditorPreview = async (
         (f) => f.id !== frame.id && !EDITOR_ONLY_KINDS.has(String((f as Record<string, unknown>).kind ?? '')),
       ) ?? frame;
 
-  const frameConfig = applyDefaults('component-editor', frame as unknown as Record<string, unknown>);
-  const sections = frameConfig.sections as EditorSection[];
+  const sections = (frame.sections ?? editorDefaults.sections) as EditorSection[];
 
   const container = document.createElement('div');
   if (frame.style) Object.assign(container.style, frame.style);

@@ -16,8 +16,11 @@ export const migrateFrameKind = (frame: FrameCandidate): FrameCandidate => {
     kind = KIND_MIGRATIONS[kind] ?? kind;
   }
   const result: Record<string, unknown> = { ...f, kind };
-  if (result.kind === 'list' && typeof result.src !== 'string') {
-    result.src = '/api/layouts/json-files';
+  if (result.kind === 'list') {
+    if (typeof result.resource !== 'string') {
+      result.resource = 'layouts';
+    }
+    delete result.src;
   }
   return result as FrameCandidate;
 };

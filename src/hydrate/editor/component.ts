@@ -1,7 +1,8 @@
 import { isFrameRef, isCanvasFrame } from '../../screen';
-import { isComponent, componentDefaults, COMPONENT_KINDS, applyDefaults } from '../../component';
+import { isComponent, componentDefaults, COMPONENT_KINDS } from '../../component';
 import type { EditorFrame } from '../../screen';
-import type { EditorSection } from '../../component/kind/component-editor';
+import type { EditorSection } from '../../screen';
+import { editorDefaults } from '../../screen';
 import type { FormField } from '../../component/kind/form/field';
 import { getEntityDisplayName } from '../../component/name';
 import { buildFieldStyleContext, type FieldStyleContext } from '../field';
@@ -71,8 +72,7 @@ export const hydrateComponentEditor = async (
     componentData = frameObj;
   }
 
-  const editorConfig = applyDefaults('component-editor', editorFrame as unknown as Record<string, unknown>);
-  const sections = editorConfig.sections as EditorSection[];
+  const sections = (editorFrame.sections ?? editorDefaults.sections) as EditorSection[];
   const ctx = buildFieldStyleContext(editorFrame.fieldStyle);
 
   editorEl.replaceChildren();

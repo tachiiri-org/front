@@ -1,6 +1,6 @@
 import { isScreen } from '../screen';
 import { isSelectComponent } from '../component/kind/select';
-import type { LayoutBackend } from './backend';
+import type { LayoutBackend } from './r2';
 import { normalizeScreen, normalizeComponentValue } from './normalize';
 
 type ListItem = {
@@ -176,5 +176,63 @@ export const handleComponentPut = async (
 
 export const handleComponentDelete = async (backend: LayoutBackend, screenId: string, componentId: string): Promise<Response> => {
   await backend.deleteKey(`${screenId}/components/${componentId}.json`);
+  return new Response(null, { status: 204 });
+};
+
+export const handleResourceListGet = async (backend: LayoutBackend, storagePrefix: string): Promise<Response> => {
+  const items = await buildJsonFileItems(backend, storagePrefix, { excludeNested: true });
+  return new Response(JSON.stringify({ items }), {
+    headers: { 'Content-Type': 'application/json' },
+  });
+};
+
+export const handleResourceGet = async (backend: LayoutBackend, storagePrefix: string, id: string): Promise<Response> => {
+  const body = await backend.getText(`${storagePrefix}${id}.json`);
+  if (body === null) return new Response('Not Found', { status: 404 });
+  return new Response(body, { headers: { 'Content-Type': 'application/json' } });
+};
+
+export const handleResourcePut = async (request: Request, backend: LayoutBackend, storagePrefix: string, id: string): Promise<Response> => {
+  const body = await request.text();
+  try {
+    JSON.parse(body);
+  } catch {
+    return new Response('Invalid JSON', { status: 400 });
+  }
+  await backend.putText(`${storagePrefix}${id}.json`, body);
+  return new Response(null, { status: 204 });
+};
+
+export const handleResourceDelete = async (backend: LayoutBackend, storagePrefix: string, id: string): Promise<Response> => {
+  await backend.deleteKey(`${storagePrefix}${id}.json`);
+  return new Response(null, { status: 204 });
+};
+
+export const handleResourceRename = async (request: Request, backend: LayoutBackend, storagePrefix: string, id: string): Promise<Response> => {
+  const body = await request.text();
+  let to: string;
+  try {
+    const parsed = JSON.parse(body) as unknown;
+    if (typeof parsed !== 'object' || parsed === null || typeof (parsed as Record<string, unknown>).to !== 'string') {
+      return new Response('Invalid body', { status: 400 });
+    }
+    to = ((parsed as Record<string, unknown>).to as string).trim();
+  } catch {
+    return new Response('Invalid JSON', { status: 400 });
+  }
+
+  if (!to || to === id || to.includes('/')) return new Response('Invalid target name', { status: 400 });
+
+  const sourceKey = `${storagePrefix}${id}.json`;
+  const destKey = `${storagePrefix}${to}.json`;
+
+  const source = await backend.getText(sourceKey);
+  if (!source) return new Response('Not Found', { status: 404 });
+
+  const existing = await backend.getText(destKey);
+  if (existing) return new Response('Conflict', { status: 409 });
+
+  await backend.putText(destKey, source);
+  await backend.deleteKey(sourceKey);
   return new Response(null, { status: 204 });
 };

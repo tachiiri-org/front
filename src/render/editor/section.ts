@@ -1,4 +1,4 @@
-import type { EditorSection } from '../../component/kind/component-editor';
+import type { EditorSection } from '../../screen';
 import type { FormField } from '../../component/kind/form/field';
 import { renderFormFromSchema } from './form';
 import type { FieldStyleContext } from './context';

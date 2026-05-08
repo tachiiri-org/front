@@ -8,7 +8,6 @@ export { type HeadingComponent, isHeadingComponent, headingDefaults, headingSche
 export { type ButtonComponent, isButtonComponent, buttonDefaults, buttonSchema } from './kind/button';
 export { type ListComponent, isListComponent, listDefaults, listSchema } from './kind/list';
 export { type CanvasComponent, isCanvasComponent, canvasDefaults, canvasSchema } from './kind/canvas';
-export { type EditorComponent, isEditorComponent, editorDefaults, editorSchema } from './kind/component-editor';
 export {
   type SelectComponent,
   type SelectOption,
@@ -29,7 +28,6 @@ import type { HeadingComponent } from './kind/heading';
 import type { ButtonComponent } from './kind/button';
 import type { ListComponent } from './kind/list';
 import type { CanvasComponent } from './kind/canvas';
-import type { EditorComponent } from './kind/component-editor';
 import type { SelectComponent } from './kind/select';
 import type { FormComponent } from './kind/form';
 import type { TextareaComponent } from './kind/textarea';
@@ -38,7 +36,6 @@ import { isHeadingComponent, headingDefaults, headingSchema } from './kind/headi
 import { isButtonComponent, buttonDefaults, buttonSchema } from './kind/button';
 import { isListComponent, listDefaults, listSchema } from './kind/list';
 import { isCanvasComponent, canvasDefaults, canvasSchema } from './kind/canvas';
-import { isEditorComponent, editorDefaults, editorSchema } from './kind/component-editor';
 import { isSelectComponent, selectDefaults, selectSchema } from './kind/select';
 import { isFormComponent, formDefaults, formSchema } from './kind/form';
 import { isTextareaComponent, textareaDefaults, textareaSchema } from './kind/textarea';
@@ -50,7 +47,6 @@ export type Component =
   | ButtonComponent
   | ListComponent
   | CanvasComponent
-  | EditorComponent
   | SelectComponent
   | FormComponent
   | TextareaComponent;
@@ -61,7 +57,6 @@ export const isComponent = (value: unknown): value is Component =>
   isButtonComponent(value) ||
   isListComponent(value) ||
   isCanvasComponent(value) ||
-  isEditorComponent(value) ||
   isSelectComponent(value) ||
   isFormComponent(value) ||
   isTextareaComponent(value);
@@ -72,7 +67,6 @@ export const componentDefaults: Record<string, Record<string, unknown>> = {
   button: buttonDefaults as Record<string, unknown>,
   form: formDefaults as Record<string, unknown>,
   select: selectDefaults as Record<string, unknown>,
-  'component-editor': editorDefaults as Record<string, unknown>,
   canvas: canvasDefaults as Record<string, unknown>,
   list: listDefaults as Record<string, unknown>,
   textarea: textareaDefaults as Record<string, unknown>,
@@ -84,7 +78,6 @@ export const componentSchemas: Record<string, FormField[]> = {
   button: buttonSchema,
   form: formSchema,
   select: selectSchema,
-  'component-editor': editorSchema,
   canvas: canvasSchema,
   list: listSchema,
   textarea: textareaSchema,

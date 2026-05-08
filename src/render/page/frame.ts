@@ -1,8 +1,8 @@
 import {
   type ListComponent,
   type CanvasComponent,
-  type EditorComponent,
 } from '../../component';
+import type { EditorComponent } from '../../screen';
 
 export const renderList = (id: string, component: ListComponent): HTMLElement => {
   const ul = document.createElement('ul');

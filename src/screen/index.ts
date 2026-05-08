@@ -6,6 +6,8 @@ export type { MetaTag, Head } from './head';
 export { headDefaults, isHead } from './head';
 export type { GridLayout, Placement, FrameRef, Frame, ListFrame, CanvasFrame, EditorFrame } from './frame';
 export { isGridLayout, isPlacement, isFrameRef, isFrame, isListFrame, isCanvasFrame, isEditorFrame } from './frame';
+export type { EditorComponent, EditorSection, FieldStyleConfig } from './kind/component-editor';
+export { isEditorComponent, editorDefaults, editorSchema } from './kind/component-editor';
 
 export type Screen = {
   head: Head;

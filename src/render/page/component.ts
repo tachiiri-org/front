@@ -1,11 +1,11 @@
 import {
   isListComponent,
   isCanvasComponent,
-  isEditorComponent,
   isTextareaComponent,
   applyDefaults,
   type Component,
 } from '../../component';
+import { isEditorComponent } from '../../screen';
 import { type Frame, type FrameRef, isFrameRef } from '../../screen';
 import type { FrameState } from '../../state';
 import { renderList, renderCanvas, renderEditor } from './frame';

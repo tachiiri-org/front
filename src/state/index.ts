@@ -16,6 +16,11 @@ export const setFrameSelection = (frameId: string, value: string): void => {
   store.frameStates.set(frameId, { ...current, selectedValue: value });
 };
 
+export const clearFrameSelection = (frameId: string): void => {
+  const current = store.frameStates.get(frameId) ?? {};
+  store.frameStates.set(frameId, { ...current, selectedValue: undefined });
+};
+
 export type CanvasSelection =
   | { kind: 'canvas' }
   | { kind: 'frame'; id: string }

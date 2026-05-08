@@ -1,12 +1,14 @@
 import type { ListFrame } from '../../screen';
 import { fetchItems } from './fetch';
+import { RESOURCES } from './resources';
 
 export const renderListPreview = async (
   wrapper: HTMLElement,
   frame: ListFrame,
 ): Promise<void> => {
-  if (!frame.src) { wrapper.replaceChildren(); return; }
-  const items = await fetchItems(frame.src);
+  const resource = RESOURCES[frame.resource ?? ''];
+  if (!resource) { wrapper.replaceChildren(); return; }
+  const items = await fetchItems(resource.listUrl);
   const ul = document.createElement('ul');
   if (frame.style) Object.assign(ul.style, frame.style);
   for (const id of items) {

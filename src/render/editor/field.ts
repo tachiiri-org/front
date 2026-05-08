@@ -81,6 +81,36 @@ function renderTextarea(
   return wrapper;
 }
 
+function renderSelectField(
+  label: string,
+  path: string,
+  options: Array<{ value: string; label: string }>,
+  draft: Record<string, unknown>,
+  ctx: FieldStyleContext,
+  onBlurSave?: () => void,
+): HTMLElement {
+  const wrapper = mk('div');
+  Object.assign(wrapper.style, ctx.wrapper);
+  const lbl = mk('label');
+  lbl.textContent = label;
+  Object.assign(lbl.style, ctx.label);
+  const select = mk('select');
+  Object.assign(select.style, ctx.input);
+  const current = getAtPath(draft, path);
+  for (const opt of options) {
+    const option = mk('option');
+    option.value = opt.value;
+    option.textContent = opt.label;
+    select.appendChild(option);
+  }
+  select.value = typeof current === 'string' ? current : '';
+  select.addEventListener('change', () => { setAtPath(draft, path, select.value); });
+  if (onBlurSave) select.addEventListener('change', onBlurSave);
+  wrapper.appendChild(lbl);
+  wrapper.appendChild(select);
+  return wrapper;
+}
+
 function renderBooleanField(
   label: string,
   path: string,
@@ -207,6 +237,8 @@ export function renderFieldFromSchema(
       return renderTextarea(label, field.key, draft, ctx, onBlurSave);
     case 'boolean-field':
       return renderBooleanField(label, field.key, draft, ctx, onBlurSave);
+    case 'select-field':
+      return renderSelectField(label, field.key, field.options, draft, ctx, onBlurSave);
     case 'style-map-field':
       return renderStyleMap(label, field.key, draft, ctx, onBlurSave);
     case 'object-list-field': {

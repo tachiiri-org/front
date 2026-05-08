@@ -1,5 +1,5 @@
-export const fetchItems = async (src: string): Promise<string[]> => {
-  const response = await fetch(src);
+export const fetchItems = async (listUrl: string): Promise<string[]> => {
+  const response = await fetch(listUrl);
   if (!response.ok) return [];
   const value = (await response.json()) as unknown;
   if (typeof value !== 'object' || value === null || Array.isArray(value)) return [];

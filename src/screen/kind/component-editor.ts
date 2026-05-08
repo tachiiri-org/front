@@ -1,4 +1,4 @@
-import type { FormField } from './form/field';
+import type { FormField } from '../../component/kind/form/field';
 
 const isStyle = (value: unknown): value is Record<string, string> =>
   typeof value === 'object' &&

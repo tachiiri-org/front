@@ -5,7 +5,6 @@ type NamedEntity = {
 };
 
 const KIND_NAME_PREFIXES: Record<string, string> = {
-  'component-editor': 'editor',
   canvas: 'canvas',
   list: 'list',
   form: 'form',

@@ -1,10 +1,9 @@
 import { type Component, isComponent } from '../component';
 import type { ListComponent } from '../component/kind/list';
 import type { CanvasComponent } from '../component/kind/canvas';
-import type { EditorComponent } from '../component/kind/component-editor';
 import { isListComponent } from '../component/kind/list';
 import { isCanvasComponent } from '../component/kind/canvas';
-import { isEditorComponent } from '../component/kind/component-editor';
+import { type EditorComponent, isEditorComponent } from './kind/component-editor';
 
 export type GridLayout = {
   kind?: 'grid';
@@ -26,7 +25,7 @@ export type FrameRef = {
   placement: Placement;
 };
 
-export type Frame = FrameRef | ({ id: string; placement: Placement } & Component);
+export type Frame = FrameRef | ({ id: string; placement: Placement } & Component) | EditorFrame;
 
 export type ListFrame = { id: string; placement: Placement } & ListComponent;
 export type CanvasFrame = { id: string; placement: Placement } & CanvasComponent;
@@ -76,7 +75,7 @@ export const isFrame = (value: unknown): value is Frame => {
   const c = value as Record<string, unknown>;
   if (typeof c.id !== 'string' || !isPlacement(c.placement)) return false;
   if (typeof c.src === 'string') return typeof c.kind === 'string';
-  return isComponent(value);
+  return isComponent(value) || isEditorComponent(value);
 };
 
 export const isListFrame = (f: Frame): f is ListFrame => isListComponent(f);

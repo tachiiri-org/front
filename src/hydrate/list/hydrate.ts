@@ -1,6 +1,7 @@
 import type { ListFrame } from '../../screen';
-import { domMap, getFrameSelection, setFrameSelection, isEditableTarget } from '../../state';
+import { domMap, getFrameSelection, setFrameSelection, clearFrameSelection, isEditableTarget } from '../../state';
 import { fetchItems } from './fetch';
+import { RESOURCES } from './resources';
 
 let listInteractionController: AbortController | null = null;
 
@@ -13,9 +14,10 @@ export const hydrateList = async (
   const listEl = domMap.get(listFrame.id);
   if (!listEl) return;
 
-  if (!listFrame.src) { listEl.replaceChildren(); return; }
+  const resource = RESOURCES[listFrame.resource ?? ''];
+  if (!resource) { listEl.replaceChildren(); return; }
 
-  const items = await fetchItems(listFrame.src);
+  const items = await fetchItems(resource.listUrl);
   listEl.replaceChildren();
 
   const currentSelection = getFrameSelection(listFrame.id);
@@ -52,7 +54,7 @@ export const hydrateList = async (
       const newName = window.prompt('Rename', currentId);
       if (!newName || newName === currentId) return;
       void (async () => {
-        const res = await fetch(`/api/layouts/${encodeURIComponent(currentId)}/rename`, {
+        const res = await fetch(`${resource.itemBaseUrl}/${encodeURIComponent(currentId)}/rename`, {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
           body: JSON.stringify({ to: newName }),
@@ -61,6 +63,21 @@ export const hydrateList = async (
         setFrameSelection(listFrame.id, newName);
         await hydrateList(listFrame, onItemSelect, onReload, isBlocked);
         void onItemSelect(newName);
+      })();
+      return;
+    }
+
+    if (e.key === 'Delete') {
+      if (!currentId) return;
+      e.preventDefault();
+      if (!window.confirm(`Delete "${currentId}"?`)) return;
+      void (async () => {
+        const res = await fetch(`${resource.itemBaseUrl}/${encodeURIComponent(currentId)}`, {
+          method: 'DELETE',
+        });
+        if (!res.ok) return;
+        clearFrameSelection(listFrame.id);
+        onReload();
       })();
       return;
     }

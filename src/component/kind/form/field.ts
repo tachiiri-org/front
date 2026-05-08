@@ -8,6 +8,13 @@ export type { NumberFieldComponent } from './field/number';
 export type { TextareaFieldComponent } from './field/textarea';
 export type { BooleanFieldComponent } from './field/boolean';
 
+export type SelectFieldComponent = {
+  kind: 'select-field';
+  key: string;
+  label?: string;
+  options: Array<{ value: string; label: string }>;
+};
+
 export type StyleMapFieldComponent = {
   kind: 'style-map-field';
   key: string;
@@ -35,6 +42,7 @@ export type FormField =
   | NumberFieldComponent
   | TextareaFieldComponent
   | BooleanFieldComponent
+  | SelectFieldComponent
   | StyleMapFieldComponent
   | ObjectListFieldComponent
   | FieldGroupComponent;
@@ -75,11 +83,26 @@ export const isFieldGroupComponent = (v: unknown): v is FieldGroupComponent => {
   );
 };
 
+export const isSelectFieldComponent = (v: unknown): v is SelectFieldComponent => {
+  if (typeof v !== 'object' || v === null || Array.isArray(v)) return false;
+  const c = v as Record<string, unknown>;
+  return (
+    c.kind === 'select-field' &&
+    typeof c.key === 'string' &&
+    (c.label === undefined || typeof c.label === 'string') &&
+    Array.isArray(c.options) &&
+    (c.options as unknown[]).every(
+      (o) => typeof o === 'object' && o !== null && typeof (o as Record<string, unknown>).value === 'string' && typeof (o as Record<string, unknown>).label === 'string',
+    )
+  );
+};
+
 export const isFormField = (v: unknown): v is FormField =>
   isTextFieldComponent(v) ||
   isNumberFieldComponent(v) ||
   isTextareaFieldComponent(v) ||
   isBooleanFieldComponent(v) ||
+  isSelectFieldComponent(v) ||
   isStyleMapFieldComponent(v) ||
   isObjectListFieldComponent(v) ||
   isFieldGroupComponent(v);
