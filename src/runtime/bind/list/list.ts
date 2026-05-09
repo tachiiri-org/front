@@ -77,8 +77,30 @@ const buildItemRow = (
     })();
   });
 
+  const openLink = document.createElement('a');
+  openLink.textContent = '開く';
+  openLink.href = `/${encodeURIComponent(itemId)}`;
+  openLink.target = '_blank';
+  openLink.rel = 'noreferrer noopener';
+  Object.assign(openLink.style, actionStyle, {
+    textDecoration: 'none',
+  });
+  openLink.addEventListener('click', (e) => {
+    e.stopPropagation();
+  });
+
+  const actions = document.createElement('span');
+  Object.assign(actions.style, {
+    display: 'inline-flex',
+    alignItems: 'center',
+    gap: '8px',
+    flexShrink: '0',
+  });
+  actions.appendChild(deleteBtn);
+  actions.appendChild(openLink);
+
   item.appendChild(label);
-  item.appendChild(deleteBtn);
+  item.appendChild(actions);
   return item;
 };
 
