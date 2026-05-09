@@ -842,6 +842,52 @@ const validateDraft = (draft: TableEditorDraft): string | null => {
   return null;
 };
 
+const validateDraftForSave = async (draft: TableEditorDraft): Promise<string | null> => {
+  const message = validateDraft(draft);
+  if (message) return message;
+
+  const endpointOptionsCache = new Map<string, TableSelectOption[]>();
+  for (const column of draft.schema.columns) {
+    if (column.type !== 'select' || column.source.kind !== 'endpoint') continue;
+
+    const cacheKey = JSON.stringify(column.source);
+    let options = endpointOptionsCache.get(cacheKey);
+    if (!options) {
+      try {
+        options = await resolveSelectOptions(column.source);
+      } catch (error) {
+        return error instanceof Error
+          ? `Failed to load select options for ${column.label}: ${error.message}`
+          : `Failed to load select options for ${column.label}: ${String(error)}`;
+      }
+      endpointOptionsCache.set(cacheKey, options);
+    }
+
+    const allowedValues = new Set(options.map((option) => option.value));
+    for (const row of draft.data.rows) {
+      const value = row.values[column.key];
+      if (value === undefined || value === null || value === '') continue;
+      if (typeof value !== 'string' || !allowedValues.has(value)) {
+        return `Invalid select value: ${column.label}`;
+      }
+    }
+  }
+
+  return null;
+};
+
+const savePatchIfValid = async (
+  draft: TableEditorDraft,
+  onSave: (patch: Record<string, unknown>) => Promise<void>,
+  patch: Record<string, unknown>,
+): Promise<void> => {
+  const nextDraft = clone(draft) as TableEditorDraft;
+  Object.assign(nextDraft, patch);
+  const message = await validateDraftForSave(nextDraft);
+  if (message) throw new Error(message);
+  await onSave(patch);
+};
+
 const renderRawJsonSections = (
   draft: TableEditorDraft,
   onSave: (patch: Record<string, unknown>) => Promise<void>,
@@ -854,7 +900,7 @@ const renderRawJsonSections = (
       validateTableSchemaDraft,
       async (schemaDraft) => {
         const nextSchema = schemaDraft as TableSchema;
-        await onSave({ schema: nextSchema });
+        await savePatchIfValid(draft, onSave, { schema: nextSchema });
       },
     ),
   },
@@ -868,7 +914,7 @@ const renderRawJsonSections = (
       },
       async (dataDraft) => {
         const nextData = dataDraft as TableData;
-        await onSave({ data: nextData });
+        await savePatchIfValid(draft, onSave, { data: nextData });
       },
     ),
   },
@@ -911,7 +957,7 @@ export const hydrateTableEditor = async (
   };
 
   const saveDraft = async (): Promise<void> => {
-    const message = validateDraft(draft);
+    const message = await validateDraftForSave(draft);
     if (message) {
       renderStatus(status, message);
       return;
