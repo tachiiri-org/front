@@ -16,6 +16,66 @@ type TableSaveTarget =
 
 const clone = <T>(value: T): T => JSON.parse(JSON.stringify(value)) as T;
 
+const TEXT_INPUT_MIN_WIDTH = 96;
+const TEXT_INPUT_EXTRA_SPACE = 18;
+
+let measureCanvas: HTMLCanvasElement | null = null;
+let measureContext: CanvasRenderingContext2D | null = null;
+
+const measureTextWidth = (text: string, font: string): number => {
+  if (!measureCanvas) {
+    measureCanvas = document.createElement('canvas');
+    measureContext = measureCanvas.getContext('2d');
+  }
+  if (!measureContext) return text.length * 8;
+  measureContext.font = font;
+  return measureContext.measureText(text).width;
+};
+
+const applyTextInputSize = (
+  input: HTMLInputElement | HTMLSelectElement,
+  value: string,
+  fallback = '',
+): void => {
+  const label = value || fallback || '';
+  const style = globalThis.getComputedStyle(input);
+  const font = style.font || `${style.fontSize} ${style.fontFamily}`;
+  const textWidth = Math.ceil(measureTextWidth(label, font));
+  const horizontalPadding =
+    Number.parseFloat(style.paddingLeft || '0') + Number.parseFloat(style.paddingRight || '0');
+  const borderWidth =
+    Number.parseFloat(style.borderLeftWidth || '0') + Number.parseFloat(style.borderRightWidth || '0');
+  const width = Math.max(
+    TEXT_INPUT_MIN_WIDTH,
+    textWidth + horizontalPadding + borderWidth + TEXT_INPUT_EXTRA_SPACE,
+  );
+  if (input instanceof HTMLInputElement) {
+    input.style.width = `${width}px`;
+  }
+  if (input instanceof HTMLSelectElement) {
+    input.style.minWidth = `${width}px`;
+  }
+};
+
+const syncAutoSizedControls = (root: HTMLElement): void => {
+  for (const element of root.querySelectorAll('[data-auto-size="true"]')) {
+    if (element instanceof HTMLInputElement || element instanceof HTMLSelectElement) {
+      applyTextInputSize(element, element.value, element instanceof HTMLInputElement ? element.placeholder : '');
+    }
+  }
+};
+
+const scheduleAutoSizedControls = (root: HTMLElement): void => {
+  const run = (): void => syncAutoSizedControls(root);
+  if (typeof queueMicrotask === 'function') {
+    queueMicrotask(run);
+    return;
+  }
+  setTimeout(run, 0);
+};
+
+const ACTION_COL_MIN_WIDTH = '72px';
+
 const randomId = (): string => {
   const cryptoObj = globalThis.crypto as Crypto | undefined;
   if (cryptoObj && typeof cryptoObj.randomUUID === 'function') return cryptoObj.randomUUID();
@@ -201,8 +261,8 @@ const renderEditableTable = (
     labelInput.type = 'text';
     labelInput.placeholder = 'column name';
     labelInput.value = column.label;
-    labelInput.style.width = '100%';
-    labelInput.style.display = 'block';
+    labelInput.style.width = 'auto';
+    labelInput.style.display = 'inline-block';
     labelInput.style.boxSizing = 'border-box';
     labelInput.style.fontSize = '12px';
     labelInput.style.border = 'none';
@@ -210,10 +270,16 @@ const renderEditableTable = (
     labelInput.style.padding = '10px 8px';
     labelInput.style.background = 'transparent';
     labelInput.style.outline = 'none';
+    labelInput.dataset.autoSize = 'true';
+    applyTextInputSize(labelInput, labelInput.value, labelInput.placeholder);
+    labelInput.addEventListener('input', () => {
+      applyTextInputSize(labelInput, labelInput.value, labelInput.placeholder);
+    });
     labelInput.addEventListener('blur', () => {
       const next = labelInput.value.trim();
       if (next) column.label = next;
       labelInput.value = column.label;
+      applyTextInputSize(labelInput, labelInput.value, labelInput.placeholder);
       void saveAndRender();
     });
     return labelInput;
@@ -232,6 +298,7 @@ const renderEditableTable = (
     removeBtn.style.padding = '0';
     removeBtn.style.width = '100%';
     removeBtn.style.textAlign = 'center';
+    removeBtn.style.whiteSpace = 'nowrap';
     removeBtn.addEventListener('click', () => removeColumn(column));
     return removeBtn;
   };
@@ -268,7 +335,7 @@ const renderEditableTable = (
     if (column.type === 'select') {
       const select = document.createElement('select');
       Object.assign(select.style, {
-        width: '100%',
+        width: 'auto',
         minWidth: '0',
         boxSizing: 'border-box',
         fontSize: '12px',
@@ -276,6 +343,7 @@ const renderEditableTable = (
         background: 'transparent',
         padding: '10px 8px',
       });
+      select.dataset.autoSize = 'true';
       const empty = document.createElement('option');
       empty.value = '';
       empty.textContent = '';
@@ -289,6 +357,7 @@ const renderEditableTable = (
         }
       }
       select.value = typeof current === 'string' ? current : '';
+      applyTextInputSize(select, select.value, '');
       select.addEventListener('change', () => {
         setValue(select.value);
         commit();
@@ -302,7 +371,7 @@ const renderEditableTable = (
       ? (column.dateKind === 'datetime' ? 'datetime-local' : 'date')
       : 'text';
     Object.assign(input.style, {
-      width: '100%',
+      width: 'auto',
       minWidth: '0',
       boxSizing: 'border-box',
       fontSize: '12px',
@@ -311,7 +380,9 @@ const renderEditableTable = (
       padding: '10px 8px',
       outline: 'none',
     });
+    input.dataset.autoSize = 'true';
     input.value = current === undefined || current === null ? '' : String(current);
+    applyTextInputSize(input, input.value, input.placeholder);
     const handleTextChange = (): void => {
       if (column.type === 'int') {
         const raw = input.value.trim();
@@ -319,6 +390,7 @@ const renderEditableTable = (
       } else {
         setValue(input.value);
       }
+      applyTextInputSize(input, input.value, input.placeholder);
       commit();
     };
     if (isDraftRow) {
@@ -336,21 +408,20 @@ const renderEditableTable = (
     const table = document.createElement('table');
     Object.assign(table.style, {
       width: 'max-content',
-      minWidth: '100%',
       borderCollapse: 'collapse',
       borderSpacing: '0',
-      tableLayout: 'fixed',
+      tableLayout: 'auto',
       fontSize: '12px',
     });
 
     const colgroup = document.createElement('colgroup');
     for (const column of draft.schema.columns) {
       const col = document.createElement('col');
-      col.style.width = '220px';
       colgroup.appendChild(col);
     }
     const actionCol = document.createElement('col');
-    actionCol.style.width = '48px';
+    actionCol.style.width = ACTION_COL_MIN_WIDTH;
+    actionCol.style.minWidth = ACTION_COL_MIN_WIDTH;
     colgroup.appendChild(actionCol);
     table.appendChild(colgroup);
 
@@ -390,6 +461,7 @@ const renderEditableTable = (
       padding: '0 8px',
       border: 'none',
       background: 'transparent',
+      whiteSpace: 'nowrap',
     });
     const addColumnBtn = document.createElement('button');
     addColumnBtn.type = 'button';
@@ -403,6 +475,7 @@ const renderEditableTable = (
     addColumnBtn.style.width = 'auto';
     addColumnBtn.style.textAlign = 'left';
     addColumnBtn.style.display = 'block';
+    addColumnBtn.style.whiteSpace = 'nowrap';
     addColumnBtn.addEventListener('click', () => addColumn());
     addColumnHead.appendChild(addColumnBtn);
     headLabelRow.appendChild(addColumnHead);
@@ -431,6 +504,7 @@ const renderEditableTable = (
       actionCell.style.padding = '0 8px';
       actionCell.style.verticalAlign = 'middle';
       actionCell.style.textAlign = 'left';
+      actionCell.style.whiteSpace = 'nowrap';
       const deleteBtn = document.createElement('button');
       deleteBtn.type = 'button';
       deleteBtn.textContent = '行削除';
@@ -441,6 +515,7 @@ const renderEditableTable = (
       deleteBtn.style.padding = '0';
       deleteBtn.style.width = 'auto';
       deleteBtn.style.textAlign = 'left';
+      deleteBtn.style.whiteSpace = 'nowrap';
       deleteBtn.addEventListener('click', () => {
         draft.data.rows.splice(rowIndex, 1);
         void saveAndRender();
@@ -470,6 +545,7 @@ const renderEditableTable = (
     draftActionCell.style.padding = '0 8px';
     draftActionCell.style.verticalAlign = 'middle';
     draftActionCell.style.textAlign = 'left';
+    draftActionCell.style.whiteSpace = 'nowrap';
     const addRowBtn = document.createElement('button');
     addRowBtn.type = 'button';
     addRowBtn.textContent = '行追加';
@@ -481,6 +557,7 @@ const renderEditableTable = (
     addRowBtn.style.padding = '0';
     addRowBtn.style.width = 'auto';
     addRowBtn.style.textAlign = 'left';
+    addRowBtn.style.whiteSpace = 'nowrap';
     addRowBtn.disabled = draft.schema.columns.length === 0;
     addRowBtn.addEventListener('click', () => {
       addRow({ ...pendingRowValues });
@@ -494,6 +571,7 @@ const renderEditableTable = (
 
     wrapper.appendChild(table);
     wrapper.appendChild(status);
+    scheduleAutoSizedControls(wrapper);
   };
 
   render();
