@@ -15,6 +15,31 @@ export const putScreen = async (screenId: string, value: unknown): Promise<void>
   });
 };
 
+export const createScreen = async (screenId: string, value: unknown): Promise<void> => {
+  const encoded = encodeURIComponent(screenId);
+  const existing = await fetch(`/api/layouts/${encoded}`);
+  if (existing.ok) {
+    throw new Error(`screen already exists: ${screenId}`);
+  }
+  const res = await fetch(`/api/layouts/${encoded}`, {
+    method: 'PUT',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify(value),
+  });
+  if (!res.ok) {
+    throw new Error(`screen_create_failed:${res.status}`);
+  }
+};
+
+export const deleteScreen = async (screenId: string): Promise<void> => {
+  const res = await fetch(`/api/layouts/${encodeURIComponent(screenId)}`, {
+    method: 'DELETE',
+  });
+  if (!res.ok) {
+    throw new Error(`screen_delete_failed:${res.status}`);
+  }
+};
+
 export const putComponent = async (
   screenId: string,
   componentSrc: string,

@@ -2,8 +2,85 @@ import type { ListFrame } from '../../../schema/screen/screen';
 import { domMap, getFrameSelection, setFrameSelection, clearFrameSelection, isEditableTarget } from '../../../state';
 import { fetchItems } from './fetch';
 import { RESOURCES } from './resources';
+import { createScreen, deleteScreen } from '../editor/save';
+import { screenDefaults } from '../../../schema/screen/screen';
 
 let listInteractionController: AbortController | null = null;
+
+const actionStyle: Record<string, string> = {
+  fontSize: '10px',
+  cursor: 'pointer',
+  border: 'none',
+  background: 'transparent',
+  color: 'rgba(0,0,0,0.45)',
+  padding: '0',
+};
+
+const showMutationError = (error: unknown): void => {
+  const message = error instanceof Error ? error.message : String(error);
+  window.alert(message);
+};
+
+const allocateScreenId = (items: string[]): string => {
+  let index = 1;
+  while (items.includes(`screen-${index}`)) index += 1;
+  return `screen-${index}`;
+};
+
+const buildItemRow = (
+  listEl: HTMLElement,
+  listFrame: ListFrame,
+  itemId: string,
+  currentSelection: string | null,
+  onItemSelect: (itemId: string) => Promise<void>,
+  onReload: () => void,
+): HTMLLIElement => {
+  const item = document.createElement('li');
+  item.style.display = 'flex';
+  item.style.alignItems = 'center';
+  item.style.justifyContent = 'space-between';
+  item.style.gap = '8px';
+  item.style.listStyle = 'none';
+  if (listFrame.itemStyle) Object.assign(item.style, listFrame.itemStyle);
+  if (itemId === currentSelection) item.style.fontWeight = 'bold';
+  item.style.cursor = 'pointer';
+  item.addEventListener('click', () => {
+    for (const child of listEl.children) {
+      (child as HTMLElement).style.fontWeight = '';
+    }
+    item.style.fontWeight = 'bold';
+    setFrameSelection(listFrame.id, itemId);
+    void onItemSelect(itemId);
+  });
+
+  const label = document.createElement('span');
+  label.textContent = itemId;
+  label.style.flex = '1';
+
+  const deleteBtn = document.createElement('button');
+  deleteBtn.type = 'button';
+  deleteBtn.textContent = '削除';
+  Object.assign(deleteBtn.style, actionStyle);
+  deleteBtn.addEventListener('click', (e) => {
+    e.stopPropagation();
+    if (!window.confirm(`Delete "${itemId}"?`)) return;
+    void (async () => {
+      try {
+        await deleteScreen(itemId);
+        if (getFrameSelection(listFrame.id) === itemId) {
+          clearFrameSelection(listFrame.id);
+        }
+        onReload();
+      } catch (error) {
+        showMutationError(error);
+      }
+    })();
+  });
+
+  item.appendChild(label);
+  item.appendChild(deleteBtn);
+  return item;
+};
 
 export const hydrateList = async (
   listFrame: ListFrame,
@@ -22,22 +99,43 @@ export const hydrateList = async (
 
   const currentSelection = getFrameSelection(listFrame.id);
 
-  for (const itemId of items) {
-    const item = document.createElement('li');
-    item.textContent = itemId;
-    if (listFrame.itemStyle) Object.assign(item.style, listFrame.itemStyle);
-    if (itemId === currentSelection) item.style.fontWeight = 'bold';
+  const header = document.createElement('li');
+  header.style.display = 'flex';
+  header.style.alignItems = 'center';
+  header.style.justifyContent = 'space-between';
+  header.style.gap = '8px';
+  header.style.padding = '0 0 6px';
+  header.style.listStyle = 'none';
 
-    item.addEventListener('click', () => {
-      for (const child of listEl.children) {
-        (child as HTMLElement).style.fontWeight = '';
+  const addBtn = document.createElement('button');
+  addBtn.type = 'button';
+  addBtn.textContent = '追加';
+  Object.assign(addBtn.style, actionStyle);
+  addBtn.addEventListener('click', () => {
+    const defaultId = allocateScreenId(items);
+    const nextId = window.prompt('New screen id', defaultId)?.trim();
+    if (!nextId) return;
+    if (items.includes(nextId)) {
+      window.alert(`"${nextId}" already exists.`);
+      return;
+    }
+    void (async () => {
+      try {
+        await createScreen(nextId, screenDefaults);
+        setFrameSelection(listFrame.id, nextId);
+        await hydrateList(listFrame, onItemSelect, onReload, isBlocked);
+        void onItemSelect(nextId);
+      } catch (error) {
+        showMutationError(error);
       }
-      item.style.fontWeight = 'bold';
-      setFrameSelection(listFrame.id, itemId);
-      void onItemSelect(itemId);
-    });
+    })();
+  });
 
-    listEl.appendChild(item);
+  header.appendChild(addBtn);
+  listEl.appendChild(header);
+
+  for (const itemId of items) {
+    listEl.appendChild(buildItemRow(listEl, listFrame, itemId, currentSelection, onItemSelect, onReload));
   }
 
   listInteractionController?.abort();
@@ -72,12 +170,13 @@ export const hydrateList = async (
       e.preventDefault();
       if (!window.confirm(`Delete "${currentId}"?`)) return;
       void (async () => {
-        const res = await fetch(`${resource.itemBaseUrl}/${encodeURIComponent(currentId)}`, {
-          method: 'DELETE',
-        });
-        if (!res.ok) return;
-        clearFrameSelection(listFrame.id);
-        onReload();
+        try {
+          await deleteScreen(currentId);
+          clearFrameSelection(listFrame.id);
+          onReload();
+        } catch (error) {
+          showMutationError(error);
+        }
       })();
       return;
     }
