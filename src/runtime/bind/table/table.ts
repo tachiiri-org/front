@@ -317,7 +317,8 @@ const renderColumnSourceEditor = (
     Object.assign(title.style, { fontSize: '10px', color: 'rgba(0,0,0,0.65)' });
     const addBtn = document.createElement('button');
     addBtn.type = 'button';
-    addBtn.textContent = '+ add';
+    addBtn.textContent = '+';
+    addBtn.setAttribute('aria-label', 'add option');
     addBtn.style.border = 'none';
     addBtn.style.background = 'transparent';
     addBtn.style.cursor = 'pointer';
@@ -883,10 +884,6 @@ const renderSchemaSection = (
     flexWrap: 'wrap',
   });
 
-  const label = document.createElement('span');
-  label.textContent = 'columns';
-  Object.assign(label.style, { fontSize: '11px', color: 'rgba(0,0,0,0.7)', fontWeight: '500' });
-
   const controls = document.createElement('div');
   Object.assign(controls.style, {
     display: 'flex',
@@ -919,7 +916,8 @@ const renderSchemaSection = (
 
   const addBtn = document.createElement('button');
   addBtn.type = 'button';
-  addBtn.textContent = '+ add';
+  addBtn.textContent = '+';
+  addBtn.setAttribute('aria-label', 'add column');
   addBtn.style.border = 'none';
   addBtn.style.background = 'transparent';
   addBtn.style.cursor = 'pointer';
@@ -928,7 +926,6 @@ const renderSchemaSection = (
 
   controls.appendChild(typeSelect);
   controls.appendChild(addBtn);
-  header.appendChild(label);
   header.appendChild(controls);
 
   const list = document.createElement('div');
@@ -942,18 +939,16 @@ const renderSchemaSection = (
       fontSize: '11px',
       color: 'rgba(0,0,0,0.55)',
     });
-    const message = document.createElement('div');
-    message.textContent = 'No columns yet. Add one to start defining the table schema.';
     const emptyBtn = document.createElement('button');
     emptyBtn.type = 'button';
-    emptyBtn.textContent = '+ add first column';
+    emptyBtn.textContent = '+';
+    emptyBtn.setAttribute('aria-label', 'add first column');
     emptyBtn.style.border = 'none';
     emptyBtn.style.background = 'transparent';
     emptyBtn.style.cursor = 'pointer';
     emptyBtn.style.padding = '0';
     emptyBtn.style.fontSize = '11px';
     emptyBtn.addEventListener('click', () => addColumn('string'));
-    empty.appendChild(message);
     empty.appendChild(emptyBtn);
     list.appendChild(empty);
   } else {
@@ -1120,20 +1115,16 @@ const renderDataSection = (
     padding: '0 8px 6px',
   });
 
-  const label = document.createElement('span');
-  label.textContent = 'rows';
-  Object.assign(label.style, { fontSize: '11px', color: 'rgba(0,0,0,0.7)', fontWeight: '500' });
-
   const addBtn = document.createElement('button');
   addBtn.type = 'button';
-  addBtn.textContent = '+ add row';
+  addBtn.textContent = '+';
+  addBtn.setAttribute('aria-label', 'add row');
   addBtn.style.border = 'none';
   addBtn.style.background = 'transparent';
   addBtn.style.cursor = 'pointer';
   addBtn.style.fontSize = '11px';
   addBtn.addEventListener('click', addRow);
 
-  header.appendChild(label);
   header.appendChild(addBtn);
 
   const visibleColumns = draft.schema.columns.filter((column) => !column.hidden);
@@ -1147,8 +1138,6 @@ const renderDataSection = (
       fontSize: '11px',
       color: 'rgba(0,0,0,0.55)',
     });
-    const message = document.createElement('div');
-    message.textContent = 'No columns yet. Start by adding a column, then add rows.';
     const actions = document.createElement('div');
     Object.assign(actions.style, {
       display: 'flex',
@@ -1158,7 +1147,8 @@ const renderDataSection = (
     });
     const firstColumnBtn = document.createElement('button');
     firstColumnBtn.type = 'button';
-    firstColumnBtn.textContent = '+ add first column';
+    firstColumnBtn.textContent = '+';
+    firstColumnBtn.setAttribute('aria-label', 'add first column');
     firstColumnBtn.style.border = 'none';
     firstColumnBtn.style.background = 'transparent';
     firstColumnBtn.style.cursor = 'pointer';
@@ -1167,14 +1157,14 @@ const renderDataSection = (
     firstColumnBtn.addEventListener('click', () => addColumn('string'));
     const firstRowBtn = document.createElement('button');
     firstRowBtn.type = 'button';
-    firstRowBtn.textContent = '+ add first row';
+    firstRowBtn.textContent = '+';
+    firstRowBtn.setAttribute('aria-label', 'add first row');
     firstRowBtn.style.border = 'none';
     firstRowBtn.style.background = 'transparent';
     firstRowBtn.style.cursor = 'pointer';
     firstRowBtn.style.padding = '0';
     firstRowBtn.style.fontSize = '11px';
     firstRowBtn.addEventListener('click', addRow);
-    empty.appendChild(message);
     actions.appendChild(firstColumnBtn);
     actions.appendChild(firstRowBtn);
     empty.appendChild(actions);
@@ -1221,18 +1211,16 @@ const renderDataSection = (
       flexDirection: 'column',
       gap: '8px',
     });
-    const message = document.createElement('div');
-    message.textContent = 'No rows yet. Add the first row to start editing data.';
     const emptyBtn = document.createElement('button');
     emptyBtn.type = 'button';
-    emptyBtn.textContent = '+ add first row';
+    emptyBtn.textContent = '+';
+    emptyBtn.setAttribute('aria-label', 'add first row');
     emptyBtn.style.border = 'none';
     emptyBtn.style.background = 'transparent';
     emptyBtn.style.cursor = 'pointer';
     emptyBtn.style.padding = '0';
     emptyBtn.style.fontSize = '11px';
     emptyBtn.addEventListener('click', addRow);
-    emptyWrap.appendChild(message);
     emptyWrap.appendChild(emptyBtn);
     td.appendChild(emptyWrap);
     tr.appendChild(td);

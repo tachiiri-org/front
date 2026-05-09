@@ -4,14 +4,12 @@ import {
   type TableComponent,
   type TableData,
   type TableSchema,
-  type TableSelectSource,
 } from '../../../schema/component';
 import { type Frame, isFrameRef } from '../../../schema/screen/screen';
 import { putComponent, updateScreen } from '../../bind/editor/save';
 import { renderTable } from './frame';
 
 type TableEditorDraft = TableComponent;
-type TableColumnType = TableColumn['type'];
 type TableSaveTarget =
   | { kind: 'component'; screenId: string; componentSrc: string }
   | { kind: 'screen-frame'; screenId: string; frameId: string };
@@ -31,32 +29,17 @@ const generateColumnKey = (columns: TableColumn[], base = 'column'): string => {
   return `${base}_${index}`;
 };
 
-const createInlineSelectSource = (): TableSelectSource => ({
-  kind: 'inline',
-  options: [],
-});
-
-const createColumnByType = (schema: TableSchema, type: TableColumnType): TableColumn => {
+const createColumn = (schema: TableSchema, label?: string): TableColumn => {
   const base = {
     key: generateColumnKey(schema.columns),
-    label: 'New column',
+    label: label?.trim() || 'New column',
     hidden: false,
     required: false,
     nullable: true,
+    type: 'string' as const,
   };
 
-  switch (type) {
-    case 'string':
-      return { ...base, type: 'string' };
-    case 'int':
-      return { ...base, type: 'int' };
-    case 'boolean':
-      return { ...base, type: 'boolean' };
-    case 'date':
-      return { ...base, type: 'date', dateKind: 'date' };
-    case 'select':
-      return { ...base, type: 'select', source: createInlineSelectSource() };
-  }
+  return base;
 };
 
 const formatDateValue = (date: Date, kind: 'date' | 'datetime' = 'date'): string => {
@@ -171,14 +154,13 @@ const renderEditableTable = (
   const wrapper = renderTable(id, component);
   const draft = clone(component) as TableEditorDraft;
   const saveTarget = buildSaveTarget(frame, screenId);
+  let pendingRowValues = makeRowFromSchema(draft.schema);
 
   const status = document.createElement('div');
   status.style.fontSize = '10px';
   status.style.fontFamily = 'monospace';
   status.style.minHeight = '14px';
   status.style.color = '#c0392b';
-
-  const visibleColumns = (): TableColumn[] => draft.schema.columns.filter((column) => !column.hidden);
 
   const saveAndRender = async (): Promise<void> => {
     try {
@@ -190,128 +172,94 @@ const renderEditableTable = (
     render();
   };
 
-  const addColumn = (type: TableColumnType): void => {
-    const column = createColumnByType(draft.schema, type);
+  const addColumn = (label?: string): void => {
+    const column = createColumn(draft.schema, label);
     draft.schema.columns.push(column);
     addColumnToRows(draft.data.rows, column);
+    pendingRowValues[column.key] = makeDefaultValue(column);
     void saveAndRender();
   };
 
-  const addRow = (): void => {
-    draft.data.rows.push({ id: randomId(), values: makeRowFromSchema(draft.schema) });
+  const removeColumn = (column: TableColumn): void => {
+    const index = draft.schema.columns.indexOf(column);
+    if (index < 0) return;
+    draft.schema.columns.splice(index, 1);
+    for (const row of draft.data.rows) {
+      delete row.values[column.key];
+    }
+    pendingRowValues = makeRowFromSchema(draft.schema);
     void saveAndRender();
   };
 
-  const renderColumnEditor = (column: TableColumn): HTMLElement => {
-    const rowWrap = document.createElement('div');
-    Object.assign(rowWrap.style, {
-      display: 'grid',
-      gridTemplateColumns: 'minmax(120px, 1.2fr) minmax(120px, 1fr) 90px 70px 70px auto',
-      gap: '6px',
-      alignItems: 'start',
-      padding: '6px 8px',
-      borderBottom: '1px solid rgba(0,0,0,0.06)',
-      background: column.hidden ? 'rgba(0,0,0,0.02)' : 'transparent',
-    });
+  const addRow = (values: Record<string, unknown>): void => {
+    draft.data.rows.push({ id: randomId(), values });
+    void saveAndRender();
+  };
 
-    const makeInput = (value: string, placeholder: string): HTMLInputElement => {
-      const input = document.createElement('input');
-      input.type = 'text';
-      input.placeholder = placeholder;
-      input.value = value;
-      input.style.width = '100%';
-      input.style.boxSizing = 'border-box';
-      input.style.fontSize = '12px';
-      return input;
-    };
-
-    const keyInput = makeInput(column.key, 'key');
-    keyInput.addEventListener('blur', () => {
-      const nextKey = keyInput.value.trim();
-      if (!nextKey || nextKey === column.key) {
-        keyInput.value = column.key;
-        return;
-      }
-      const oldKey = column.key;
-      column.key = nextKey;
-      syncRowValuesForColumn(draft.data.rows, oldKey, nextKey, makeDefaultValue(column));
-      void saveAndRender();
-    });
-
-    const labelInput = makeInput(column.label, 'label');
+  const renderColumnHeaderLabel = (column: TableColumn): HTMLElement => {
+    const labelInput = document.createElement('input');
+    labelInput.type = 'text';
+    labelInput.placeholder = 'column name';
+    labelInput.value = column.label;
+    labelInput.style.width = '100%';
+    labelInput.style.display = 'block';
+    labelInput.style.boxSizing = 'border-box';
+    labelInput.style.fontSize = '12px';
+    labelInput.style.border = 'none';
+    labelInput.style.borderRadius = '0';
+    labelInput.style.padding = '10px 8px';
+    labelInput.style.background = 'transparent';
+    labelInput.style.outline = 'none';
     labelInput.addEventListener('blur', () => {
       const next = labelInput.value.trim();
       if (next) column.label = next;
       labelInput.value = column.label;
       void saveAndRender();
     });
+    return labelInput;
+  };
 
-    const typeLabel = document.createElement('div');
-    typeLabel.textContent = column.type;
-    typeLabel.style.fontSize = '11px';
-    typeLabel.style.color = 'rgba(0,0,0,0.7)';
-    typeLabel.style.padding = '5px 0';
-
-    const requiredInput = document.createElement('input');
-    requiredInput.type = 'checkbox';
-    requiredInput.checked = Boolean(column.required);
-    requiredInput.addEventListener('change', () => {
-      column.required = requiredInput.checked;
-      void saveAndRender();
-    });
-
-    const hiddenInput = document.createElement('input');
-    hiddenInput.type = 'checkbox';
-    hiddenInput.checked = Boolean(column.hidden);
-    hiddenInput.addEventListener('change', () => {
-      column.hidden = hiddenInput.checked;
-      void saveAndRender();
-    });
-
-    const actions = document.createElement('div');
-    Object.assign(actions.style, { display: 'flex', gap: '4px', flexWrap: 'wrap' });
-
+  const renderColumnHeaderAction = (column: TableColumn): HTMLElement => {
     const removeBtn = document.createElement('button');
     removeBtn.type = 'button';
-    removeBtn.textContent = 'delete';
+    removeBtn.textContent = '列削除';
+    removeBtn.setAttribute('aria-label', 'remove column');
+    removeBtn.style.display = 'block';
     removeBtn.style.border = 'none';
     removeBtn.style.background = 'transparent';
     removeBtn.style.cursor = 'pointer';
     removeBtn.style.fontSize = '11px';
-    removeBtn.addEventListener('click', () => {
-      const index = draft.schema.columns.indexOf(column);
-      if (index < 0) return;
-      draft.schema.columns.splice(index, 1);
-      for (const row of draft.data.rows) delete row.values[column.key];
-      void saveAndRender();
-    });
-
-    actions.appendChild(removeBtn);
-    rowWrap.appendChild(keyInput);
-    rowWrap.appendChild(labelInput);
-    rowWrap.appendChild(typeLabel);
-    rowWrap.appendChild(requiredInput);
-    rowWrap.appendChild(hiddenInput);
-    rowWrap.appendChild(actions);
-    return rowWrap;
+    removeBtn.style.padding = '0';
+    removeBtn.style.width = '100%';
+    removeBtn.style.textAlign = 'center';
+    removeBtn.addEventListener('click', () => removeColumn(column));
+    return removeBtn;
   };
 
-  const renderCellEditor = (rowIndex: number, column: TableColumn): HTMLElement => {
-    const row = draft.data.rows[rowIndex];
+  const renderCellEditor = (
+    current: unknown,
+    column: TableColumn,
+    setValue: (value: unknown) => void,
+    commit: () => void,
+    isDraftRow = false,
+  ): HTMLElement => {
     const cell = document.createElement('td');
-    cell.style.borderBottom = '1px solid rgba(0,0,0,0.06)';
-    cell.style.padding = '4px 6px';
+    cell.style.border = '1px solid rgba(0,0,0,0.14)';
+    cell.style.padding = '0';
     cell.style.verticalAlign = 'top';
-
-    const current = row.values[column.key];
+    if (column.hidden) {
+      cell.style.opacity = '0.35';
+    }
 
     if (column.type === 'boolean') {
       const input = document.createElement('input');
       input.type = 'checkbox';
+      input.style.display = 'block';
+      input.style.margin = '10px 8px';
       input.checked = Boolean(current);
       input.addEventListener('change', () => {
-        row.values[column.key] = input.checked;
-        void saveAndRender();
+        setValue(input.checked);
+        commit();
       });
       cell.appendChild(input);
       return cell;
@@ -319,8 +267,15 @@ const renderEditableTable = (
 
     if (column.type === 'select') {
       const select = document.createElement('select');
-      select.style.width = '100%';
-      select.style.fontSize = '12px';
+      Object.assign(select.style, {
+        width: '100%',
+        minWidth: '0',
+        boxSizing: 'border-box',
+        fontSize: '12px',
+        border: 'none',
+        background: 'transparent',
+        padding: '10px 8px',
+      });
       const empty = document.createElement('option');
       empty.value = '';
       empty.textContent = '';
@@ -335,8 +290,8 @@ const renderEditableTable = (
       }
       select.value = typeof current === 'string' ? current : '';
       select.addEventListener('change', () => {
-        row.values[column.key] = select.value;
-        void saveAndRender();
+        setValue(select.value);
+        commit();
       });
       cell.appendChild(select);
       return cell;
@@ -346,19 +301,31 @@ const renderEditableTable = (
     input.type = column.type === 'date'
       ? (column.dateKind === 'datetime' ? 'datetime-local' : 'date')
       : 'text';
-    input.style.width = '100%';
-    input.style.boxSizing = 'border-box';
-    input.style.fontSize = '12px';
+    Object.assign(input.style, {
+      width: '100%',
+      minWidth: '0',
+      boxSizing: 'border-box',
+      fontSize: '12px',
+      border: 'none',
+      background: 'transparent',
+      padding: '10px 8px',
+      outline: 'none',
+    });
     input.value = current === undefined || current === null ? '' : String(current);
-    input.addEventListener('blur', () => {
+    const handleTextChange = (): void => {
       if (column.type === 'int') {
         const raw = input.value.trim();
-        row.values[column.key] = raw === '' ? '' : Number.isFinite(Number(raw)) ? Number(raw) : raw;
+        setValue(raw === '' ? '' : Number.isFinite(Number(raw)) ? Number(raw) : raw);
       } else {
-        row.values[column.key] = input.value;
+        setValue(input.value);
       }
-      void saveAndRender();
-    });
+      commit();
+    };
+    if (isDraftRow) {
+      input.addEventListener('input', handleTextChange);
+    } else {
+      input.addEventListener('blur', handleTextChange);
+    }
     cell.appendChild(input);
     return cell;
   };
@@ -366,231 +333,166 @@ const renderEditableTable = (
   const render = (): void => {
     wrapper.replaceChildren();
 
-    const header = document.createElement('div');
-    Object.assign(header.style, {
-      display: 'flex',
-      alignItems: 'center',
-      justifyContent: 'space-between',
-      gap: '8px',
-      padding: '0 8px 6px',
-      flexWrap: 'wrap',
+    const table = document.createElement('table');
+    Object.assign(table.style, {
+      width: 'max-content',
+      minWidth: '100%',
+      borderCollapse: 'collapse',
+      borderSpacing: '0',
+      tableLayout: 'fixed',
+      fontSize: '12px',
     });
-    const title = document.createElement('span');
-    title.textContent = 'columns';
-    title.style.fontSize = '11px';
-    title.style.color = 'rgba(0,0,0,0.7)';
-    title.style.fontWeight = '500';
 
-    const controls = document.createElement('div');
-    Object.assign(controls.style, {
-      display: 'flex',
-      alignItems: 'center',
-      gap: '6px',
-      flexWrap: 'wrap',
-    });
-    const typeSelect = document.createElement('select');
-    Object.assign(typeSelect.style, {
-      minWidth: '108px',
-      fontSize: '11px',
-      border: '1px solid rgba(0,0,0,0.12)',
-      borderRadius: '4px',
-      background: 'white',
-      padding: '2px 4px',
-    });
-    for (const option of [
-      { value: 'string', label: 'string' },
-      { value: 'int', label: 'int' },
-      { value: 'boolean', label: 'boolean' },
-      { value: 'date', label: 'date' },
-      { value: 'select', label: 'select' },
-    ]) {
-      const el = document.createElement('option');
-      el.value = option.value;
-      el.textContent = option.label;
-      typeSelect.appendChild(el);
+    const colgroup = document.createElement('colgroup');
+    for (const column of draft.schema.columns) {
+      const col = document.createElement('col');
+      col.style.width = '220px';
+      colgroup.appendChild(col);
     }
-    const addBtn = document.createElement('button');
-    addBtn.type = 'button';
-    addBtn.textContent = '+ add';
-    addBtn.style.border = 'none';
-    addBtn.style.background = 'transparent';
-    addBtn.style.cursor = 'pointer';
-    addBtn.style.fontSize = '11px';
-    addBtn.addEventListener('click', () => addColumn(typeSelect.value as TableColumnType));
-    controls.appendChild(typeSelect);
-    controls.appendChild(addBtn);
-    header.appendChild(title);
-    header.appendChild(controls);
-    wrapper.appendChild(header);
+    const actionCol = document.createElement('col');
+    actionCol.style.width = '48px';
+    colgroup.appendChild(actionCol);
+    table.appendChild(colgroup);
 
-    const columnList = document.createElement('div');
-    if (draft.schema.columns.length === 0) {
-      const empty = document.createElement('div');
-      Object.assign(empty.style, {
-        display: 'flex',
-        flexDirection: 'column',
-        gap: '8px',
-        padding: '8px',
-        fontSize: '11px',
-        color: 'rgba(0,0,0,0.55)',
+    const thead = document.createElement('thead');
+    const headActionRow = document.createElement('tr');
+    for (const column of draft.schema.columns) {
+      const th = document.createElement('th');
+      Object.assign(th.style, {
+        verticalAlign: 'bottom',
+        textAlign: 'left',
+        padding: '0 8px 4px',
+        border: 'none',
+        background: column.hidden ? 'rgba(0,0,0,0.02)' : 'transparent',
       });
-      const message = document.createElement('div');
-      message.textContent = 'No columns yet. Add one to start defining the table schema.';
-      const firstColumnBtn = document.createElement('button');
-      firstColumnBtn.type = 'button';
-      firstColumnBtn.textContent = '+ add first column';
-      firstColumnBtn.style.border = 'none';
-      firstColumnBtn.style.background = 'transparent';
-      firstColumnBtn.style.cursor = 'pointer';
-      firstColumnBtn.style.padding = '0';
-      firstColumnBtn.style.fontSize = '11px';
-      firstColumnBtn.addEventListener('click', () => addColumn('string'));
-      empty.appendChild(message);
-      empty.appendChild(firstColumnBtn);
-      columnList.appendChild(empty);
-    } else {
-      for (const column of draft.schema.columns) {
-        columnList.appendChild(renderColumnEditor(column));
-      }
+      th.appendChild(renderColumnHeaderAction(column));
+      headActionRow.appendChild(th);
     }
-    wrapper.appendChild(columnList);
+    thead.appendChild(headActionRow);
 
-    const rowsHeader = document.createElement('div');
-    Object.assign(rowsHeader.style, {
-      display: 'flex',
-      alignItems: 'center',
-      justifyContent: 'space-between',
-      gap: '8px',
-      padding: '8px 8px 6px',
+    const headLabelRow = document.createElement('tr');
+    for (const column of draft.schema.columns) {
+      const th = document.createElement('th');
+      Object.assign(th.style, {
+        verticalAlign: 'top',
+        textAlign: 'left',
+        padding: '0',
+        border: '1px solid rgba(0,0,0,0.14)',
+        background: column.hidden ? 'rgba(0,0,0,0.02)' : 'transparent',
+      });
+      th.appendChild(renderColumnHeaderLabel(column));
+      headLabelRow.appendChild(th);
+    }
+    const addColumnHead = document.createElement('th');
+    Object.assign(addColumnHead.style, {
+      verticalAlign: 'middle',
+      textAlign: 'left',
+      padding: '0 8px',
+      border: 'none',
+      background: 'transparent',
     });
-    const rowsTitle = document.createElement('span');
-    rowsTitle.textContent = 'rows';
-    rowsTitle.style.fontSize = '11px';
-    rowsTitle.style.color = 'rgba(0,0,0,0.7)';
-    rowsTitle.style.fontWeight = '500';
+    const addColumnBtn = document.createElement('button');
+    addColumnBtn.type = 'button';
+    addColumnBtn.textContent = '列追加';
+    addColumnBtn.setAttribute('aria-label', 'add column');
+    addColumnBtn.style.border = 'none';
+    addColumnBtn.style.background = 'transparent';
+    addColumnBtn.style.cursor = 'pointer';
+    addColumnBtn.style.fontSize = '11px';
+    addColumnBtn.style.padding = '0';
+    addColumnBtn.style.width = 'auto';
+    addColumnBtn.style.textAlign = 'left';
+    addColumnBtn.style.display = 'block';
+    addColumnBtn.addEventListener('click', () => addColumn());
+    addColumnHead.appendChild(addColumnBtn);
+    headLabelRow.appendChild(addColumnHead);
+    thead.appendChild(headLabelRow);
+    table.appendChild(thead);
+
+    const tbody = document.createElement('tbody');
+    for (const [rowIndex, row] of draft.data.rows.entries()) {
+      const tr = document.createElement('tr');
+      tr.dataset.rowId = row.id;
+      for (const column of draft.schema.columns) {
+        tr.appendChild(
+          renderCellEditor(
+            row.values[column.key],
+            column,
+            (value) => {
+              row.values[column.key] = value;
+            },
+            () => void saveAndRender(),
+          ),
+        );
+      }
+
+      const actionCell = document.createElement('td');
+      actionCell.style.border = 'none';
+      actionCell.style.padding = '0 8px';
+      actionCell.style.verticalAlign = 'middle';
+      actionCell.style.textAlign = 'left';
+      const deleteBtn = document.createElement('button');
+      deleteBtn.type = 'button';
+      deleteBtn.textContent = '行削除';
+      deleteBtn.style.border = 'none';
+      deleteBtn.style.background = 'transparent';
+      deleteBtn.style.cursor = 'pointer';
+      deleteBtn.style.fontSize = '11px';
+      deleteBtn.style.padding = '0';
+      deleteBtn.style.width = 'auto';
+      deleteBtn.style.textAlign = 'left';
+      deleteBtn.addEventListener('click', () => {
+        draft.data.rows.splice(rowIndex, 1);
+        void saveAndRender();
+      });
+      actionCell.appendChild(deleteBtn);
+      tr.appendChild(actionCell);
+      tbody.appendChild(tr);
+    }
+
+    const draftRow = document.createElement('tr');
+    draftRow.dataset.rowId = 'pending';
+    for (const column of draft.schema.columns) {
+      draftRow.appendChild(
+        renderCellEditor(
+          pendingRowValues[column.key],
+          column,
+          (value) => {
+            pendingRowValues[column.key] = value;
+          },
+          () => {},
+          true,
+        ),
+      );
+    }
+    const draftActionCell = document.createElement('td');
+    draftActionCell.style.border = 'none';
+    draftActionCell.style.padding = '0 8px';
+    draftActionCell.style.verticalAlign = 'middle';
+    draftActionCell.style.textAlign = 'left';
     const addRowBtn = document.createElement('button');
     addRowBtn.type = 'button';
-    addRowBtn.textContent = '+ add row';
+    addRowBtn.textContent = '行追加';
+    addRowBtn.setAttribute('aria-label', 'add row');
     addRowBtn.style.border = 'none';
     addRowBtn.style.background = 'transparent';
     addRowBtn.style.cursor = 'pointer';
     addRowBtn.style.fontSize = '11px';
-    addRowBtn.addEventListener('click', addRow);
-    rowsHeader.appendChild(rowsTitle);
-    rowsHeader.appendChild(addRowBtn);
-    wrapper.appendChild(rowsHeader);
+    addRowBtn.style.padding = '0';
+    addRowBtn.style.width = 'auto';
+    addRowBtn.style.textAlign = 'left';
+    addRowBtn.disabled = draft.schema.columns.length === 0;
+    addRowBtn.addEventListener('click', () => {
+      addRow({ ...pendingRowValues });
+      pendingRowValues = makeRowFromSchema(draft.schema);
+      render();
+    });
+    draftActionCell.appendChild(addRowBtn);
+    draftRow.appendChild(draftActionCell);
+    tbody.appendChild(draftRow);
+    table.appendChild(tbody);
 
-    const rowsBody = document.createElement('div');
-    const columns = visibleColumns();
-    if (draft.schema.columns.length === 0) {
-      const empty = document.createElement('div');
-      Object.assign(empty.style, {
-        display: 'flex',
-        flexDirection: 'column',
-        gap: '8px',
-        padding: '8px',
-        fontSize: '11px',
-        color: 'rgba(0,0,0,0.55)',
-      });
-      const message = document.createElement('div');
-      message.textContent = 'No rows yet. Start by adding a column, then add rows.';
-      const actions = document.createElement('div');
-      Object.assign(actions.style, {
-        display: 'flex',
-        gap: '8px',
-        flexWrap: 'wrap',
-      });
-      const addFirstRowBtn = document.createElement('button');
-      addFirstRowBtn.type = 'button';
-      addFirstRowBtn.textContent = '+ add first row';
-      addFirstRowBtn.style.border = 'none';
-      addFirstRowBtn.style.background = 'transparent';
-      addFirstRowBtn.style.cursor = 'pointer';
-      addFirstRowBtn.style.padding = '0';
-      addFirstRowBtn.style.fontSize = '11px';
-      addFirstRowBtn.addEventListener('click', addRow);
-      actions.appendChild(addFirstRowBtn);
-      empty.appendChild(message);
-      empty.appendChild(actions);
-      rowsBody.appendChild(empty);
-    } else if (draft.data.rows.length === 0) {
-      const empty = document.createElement('div');
-      Object.assign(empty.style, {
-        display: 'flex',
-        flexDirection: 'column',
-        gap: '8px',
-        padding: '8px',
-        fontSize: '11px',
-        color: 'rgba(0,0,0,0.55)',
-      });
-      const message = document.createElement('div');
-      message.textContent = 'No rows yet. Add the first row to start editing data.';
-      const addFirstRowBtn = document.createElement('button');
-      addFirstRowBtn.type = 'button';
-      addFirstRowBtn.textContent = '+ add first row';
-      addFirstRowBtn.style.border = 'none';
-      addFirstRowBtn.style.background = 'transparent';
-      addFirstRowBtn.style.cursor = 'pointer';
-      addFirstRowBtn.style.padding = '0';
-      addFirstRowBtn.style.fontSize = '11px';
-      addFirstRowBtn.addEventListener('click', addRow);
-      empty.appendChild(message);
-      empty.appendChild(addFirstRowBtn);
-      rowsBody.appendChild(empty);
-    } else {
-      const table = document.createElement('table');
-      table.style.width = '100%';
-      table.style.borderCollapse = 'collapse';
-      table.style.fontSize = '12px';
-
-      const thead = document.createElement('thead');
-      const headRow = document.createElement('tr');
-      for (const column of columns) {
-        const th = document.createElement('th');
-        th.textContent = column.label || column.key;
-        th.style.textAlign = 'left';
-        th.style.borderBottom = '1px solid rgba(0,0,0,0.12)';
-        th.style.padding = '4px 6px';
-        th.style.whiteSpace = 'nowrap';
-        headRow.appendChild(th);
-      }
-      const actionHead = document.createElement('th');
-      actionHead.style.borderBottom = '1px solid rgba(0,0,0,0.12)';
-      actionHead.style.padding = '4px 6px';
-      headRow.appendChild(actionHead);
-      thead.appendChild(headRow);
-      table.appendChild(thead);
-
-      const tbody = document.createElement('tbody');
-      for (const [rowIndex, row] of draft.data.rows.entries()) {
-        const tr = document.createElement('tr');
-        tr.dataset.rowId = row.id;
-        for (const column of columns) {
-          tr.appendChild(renderCellEditor(rowIndex, column));
-        }
-
-        const actionCell = document.createElement('td');
-        actionCell.style.borderBottom = '1px solid rgba(0,0,0,0.06)';
-        actionCell.style.padding = '4px 6px';
-        const deleteBtn = document.createElement('button');
-        deleteBtn.type = 'button';
-        deleteBtn.textContent = 'delete';
-        deleteBtn.style.border = 'none';
-        deleteBtn.style.background = 'transparent';
-        deleteBtn.style.cursor = 'pointer';
-        deleteBtn.style.fontSize = '11px';
-        deleteBtn.addEventListener('click', () => {
-          draft.data.rows.splice(rowIndex, 1);
-          void saveAndRender();
-        });
-        actionCell.appendChild(deleteBtn);
-        tr.appendChild(actionCell);
-        tbody.appendChild(tr);
-      }
-      table.appendChild(tbody);
-      rowsBody.appendChild(table);
-    }
-    wrapper.appendChild(rowsBody);
+    wrapper.appendChild(table);
     wrapper.appendChild(status);
   };
 
