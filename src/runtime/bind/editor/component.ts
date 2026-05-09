@@ -93,48 +93,50 @@ export const hydrateComponentEditor = async (
   };
 
   if (componentKind && COMPONENT_KINDS.includes(componentKind)) {
-    const kindRow = createLabeledRow('kind');
-    const kindSelect = document.createElement('select');
-    Object.assign(kindSelect.style, {
-      flex: '1',
-      fontSize: '12px',
-      border: 'none',
-      borderBottom: '1px solid rgba(0,0,0,0.12)',
-      background: 'transparent',
-      padding: '3px 2px',
-      minWidth: '0',
-      outline: 'none',
-      cursor: 'pointer',
-    });
-    for (const k of COMPONENT_KINDS) {
-      const option = document.createElement('option');
-      option.value = k;
-      option.textContent = k;
-      option.selected = k === componentKind;
-      kindSelect.appendChild(option);
+    if (componentKind !== 'table') {
+      const kindRow = createLabeledRow('kind');
+      const kindSelect = document.createElement('select');
+      Object.assign(kindSelect.style, {
+        flex: '1',
+        fontSize: '12px',
+        border: 'none',
+        borderBottom: '1px solid rgba(0,0,0,0.12)',
+        background: 'transparent',
+        padding: '3px 2px',
+        minWidth: '0',
+        outline: 'none',
+        cursor: 'pointer',
+      });
+      for (const k of COMPONENT_KINDS) {
+        const option = document.createElement('option');
+        option.value = k;
+        option.textContent = k;
+        option.selected = k === componentKind;
+        kindSelect.appendChild(option);
+      }
+      kindSelect.addEventListener('change', () => {
+        const newKind = kindSelect.value;
+        const defaults = componentDefaults[newKind];
+        if (!defaults) return;
+        void (async () => {
+          if (componentSrc !== null) {
+            await putComponent(selectedScreenId, componentSrc, defaults);
+          } else {
+            await updateScreen(selectedScreenId, (s) => ({
+              ...s,
+              frames: s.frames.map((f) =>
+                f.id === selectedFrameId
+                  ? { id: f.id, placement: f.placement, ...defaults }
+                  : f,
+              ),
+            }));
+          }
+          onAfterSave();
+        })();
+      });
+      kindRow.appendChild(kindSelect);
+      editorEl.appendChild(kindRow);
     }
-    kindSelect.addEventListener('change', () => {
-      const newKind = kindSelect.value;
-      const defaults = componentDefaults[newKind];
-      if (!defaults) return;
-      void (async () => {
-        if (componentSrc !== null) {
-          await putComponent(selectedScreenId, componentSrc, defaults);
-        } else {
-          await updateScreen(selectedScreenId, (s) => ({
-            ...s,
-            frames: s.frames.map((f) =>
-              f.id === selectedFrameId
-                ? { id: f.id, placement: f.placement, ...defaults }
-                : f,
-            ),
-          }));
-        }
-        onAfterSave();
-      })();
-    });
-    kindRow.appendChild(kindSelect);
-    editorEl.appendChild(kindRow);
   }
 
   if (componentKind === 'table' && componentData) {
