@@ -6,6 +6,18 @@ import type { FrameState } from './state';
 const root = document.createElement('div');
 document.body.appendChild(root);
 
+const getScreenIdFromPathname = (): string | null => {
+  const pathname = window.location.pathname.replace(/\/+$/, '');
+  if (!pathname || pathname === '/') return null;
+  const segments = pathname.split('/').filter(Boolean);
+  if (segments.length !== 1) return null;
+  try {
+    return decodeURIComponent(segments[0]);
+  } catch {
+    return null;
+  }
+};
+
 const applyPlacement = (el: HTMLElement, frame: Frame): void => {
   el.style.gridColumn = `${frame.placement.x} / span ${frame.placement.width}`;
   el.style.gridRow = `${frame.placement.y} / span ${frame.placement.height}`;
@@ -110,7 +122,8 @@ const loadEditor = async (screenId: string): Promise<void> => {
 };
 
 const loadEditorBootstrap = async (): Promise<void> => {
-  const screenId = await findEditorScreenId();
+  const pathnameScreenId = getScreenIdFromPathname();
+  const screenId = pathnameScreenId ?? await findEditorScreenId();
   if (!screenId) {
     root.replaceChildren();
     return;
