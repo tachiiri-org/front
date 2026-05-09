@@ -21,6 +21,8 @@ type TableSelectOption = {
 };
 
 type TableEditorDraft = TableComponent;
+type TableColumnType = TableColumn['type'];
+type TableEndpointSource = Extract<TableSelectSource, { kind: 'endpoint' }>;
 
 type SectionMounts = {
   schema: HTMLElement;
@@ -75,6 +77,34 @@ const generateColumnKey = (columns: TableColumn[], base = 'column'): string => {
   let index = 1;
   while (used.has(`${base}_${index}`)) index += 1;
   return `${base}_${index}`;
+};
+
+const createInlineSelectSource = (): TableSelectSource => ({
+  kind: 'inline',
+  options: [],
+});
+
+const createColumnByType = (schema: TableSchema, type: TableColumnType): TableColumn => {
+  const base = {
+    key: generateColumnKey(schema.columns),
+    label: 'New column',
+    hidden: false,
+    required: false,
+    nullable: true,
+  };
+
+  switch (type) {
+    case 'string':
+      return { ...base, type: 'string' };
+    case 'int':
+      return { ...base, type: 'int' };
+    case 'boolean':
+      return { ...base, type: 'boolean' };
+    case 'date':
+      return { ...base, type: 'date', dateKind: 'date' };
+    case 'select':
+      return { ...base, type: 'select', source: createInlineSelectSource() };
+  }
 };
 
 const makeDefaultValue = (column: TableColumn, now = new Date()): unknown => {
@@ -133,15 +163,6 @@ const addColumnToRows = (rows: TableData['rows'], column: TableColumn): void => 
     }
   }
 };
-
-const createNewColumn = (schema: TableSchema): TableColumn => ({
-  key: generateColumnKey(schema.columns),
-  label: 'New column',
-  type: 'string',
-  hidden: false,
-  required: false,
-  nullable: true,
-});
 
 const renderKindSelector = (
   editorEl: HTMLElement,
@@ -215,102 +236,396 @@ const renderPropertiesSection = (
   return wrap;
 };
 
-const renderColumnOptionsEditor = (
+const renderColumnSourceEditor = (
   column: TableColumn,
   ctx: FieldStyleContext,
+  refreshSchema: () => void,
   onChange: () => void,
   refreshData: () => void,
 ): HTMLElement | null => {
   if (column.type !== 'select') return null;
   const source = column.source;
-  if (source.kind !== 'inline') return null;
-
   const wrap = document.createElement('div');
-  Object.assign(wrap.style, { display: 'flex', flexDirection: 'column', gap: '4px' });
+  Object.assign(wrap.style, {
+    display: 'flex',
+    flexDirection: 'column',
+    gap: '6px',
+  });
 
-  const renderRows = (): void => {
-    list.replaceChildren();
-    for (const [index, option] of source.options.entries()) {
-      const row = document.createElement('div');
-      Object.assign(row.style, {
-        display: 'flex',
-        alignItems: 'center',
-        gap: '4px',
-      });
-
-      const valueInput = document.createElement('input');
-      valueInput.type = 'text';
-      valueInput.placeholder = 'value';
-      Object.assign(valueInput.style, ctx.input);
-      valueInput.value = option.value;
-      valueInput.addEventListener('input', () => {
-        source.options[index] = { ...source.options[index], value: valueInput.value };
-        onChange();
-      });
-
-      const labelInput = document.createElement('input');
-      labelInput.type = 'text';
-      labelInput.placeholder = 'label';
-      Object.assign(labelInput.style, ctx.input);
-      labelInput.value = option.label;
-      labelInput.addEventListener('input', () => {
-        source.options[index] = { ...source.options[index], label: labelInput.value };
-        onChange();
-      });
-
-      const removeBtn = document.createElement('button');
-      removeBtn.type = 'button';
-      removeBtn.textContent = '×';
-      removeBtn.style.border = 'none';
-      removeBtn.style.background = 'transparent';
-      removeBtn.style.cursor = 'pointer';
-      removeBtn.addEventListener('click', () => {
-        source.options.splice(index, 1);
-        renderRows();
-        refreshData();
-        onChange();
-      });
-
-      row.appendChild(valueInput);
-      row.appendChild(labelInput);
-      row.appendChild(removeBtn);
-      list.appendChild(row);
-    }
-  };
-
-  const heading = document.createElement('div');
-  Object.assign(heading.style, {
+  const sourceTypeRow = document.createElement('div');
+  Object.assign(sourceTypeRow.style, {
     display: 'flex',
     alignItems: 'center',
-    justifyContent: 'space-between',
-    gap: '8px',
+    gap: '6px',
   });
-  const title = document.createElement('span');
-  title.textContent = 'options';
-  Object.assign(title.style, { fontSize: '10px', color: 'rgba(0,0,0,0.65)' });
-  const addBtn = document.createElement('button');
-  addBtn.type = 'button';
-  addBtn.textContent = '+ add';
-  addBtn.style.border = 'none';
-  addBtn.style.background = 'transparent';
-  addBtn.style.cursor = 'pointer';
-  addBtn.style.fontSize = '10px';
-  addBtn.addEventListener('click', () => {
-    source.options.push({ value: '', label: '' });
-    renderRows();
+
+  const sourceTypeLabel = document.createElement('span');
+  sourceTypeLabel.textContent = 'source';
+  Object.assign(sourceTypeLabel.style, { fontSize: '10px', color: 'rgba(0,0,0,0.65)', width: '80px' });
+
+  const sourceTypeSelect = document.createElement('select');
+  Object.assign(sourceTypeSelect.style, {
+    minWidth: '120px',
+    fontSize: '11px',
+    border: '1px solid rgba(0,0,0,0.12)',
+    borderRadius: '4px',
+    background: 'white',
+    padding: '2px 4px',
+  });
+  for (const option of [
+    { value: 'inline', label: 'inline options' },
+    { value: 'endpoint', label: 'endpoint' },
+  ]) {
+    const el = document.createElement('option');
+    el.value = option.value;
+    el.textContent = option.label;
+    el.selected = source.kind === option.value;
+    sourceTypeSelect.appendChild(el);
+  }
+  sourceTypeSelect.addEventListener('change', () => {
+    if (sourceTypeSelect.value === 'inline') {
+      column.source = createInlineSelectSource();
+    } else {
+      column.source = {
+        kind: 'endpoint',
+        url: '',
+        itemsPath: '',
+        valueKey: 'value',
+        labelKey: 'label',
+        headers: {},
+      };
+    }
+    refreshSchema();
     refreshData();
     onChange();
   });
-  heading.appendChild(title);
-  heading.appendChild(addBtn);
 
-  const list = document.createElement('div');
-  Object.assign(list.style, { display: 'flex', flexDirection: 'column', gap: '4px' });
+  sourceTypeRow.appendChild(sourceTypeLabel);
+  sourceTypeRow.appendChild(sourceTypeSelect);
+  wrap.appendChild(sourceTypeRow);
 
-  renderRows();
-  wrap.appendChild(heading);
-  wrap.appendChild(list);
+  if (source.kind === 'inline') {
+    const heading = document.createElement('div');
+    Object.assign(heading.style, {
+      display: 'flex',
+      alignItems: 'center',
+      justifyContent: 'space-between',
+      gap: '8px',
+    });
+    const title = document.createElement('span');
+    title.textContent = 'options';
+    Object.assign(title.style, { fontSize: '10px', color: 'rgba(0,0,0,0.65)' });
+    const addBtn = document.createElement('button');
+    addBtn.type = 'button';
+    addBtn.textContent = '+ add';
+    addBtn.style.border = 'none';
+    addBtn.style.background = 'transparent';
+    addBtn.style.cursor = 'pointer';
+    addBtn.style.fontSize = '10px';
+    heading.appendChild(title);
+    heading.appendChild(addBtn);
+
+    const list = document.createElement('div');
+    Object.assign(list.style, { display: 'flex', flexDirection: 'column', gap: '4px' });
+
+    const renderRows = (): void => {
+      list.replaceChildren();
+      for (const [index, option] of source.options.entries()) {
+        const row = document.createElement('div');
+        Object.assign(row.style, {
+          display: 'grid',
+          gridTemplateColumns: '1fr 1fr auto',
+          gap: '4px',
+          alignItems: 'center',
+        });
+
+        const valueInput = document.createElement('input');
+        valueInput.type = 'text';
+        valueInput.placeholder = 'value';
+        Object.assign(valueInput.style, ctx.input);
+        valueInput.value = option.value;
+        valueInput.addEventListener('input', () => {
+          source.options[index] = { ...source.options[index], value: valueInput.value };
+          onChange();
+        });
+
+        const labelInput = document.createElement('input');
+        labelInput.type = 'text';
+        labelInput.placeholder = 'label';
+        Object.assign(labelInput.style, ctx.input);
+        labelInput.value = option.label;
+        labelInput.addEventListener('input', () => {
+          source.options[index] = { ...source.options[index], label: labelInput.value };
+          onChange();
+        });
+
+        const removeBtn = document.createElement('button');
+        removeBtn.type = 'button';
+        removeBtn.textContent = '×';
+        removeBtn.style.border = 'none';
+        removeBtn.style.background = 'transparent';
+        removeBtn.style.cursor = 'pointer';
+        removeBtn.addEventListener('click', () => {
+          source.options.splice(index, 1);
+          renderRows();
+          refreshData();
+          onChange();
+        });
+
+        row.appendChild(valueInput);
+        row.appendChild(labelInput);
+        row.appendChild(removeBtn);
+        list.appendChild(row);
+      }
+    };
+
+    addBtn.addEventListener('click', () => {
+      source.options.push({ value: '', label: '' });
+      renderRows();
+      refreshData();
+      onChange();
+    });
+
+    renderRows();
+    wrap.appendChild(heading);
+    wrap.appendChild(list);
+    return wrap;
+  }
+
+  const endpointForm = document.createElement('div');
+  Object.assign(endpointForm.style, {
+    display: 'grid',
+    gridTemplateColumns: '80px 1fr',
+    gap: '6px',
+    alignItems: 'center',
+  });
+
+  const endpointFields: Array<{
+    label: string;
+    key: 'url' | 'itemsPath' | 'valueKey' | 'labelKey';
+    placeholder: string;
+  }> = [
+    { label: 'url', key: 'url', placeholder: 'https://example.com/options' },
+    { label: 'itemsPath', key: 'itemsPath', placeholder: 'data.items' },
+    { label: 'valueKey', key: 'valueKey', placeholder: 'value' },
+    { label: 'labelKey', key: 'labelKey', placeholder: 'label' },
+  ];
+
+  for (const field of endpointFields) {
+    const label = document.createElement('span');
+    label.textContent = field.label;
+    Object.assign(label.style, { fontSize: '10px', color: 'rgba(0,0,0,0.65)' });
+
+    const input = document.createElement('input');
+    input.type = 'text';
+    input.placeholder = field.placeholder;
+    Object.assign(input.style, ctx.input);
+    input.value =
+      field.key === 'url'
+        ? source.url
+        : field.key === 'itemsPath'
+          ? source.itemsPath ?? ''
+          : field.key === 'valueKey'
+            ? source.valueKey ?? ''
+            : source.labelKey ?? '';
+    input.addEventListener('input', () => {
+      if (field.key === 'url') {
+        source.url = input.value;
+      } else if (field.key === 'itemsPath') {
+        source.itemsPath = input.value;
+      } else if (field.key === 'valueKey') {
+        source.valueKey = input.value;
+      } else {
+        source.labelKey = input.value;
+      }
+      onChange();
+    });
+
+    endpointForm.appendChild(label);
+    endpointForm.appendChild(input);
+  }
+
+  const headersLabel = document.createElement('span');
+  headersLabel.textContent = 'headers';
+  Object.assign(headersLabel.style, { fontSize: '10px', color: 'rgba(0,0,0,0.65)' });
+  const headersInput = document.createElement('textarea');
+  Object.assign(headersInput.style, {
+    ...ctx.input,
+    minHeight: '72px',
+    fontFamily: 'monospace',
+    gridColumn: '2',
+  });
+  headersInput.value = JSON.stringify(source.headers ?? {}, null, 2);
+  headersInput.addEventListener('input', () => {
+    try {
+      const parsed = JSON.parse(headersInput.value);
+      if (typeof parsed === 'object' && parsed !== null && !Array.isArray(parsed)) {
+        const record: Record<string, string> = {};
+        let valid = true;
+        for (const [key, value] of Object.entries(parsed)) {
+          if (typeof value !== 'string') {
+            valid = false;
+            break;
+          }
+          record[key] = value;
+        }
+        if (valid) {
+          source.headers = record;
+          onChange();
+        }
+      }
+    } catch {
+      // keep draft editable
+    }
+  });
+  endpointForm.appendChild(headersLabel);
+  endpointForm.appendChild(headersInput);
+  wrap.appendChild(endpointForm);
+
+  const hint = document.createElement('div');
+  hint.textContent = 'Endpoint source reads a string array from itemsPath and maps value/label keys.';
+  Object.assign(hint.style, {
+    fontSize: '10px',
+    color: 'rgba(0,0,0,0.55)',
+    padding: '0 0 0 80px',
+  });
+  wrap.appendChild(hint);
   return wrap;
+};
+
+const renderColumnSpecificFields = (
+  column: TableColumn,
+  ctx: FieldStyleContext,
+  refreshSchema: () => void,
+  onChange: () => void,
+  refreshData: () => void,
+): HTMLElement | null => {
+  const wrap = document.createElement('div');
+  Object.assign(wrap.style, {
+    display: 'flex',
+    flexDirection: 'column',
+    gap: '6px',
+    padding: '0 8px 8px',
+    borderBottom: '1px solid rgba(0,0,0,0.06)',
+  });
+
+  const addLabeledRow = (labelText: string, control: HTMLElement): void => {
+    const row = document.createElement('div');
+    Object.assign(row.style, {
+      display: 'flex',
+      alignItems: 'center',
+      gap: '6px',
+    });
+    const label = document.createElement('span');
+    label.textContent = labelText;
+    Object.assign(label.style, { fontSize: '10px', color: 'rgba(0,0,0,0.65)', width: '80px' });
+    row.appendChild(label);
+    row.appendChild(control);
+    wrap.appendChild(row);
+  };
+
+  if (column.type === 'string') {
+    const minInput = document.createElement('input');
+    minInput.type = 'number';
+    minInput.value = column.minLength === undefined ? '' : String(column.minLength);
+    Object.assign(minInput.style, ctx.input);
+    minInput.addEventListener('input', () => {
+      column.minLength = minInput.value === '' ? undefined : Number(minInput.value);
+      onChange();
+    });
+    addLabeledRow('minLength', minInput);
+
+    const maxInput = document.createElement('input');
+    maxInput.type = 'number';
+    maxInput.value = column.maxLength === undefined ? '' : String(column.maxLength);
+    Object.assign(maxInput.style, ctx.input);
+    maxInput.addEventListener('input', () => {
+      column.maxLength = maxInput.value === '' ? undefined : Number(maxInput.value);
+      onChange();
+    });
+    addLabeledRow('maxLength', maxInput);
+    return wrap;
+  }
+
+  if (column.type === 'int') {
+    const minInput = document.createElement('input');
+    minInput.type = 'number';
+    minInput.value = column.min === undefined ? '' : String(column.min);
+    Object.assign(minInput.style, ctx.input);
+    minInput.addEventListener('input', () => {
+      column.min = minInput.value === '' ? undefined : Number(minInput.value);
+      onChange();
+    });
+    addLabeledRow('min', minInput);
+
+    const maxInput = document.createElement('input');
+    maxInput.type = 'number';
+    maxInput.value = column.max === undefined ? '' : String(column.max);
+    Object.assign(maxInput.style, ctx.input);
+    maxInput.addEventListener('input', () => {
+      column.max = maxInput.value === '' ? undefined : Number(maxInput.value);
+      onChange();
+    });
+    addLabeledRow('max', maxInput);
+    return wrap;
+  }
+
+  if (column.type === 'date') {
+    const dateKindSelect = document.createElement('select');
+    Object.assign(dateKindSelect.style, {
+      minWidth: '120px',
+      fontSize: '11px',
+      border: '1px solid rgba(0,0,0,0.12)',
+      borderRadius: '4px',
+      background: 'white',
+      padding: '2px 4px',
+    });
+    for (const option of [
+      { value: '', label: '(default)' },
+      { value: 'date', label: 'date' },
+      { value: 'datetime', label: 'datetime' },
+    ]) {
+      const el = document.createElement('option');
+      el.value = option.value;
+      el.textContent = option.label;
+      el.selected = (column.dateKind ?? '') === option.value;
+      dateKindSelect.appendChild(el);
+    }
+    dateKindSelect.addEventListener('change', () => {
+      column.dateKind = dateKindSelect.value === '' ? undefined : (dateKindSelect.value as 'date' | 'datetime');
+      onChange();
+    });
+    addLabeledRow('dateKind', dateKindSelect);
+
+    const minInput = document.createElement('input');
+    minInput.type = 'date';
+    minInput.value = column.min ?? '';
+    Object.assign(minInput.style, ctx.input);
+    minInput.addEventListener('input', () => {
+      column.min = minInput.value || undefined;
+      onChange();
+    });
+    addLabeledRow('min', minInput);
+
+    const maxInput = document.createElement('input');
+    maxInput.type = 'date';
+    maxInput.value = column.max ?? '';
+    Object.assign(maxInput.style, ctx.input);
+    maxInput.addEventListener('input', () => {
+      column.max = maxInput.value || undefined;
+      onChange();
+    });
+    addLabeledRow('max', maxInput);
+    return wrap;
+  }
+
+  if (column.type === 'select') {
+    const sourceEditor = renderColumnSourceEditor(column, ctx, refreshSchema, onChange, refreshData);
+    if (sourceEditor) wrap.appendChild(sourceEditor);
+    return wrap;
+  }
+
+  return null;
 };
 
 const renderColumnRow = (
@@ -321,6 +636,12 @@ const renderColumnRow = (
   refreshData: () => void,
   ctx: FieldStyleContext,
 ): HTMLElement => {
+  const wrapper = document.createElement('div');
+  Object.assign(wrapper.style, {
+    borderBottom: '1px solid rgba(0,0,0,0.06)',
+    background: column.hidden ? 'rgba(0,0,0,0.02)' : 'transparent',
+  });
+
   const row = document.createElement('div');
   Object.assign(row.style, {
     display: 'grid',
@@ -328,8 +649,6 @@ const renderColumnRow = (
     gap: '6px',
     alignItems: 'start',
     padding: '6px 8px',
-    borderBottom: '1px solid rgba(0,0,0,0.06)',
-    background: column.hidden ? 'rgba(0,0,0,0.02)' : 'transparent',
   });
 
   const makeTextInput = (value: string, placeholder: string): HTMLInputElement => {
@@ -366,14 +685,12 @@ const renderColumnRow = (
     onChange();
   });
 
-  const hiddenInput = document.createElement('input');
-  hiddenInput.type = 'checkbox';
-  hiddenInput.checked = Boolean(column.hidden);
-  hiddenInput.addEventListener('change', () => {
-    column.hidden = hiddenInput.checked;
-    refreshSchema();
-    refreshData();
-    onChange();
+  const typeLabel = document.createElement('div');
+  typeLabel.textContent = column.type;
+  Object.assign(typeLabel.style, {
+    fontSize: '11px',
+    color: 'rgba(0,0,0,0.7)',
+    padding: '5px 0',
   });
 
   const requiredInput = document.createElement('input');
@@ -390,6 +707,89 @@ const renderColumnRow = (
   nullableInput.addEventListener('change', () => {
     column.nullable = nullableInput.checked;
     onChange();
+  });
+
+  const hiddenInput = document.createElement('input');
+  hiddenInput.type = 'checkbox';
+  hiddenInput.checked = Boolean(column.hidden);
+  hiddenInput.addEventListener('change', () => {
+    column.hidden = hiddenInput.checked;
+    refreshSchema();
+    refreshData();
+    onChange();
+  });
+
+  const actions = document.createElement('div');
+  Object.assign(actions.style, { display: 'flex', gap: '4px', flexWrap: 'wrap' });
+
+  const hideBtn = document.createElement('button');
+  hideBtn.type = 'button';
+  hideBtn.textContent = column.hidden ? 'show' : 'hide';
+  hideBtn.style.border = 'none';
+  hideBtn.style.background = 'transparent';
+  hideBtn.style.cursor = 'pointer';
+  hideBtn.style.fontSize = '11px';
+  hideBtn.addEventListener('click', () => {
+    column.hidden = !column.hidden;
+    refreshSchema();
+    refreshData();
+    onChange();
+  });
+
+  const removeBtn = document.createElement('button');
+  removeBtn.type = 'button';
+  removeBtn.textContent = 'delete';
+  removeBtn.style.border = 'none';
+  removeBtn.style.background = 'transparent';
+  removeBtn.style.cursor = 'pointer';
+  removeBtn.style.fontSize = '11px';
+  removeBtn.addEventListener('click', () => {
+    const index = draft.schema.columns.indexOf(column);
+    if (index >= 0) {
+      draft.schema.columns.splice(index, 1);
+      for (const rowData of draft.data.rows) {
+        delete rowData.values[column.key];
+      }
+      refreshSchema();
+      refreshData();
+      onChange();
+    }
+  });
+
+  actions.appendChild(hideBtn);
+  actions.appendChild(removeBtn);
+
+  row.appendChild(keyInput);
+  row.appendChild(labelInput);
+  row.appendChild(typeLabel);
+  row.appendChild(requiredInput);
+  row.appendChild(nullableInput);
+  row.appendChild(hiddenInput);
+  row.appendChild(actions);
+  wrapper.appendChild(row);
+
+  const specific = renderColumnSpecificFields(column, ctx, refreshSchema, onChange, refreshData);
+  if (specific) wrapper.appendChild(specific);
+
+  const defaultRow = document.createElement('div');
+  Object.assign(defaultRow.style, {
+    display: 'flex',
+    alignItems: 'center',
+    padding: '0 8px 8px',
+    gap: '6px',
+    borderBottom: '1px solid rgba(0,0,0,0.06)',
+    flexWrap: 'wrap',
+  });
+  const defaultLabel = document.createElement('span');
+  defaultLabel.textContent = 'default';
+  Object.assign(defaultLabel.style, { fontSize: '10px', color: 'rgba(0,0,0,0.65)', width: '80px' });
+  const defaultWrap = document.createElement('div');
+  Object.assign(defaultWrap.style, {
+    display: 'flex',
+    flexDirection: 'column',
+    gap: '4px',
+    minWidth: '220px',
+    flex: '1',
   });
 
   const defaultInput = document.createElement('input');
@@ -423,6 +823,14 @@ const renderColumnRow = (
     el.selected = column.default ? column.default.kind === option.value : option.value === '';
     defaultKindSelect.appendChild(el);
   }
+
+  const syncDefaultInputState = (): void => {
+    defaultInput.disabled = defaultKindSelect.value !== 'literal';
+    if (defaultKindSelect.value !== 'literal') {
+      defaultInput.value = '';
+    }
+  };
+
   defaultKindSelect.addEventListener('change', () => {
     if (defaultKindSelect.value === '') {
       delete column.default;
@@ -431,14 +839,10 @@ const renderColumnRow = (
     } else {
       column.default = { kind: defaultKindSelect.value as 'now' | 'createdAt' | 'updatedAt' };
     }
-    defaultInput.disabled = defaultKindSelect.value !== 'literal';
-    if (defaultKindSelect.value !== 'literal') {
-      defaultInput.value = '';
-    }
-    refreshSchema();
+    syncDefaultInputState();
     onChange();
   });
-  defaultInput.disabled = !column.default || column.default.kind !== 'literal';
+
   defaultInput.addEventListener('input', () => {
     if (!column.default || column.default.kind !== 'literal') return;
     const raw = defaultInput.value;
@@ -449,76 +853,13 @@ const renderColumnRow = (
     onChange();
   });
 
-  const defaultWrap = document.createElement('div');
-  Object.assign(defaultWrap.style, {
-    display: 'flex',
-    flexDirection: 'column',
-    gap: '4px',
-  });
+  syncDefaultInputState();
   defaultWrap.appendChild(defaultKindSelect);
   defaultWrap.appendChild(defaultInput);
-
-  const typeLabel = document.createElement('div');
-  typeLabel.textContent = column.type;
-  Object.assign(typeLabel.style, {
-    fontSize: '11px',
-    color: 'rgba(0,0,0,0.7)',
-    padding: '5px 0',
-  });
-
-  const optionsWrap = renderColumnOptionsEditor(column, ctx, onChange, refreshData);
-
-  const actions = document.createElement('div');
-  Object.assign(actions.style, { display: 'flex', gap: '4px', flexWrap: 'wrap' });
-  const hideBtn = document.createElement('button');
-  hideBtn.type = 'button';
-  hideBtn.textContent = column.hidden ? 'show' : 'hide';
-  hideBtn.style.border = 'none';
-  hideBtn.style.background = 'transparent';
-  hideBtn.style.cursor = 'pointer';
-  hideBtn.style.fontSize = '11px';
-  hideBtn.addEventListener('click', () => {
-    column.hidden = !column.hidden;
-    refreshSchema();
-    refreshData();
-    onChange();
-  });
-
-  actions.appendChild(hideBtn);
-
-  row.appendChild(keyInput);
-  row.appendChild(labelInput);
-  row.appendChild(typeLabel);
-  row.appendChild(requiredInput);
-  row.appendChild(nullableInput);
-  row.appendChild(hiddenInput);
-  row.appendChild(actions);
-
-  const wrapper = document.createElement('div');
-  wrapper.appendChild(row);
-  if (optionsWrap) {
-    const nested = document.createElement('div');
-    Object.assign(nested.style, {
-      padding: '6px 8px 10px',
-      borderBottom: '1px solid rgba(0,0,0,0.06)',
-    });
-    nested.appendChild(optionsWrap);
-    wrapper.appendChild(nested);
-  }
-  const defaultRow = document.createElement('div');
-  Object.assign(defaultRow.style, {
-    display: 'flex',
-    alignItems: 'center',
-    padding: '0 8px 8px',
-    gap: '6px',
-    borderBottom: '1px solid rgba(0,0,0,0.06)',
-  });
-  const defaultLabel = document.createElement('span');
-  defaultLabel.textContent = 'default';
-  Object.assign(defaultLabel.style, { fontSize: '10px', color: 'rgba(0,0,0,0.65)', width: '80px' });
   defaultRow.appendChild(defaultLabel);
   defaultRow.appendChild(defaultWrap);
   wrapper.appendChild(defaultRow);
+
   return wrapper;
 };
 
@@ -538,40 +879,89 @@ const renderSchemaSection = (
     justifyContent: 'space-between',
     gap: '8px',
     padding: '0 8px 6px',
+    flexWrap: 'wrap',
   });
 
   const label = document.createElement('span');
   label.textContent = 'columns';
   Object.assign(label.style, { fontSize: '11px', color: 'rgba(0,0,0,0.7)', fontWeight: '500' });
 
+  const controls = document.createElement('div');
+  Object.assign(controls.style, {
+    display: 'flex',
+    alignItems: 'center',
+    gap: '6px',
+    flexWrap: 'wrap',
+  });
+
+  const typeSelect = document.createElement('select');
+  Object.assign(typeSelect.style, {
+    minWidth: '108px',
+    fontSize: '11px',
+    border: '1px solid rgba(0,0,0,0.12)',
+    borderRadius: '4px',
+    background: 'white',
+    padding: '2px 4px',
+  });
+  for (const option of [
+    { value: 'string', label: 'string' },
+    { value: 'int', label: 'int' },
+    { value: 'boolean', label: 'boolean' },
+    { value: 'date', label: 'date' },
+    { value: 'select', label: 'select' },
+  ]) {
+    const el = document.createElement('option');
+    el.value = option.value;
+    el.textContent = option.label;
+    typeSelect.appendChild(el);
+  }
+
   const addBtn = document.createElement('button');
   addBtn.type = 'button';
-  addBtn.textContent = '+ add column';
+  addBtn.textContent = '+ add';
   addBtn.style.border = 'none';
   addBtn.style.background = 'transparent';
   addBtn.style.cursor = 'pointer';
   addBtn.style.fontSize = '11px';
-  addBtn.addEventListener('click', () => {
-    const column = createNewColumn(draft.schema);
+  const addColumn = (): void => {
+    const column = createColumnByType(draft.schema, typeSelect.value as TableColumnType);
     draft.schema.columns.push(column);
     addColumnToRows(draft.data.rows, column);
     refreshSchema();
     refreshData();
     onChange();
-  });
+  };
+  addBtn.addEventListener('click', addColumn);
 
+  controls.appendChild(typeSelect);
+  controls.appendChild(addBtn);
   header.appendChild(label);
-  header.appendChild(addBtn);
+  header.appendChild(controls);
 
   const list = document.createElement('div');
   if (draft.schema.columns.length === 0) {
     const empty = document.createElement('div');
-    empty.textContent = 'No columns yet.';
     Object.assign(empty.style, {
+      display: 'flex',
+      flexDirection: 'column',
+      gap: '8px',
       padding: '8px',
       fontSize: '11px',
       color: 'rgba(0,0,0,0.55)',
     });
+    const message = document.createElement('div');
+    message.textContent = 'No columns yet. Add one to start defining the table schema.';
+    const emptyBtn = document.createElement('button');
+    emptyBtn.type = 'button';
+    emptyBtn.textContent = '+ add first column';
+    emptyBtn.style.border = 'none';
+    emptyBtn.style.background = 'transparent';
+    emptyBtn.style.cursor = 'pointer';
+    emptyBtn.style.padding = '0';
+    emptyBtn.style.fontSize = '11px';
+    emptyBtn.addEventListener('click', addColumn);
+    empty.appendChild(message);
+    empty.appendChild(emptyBtn);
     list.appendChild(empty);
   } else {
     for (const column of draft.schema.columns) {
@@ -759,12 +1149,31 @@ const renderDataSection = (
   header.appendChild(label);
   header.appendChild(addBtn);
 
+  const visibleColumns = draft.schema.columns.filter((column) => !column.hidden);
+  if (draft.schema.columns.length === 0) {
+    const empty = document.createElement('div');
+    Object.assign(empty.style, {
+      display: 'flex',
+      flexDirection: 'column',
+      gap: '8px',
+      padding: '8px',
+      fontSize: '11px',
+      color: 'rgba(0,0,0,0.55)',
+    });
+    const message = document.createElement('div');
+    message.textContent = 'No columns yet. Define the schema first, then add rows here.';
+    empty.appendChild(message);
+    container.appendChild(header);
+    container.appendChild(empty);
+    mount.replaceChildren(container);
+    return container;
+  }
+
   const table = document.createElement('table');
   table.style.width = '100%';
   table.style.borderCollapse = 'collapse';
   table.style.fontSize = '12px';
 
-  const visibleColumns = draft.schema.columns.filter((column) => !column.hidden);
   const thead = document.createElement('thead');
   const headRow = document.createElement('tr');
   for (const column of visibleColumns) {
@@ -789,9 +1198,36 @@ const renderDataSection = (
     const tr = document.createElement('tr');
     const td = document.createElement('td');
     td.colSpan = Math.max(visibleColumns.length + 1, 1);
-    td.textContent = 'No rows yet.';
     td.style.padding = '8px 6px';
     td.style.color = 'rgba(0,0,0,0.55)';
+    const emptyWrap = document.createElement('div');
+    Object.assign(emptyWrap.style, {
+      display: 'flex',
+      flexDirection: 'column',
+      gap: '8px',
+    });
+    const message = document.createElement('div');
+    message.textContent = 'No rows yet. Add the first row to start editing data.';
+    const emptyBtn = document.createElement('button');
+    emptyBtn.type = 'button';
+    emptyBtn.textContent = '+ add first row';
+    emptyBtn.style.border = 'none';
+    emptyBtn.style.background = 'transparent';
+    emptyBtn.style.cursor = 'pointer';
+    emptyBtn.style.padding = '0';
+    emptyBtn.style.fontSize = '11px';
+    emptyBtn.addEventListener('click', () => {
+      const row = {
+        id: randomId(),
+        values: makeRowFromSchema(draft.schema),
+      };
+      draft.data.rows.push(row);
+      refreshData();
+      onChange();
+    });
+    emptyWrap.appendChild(message);
+    emptyWrap.appendChild(emptyBtn);
+    td.appendChild(emptyWrap);
     tr.appendChild(td);
     tbody.appendChild(tr);
   } else {
@@ -888,37 +1324,50 @@ const savePatchIfValid = async (
   await onSave(patch);
 };
 
-const renderRawJsonSections = (
+const renderAdvancedJsonSection = (
   draft: TableEditorDraft,
   onSave: (patch: Record<string, unknown>) => Promise<void>,
-): Array<{ label: string; content: HTMLElement }> => [
-  {
-    label: 'schema json',
-    content: renderJsonEditorRow(
-      'schema',
-      draft.schema,
-      validateTableSchemaDraft,
-      async (schemaDraft) => {
-        const nextSchema = schemaDraft as TableSchema;
-        await savePatchIfValid(draft, onSave, { schema: nextSchema });
-      },
-    ),
-  },
-  {
-    label: 'data json',
-    content: renderJsonEditorRow(
-      'data',
-      draft.data,
-      (dataDraft) => {
-        return validateTableDataDraft(dataDraft, draft.schema);
-      },
-      async (dataDraft) => {
-        const nextData = dataDraft as TableData;
-        await savePatchIfValid(draft, onSave, { data: nextData });
-      },
-    ),
-  },
-];
+): HTMLElement => {
+  const wrap = document.createElement('div');
+  Object.assign(wrap.style, {
+    display: 'flex',
+    flexDirection: 'column',
+    gap: '8px',
+  });
+
+  const schemaRow = renderJsonEditorRow(
+    'schema',
+    draft.schema,
+    validateTableSchemaDraft,
+    async (schemaDraft) => {
+      const nextSchema = schemaDraft as TableSchema;
+      await savePatchIfValid(draft, onSave, { schema: nextSchema });
+    },
+  );
+
+  const dataRow = renderJsonEditorRow(
+    'data',
+    draft.data,
+    (dataDraft) => validateTableDataDraft(dataDraft, draft.schema),
+    async (dataDraft) => {
+      const nextData = dataDraft as TableData;
+      await savePatchIfValid(draft, onSave, { data: nextData });
+    },
+  );
+
+  const note = document.createElement('div');
+  note.textContent = 'Advanced JSON editors for direct editing and recovery.';
+  Object.assign(note.style, {
+    padding: '0 8px',
+    fontSize: '10px',
+    color: 'rgba(0,0,0,0.55)',
+  });
+
+  wrap.appendChild(note);
+  wrap.appendChild(schemaRow);
+  wrap.appendChild(dataRow);
+  return wrap;
+};
 
 export const hydrateTableEditor = async (
   editorEl: HTMLElement,
@@ -976,10 +1425,11 @@ export const hydrateTableEditor = async (
   appendSection(editorEl, { source: 'properties', label: 'schema' }, schemaMount);
   refreshData();
   appendSection(editorEl, { source: 'properties', label: 'data' }, dataMount);
-
-  for (const section of renderRawJsonSections(draft, onSave)) {
-    appendSection(editorEl, { source: 'properties', label: section.label, collapsible: true, defaultCollapsed: true }, section.content);
-  }
+  appendSection(
+    editorEl,
+    { source: 'properties', label: 'advanced JSON', collapsible: true, defaultCollapsed: true },
+    renderAdvancedJsonSection(draft, onSave),
+  );
 
   const footer = document.createElement('div');
   Object.assign(footer.style, {
