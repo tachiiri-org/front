@@ -1,8 +1,29 @@
+import type { ElementComponent } from './kind/element';
+import type { HeadingComponent } from './kind/heading';
+import type { ButtonComponent } from './kind/button';
+import type { ListComponent } from './kind/list';
+import type { CanvasComponent } from './kind/canvas';
+import type { SelectComponent } from './kind/select';
+import type { FormComponent } from './kind/form';
+import type { TextareaComponent } from './kind/textarea';
+import type { TableComponent } from './kind/table';
+import { isElementComponent, elementDefaults, elementSchema } from './kind/element';
+import { isHeadingComponent, headingDefaults, headingSchema } from './kind/heading';
+import { isButtonComponent, buttonDefaults, buttonSchema } from './kind/button';
+import { isListComponent, listDefaults, listSchema } from './kind/list';
+import { isCanvasComponent, canvasDefaults, canvasSchema } from './kind/canvas';
+import { isSelectComponent, selectDefaults, selectSchema } from './kind/select';
+import { isFormComponent, formDefaults, formSchema } from './kind/form';
+import { isTextareaComponent, textareaDefaults, textareaSchema } from './kind/textarea';
+import { isTableComponent, tableDefaults, tableSchema } from './kind/table';
+import type { FormField } from './kind/form/field';
+
 export const isStyle = (value: unknown): value is Record<string, string> =>
   typeof value === 'object' &&
   value !== null &&
   !Array.isArray(value) &&
   Object.values(value as Record<string, unknown>).every((x) => typeof x === 'string');
+
 export { type ElementComponent, isElementComponent, elementDefaults, elementSchema } from './kind/element';
 export { type HeadingComponent, isHeadingComponent, headingDefaults, headingSchema } from './kind/heading';
 export { type ButtonComponent, isButtonComponent, buttonDefaults, buttonSchema } from './kind/button';
@@ -21,27 +42,21 @@ export {
 } from './kind/select';
 export { type FormComponent, isFormComponent, formDefaults, formSchema } from './kind/form';
 export { type TextareaComponent, isTextareaComponent, textareaDefaults, textareaSchema } from './kind/textarea';
+export {
+  type TableComponent,
+  type TableSchema,
+  type TableData,
+  type TableRow,
+  type TableColumn,
+  type TableSelectSource,
+  type TableDefaultValue,
+  isTableComponent,
+  isTableSchema,
+  isTableData,
+  tableDefaults,
+  tableSchema,
+} from './kind/table';
 export { type FormField, isFormField } from './kind/form/field';
-export type { EditorComponent, EditorSection, FieldStyleConfig } from '../../editor/component-editor';
-export { isEditorComponent, editorDefaults, editorSchema } from '../../editor/component-editor';
-
-import type { ElementComponent } from './kind/element';
-import type { HeadingComponent } from './kind/heading';
-import type { ButtonComponent } from './kind/button';
-import type { ListComponent } from './kind/list';
-import type { CanvasComponent } from './kind/canvas';
-import type { SelectComponent } from './kind/select';
-import type { FormComponent } from './kind/form';
-import type { TextareaComponent } from './kind/textarea';
-import { isElementComponent, elementDefaults, elementSchema } from './kind/element';
-import { isHeadingComponent, headingDefaults, headingSchema } from './kind/heading';
-import { isButtonComponent, buttonDefaults, buttonSchema } from './kind/button';
-import { isListComponent, listDefaults, listSchema } from './kind/list';
-import { isCanvasComponent, canvasDefaults, canvasSchema } from './kind/canvas';
-import { isSelectComponent, selectDefaults, selectSchema } from './kind/select';
-import { isFormComponent, formDefaults, formSchema } from './kind/form';
-import { isTextareaComponent, textareaDefaults, textareaSchema } from './kind/textarea';
-import type { FormField } from './kind/form/field';
 
 export type Component =
   | ElementComponent
@@ -51,7 +66,8 @@ export type Component =
   | CanvasComponent
   | SelectComponent
   | FormComponent
-  | TextareaComponent;
+  | TextareaComponent
+  | TableComponent;
 
 export const isComponent = (value: unknown): value is Component =>
   isElementComponent(value) ||
@@ -61,7 +77,8 @@ export const isComponent = (value: unknown): value is Component =>
   isCanvasComponent(value) ||
   isSelectComponent(value) ||
   isFormComponent(value) ||
-  isTextareaComponent(value);
+  isTextareaComponent(value) ||
+  isTableComponent(value);
 
 export const componentDefaults: Record<string, Record<string, unknown>> = {
   element: elementDefaults as Record<string, unknown>,
@@ -72,6 +89,7 @@ export const componentDefaults: Record<string, Record<string, unknown>> = {
   canvas: canvasDefaults as Record<string, unknown>,
   list: listDefaults as Record<string, unknown>,
   textarea: textareaDefaults as Record<string, unknown>,
+  table: tableDefaults as Record<string, unknown>,
 };
 
 export const componentSchemas: Record<string, FormField[]> = {
@@ -83,6 +101,7 @@ export const componentSchemas: Record<string, FormField[]> = {
   canvas: canvasSchema,
   list: listSchema,
   textarea: textareaSchema,
+  table: tableSchema,
 };
 
 export const COMPONENT_KINDS = Object.keys(componentDefaults);

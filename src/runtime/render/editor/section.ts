@@ -1,4 +1,5 @@
-import type { EditorSection, FormField } from '../../../schema/component';
+import type { EditorSection } from '../../../editor/component-editor';
+import type { FormField } from '../../../schema/component';
 import { renderFormFromSchema } from './form';
 import type { FieldStyleContext } from './context';
 import { inferFieldsFromData } from '../../bind/form/infer';

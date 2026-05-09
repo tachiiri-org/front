@@ -1,5 +1,7 @@
-import { isComponent, componentDefaults, COMPONENT_KINDS, editorDefaults } from '../../../schema/component';
-import { isFrameRef, isCanvasFrame, type EditorFrame, type EditorSection } from '../../../schema/screen/screen';
+import { isComponent, componentDefaults, COMPONENT_KINDS } from '../../../schema/component';
+import { isFrameRef, isCanvasFrame, type EditorFrame } from '../../../schema/screen/screen';
+import type { EditorSection } from '../../../editor/component-editor';
+import { editorDefaults } from '../../../editor/component-editor';
 import type { FormField } from '../../../schema/component';
 import { getEntityDisplayName } from '../../../schema/component/name';
 import { buildFieldStyleContext, type FieldStyleContext } from '../../render/editor/context';
@@ -7,9 +9,9 @@ import { domMap } from '../../../state';
 import { putComponent, updateScreen, fetchScreen } from './save';
 import { appendSection, createLabeledRow, renderSectionContent } from '../../render/editor/section';
 import { renderPlacementRow } from '../../render/editor/placement';
+import { hydrateTableEditor } from '../table/table';
 
 const NAME_PROPERTY_SCHEMA: FormField[] = [{ kind: 'text-field', key: 'name', label: 'name' }];
-
 const getEditableComponentData = (data: Record<string, unknown>): Record<string, unknown> => {
   const editable: Record<string, unknown> = {};
   if (Object.prototype.hasOwnProperty.call(data, 'name')) editable.name = data.name;
@@ -73,6 +75,7 @@ export const hydrateComponentEditor = async (
   const ctx = buildFieldStyleContext(editorFrame.fieldStyle);
 
   editorEl.replaceChildren();
+  let renderedProperties = false;
 
   const saveSelectedFrameUpdate = async (patch: Record<string, unknown>): Promise<void> => {
     if (componentSrc !== null) {
@@ -134,6 +137,11 @@ export const hydrateComponentEditor = async (
     editorEl.appendChild(kindRow);
   }
 
+  if (componentKind === 'table' && componentData) {
+    await hydrateTableEditor(editorEl, editorFrame, componentData, saveSelectedFrameUpdate);
+    renderedProperties = true;
+  }
+
   if (componentKind === 'component-editor' && componentData) {
     const sourceCanvasRow = createLabeledRow('source');
     const sourceCanvasSelect = document.createElement('select');
@@ -184,7 +192,6 @@ export const hydrateComponentEditor = async (
     editorEl.appendChild(sourceCanvasRow);
   }
 
-  let renderedProperties = false;
   for (const section of sections) {
     if (section.source !== 'placement') continue;
     const placementData = JSON.parse(JSON.stringify(frame.placement)) as Record<string, unknown>;

@@ -2,12 +2,14 @@ import {
   isListComponent,
   isCanvasComponent,
   isTextareaComponent,
+  isTableComponent,
   applyDefaults,
   type Component,
 } from '../../../schema/component';
-import { isEditorComponent, type Frame, type FrameRef, isFrameRef } from '../../../schema/screen/screen';
+import { type Frame, type FrameRef, isFrameRef } from '../../../schema/screen/screen';
+import { isEditorComponent } from '../../../editor/component-editor';
 import type { FrameState } from '../../../state';
-import { renderList, renderCanvas, renderEditor } from './frame';
+import { renderList, renderCanvas, renderEditor, renderTable } from './frame';
 
 const applyPadding = (el: HTMLElement, c: Record<string, unknown>): void => {
   if (typeof c.padding === 'string') el.style.padding = c.padding;
@@ -75,6 +77,46 @@ const renderResolved = (
     }
     applyPadding(form, c);
     return form;
+  }
+
+  if (c.kind === 'table' && isTableComponent(c)) {
+    const wrapper = renderTable(id, c);
+    const table = document.createElement('table');
+    table.style.width = '100%';
+    table.style.borderCollapse = 'collapse';
+    table.style.fontSize = '12px';
+
+    const thead = document.createElement('thead');
+    const headRow = document.createElement('tr');
+    for (const column of c.schema.columns.filter((column) => !column.hidden)) {
+      const th = document.createElement('th');
+      th.textContent = column.label;
+      th.style.textAlign = 'left';
+      th.style.borderBottom = '1px solid rgba(0,0,0,0.12)';
+      th.style.padding = '4px 6px';
+      th.style.whiteSpace = 'nowrap';
+      headRow.appendChild(th);
+    }
+    thead.appendChild(headRow);
+    table.appendChild(thead);
+
+    const tbody = document.createElement('tbody');
+    for (const row of c.data.rows) {
+      const tr = document.createElement('tr');
+      tr.dataset.rowId = row.id;
+      for (const column of c.schema.columns.filter((column) => !column.hidden)) {
+        const td = document.createElement('td');
+        td.style.borderBottom = '1px solid rgba(0,0,0,0.06)';
+        td.style.padding = '4px 6px';
+        const value = row.values[column.key];
+        td.textContent = value === undefined || value === null ? '' : String(value);
+        tr.appendChild(td);
+      }
+      tbody.appendChild(tr);
+    }
+    table.appendChild(tbody);
+    wrapper.appendChild(table);
+    return wrapper;
   }
 
   const pre = document.createElement('pre');

@@ -1,8 +1,9 @@
 import {
   type ListComponent,
   type CanvasComponent,
+  type TableComponent,
 } from '../../../schema/component';
-import type { EditorComponent } from '../../../schema/component';
+import type { EditorComponent } from '../../../editor/component-editor';
 
 export const renderList = (id: string, component: ListComponent): HTMLElement => {
   const ul = document.createElement('ul');
@@ -23,4 +24,13 @@ export const renderEditor = (id: string, component: EditorComponent): HTMLElemen
   div.dataset.frameId = id;
   if (component.style) Object.assign(div.style, component.style);
   return div;
+};
+
+export const renderTable = (id: string, component: TableComponent): HTMLElement => {
+  const wrapper = document.createElement('div');
+  wrapper.dataset.frameId = id;
+  wrapper.style.overflow = 'auto';
+  wrapper.style.boxSizing = 'border-box';
+  if (component.padding) wrapper.style.padding = component.padding;
+  return wrapper;
 };

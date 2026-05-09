@@ -1,4 +1,4 @@
-import { handleApiRequest } from './api/layouts';
+import { handleApiRequest } from './api/layout';
 import type { LayoutsEnv } from './storage/layouts/r2';
 
 type Env = {

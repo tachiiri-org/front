@@ -1,5 +1,6 @@
-import type { EditorFrame, Screen, EditorSection } from '../../../schema/screen/screen';
-import { editorDefaults } from '../../../schema/component';
+import type { EditorFrame, Screen } from '../../../schema/screen/screen';
+import type { EditorSection } from '../../../editor/component-editor';
+import { editorDefaults } from '../../../editor/component-editor';
 import { getFrameSelection } from '../../../state';
 import { EDITOR_ONLY_KINDS } from '../../render/canvas/preview';
 import { appendSection } from '../../render/editor/section';
