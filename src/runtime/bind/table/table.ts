@@ -870,6 +870,7 @@ const renderSchemaSection = (
   refreshData: () => void,
   onChange: () => void,
   ctx: FieldStyleContext,
+  addColumn: (type: TableColumnType) => void,
 ): HTMLElement => {
   const container = document.createElement('div');
   const header = document.createElement('div');
@@ -923,15 +924,7 @@ const renderSchemaSection = (
   addBtn.style.background = 'transparent';
   addBtn.style.cursor = 'pointer';
   addBtn.style.fontSize = '11px';
-  const addColumn = (): void => {
-    const column = createColumnByType(draft.schema, typeSelect.value as TableColumnType);
-    draft.schema.columns.push(column);
-    addColumnToRows(draft.data.rows, column);
-    refreshSchema();
-    refreshData();
-    onChange();
-  };
-  addBtn.addEventListener('click', addColumn);
+  addBtn.addEventListener('click', () => addColumn(typeSelect.value as TableColumnType));
 
   controls.appendChild(typeSelect);
   controls.appendChild(addBtn);
@@ -959,7 +952,7 @@ const renderSchemaSection = (
     emptyBtn.style.cursor = 'pointer';
     emptyBtn.style.padding = '0';
     emptyBtn.style.fontSize = '11px';
-    emptyBtn.addEventListener('click', addColumn);
+    emptyBtn.addEventListener('click', () => addColumn('string'));
     empty.appendChild(message);
     empty.appendChild(emptyBtn);
     list.appendChild(empty);
@@ -1114,6 +1107,8 @@ const renderDataSection = (
   mount: HTMLElement,
   refreshData: () => void,
   onChange: () => void,
+  addRow: () => void,
+  addColumn: (type: TableColumnType) => void,
 ): HTMLElement => {
   const container = document.createElement('div');
   const header = document.createElement('div');
@@ -1136,15 +1131,7 @@ const renderDataSection = (
   addBtn.style.background = 'transparent';
   addBtn.style.cursor = 'pointer';
   addBtn.style.fontSize = '11px';
-  addBtn.addEventListener('click', () => {
-    const row = {
-      id: randomId(),
-      values: makeRowFromSchema(draft.schema),
-    };
-    draft.data.rows.push(row);
-    refreshData();
-    onChange();
-  });
+  addBtn.addEventListener('click', addRow);
 
   header.appendChild(label);
   header.appendChild(addBtn);
@@ -1161,8 +1148,36 @@ const renderDataSection = (
       color: 'rgba(0,0,0,0.55)',
     });
     const message = document.createElement('div');
-    message.textContent = 'No columns yet. Define the schema first, then add rows here.';
+    message.textContent = 'No columns yet. Start by adding a column, then add rows.';
+    const actions = document.createElement('div');
+    Object.assign(actions.style, {
+      display: 'flex',
+      flexWrap: 'wrap',
+      gap: '8px',
+      alignItems: 'center',
+    });
+    const firstColumnBtn = document.createElement('button');
+    firstColumnBtn.type = 'button';
+    firstColumnBtn.textContent = '+ add first column';
+    firstColumnBtn.style.border = 'none';
+    firstColumnBtn.style.background = 'transparent';
+    firstColumnBtn.style.cursor = 'pointer';
+    firstColumnBtn.style.padding = '0';
+    firstColumnBtn.style.fontSize = '11px';
+    firstColumnBtn.addEventListener('click', () => addColumn('string'));
+    const firstRowBtn = document.createElement('button');
+    firstRowBtn.type = 'button';
+    firstRowBtn.textContent = '+ add first row';
+    firstRowBtn.style.border = 'none';
+    firstRowBtn.style.background = 'transparent';
+    firstRowBtn.style.cursor = 'pointer';
+    firstRowBtn.style.padding = '0';
+    firstRowBtn.style.fontSize = '11px';
+    firstRowBtn.addEventListener('click', addRow);
     empty.appendChild(message);
+    actions.appendChild(firstColumnBtn);
+    actions.appendChild(firstRowBtn);
+    empty.appendChild(actions);
     container.appendChild(header);
     container.appendChild(empty);
     mount.replaceChildren(container);
@@ -1216,15 +1231,7 @@ const renderDataSection = (
     emptyBtn.style.cursor = 'pointer';
     emptyBtn.style.padding = '0';
     emptyBtn.style.fontSize = '11px';
-    emptyBtn.addEventListener('click', () => {
-      const row = {
-        id: randomId(),
-        values: makeRowFromSchema(draft.schema),
-      };
-      draft.data.rows.push(row);
-      refreshData();
-      onChange();
-    });
+    emptyBtn.addEventListener('click', addRow);
     emptyWrap.appendChild(message);
     emptyWrap.appendChild(emptyBtn);
     td.appendChild(emptyWrap);
@@ -1394,15 +1401,34 @@ export const hydrateTableEditor = async (
   const dataSectionMount = document.createElement('div');
 
   const refreshSchema = (): void => {
-    renderSchemaSection(draft, schemaMount, refreshSchema, refreshData, updateStatus, ctx);
+    renderSchemaSection(draft, schemaMount, refreshSchema, refreshData, updateStatus, ctx, addColumn);
   };
 
   const refreshData = (): void => {
-    renderDataSection(draft, dataMount, refreshData, updateStatus);
+    renderDataSection(draft, dataMount, refreshData, updateStatus, addRow, addColumn);
   };
 
   const updateStatus = (): void => {
     renderStatus(status, validateDraft(draft) ?? '');
+  };
+
+  const addColumn = (type: TableColumnType): void => {
+    const column = createColumnByType(draft.schema, type);
+    draft.schema.columns.push(column);
+    addColumnToRows(draft.data.rows, column);
+    refreshSchema();
+    refreshData();
+    updateStatus();
+  };
+
+  const addRow = (): void => {
+    const row = {
+      id: randomId(),
+      values: makeRowFromSchema(draft.schema),
+    };
+    draft.data.rows.push(row);
+    refreshData();
+    updateStatus();
   };
 
   const saveDraft = async (): Promise<void> => {

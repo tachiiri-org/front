@@ -25,12 +25,30 @@ const applyPlacement = (el: HTMLElement, frame: Frame): void => {
   el.style.minHeight = '0';
 };
 
+const showLoadError = (message: string): void => {
+  document.body.style.margin = '0';
+  document.body.style.padding = '24px';
+  document.body.style.fontFamily = 'monospace';
+  root.replaceChildren();
+  const pre = document.createElement('pre');
+  pre.textContent = message;
+  pre.style.whiteSpace = 'pre-wrap';
+  pre.style.margin = '0';
+  root.appendChild(pre);
+};
+
 const renderScreen = async (screenId: string): Promise<void> => {
   const response = await fetch(`/api/layouts/${screenId}`);
-  if (!response.ok) return;
+  if (!response.ok) {
+    showLoadError(`Failed to load screen "${screenId}" (${response.status} ${response.statusText}).`);
+    return;
+  }
 
   const value = (await response.json()) as unknown;
-  if (!isScreen(value)) return;
+  if (!isScreen(value)) {
+    showLoadError(`Invalid screen payload for "${screenId}".`);
+    return;
+  }
 
   store.screen = value;
   store.frameComponents.clear();
@@ -90,7 +108,7 @@ const renderScreen = async (screenId: string): Promise<void> => {
   for (const frame of store.screen.frames) {
     const state: FrameState = store.frameStates.get(frame.id) ?? {};
     const resolved = isFrameRef(frame) ? (store.frameComponents.get(frame.id) ?? null) : null;
-    const el = renderComponent(frame, state, resolved);
+    const el = renderComponent(frame, state, resolved, { screenId });
     applyPlacement(el, frame);
     canvas.appendChild(el);
     domMap.set(frame.id, el);
