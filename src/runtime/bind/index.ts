@@ -52,6 +52,7 @@ const loadSchemaIntoTable = async (
   if (typeof payload !== 'object' || payload === null) return;
   const p = payload as Record<string, unknown>;
   const tf = tableFrame as Record<string, unknown>;
+  tf.schemaEditorKind = kind;
   if (p.schema) tf.schema = p.schema;
   if (p.data) tf.data = p.data;
   onFrameRerender?.(tableFrame.id);

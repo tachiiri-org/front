@@ -8,11 +8,14 @@ export const fetchScreen = async (screenId: string): Promise<Screen | null> => {
 };
 
 export const putScreen = async (screenId: string, value: unknown): Promise<void> => {
-  await fetch(`/api/layouts/${screenId}`, {
+  const res = await fetch(`/api/layouts/${screenId}`, {
     method: 'PUT',
     headers: { 'Content-Type': 'application/json' },
     body: JSON.stringify(value),
   });
+  if (!res.ok) {
+    throw new Error(`screen_put_failed:${res.status}`);
+  }
 };
 
 export const createScreen = async (screenId: string, value: unknown): Promise<void> => {
@@ -45,11 +48,25 @@ export const putComponent = async (
   componentSrc: string,
   data: unknown,
 ): Promise<void> => {
-  await fetch(`/api/layouts/${screenId}/components/${componentSrc}`, {
+  const res = await fetch(`/api/layouts/${screenId}/components/${componentSrc}`, {
     method: 'PUT',
     headers: { 'Content-Type': 'application/json' },
     body: JSON.stringify(data),
   });
+  if (!res.ok) {
+    throw new Error(`component_put_failed:${res.status}`);
+  }
+};
+
+export const putComponentSchema = async (kind: string, data: unknown): Promise<void> => {
+  const res = await fetch(`/api/component-schemas/${encodeURIComponent(kind)}`, {
+    method: 'PUT',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify(data),
+  });
+  if (!res.ok) {
+    throw new Error(`component_schema_put_failed:${res.status}`);
+  }
 };
 
 export const updateScreen = async (
@@ -57,6 +74,8 @@ export const updateScreen = async (
   transform: (screen: Screen) => unknown,
 ): Promise<void> => {
   const screen = await fetchScreen(screenId);
-  if (!screen) return;
+  if (!screen) {
+    throw new Error(`screen_not_found:${screenId}`);
+  }
   await putScreen(screenId, transform(screen));
 };

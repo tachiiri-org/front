@@ -5,13 +5,18 @@ import {
   type TableData,
   type TableSchema,
 } from '../../../schema/component';
+import {
+  validateSchemaEditorTableDraft,
+  validateSchemaEditorTableDraftDetail,
+} from '../../../schema/component/schema-editor';
 import { type Frame, isFrameRef } from '../../../schema/screen/screen';
-import { putComponent, updateScreen } from '../../bind/editor/save';
+import { putComponent, putComponentSchema, updateScreen } from '../../bind/editor/save';
 import { renderTable } from './frame';
 
 type TableEditorDraft = TableComponent;
 type TableSaveTarget =
   | { kind: 'component'; screenId: string; componentSrc: string }
+  | { kind: 'component-schema'; screenId: string; componentSrc: string }
   | { kind: 'screen-frame'; screenId: string; frameId: string };
 
 const clone = <T>(value: T): T => JSON.parse(JSON.stringify(value)) as T;
@@ -182,6 +187,10 @@ const buildSaveTarget = (
   screenId?: string,
 ): TableSaveTarget | null => {
   if (!screenId) return null;
+  const frameRecord = frame as Record<string, unknown>;
+  if (typeof frameRecord.schemaEditorKind === 'string' && frameRecord.schemaEditorKind) {
+    return { kind: 'component-schema', screenId, componentSrc: frameRecord.schemaEditorKind };
+  }
   if (isFrameRef(frame)) return { kind: 'component', screenId, componentSrc: frame.src };
   if (isTableComponent(frame)) return { kind: 'screen-frame', screenId, frameId: frame.id };
   return null;
@@ -193,6 +202,10 @@ const persistTableDraft = async (
 ): Promise<void> => {
   if (!saveTarget) return;
   const next = clone(draft);
+  if (saveTarget.kind === 'component-schema') {
+    await putComponentSchema(saveTarget.componentSrc, next);
+    return;
+  }
   if (saveTarget.kind === 'component') {
     await putComponent(saveTarget.screenId, saveTarget.componentSrc, next);
     return;
@@ -221,16 +234,68 @@ const renderEditableTable = (
   status.style.fontSize = '10px';
   status.style.fontFamily = 'monospace';
   status.style.minHeight = '14px';
-  status.style.color = '#c0392b';
+  status.style.color = 'rgba(0,0,0,0.6)';
 
-  const saveAndRender = async (): Promise<void> => {
+  let isDirty = false;
+  const saveBtn = document.createElement('button');
+  saveBtn.type = 'button';
+  saveBtn.textContent = 'Save all';
+  Object.assign(saveBtn.style, {
+    fontSize: '11px',
+    padding: '2px 10px',
+    cursor: 'pointer',
+    border: '1px solid rgba(0,0,0,0.14)',
+    borderRadius: '4px',
+    background: 'white',
+  });
+  saveBtn.disabled = true;
+
+  const updateStatus = (): void => {
+    if (!saveTarget) {
+      status.textContent = '';
+      status.style.color = 'rgba(0,0,0,0.6)';
+      saveBtn.disabled = true;
+      saveBtn.style.opacity = '0.65';
+      saveBtn.style.cursor = 'not-allowed';
+      return;
+    }
+    status.textContent = isDirty ? 'Unsaved changes' : 'Saved';
+    status.style.color = 'rgba(0,0,0,0.6)';
+    saveBtn.disabled = !isDirty;
+    saveBtn.style.opacity = isDirty ? '1' : '0.65';
+    saveBtn.style.cursor = isDirty ? 'pointer' : 'not-allowed';
+  };
+
+  const markDirty = (): void => {
+    isDirty = true;
+    updateStatus();
+  };
+
+  const markDirtyAndRender = (): void => {
+    markDirty();
+    render();
+  };
+
+  const saveDraft = async (): Promise<void> => {
+    if (!saveTarget) return;
+    if (saveTarget.kind === 'component-schema') {
+      const message = validateSchemaEditorTableDraftDetail(draft.data).message;
+      if (message) {
+        status.style.color = '#c0392b';
+        status.textContent = message;
+        return;
+      }
+    }
+    status.style.color = 'rgba(0,0,0,0.6)';
+    status.textContent = 'Saving...';
     try {
       await persistTableDraft(draft, saveTarget);
-      status.textContent = '';
+      isDirty = false;
+      updateStatus();
     } catch (error) {
+      status.style.color = '#c0392b';
       status.textContent = error instanceof Error ? error.message : String(error);
     }
-    render();
   };
 
   const addColumn = (label?: string): void => {
@@ -238,7 +303,7 @@ const renderEditableTable = (
     draft.schema.columns.push(column);
     addColumnToRows(draft.data.rows, column);
     pendingRowValues[column.key] = makeDefaultValue(column);
-    void saveAndRender();
+    markDirtyAndRender();
   };
 
   const removeColumn = (column: TableColumn): void => {
@@ -249,12 +314,12 @@ const renderEditableTable = (
       delete row.values[column.key];
     }
     pendingRowValues = makeRowFromSchema(draft.schema);
-    void saveAndRender();
+    markDirtyAndRender();
   };
 
   const addRow = (values: Record<string, unknown>): void => {
     draft.data.rows.push({ id: randomId(), values });
-    void saveAndRender();
+    markDirtyAndRender();
   };
 
   const renderColumnHeaderLabel = (column: TableColumn): HTMLElement => {
@@ -281,7 +346,7 @@ const renderEditableTable = (
       if (next) column.label = next;
       labelInput.value = column.label;
       applyTextInputSize(labelInput, labelInput.value, labelInput.placeholder);
-      void saveAndRender();
+      markDirtyAndRender();
     });
     return labelInput;
   };
@@ -310,11 +375,17 @@ const renderEditableTable = (
     setValue: (value: unknown) => void,
     commit: () => void,
     isDraftRow = false,
+    issue?: string,
   ): HTMLElement => {
     const cell = document.createElement('td');
     cell.style.border = '1px solid rgba(0,0,0,0.14)';
     cell.style.padding = '0';
     cell.style.verticalAlign = 'top';
+    if (issue) {
+      cell.style.background = 'rgba(239, 68, 68, 0.10)';
+      cell.style.boxShadow = 'inset 0 0 0 1px rgba(239, 68, 68, 0.25)';
+      cell.title = issue;
+    }
     if (column.hidden) {
       cell.style.opacity = '0.35';
     }
@@ -349,6 +420,7 @@ const renderEditableTable = (
       empty.value = '';
       empty.textContent = '';
       select.appendChild(empty);
+      const currentValue = typeof current === 'string' ? current : '';
       if (column.source.kind === 'inline') {
         for (const option of column.source.options) {
           const el = document.createElement('option');
@@ -357,8 +429,18 @@ const renderEditableTable = (
           select.appendChild(el);
         }
       }
-      select.value = typeof current === 'string' ? current : '';
+      if (currentValue && !Array.from(select.options).some((option) => option.value === currentValue)) {
+        const invalid = document.createElement('option');
+        invalid.value = currentValue;
+        invalid.textContent = `invalid: ${currentValue}`;
+        invalid.style.color = '#c0392b';
+        select.appendChild(invalid);
+      }
+      select.value = currentValue;
       applyTextInputSize(select, select.value, '');
+      if (issue) {
+        select.style.background = 'rgba(239, 68, 68, 0.10)';
+      }
       select.addEventListener('change', () => {
         setValue(select.value);
         commit();
@@ -405,15 +487,28 @@ const renderEditableTable = (
 
   const render = (): void => {
     wrapper.replaceChildren();
+    const validationDetail =
+      saveTarget?.kind === 'component-schema'
+        ? validateSchemaEditorTableDraftDetail(draft.data)
+        : null;
+    const rowIssues = validationDetail?.rowIssues ?? new Map<string, Record<string, string>>();
 
     const toolbar = document.createElement('div');
     Object.assign(toolbar.style, {
       display: 'flex',
       alignItems: 'center',
       gap: '8px',
-      padding: '0 8px 6px',
+      padding: '8px 8px 6px',
       flexWrap: 'wrap',
+      position: 'sticky',
+      top: '0',
+      zIndex: '1',
+      background: 'rgba(255,255,255,0.96)',
+      backdropFilter: 'blur(6px)',
+      borderBottom: '1px solid rgba(0,0,0,0.06)',
     });
+
+    toolbar.appendChild(saveBtn);
 
     const hiddenLabel = document.createElement('label');
     Object.assign(hiddenLabel.style, {
@@ -435,6 +530,7 @@ const renderEditableTable = (
     hiddenLabel.appendChild(hiddenToggle);
     hiddenLabel.appendChild(document.createTextNode('show hidden columns'));
     toolbar.appendChild(hiddenLabel);
+    toolbar.appendChild(status);
     wrapper.appendChild(toolbar);
 
     const visibleColumns = draft.schema.columns.filter(
@@ -522,6 +618,11 @@ const renderEditableTable = (
     for (const [rowIndex, row] of draft.data.rows.entries()) {
       const tr = document.createElement('tr');
       tr.dataset.rowId = row.id;
+      const issueMap = rowIssues.get(row.id);
+      const rowHasIssue = Boolean(issueMap && Object.keys(issueMap).length > 0);
+      if (rowHasIssue) {
+        tr.style.background = 'rgba(239, 68, 68, 0.05)';
+      }
       for (const column of visibleColumns) {
         tr.appendChild(
           renderCellEditor(
@@ -530,7 +631,9 @@ const renderEditableTable = (
             (value) => {
               row.values[column.key] = value;
             },
-            () => void saveAndRender(),
+            markDirty,
+            false,
+            issueMap?.[column.key],
           ),
         );
       }
@@ -541,6 +644,9 @@ const renderEditableTable = (
       actionCell.style.verticalAlign = 'middle';
       actionCell.style.textAlign = 'left';
       actionCell.style.whiteSpace = 'nowrap';
+      if (rowHasIssue) {
+        actionCell.style.background = 'rgba(239, 68, 68, 0.05)';
+      }
       const deleteBtn = document.createElement('button');
       deleteBtn.type = 'button';
       deleteBtn.textContent = '行削除';
@@ -554,7 +660,7 @@ const renderEditableTable = (
       deleteBtn.style.whiteSpace = 'nowrap';
       deleteBtn.addEventListener('click', () => {
         draft.data.rows.splice(rowIndex, 1);
-        void saveAndRender();
+        markDirtyAndRender();
       });
       actionCell.appendChild(deleteBtn);
       tr.appendChild(actionCell);
@@ -606,11 +712,17 @@ const renderEditableTable = (
     table.appendChild(tbody);
 
     wrapper.appendChild(table);
-    wrapper.appendChild(status);
     scheduleAutoSizedControls(wrapper);
   };
 
+  saveBtn.addEventListener('click', () => {
+    void saveDraft().catch((error: unknown) => {
+      status.textContent = error instanceof Error ? error.message : String(error);
+    });
+  });
+
   render();
+  updateStatus();
   return wrapper;
 };
 
