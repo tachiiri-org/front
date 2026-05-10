@@ -5,8 +5,9 @@ import {
   type ListFrame,
   type CanvasFrame,
   type EditorFrame,
+  type Frame,
 } from '../../schema/screen/screen';
-import { store, getFrameSelection, setFrameSelection, getCanvasSelection, setCanvasSelection } from '../../state';
+import { store, domMap, getFrameSelection, setFrameSelection, getCanvasSelection, setCanvasSelection } from '../../state';
 import { hydrateList } from './list/list';
 import { hydrateCanvas } from './canvas/canvas';
 import { hydrateComponentEditor } from './editor/component';
@@ -29,9 +30,89 @@ const resolveEditorTargetFrameId = (canvasFrameId: string | null): string | null
   return findDefaultEditableFrameId();
 };
 
+const getByPath = (value: unknown, path: string | undefined): unknown => {
+  if (!path) return value;
+  const segments = path.split('.').filter(Boolean);
+  let cur: unknown = value;
+  for (const seg of segments) {
+    if (typeof cur !== 'object' || cur === null || Array.isArray(cur)) return undefined;
+    cur = (cur as Record<string, unknown>)[seg];
+  }
+  return cur;
+};
+
+const loadSchemaIntoTable = async (
+  kind: string,
+  tableFrame: Frame,
+  onFrameRerender?: (id: string) => void,
+): Promise<void> => {
+  const res = await fetch(`/api/component-schemas/${encodeURIComponent(kind)}`);
+  if (!res.ok) return;
+  const payload = (await res.json()) as unknown;
+  if (typeof payload !== 'object' || payload === null) return;
+  const p = payload as Record<string, unknown>;
+  const tf = tableFrame as Record<string, unknown>;
+  if (p.schema) tf.schema = p.schema;
+  if (p.data) tf.data = p.data;
+  onFrameRerender?.(tableFrame.id);
+};
+
+const hydrateSelectTableBindings = async (
+  onFrameRerender?: (frameId: string) => void,
+): Promise<void> => {
+  if (!store.screen) return;
+
+  for (const frame of store.screen.frames) {
+    const c = frame as Record<string, unknown>;
+    if (c.kind !== 'select') continue;
+    const targetId = typeof c.targetComponentId === 'string' ? c.targetComponentId : '';
+    if (!targetId) continue;
+
+    const tableFrame = store.screen.frames.find((f) => f.id === targetId);
+    if (!tableFrame || (tableFrame as Record<string, unknown>).kind !== 'table') continue;
+
+    const selectEl = domMap.get(frame.id);
+    if (!(selectEl instanceof HTMLSelectElement)) continue;
+
+    const source = c.source as Record<string, unknown> | undefined;
+    if (source?.kind === 'endpoint' && typeof source.url === 'string' && source.url) {
+      try {
+        const res = await fetch(source.url);
+        if (res.ok) {
+          const raw = (await res.json()) as unknown;
+          const itemsPath = typeof source.itemsPath === 'string' ? source.itemsPath : '';
+          const items = getByPath(raw, itemsPath);
+          const valueKey = typeof source.valueKey === 'string' && source.valueKey ? source.valueKey : 'value';
+          const labelKey = typeof source.labelKey === 'string' && source.labelKey ? source.labelKey : 'label';
+
+          if (Array.isArray(items)) {
+            for (const item of items as Record<string, unknown>[]) {
+              const opt = document.createElement('option');
+              opt.value = String(item[valueKey] ?? '');
+              opt.textContent = String(item[labelKey] ?? opt.value);
+              selectEl.appendChild(opt);
+            }
+            if (selectEl.options.length > 0) {
+              selectEl.value = selectEl.options[0].value;
+              await loadSchemaIntoTable(selectEl.value, tableFrame, onFrameRerender);
+            }
+          }
+        }
+      } catch {
+        // ignore fetch errors
+      }
+    }
+
+    selectEl.addEventListener('change', () => {
+      void loadSchemaIntoTable(selectEl.value, tableFrame, onFrameRerender);
+    });
+  }
+};
+
 export const hydrateEditor = async (
   onReload: () => void,
   initialScreenId: string | null = null,
+  onFrameRerender?: (frameId: string) => void,
 ): Promise<void> => {
   if (!store.screen) return;
 
@@ -107,4 +188,6 @@ export const hydrateEditor = async (
       }
     }
   }
+
+  await hydrateSelectTableBindings(onFrameRerender);
 };

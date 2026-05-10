@@ -13,6 +13,7 @@ export const LIST_RESOURCE_OPTIONS: Array<{ value: string; label: string }> = [
 export type ListComponent = {
   kind: 'list';
   name?: string;
+  padding?: string;
   resource?: string;
   targetComponentId?: string;
   style?: Record<string, string>;
@@ -22,6 +23,7 @@ export type ListComponent = {
 export const listDefaults: ListComponent = {
   kind: 'list',
   name: '',
+  padding: '',
   resource: 'layouts',
   targetComponentId: '',
   style: {},
@@ -29,6 +31,7 @@ export const listDefaults: ListComponent = {
 };
 
 export const listSchema: FormField[] = [
+  { kind: 'text-field', key: 'padding', label: 'padding' },
   { kind: 'select-field', key: 'resource', label: 'resource', options: LIST_RESOURCE_OPTIONS },
   { kind: 'text-field', key: 'targetComponentId', label: 'targetComponentId' },
   { kind: 'style-map-field', key: 'style', label: 'style' },
@@ -41,6 +44,7 @@ export const isListComponent = (value: unknown): value is ListComponent => {
   return (
     c.kind === 'list' &&
     (c.name === undefined || typeof c.name === 'string') &&
+    (c.padding === undefined || typeof c.padding === 'string') &&
     (c.resource === undefined || typeof c.resource === 'string') &&
     (c.targetComponentId === undefined || typeof c.targetComponentId === 'string') &&
     (c.style === undefined || isStyle(c.style)) &&

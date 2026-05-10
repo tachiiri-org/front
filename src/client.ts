@@ -121,7 +121,10 @@ export const rerender = (id: string): void => {
   const oldEl = domMap.get(id);
   if (!oldEl) return;
   const state: FrameState = store.frameStates.get(id) ?? {};
-  const newEl = renderComponent(frame, state, store.frameComponents.get(id) ?? null);
+  const resolved = isFrameRef(frame) ? (store.frameComponents.get(id) ?? null) : null;
+  const newEl = renderComponent(frame, state, resolved, {
+    screenId: currentEditorScreenId ?? undefined,
+  });
   applyPlacement(newEl, frame);
   oldEl.replaceWith(newEl);
   domMap.set(id, newEl);
@@ -136,7 +139,7 @@ const reloadEditor = (): void => {
 const loadEditor = async (screenId: string): Promise<void> => {
   currentEditorScreenId = screenId;
   await renderScreen(screenId);
-  await hydrateEditor(reloadEditor, screenId);
+  await hydrateEditor(reloadEditor, screenId, rerender);
 };
 
 const loadEditorBootstrap = async (): Promise<void> => {

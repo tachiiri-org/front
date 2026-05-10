@@ -9,6 +9,7 @@ const isStyle = (value: unknown): value is Record<string, string> =>
 export type CanvasComponent = {
   kind: 'canvas';
   name?: string;
+  padding?: string;
   viewportWidth?: number;
   viewportHeight?: number;
   style?: Record<string, string>;
@@ -18,6 +19,7 @@ export type CanvasComponent = {
 export const canvasDefaults: CanvasComponent = {
   kind: 'canvas',
   name: '',
+  padding: '',
   viewportWidth: 1200,
   viewportHeight: 800,
   style: {},
@@ -25,6 +27,7 @@ export const canvasDefaults: CanvasComponent = {
 };
 
 export const canvasSchema: FormField[] = [
+  { kind: 'text-field', key: 'padding', label: 'padding' },
   { kind: 'number-field', key: 'viewportWidth', label: 'viewportWidth' },
   { kind: 'number-field', key: 'viewportHeight', label: 'viewportHeight' },
   { kind: 'style-map-field', key: 'style', label: 'style' },
@@ -40,6 +43,7 @@ export const isCanvasComponent = (value: unknown): value is CanvasComponent => {
   return (
     c.kind === 'canvas' &&
     (c.name === undefined || typeof c.name === 'string') &&
+    (c.padding === undefined || typeof c.padding === 'string') &&
     (c.viewportWidth === undefined || isPositiveInteger(c.viewportWidth)) &&
     (c.viewportHeight === undefined || isPositiveInteger(c.viewportHeight)) &&
     (c.style === undefined || isStyle(c.style)) &&
