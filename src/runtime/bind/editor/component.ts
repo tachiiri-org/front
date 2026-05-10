@@ -1,8 +1,13 @@
-import { isComponent, componentDefaults, COMPONENT_KINDS } from '../../../schema/component';
+import {
+  isComponent,
+  componentDefaults,
+  componentSchemas,
+  COMPONENT_KINDS,
+  type FormField,
+} from '../../../schema/component';
 import { isFrameRef, isCanvasFrame, type EditorFrame } from '../../../schema/screen/screen';
 import type { EditorSection } from '../../../editor/component-editor';
-import { editorDefaults } from '../../../editor/component-editor';
-import type { FormField } from '../../../schema/component';
+import { editorDefaults, editorSchema } from '../../../editor/component-editor';
 import { getEntityDisplayName } from '../../../schema/component/name';
 import { buildFieldStyleContext, type FieldStyleContext } from '../../render/editor/context';
 import { domMap } from '../../../state';
@@ -11,21 +16,57 @@ import { appendSection, createLabeledRow, renderSectionContent } from '../../ren
 import { renderPlacementRow } from '../../render/editor/placement';
 import { hydrateTableEditor } from '../table/table';
 
-const NAME_PROPERTY_SCHEMA: FormField[] = [{ kind: 'text-field', key: 'name', label: 'name' }];
-const getEditableComponentData = (data: Record<string, unknown>): Record<string, unknown> => {
-  const editable: Record<string, unknown> = {};
-  if (Object.prototype.hasOwnProperty.call(data, 'name')) editable.name = data.name;
-  return editable;
+const getPropertiesSchema = (componentKind: string | null): FormField[] | null => {
+  if (!componentKind) return null;
+  if (componentKind === 'component-editor') return editorSchema;
+  return componentSchemas[componentKind] ?? null;
+};
+
+const pickEditableData = (
+  data: Record<string, unknown>,
+  fields: FormField[] | null,
+): Record<string, unknown> => {
+  if (!fields) {
+    const editable: Record<string, unknown> = {};
+    if (Object.prototype.hasOwnProperty.call(data, 'name')) editable.name = data.name;
+    return editable;
+  }
+
+  const picked: Record<string, unknown> = {};
+  for (const field of fields) {
+    if (!('key' in field) || !field.key) continue;
+    const value = data[field.key];
+    if (field.kind === 'field-group') {
+      if (typeof value === 'object' && value !== null && !Array.isArray(value)) {
+        picked[field.key] = pickEditableData(value as Record<string, unknown>, field.fields);
+      } else {
+        picked[field.key] = pickEditableData({}, field.fields);
+      }
+      continue;
+    }
+    if (field.kind === 'object-list-field') {
+      picked[field.key] = Array.isArray(value)
+        ? value.map((item) =>
+          typeof item === 'object' && item !== null && !Array.isArray(item)
+            ? pickEditableData(item as Record<string, unknown>, field.fields)
+            : pickEditableData({}, field.fields))
+        : [];
+      continue;
+    }
+    if (value !== undefined) picked[field.key] = value;
+  }
+  return picked;
 };
 
 const renderPropertiesSection = (
   componentData: Record<string, unknown>,
+  componentKind: string | null,
   onSave: (patch: Record<string, unknown>) => Promise<void>,
   ctx: FieldStyleContext,
 ): HTMLElement =>
   renderSectionContent(
-    getEditableComponentData(componentData),
-    NAME_PROPERTY_SCHEMA,
+    pickEditableData(componentData, getPropertiesSchema(componentKind)),
+    getPropertiesSchema(componentKind),
     async (draft) => onSave(draft as Record<string, unknown>),
     ctx,
     true,
@@ -218,7 +259,7 @@ export const hydrateComponentEditor = async (
     appendSection(
       editorEl,
       section,
-      renderSectionContent(getEditableComponentData(componentData), NAME_PROPERTY_SCHEMA, onSave, ctx, true),
+      renderPropertiesSection(componentData, componentKind, onSave, ctx),
     );
     renderedProperties = true;
   }
@@ -227,6 +268,10 @@ export const hydrateComponentEditor = async (
     const onSave = async (draft: unknown): Promise<void> => {
       await saveSelectedFrameUpdate(draft as Record<string, unknown>);
     };
-    appendSection(editorEl, { source: 'properties', label: 'properties' }, renderPropertiesSection(componentData, onSave, ctx));
+    appendSection(
+      editorEl,
+      { source: 'properties', label: 'properties' },
+      renderPropertiesSection(componentData, componentKind, onSave, ctx),
+    );
   }
 };

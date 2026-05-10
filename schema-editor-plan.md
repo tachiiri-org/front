@@ -12,6 +12,38 @@
 - `table` はすでに「schema を JSON で編集して保存する」最初の成功例
 - ローカル開発でも本番と同じ R2 API 経由を通す
 
+## 論点
+
+### 保存経路ごとに検証を差し込む
+
+`schema-editor` で編集できるようにするだけでは不十分で、どの保存経路でも壊れた JSON を受け付けないことが必要。
+
+現状の保存経路:
+
+- `handleResourcePut` は JSON の parse だけで保存している
+- `handleScreenPut` と `handleComponentPut` は normalize を通す
+- UI 側の `updateScreen` / `putComponent` は最終的に R2 API を通す
+
+そのため、`schema-editor` で触れる対象は「UI の入力」ではなく「保存時に通る検証と正規化」として設計する。
+
+### 増やし方は登録表ベースに寄せる
+
+`if` を増やして対応項目を足すと、`screen` / `component` / `resource` の差分が肥大化する。
+
+`src/schema/component/index.ts` にある `componentDefaults` と `componentSchemas` を起点に、
+
+- どの path を
+- どの editor で
+- どの validator / normalizer で扱うか
+
+を登録として定義する。
+
+### 既存 UI と新規 editor を分けて考える
+
+`screen.head` や `screen.shell` は既存の `screen` editor ですでに編集できるので、まずはその経路の整合を保つ。
+
+一方で、`table` の JSON editor は再利用しやすい共通部品として切り出し、他の schema でも同じ入力体験を使えるようにする。
+
 ## 進め方
 
 ### 1. まず境界を固める
@@ -24,6 +56,12 @@
 - `normalizeScreen`
 - `normalizeComponentValue`
 - `handleResourceGet` / `handleResourcePut`
+
+この段階で確認したいこと:
+
+- `screen` 系、`component` 系、`resource` 系の保存経路で検証の有無を揃える
+- 保存時に正規化できるものと、保存前に弾くべきものを切り分ける
+- 読み込み時の補正は、保存時の検証と矛盾しないようにする
 
 ### 2. 変更の小さい型から増やす
 
@@ -58,6 +96,12 @@
 
 これにより、schema-editor の追加が `if` の増殖ではなく登録の追加になる。
 
+ここでの判断基準は次の通り。
+
+- path ごとに扱う型が明確である
+- UI の入力と保存時の検証が同じ定義を参照できる
+- 後から `select.source` や `style map` を足しても既存の分岐を壊さない
+
 ### 5. 正規化を後ろで支える
 
 保存できるだけでは不十分なので、R2 から読む時にも補正する。
@@ -70,13 +114,14 @@
 
 ## 実装順の提案
 
-1. `table` の JSON editor を共通部品化する
-2. `select` と `style map` を schema-editor に載せる
-3. `screen.head` と `screen.shell` を載せる
-4. `frame` の placement や kind 変更を載せる
-5. `editor` 系の参照値や `list` / `canvas` / `form` のようなネストが深い型を載せる
-6. `table` のように schema 依存が強い data を載せる
-7. `normalize.ts` に migration を増やす
+1. `handleResourcePut` を含む保存経路の検証方針を揃える
+2. `table` の JSON editor を共通部品として切り出す
+3. `screen.head` と `screen.shell` を既存 editor 側で整理する
+4. `select` と `style map` を schema-editor に載せる
+5. `frame` の placement や kind 変更を載せる
+6. `editor` 系の参照値や `list` / `canvas` / `form` のようなネストが深い型を載せる
+7. `table` のように schema 依存が強い data を載せる
+8. `normalize.ts` に migration を増やす
 
 ## 段階ごとの扱い
 
@@ -89,6 +134,8 @@
 - table のように schema 依存が強い data
 
 これらは「やらない」領域ではなく、基礎が固まったあとに順に追加していく対象。
+
+`screen.head` と `screen.shell` は既存 editor ですでに触れているので、schema-editor の初期対象というより、保存経路の整合を確認する対象として扱う。
 
 ## 判断基準
 
