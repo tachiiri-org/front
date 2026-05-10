@@ -12,6 +12,13 @@
 - `table` はすでに「schema を JSON で編集して保存する」最初の成功例
 - ローカル開発でも本番と同じ R2 API 経由を通す
 
+## 進捗
+
+- `component` 側の properties editor を schema 登録ベースに拡張済み
+- `screen.head` を schema ベースで編集できるようにし、`lang` と `meta` も扱えるようにした
+- `normalizeScreen` は `head` の defaults を補うように揃えた
+- 以後の細かい進捗はローカルコミット単位で追うので、必要なら直近コミットを参照する
+
 ## 論点
 
 ### 保存経路ごとに検証を差し込む

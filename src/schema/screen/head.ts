@@ -1,3 +1,5 @@
+import type { FormField } from '../component';
+
 export type MetaTag = {
   name: string;
   content: string;
@@ -14,6 +16,20 @@ export const headDefaults: Head = {
   lang: 'ja',
   meta: [],
 };
+
+export const headSchema: FormField[] = [
+  { kind: 'text-field', key: 'title', label: 'title' },
+  { kind: 'text-field', key: 'lang', label: 'lang' },
+  {
+    kind: 'object-list-field',
+    key: 'meta',
+    label: 'meta',
+    fields: [
+      { kind: 'text-field', key: 'name', label: 'name' },
+      { kind: 'text-field', key: 'content', label: 'content' },
+    ],
+  },
+];
 
 const isMetaTag = (value: unknown): value is MetaTag => {
   if (typeof value !== 'object' || value === null || Array.isArray(value)) return false;

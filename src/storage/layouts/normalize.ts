@@ -1,6 +1,6 @@
 import { isScreen, isGridLayout, isFrame, isPlacement, type Screen, type Frame, type Placement } from '../../schema/screen/screen';
 import { isComponent } from '../../schema/component';
-import { isHead } from '../../schema/screen/head';
+import { headDefaults, isHead } from '../../schema/screen/head';
 import { allocateDefaultEntityName, assignDefaultEntityNames } from '../../schema/component/name';
 import { isStringRecord, isPositiveInteger, isFrameCandidate, type FrameCandidate } from './validate';
 import { migrateFrameKind, migrateEditorSource, migrateLegacyCanvasIds } from './migrate';
@@ -106,7 +106,7 @@ export const normalizeScreen = (value: unknown): Screen | null => {
     : { kind: 'grid', columns };
 
   const normalized: Screen = {
-    head: candidate.head as Screen['head'],
+    head: { ...headDefaults, ...(candidate.head as Screen['head']) },
     shell: candidate.shell as Record<string, string> | undefined,
     grid,
     frames: normalizedFrames,
