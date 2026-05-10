@@ -3,8 +3,8 @@ import type { FieldStyleContext } from '../../render/editor/context';
 import { renderFormFromSchema } from '../../render/editor/form';
 
 const TABLE_PROPERTIES_SCHEMA: FormField[] = [
-  { kind: 'text-field', key: 'name', label: 'name' },
-  { kind: 'text-field', key: 'padding', label: 'padding' },
+  { kind: 'text', key: 'name', label: 'name' },
+  { kind: 'text', key: 'padding', label: 'padding' },
 ];
 
 export const renderTablePropertiesContent = (

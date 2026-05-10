@@ -18,15 +18,15 @@ export const headDefaults: Head = {
 };
 
 export const headSchema: FormField[] = [
-  { kind: 'text-field', key: 'title', label: 'title' },
-  { kind: 'text-field', key: 'lang', label: 'lang' },
+  { kind: 'text', key: 'title', label: 'title' },
+  { kind: 'text', key: 'lang', label: 'lang' },
   {
-    kind: 'object-list-field',
+    kind: 'object-list',
     key: 'meta',
     label: 'meta',
     fields: [
-      { kind: 'text-field', key: 'name', label: 'name' },
-      { kind: 'text-field', key: 'content', label: 'content' },
+      { kind: 'text', key: 'name', label: 'name' },
+      { kind: 'text', key: 'content', label: 'content' },
     ],
   },
 ];

@@ -57,6 +57,7 @@ export {
   tableSchema,
 } from './kind/table';
 export { type FormField, type SchemaField, isFormField, isSchemaField } from './kind/form/field';
+export { normalizeFormFieldKind } from './kind/form/field';
 
 export type Component =
   | ElementComponent

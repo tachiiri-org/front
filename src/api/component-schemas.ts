@@ -1,32 +1,38 @@
-import { componentSchemas, COMPONENT_KINDS, isSchemaField, type SchemaField } from '../schema/component';
+import {
+  componentSchemas,
+  COMPONENT_KINDS,
+  isSchemaField,
+  normalizeFormFieldKind,
+  type SchemaField,
+} from '../schema/component';
 import type { TableData, TableSchema } from '../schema/component/kind/table';
 import type { LayoutBackend } from '../storage/layouts/r2';
 
 const FORM_FIELD_KIND_OPTIONS = [
-  'text-field',
-  'number-field',
-  'textarea-field',
-  'boolean-field',
-  'select-field',
-  'style-map-field',
-  'object-list-field',
-  'field-group',
+  'text',
+  'number',
+  'textarea',
+  'boolean',
+  'select',
+  'style-map',
+  'object-list',
+  'group',
 ].map((k) => ({ value: k, label: k }));
 
 export const SCHEMA_TABLE_SCHEMA: TableSchema = {
   version: 1,
   columns: [
+    { key: 'label', label: 'label', type: 'string', nullable: true },
+    { key: 'key', label: 'key', type: 'string', nullable: true },
     {
-      key: 'kind',
-      label: 'kind',
+      key: 'type',
+      label: 'type',
       type: 'select',
       source: { kind: 'inline', options: FORM_FIELD_KIND_OPTIONS },
     },
-    { key: 'key', label: 'key', type: 'string', nullable: true },
-    { key: 'label', label: 'label', type: 'string', nullable: true },
-    { key: 'options_json', label: 'options', type: 'string', nullable: true },
-    { key: 'fields_json', label: 'fields', type: 'string', nullable: true },
-    { key: 'style_json', label: 'style', type: 'string', nullable: true },
+    { key: 'options_json', label: 'options', type: 'string', hidden: true, nullable: true },
+    { key: 'fields_json', label: 'fields', type: 'string', hidden: true, nullable: true },
+    { key: 'style_json', label: 'style', type: 'string', hidden: true, nullable: true },
     { key: 'raw_json', label: 'raw', type: 'string', hidden: true, nullable: true },
   ],
 };
@@ -57,7 +63,7 @@ const fieldToRow = (
   return {
     id: String(index),
     values: {
-      kind: field.kind,
+      type: normalizeFormFieldKind(String(field.kind)),
       key: typeof f.key === 'string' ? f.key : '',
       label: typeof f.label === 'string' ? f.label : '',
       options_json: Array.isArray(f.options) ? JSON.stringify(f.options) : '',
@@ -73,8 +79,15 @@ const rowToSchemaField = (row: TableData['rows'][number]): SchemaField => {
   const raw = parseJson(row.values.raw_json);
   const base: Record<string, unknown> =
     isSchemaField(raw) ? { ...raw } : (typeof raw === 'object' && raw !== null && !Array.isArray(raw) ? { ...raw } : {});
+  if (typeof base.kind === 'string') base.kind = normalizeFormFieldKind(base.kind);
 
-  if (typeof row.values.kind === 'string' && row.values.kind.trim()) base.kind = row.values.kind;
+  const rowType =
+    typeof row.values.type === 'string' && row.values.type.trim()
+      ? row.values.type
+      : typeof row.values.kind === 'string' && row.values.kind.trim()
+        ? row.values.kind
+        : '';
+  if (rowType) base.kind = normalizeFormFieldKind(rowType);
   if (typeof row.values.key === 'string' && row.values.key.trim()) base.key = row.values.key;
   if (typeof row.values.label === 'string') base.label = row.values.label;
 

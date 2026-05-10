@@ -85,14 +85,14 @@ const SAMPLE_JSON = {
 };
 
 const FORM_FIELD_KIND_OPTIONS = [
-  'text-field',
-  'number-field',
-  'textarea-field',
-  'boolean-field',
-  'select-field',
-  'style-map-field',
-  'object-list-field',
-  'field-group',
+  'text',
+  'number',
+  'textarea',
+  'boolean',
+  'select',
+  'style-map',
+  'object-list',
+  'group',
 ].map((k) => ({ value: k, label: k }));
 
 const SCHEMA_EDITOR_JSON = {
@@ -123,21 +123,21 @@ const SCHEMA_EDITOR_JSON = {
       name: 'table-1',
       schema: {
         version: 1,
-        columns: [
-          {
-            key: 'kind',
-            label: 'kind',
-            hidden: false,
-            required: false,
-            nullable: true,
-            type: 'select',
-            source: { kind: 'inline', options: FORM_FIELD_KIND_OPTIONS },
-          },
-          { key: 'key', label: 'key', hidden: false, required: false, nullable: true, type: 'string' },
-          { key: 'label', label: 'label', hidden: false, required: false, nullable: true, type: 'string' },
-          { key: 'options_json', label: 'options', hidden: false, required: false, nullable: true, type: 'string' },
-          { key: 'fields_json', label: 'fields', hidden: false, required: false, nullable: true, type: 'string' },
-          { key: 'style_json', label: 'style', hidden: false, required: false, nullable: true, type: 'string' },
+      columns: [
+        { key: 'label', label: 'label', hidden: false, required: false, nullable: true, type: 'string' },
+        { key: 'key', label: 'key', hidden: false, required: false, nullable: true, type: 'string' },
+        {
+          key: 'type',
+          label: 'type',
+          hidden: false,
+          required: false,
+          nullable: true,
+          type: 'select',
+          source: { kind: 'inline', options: FORM_FIELD_KIND_OPTIONS },
+        },
+        { key: 'options_json', label: 'options', hidden: false, required: false, nullable: true, type: 'string' },
+        { key: 'fields_json', label: 'fields', hidden: false, required: false, nullable: true, type: 'string' },
+        { key: 'style_json', label: 'style', hidden: false, required: false, nullable: true, type: 'string' },
         ],
       },
       data: { rows: [] },

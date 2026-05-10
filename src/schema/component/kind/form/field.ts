@@ -8,28 +8,59 @@ export type { NumberFieldComponent } from './field/number';
 export type { TextareaFieldComponent } from './field/textarea';
 export type { BooleanFieldComponent } from './field/boolean';
 
+export type FormFieldKind =
+  | 'text'
+  | 'number'
+  | 'textarea'
+  | 'boolean'
+  | 'select'
+  | 'style-map'
+  | 'object-list'
+  | 'group';
+
+const FORM_FIELD_KIND_ALIASES: Record<string, FormFieldKind> = {
+  text: 'text',
+  'text-field': 'text',
+  number: 'number',
+  'number-field': 'number',
+  textarea: 'textarea',
+  'textarea-field': 'textarea',
+  boolean: 'boolean',
+  'boolean-field': 'boolean',
+  select: 'select',
+  'select-field': 'select',
+  'style-map': 'style-map',
+  'style-map-field': 'style-map',
+  'object-list': 'object-list',
+  'object-list-field': 'object-list',
+  group: 'group',
+  'field-group': 'group',
+};
+
+export const normalizeFormFieldKind = (kind: string): string => FORM_FIELD_KIND_ALIASES[kind] ?? kind;
+
 export type SelectFieldComponent = {
-  kind: 'select-field';
+  kind: 'select';
   key: string;
   label?: string;
   options: Array<{ value: string; label: string }>;
 };
 
 export type StyleMapFieldComponent = {
-  kind: 'style-map-field';
+  kind: 'style-map';
   key: string;
   label?: string;
 };
 
 export type ObjectListFieldComponent = {
-  kind: 'object-list-field';
+  kind: 'object-list';
   key: string;
   label?: string;
   fields: FormField[];
 };
 
 export type FieldGroupComponent = {
-  kind: 'field-group';
+  kind: 'group';
   key?: string;
   label?: string;
   fields: FormField[];
@@ -62,7 +93,7 @@ export const isStyleMapFieldComponent = (v: unknown): v is StyleMapFieldComponen
   if (typeof v !== 'object' || v === null || Array.isArray(v)) return false;
   const c = v as Record<string, unknown>;
   return (
-    c.kind === 'style-map-field' &&
+    normalizeFormFieldKind(String(c.kind)) === 'style-map' &&
     typeof c.key === 'string' &&
     (c.label === undefined || typeof c.label === 'string')
   );
@@ -72,7 +103,7 @@ export const isObjectListFieldComponent = (v: unknown): v is ObjectListFieldComp
   if (typeof v !== 'object' || v === null || Array.isArray(v)) return false;
   const c = v as Record<string, unknown>;
   return (
-    c.kind === 'object-list-field' &&
+    normalizeFormFieldKind(String(c.kind)) === 'object-list' &&
     typeof c.key === 'string' &&
     (c.label === undefined || typeof c.label === 'string') &&
     Array.isArray(c.fields) &&
@@ -84,7 +115,7 @@ export const isFieldGroupComponent = (v: unknown): v is FieldGroupComponent => {
   if (typeof v !== 'object' || v === null || Array.isArray(v)) return false;
   const c = v as Record<string, unknown>;
   return (
-    c.kind === 'field-group' &&
+    normalizeFormFieldKind(String(c.kind)) === 'group' &&
     (c.key === undefined || typeof c.key === 'string') &&
     (c.label === undefined || typeof c.label === 'string') &&
     Array.isArray(c.fields) &&
@@ -120,7 +151,7 @@ export const isSelectFieldComponent = (v: unknown): v is SelectFieldComponent =>
   if (typeof v !== 'object' || v === null || Array.isArray(v)) return false;
   const c = v as Record<string, unknown>;
   return (
-    c.kind === 'select-field' &&
+    normalizeFormFieldKind(String(c.kind)) === 'select' &&
     typeof c.key === 'string' &&
     (c.label === undefined || typeof c.label === 'string') &&
     Array.isArray(c.options) &&

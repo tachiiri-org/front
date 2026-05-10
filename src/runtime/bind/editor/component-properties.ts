@@ -1,7 +1,13 @@
-import { componentSchemas, isSchemaField, type FormField, type SchemaField } from '../../../schema/component';
+import {
+  componentSchemas,
+  isSchemaField,
+  normalizeFormFieldKind,
+  type FormField,
+  type SchemaField,
+} from '../../../schema/component';
 import { editorSchema } from '../../../editor/component-editor';
 
-const NAME_FIELD: FormField = { kind: 'text-field', key: 'name', label: 'name' };
+const NAME_FIELD: FormField = { kind: 'text', key: 'name', label: 'name' };
 
 const withName = (fields: SchemaField[] | null): SchemaField[] => {
   if (!fields) return [NAME_FIELD];
@@ -22,7 +28,8 @@ const pickEditableData = (
     const nestedFields = isSchemaFieldArray((field as Record<string, unknown>).fields)
       ? ((field as Record<string, unknown>).fields as SchemaField[])
       : null;
-    if (field.kind === 'field-group' || nestedFields) {
+    const kind = normalizeFormFieldKind(String(field.kind));
+    if (kind === 'group' || nestedFields) {
       if (typeof value === 'object' && value !== null && !Array.isArray(value)) {
         picked[field.key] = pickEditableData(value as Record<string, unknown>, nestedFields ?? []);
       } else {
@@ -30,7 +37,7 @@ const pickEditableData = (
       }
       continue;
     }
-    if (field.kind === 'object-list-field') {
+    if (kind === 'object-list') {
       picked[field.key] = Array.isArray(value)
         ? value.map((item) =>
           typeof item === 'object' && item !== null && !Array.isArray(item)

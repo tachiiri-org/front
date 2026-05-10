@@ -1,4 +1,4 @@
-import type { SchemaField } from '../../../schema/component';
+import { normalizeFormFieldKind, type SchemaField } from '../../../schema/component';
 
 export const getAtPath = (obj: unknown, path: string): unknown => {
   if (!path) return obj;
@@ -37,11 +37,12 @@ export const blankFromSchema = (fields: SchemaField[]): Record<string, unknown> 
   const obj: Record<string, unknown> = {};
   for (const field of fields) {
     if (!('key' in field) || !field.key) continue;
-    if (field.kind === 'number-field') obj[field.key] = 0;
-    else if (field.kind === 'boolean-field') obj[field.key] = false;
-    else if (field.kind === 'text-field' || field.kind === 'textarea-field') obj[field.key] = '';
-    else if (field.kind === 'style-map-field') obj[field.key] = {};
-    else if (field.kind === 'object-list-field') obj[field.key] = [];
+    const kind = normalizeFormFieldKind(String(field.kind));
+    if (kind === 'number') obj[field.key] = 0;
+    else if (kind === 'boolean') obj[field.key] = false;
+    else if (kind === 'text' || kind === 'textarea') obj[field.key] = '';
+    else if (kind === 'style-map') obj[field.key] = {};
+    else if (kind === 'object-list') obj[field.key] = [];
   }
   return obj;
 };

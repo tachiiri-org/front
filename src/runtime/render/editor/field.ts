@@ -1,4 +1,9 @@
-import { isFormField, type SchemaField } from '../../../schema/component';
+import {
+  isFormField,
+  normalizeFormFieldKind,
+  type FormField,
+  type SchemaField,
+} from '../../../schema/component';
 import { type FieldStyleContext, SUMMARY_STYLE } from './context';
 import { getAtPath, setAtPath, blankFromSchema } from '../../bind/field/path';
 
@@ -260,21 +265,40 @@ export function renderFieldFromSchema(
 ): HTMLElement {
   if (!isFormField(field)) return renderUnsupportedField(field, draft, ctx);
   const label: string = ('label' in field && field.label) ? field.label : (('key' in field && field.key) ? field.key : '');
+  const kind = normalizeFormFieldKind(String(field.kind));
 
-  switch (field.kind) {
-    case 'text-field':
-      return renderTextField(label, field.key, draft, ctx, onBlurSave);
-    case 'number-field':
-      return renderNumberField(label, field.key, draft, ctx, onBlurSave);
-    case 'textarea-field':
-      return renderTextarea(label, field.key, draft, ctx, onBlurSave);
-    case 'boolean-field':
-      return renderBooleanField(label, field.key, draft, ctx, onBlurSave);
-    case 'select-field':
-      return renderSelectField(label, field.key, field.options, draft, ctx, onBlurSave);
-    case 'style-map-field':
-      return renderStyleMap(label, field.key, draft, ctx, onBlurSave);
-    case 'object-list-field': {
+  switch (kind) {
+    case 'text': {
+      const textField = field as Extract<FormField, { kind: 'text' }>;
+      return renderTextField(label, textField.key, draft, ctx, onBlurSave);
+    }
+    case 'number': {
+      const numberField = field as Extract<FormField, { kind: 'number' }>;
+      return renderNumberField(label, numberField.key, draft, ctx, onBlurSave);
+    }
+    case 'textarea': {
+      const textareaField = field as Extract<FormField, { kind: 'textarea' }>;
+      return renderTextarea(label, textareaField.key, draft, ctx, onBlurSave);
+    }
+    case 'boolean': {
+      const booleanField = field as Extract<FormField, { kind: 'boolean' }>;
+      return renderBooleanField(label, booleanField.key, draft, ctx, onBlurSave);
+    }
+    case 'select':
+      return renderSelectField(
+        label,
+        (field as Extract<FormField, { kind: 'select' }>).key,
+        (field as Extract<FormField, { kind: 'select' }>).options,
+        draft,
+        ctx,
+        onBlurSave,
+      );
+    case 'style-map': {
+      const styleField = field as Extract<FormField, { kind: 'style-map' }>;
+      return renderStyleMap(label, styleField.key, draft, ctx, onBlurSave);
+    }
+    case 'object-list': {
+      const listField = field as Extract<FormField, { kind: 'object-list' }>;
       const wrapper = mk('div');
       const headingRow = mk('div');
       Object.assign(headingRow.style, ctx.wrapper);
@@ -294,9 +318,9 @@ export function renderFieldFromSchema(
       wrapper.appendChild(headingRow);
       const list = mk('div');
       wrapper.appendChild(list);
-      const raw = getAtPath(draft, field.key);
+      const raw = getAtPath(draft, listField.key);
       const arr: Record<string, unknown>[] = Array.isArray(raw) ? (raw as Record<string, unknown>[]) : [];
-      setAtPath(draft, field.key, arr);
+      setAtPath(draft, listField.key, arr);
       const renderItems = (): void => {
         list.innerHTML = '';
         arr.forEach((item, i) => {
@@ -314,49 +338,51 @@ export function renderFieldFromSchema(
           removeBtn.style.padding = '2px 8px';
           removeBtn.addEventListener('click', () => { arr.splice(i, 1); renderItems(); });
           section.appendChild(removeBtn);
-          for (const subField of field.fields) {
+          for (const subField of listField.fields) {
             section.appendChild(renderFieldFromSchema(subField, item, ctx, onBlurSave));
           }
           list.appendChild(section);
         });
       };
       renderItems();
-      addBtn.addEventListener('click', () => { arr.push(blankFromSchema(field.fields)); renderItems(); });
+      addBtn.addEventListener('click', () => { arr.push(blankFromSchema(listField.fields)); renderItems(); });
       return wrapper;
     }
-    case 'field-group': {
+    case 'group': {
+      const groupField = field as Extract<FormField, { kind: 'group' }>;
       const subDraft = field.key
         ? ((getAtPath(draft, field.key) as Record<string, unknown>) ?? {})
         : draft;
       if (field.key && getAtPath(draft, field.key) === undefined) {
         setAtPath(draft, field.key, subDraft);
       }
-      if (field.collapsible) {
+      if (groupField.collapsible) {
         const details = mk('details');
-        if (!field.defaultCollapsed) details.open = true;
+        if (!groupField.defaultCollapsed) details.open = true;
         const summary = mk('summary');
-        summary.textContent = field.label ?? field.key ?? '';
+        summary.textContent = groupField.label ?? groupField.key ?? '';
         Object.assign(summary.style, SUMMARY_STYLE);
         details.appendChild(summary);
-        for (const subField of field.fields) {
+        for (const subField of groupField.fields) {
           details.appendChild(renderFieldFromSchema(subField, subDraft, ctx, onBlurSave));
         }
         return details;
       }
       const wrapper = mk('div');
-      if (field.label || field.key) {
+      if (groupField.label || groupField.key) {
         const headingRow = mk('div');
         Object.assign(headingRow.style, ctx.wrapper);
         const lbl = mk('span');
-        lbl.textContent = field.label ?? field.key ?? '';
+        lbl.textContent = groupField.label ?? groupField.key ?? '';
         Object.assign(lbl.style, ctx.label);
         headingRow.appendChild(lbl);
         wrapper.appendChild(headingRow);
       }
-      for (const subField of field.fields) {
+      for (const subField of groupField.fields) {
         wrapper.appendChild(renderFieldFromSchema(subField, subDraft, ctx, onBlurSave));
       }
       return wrapper;
     }
   }
+  return renderUnsupportedField(field, draft, ctx);
 }

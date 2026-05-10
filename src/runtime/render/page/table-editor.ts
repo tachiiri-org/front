@@ -215,6 +215,7 @@ const renderEditableTable = (
   const draft = clone(component) as TableEditorDraft;
   const saveTarget = buildSaveTarget(frame, screenId);
   let pendingRowValues = makeRowFromSchema(draft.schema);
+  let showHiddenColumns = false;
 
   const status = document.createElement('div');
   status.style.fontSize = '10px';
@@ -405,6 +406,41 @@ const renderEditableTable = (
   const render = (): void => {
     wrapper.replaceChildren();
 
+    const toolbar = document.createElement('div');
+    Object.assign(toolbar.style, {
+      display: 'flex',
+      alignItems: 'center',
+      gap: '8px',
+      padding: '0 8px 6px',
+      flexWrap: 'wrap',
+    });
+
+    const hiddenLabel = document.createElement('label');
+    Object.assign(hiddenLabel.style, {
+      display: 'flex',
+      alignItems: 'center',
+      gap: '4px',
+      fontSize: '11px',
+      color: 'rgba(0,0,0,0.7)',
+      cursor: 'pointer',
+      userSelect: 'none',
+    });
+    const hiddenToggle = document.createElement('input');
+    hiddenToggle.type = 'checkbox';
+    hiddenToggle.checked = showHiddenColumns;
+    hiddenToggle.addEventListener('change', () => {
+      showHiddenColumns = hiddenToggle.checked;
+      render();
+    });
+    hiddenLabel.appendChild(hiddenToggle);
+    hiddenLabel.appendChild(document.createTextNode('show hidden columns'));
+    toolbar.appendChild(hiddenLabel);
+    wrapper.appendChild(toolbar);
+
+    const visibleColumns = draft.schema.columns.filter(
+      (column) => showHiddenColumns || !column.hidden,
+    );
+
     const table = document.createElement('table');
     Object.assign(table.style, {
       width: 'max-content',
@@ -415,7 +451,7 @@ const renderEditableTable = (
     });
 
     const colgroup = document.createElement('colgroup');
-    for (const column of draft.schema.columns) {
+    for (const column of visibleColumns) {
       const col = document.createElement('col');
       colgroup.appendChild(col);
     }
@@ -427,7 +463,7 @@ const renderEditableTable = (
 
     const thead = document.createElement('thead');
     const headActionRow = document.createElement('tr');
-    for (const column of draft.schema.columns) {
+    for (const column of visibleColumns) {
       const th = document.createElement('th');
       Object.assign(th.style, {
         verticalAlign: 'bottom',
@@ -442,7 +478,7 @@ const renderEditableTable = (
     thead.appendChild(headActionRow);
 
     const headLabelRow = document.createElement('tr');
-    for (const column of draft.schema.columns) {
+    for (const column of visibleColumns) {
       const th = document.createElement('th');
       Object.assign(th.style, {
         verticalAlign: 'top',
@@ -486,7 +522,7 @@ const renderEditableTable = (
     for (const [rowIndex, row] of draft.data.rows.entries()) {
       const tr = document.createElement('tr');
       tr.dataset.rowId = row.id;
-      for (const column of draft.schema.columns) {
+      for (const column of visibleColumns) {
         tr.appendChild(
           renderCellEditor(
             row.values[column.key],
@@ -527,7 +563,7 @@ const renderEditableTable = (
 
     const draftRow = document.createElement('tr');
     draftRow.dataset.rowId = 'pending';
-    for (const column of draft.schema.columns) {
+    for (const column of visibleColumns) {
       draftRow.appendChild(
         renderCellEditor(
           pendingRowValues[column.key],

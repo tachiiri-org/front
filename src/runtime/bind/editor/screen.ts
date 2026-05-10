@@ -15,14 +15,14 @@ const DEVICE_PRESETS: { label: string; shell: Record<string, string> }[] = [
 
 const screenEditSchema: FormField[] = [
   {
-    kind: 'field-group',
+    kind: 'group',
     key: 'head',
     label: 'head',
     fields: headSchema,
   },
-  { kind: 'style-map-field', key: 'shell', label: 'shell' },
-  { kind: 'number-field', key: 'columns', label: 'columns' },
-  { kind: 'number-field', key: 'rows', label: 'rows' },
+  { kind: 'style-map', key: 'shell', label: 'shell' },
+  { kind: 'number', key: 'columns', label: 'columns' },
+  { kind: 'number', key: 'rows', label: 'rows' },
 ];
 
 export const hydrateScreenEditor = async (
