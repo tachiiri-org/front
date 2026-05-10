@@ -10,6 +10,57 @@ import { getAtPath, setAtPath, blankFromSchema } from '../../bind/field/path';
 const mk = <K extends keyof HTMLElementTagNameMap>(tag: K): HTMLElementTagNameMap[K] =>
   document.createElement(tag);
 
+const COMMON_STYLE_KEYS = [
+  'padding',
+  'paddingTop',
+  'paddingRight',
+  'paddingBottom',
+  'paddingLeft',
+  'margin',
+  'marginTop',
+  'marginRight',
+  'marginBottom',
+  'marginLeft',
+  'width',
+  'height',
+  'minWidth',
+  'minHeight',
+  'maxWidth',
+  'maxHeight',
+  'display',
+  'gap',
+  'flex',
+  'flexDirection',
+  'alignItems',
+  'justifyContent',
+  'textAlign',
+  'fontSize',
+  'fontWeight',
+  'color',
+  'background',
+  'backgroundColor',
+  'border',
+  'borderRadius',
+  'boxShadow',
+  'overflow',
+  'overflowX',
+  'overflowY',
+  'position',
+  'inset',
+  'top',
+  'right',
+  'bottom',
+  'left',
+  'cursor',
+  'whiteSpace',
+  'opacity',
+  'transform',
+  'transformOrigin',
+  'userSelect',
+  'pointerEvents',
+  'lineHeight',
+] as const;
+
 function renderTextField(
   label: string,
   path: string,
@@ -180,6 +231,7 @@ function renderUnsupportedField(
 function renderStyleMap(
   label: string,
   path: string,
+  field: SchemaField,
   draft: Record<string, unknown>,
   ctx: FieldStyleContext,
   onBlurSave?: () => void,
@@ -191,16 +243,62 @@ function renderStyleMap(
   setAtPath(draft, path, map);
 
   const list = mk('div');
+  const keys =
+    Array.isArray((field as Record<string, unknown>).keys) &&
+    ((field as Record<string, unknown>).keys as unknown[]).every((key) => typeof key === 'string')
+      ? ((field as Record<string, unknown>).keys as string[])
+      : [...COMMON_STYLE_KEYS];
 
   const renderRows = (): void => {
     list.innerHTML = '';
     for (const key of Object.keys(map)) {
       const row = mk('div');
       Object.assign(row.style, ctx.wrapper);
-      const keyInput = mk('input');
-      keyInput.placeholder = 'key';
-      keyInput.value = key;
-      Object.assign(keyInput.style, ctx.input);
+      const keySelect = mk('select');
+      Object.assign(keySelect.style, ctx.input);
+      const customOptionValue = '__custom__';
+      const knownKeys = new Set(keys);
+      for (const candidate of keys) {
+        const option = mk('option');
+        option.value = candidate;
+        option.textContent = candidate;
+        keySelect.appendChild(option);
+      }
+      const customOption = mk('option');
+      customOption.value = customOptionValue;
+      customOption.textContent = 'custom...';
+      keySelect.appendChild(customOption);
+      const customKeyInput = mk('input');
+      customKeyInput.placeholder = 'style key';
+      Object.assign(customKeyInput.style, ctx.input);
+      customKeyInput.style.display = 'none';
+      const syncKeyState = (nextKey: string): void => {
+        if (nextKey === key) return;
+        map[nextKey] = map[key] ?? '';
+        delete map[key];
+        renderRows();
+      };
+      if (knownKeys.has(key)) {
+        keySelect.value = key;
+      } else {
+        keySelect.value = customOptionValue;
+        customKeyInput.style.display = '';
+        customKeyInput.value = key;
+      }
+      keySelect.addEventListener('change', () => {
+        if (keySelect.value === customOptionValue) {
+          customKeyInput.style.display = '';
+          customKeyInput.focus();
+          return;
+        }
+        syncKeyState(keySelect.value);
+      });
+      customKeyInput.addEventListener('input', () => {
+        if (keySelect.value !== customOptionValue) return;
+        const nextKey = customKeyInput.value;
+        if (!nextKey || nextKey === key) return;
+        syncKeyState(nextKey);
+      });
       const valInput = mk('input');
       valInput.placeholder = 'value';
       valInput.value = map[key] ?? '';
@@ -213,20 +311,15 @@ function renderStyleMap(
       removeBtn.style.flexShrink = '0';
       removeBtn.style.border = 'none';
       removeBtn.style.background = 'transparent';
-      keyInput.addEventListener('change', () => {
-        const newKey = keyInput.value;
-        if (newKey === key) return;
-        map[newKey] = map[key] ?? '';
-        delete map[key];
-        renderRows();
-      });
       valInput.addEventListener('input', () => { map[key] = valInput.value; });
       if (onBlurSave) {
-        keyInput.addEventListener('blur', onBlurSave);
+        keySelect.addEventListener('blur', onBlurSave);
+        customKeyInput.addEventListener('blur', onBlurSave);
         valInput.addEventListener('blur', onBlurSave);
       }
       removeBtn.addEventListener('click', () => { delete map[key]; renderRows(); });
-      row.appendChild(keyInput);
+      row.appendChild(keySelect);
+      row.appendChild(customKeyInput);
       row.appendChild(valInput);
       row.appendChild(removeBtn);
       list.appendChild(row);
@@ -293,9 +386,9 @@ export function renderFieldFromSchema(
         ctx,
         onBlurSave,
       );
-    case 'style-map': {
-      const styleField = field as Extract<FormField, { kind: 'style-map' }>;
-      return renderStyleMap(label, styleField.key, draft, ctx, onBlurSave);
+    case 'style': {
+      const styleField = field as Extract<FormField, { kind: 'style' }>;
+      return renderStyleMap(label, styleField.key, styleField, draft, ctx, onBlurSave);
     }
     case 'object-list': {
       const listField = field as Extract<FormField, { kind: 'object-list' }>;

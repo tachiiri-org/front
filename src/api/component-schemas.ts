@@ -17,7 +17,7 @@ const FORM_FIELD_KIND_OPTIONS = [
   'textarea',
   'boolean',
   'select',
-  'style-map',
+  'style',
   'object-list',
   'group',
 ].map((k) => ({ value: k, label: k }));
@@ -36,6 +36,7 @@ export const SCHEMA_TABLE_SCHEMA: TableSchema = {
     { key: 'options_json', label: 'options', type: 'string', hidden: true, nullable: true },
     { key: 'fields_json', label: 'fields', type: 'string', hidden: true, nullable: true },
     { key: 'style_json', label: 'style', type: 'string', hidden: true, nullable: true },
+    { key: 'keys_json', label: 'keys', type: 'string', hidden: true, nullable: true },
     { key: 'raw_json', label: 'raw', type: 'string', hidden: true, nullable: true },
   ],
 };

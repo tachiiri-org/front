@@ -9,6 +9,6 @@
     ]
   },
   { "kind": "text-field", "key": "targetComponentId", "label": "targetComponentId" },
-  { "kind": "style-map-field", "key": "style", "label": "style" },
-  { "kind": "style-map-field", "key": "itemStyle", "label": "itemStyle" }
+  { "kind": "style-field", "key": "style", "label": "style" },
+  { "kind": "style-field", "key": "itemStyle", "label": "itemStyle" }
 ]

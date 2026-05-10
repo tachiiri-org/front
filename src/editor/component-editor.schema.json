@@ -1,4 +1,4 @@
 [
   { "kind": "text-field", "key": "name", "label": "name" },
-  { "kind": "style-map-field", "key": "style", "label": "style" }
+  { "kind": "style-field", "key": "style", "label": "style" }
 ]

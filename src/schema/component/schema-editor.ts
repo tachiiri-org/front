@@ -7,13 +7,16 @@ const ALLOWED_FIELD_KINDS = new Set([
   'textarea',
   'boolean',
   'select',
-  'style-map',
+  'style',
   'object-list',
   'group',
 ]);
 
 const isSchemaFieldArray = (value: unknown): value is SchemaField[] =>
   Array.isArray(value) && value.every(isSchemaField);
+
+const isStringArray = (value: unknown): value is string[] =>
+  Array.isArray(value) && value.every((item) => typeof item === 'string');
 
 const parseJson = (value: unknown): unknown => {
   if (typeof value !== 'string' || value.trim() === '') return undefined;
@@ -55,6 +58,9 @@ const fieldToRow = (
       fields_json: Array.isArray(f.fields) ? JSON.stringify(f.fields) : '',
       style_json:
         typeof f.style === 'object' && f.style !== null ? JSON.stringify(f.style) : '',
+      keys_json: Array.isArray((f as Record<string, unknown>).keys)
+        ? JSON.stringify((f as Record<string, unknown>).keys)
+        : '',
       raw_json: JSON.stringify(field),
     },
   };
@@ -153,6 +159,15 @@ export const validateSchemaEditorTableDraftDetail = (draft: unknown): SchemaEdit
         setMessage(`Invalid style JSON: ${key || row.id}`);
       }
     }
+
+    const keysJson = row.values.keys_json;
+    if (typeof keysJson === 'string' && keysJson.trim() !== '') {
+      const parsed = parseJson(keysJson);
+      if (!isStringArray(parsed)) {
+        markIssue(row.id, 'keys_json', 'Invalid keys JSON.');
+        setMessage(`Invalid keys JSON: ${key || row.id}`);
+      }
+    }
   }
 
   return { message, rowIssues };
@@ -185,6 +200,11 @@ export const schemaEditorTableDataToSchema = (draft: TableData): SchemaField[] =
     const style = parseJson(row.values.style_json);
     if (isStringRecord(style)) {
       base.style = style;
+    }
+
+    const keys = parseJson(row.values.keys_json);
+    if (isStringArray(keys)) {
+      base.keys = keys;
     }
 
     return base as SchemaField;

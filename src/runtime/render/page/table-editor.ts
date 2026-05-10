@@ -81,6 +81,56 @@ const scheduleAutoSizedControls = (root: HTMLElement): void => {
 };
 
 const ACTION_COL_MIN_WIDTH = '72px';
+const STYLE_MAP_KEY_OPTIONS = [
+  'padding',
+  'paddingTop',
+  'paddingRight',
+  'paddingBottom',
+  'paddingLeft',
+  'margin',
+  'marginTop',
+  'marginRight',
+  'marginBottom',
+  'marginLeft',
+  'width',
+  'height',
+  'minWidth',
+  'minHeight',
+  'maxWidth',
+  'maxHeight',
+  'display',
+  'gap',
+  'flex',
+  'flexDirection',
+  'alignItems',
+  'justifyContent',
+  'textAlign',
+  'fontSize',
+  'fontWeight',
+  'color',
+  'background',
+  'backgroundColor',
+  'border',
+  'borderRadius',
+  'boxShadow',
+  'overflow',
+  'overflowX',
+  'overflowY',
+  'position',
+  'inset',
+  'top',
+  'right',
+  'bottom',
+  'left',
+  'cursor',
+  'whiteSpace',
+  'opacity',
+  'transform',
+  'transformOrigin',
+  'userSelect',
+  'pointerEvents',
+  'lineHeight',
+] as const;
 
 const randomId = (): string => {
   const cryptoObj = globalThis.crypto as Crypto | undefined;
@@ -358,6 +408,7 @@ const renderEditableTable = (
   };
 
   const renderCellEditor = (
+    rowValues: Record<string, unknown>,
     current: unknown,
     column: TableColumn,
     setValue: (value: unknown) => void,
@@ -376,6 +427,50 @@ const renderEditableTable = (
     }
     if (column.hidden) {
       cell.style.opacity = '0.35';
+    }
+
+    if (
+      column.key === 'key' &&
+      typeof rowValues.type === 'string' &&
+      rowValues.type === 'style'
+    ) {
+      const select = document.createElement('select');
+      Object.assign(select.style, {
+        width: 'auto',
+        minWidth: '0',
+        boxSizing: 'border-box',
+        fontSize: '12px',
+        border: 'none',
+        background: 'transparent',
+        padding: '10px 8px',
+      });
+      select.dataset.autoSize = 'true';
+      const currentValue = typeof current === 'string' ? current : '';
+      const empty = document.createElement('option');
+      empty.value = '';
+      empty.textContent = '';
+      select.appendChild(empty);
+      for (const optionValue of STYLE_MAP_KEY_OPTIONS) {
+        const el = document.createElement('option');
+        el.value = optionValue;
+        el.textContent = optionValue;
+        select.appendChild(el);
+      }
+      if (currentValue && !Array.from(select.options).some((option) => option.value === currentValue)) {
+        const invalid = document.createElement('option');
+        invalid.value = currentValue;
+        invalid.textContent = `invalid: ${currentValue}`;
+        invalid.style.color = '#c0392b';
+        select.appendChild(invalid);
+      }
+      select.value = currentValue;
+      applyTextInputSize(select, select.value, '');
+      select.addEventListener('change', () => {
+        setValue(select.value);
+        commit();
+      });
+      cell.appendChild(select);
+      return cell;
     }
 
     if (column.type === 'boolean') {
@@ -613,12 +708,13 @@ const renderEditableTable = (
       for (const column of visibleColumns) {
         tr.appendChild(
           renderCellEditor(
+            row.values,
             row.values[column.key],
             column,
             (value) => {
               row.values[column.key] = value;
             },
-            markDirty,
+            column.type === 'select' ? markDirtyAndRender : markDirty,
             false,
             issueMap?.[column.key],
           ),
@@ -659,12 +755,18 @@ const renderEditableTable = (
     for (const column of visibleColumns) {
       draftRow.appendChild(
         renderCellEditor(
+          pendingRowValues,
           pendingRowValues[column.key],
           column,
           (value) => {
             pendingRowValues[column.key] = value;
           },
-          () => {},
+          column.type === 'select'
+            ? () => {
+                pendingRowValues = { ...pendingRowValues };
+                render();
+              }
+            : () => {},
           true,
         ),
       );

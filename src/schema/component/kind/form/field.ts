@@ -14,7 +14,7 @@ export type FormFieldKind =
   | 'textarea'
   | 'boolean'
   | 'select'
-  | 'style-map'
+  | 'style'
   | 'object-list'
   | 'group';
 
@@ -29,8 +29,10 @@ const FORM_FIELD_KIND_ALIASES: Record<string, FormFieldKind> = {
   'boolean-field': 'boolean',
   select: 'select',
   'select-field': 'select',
-  'style-map': 'style-map',
-  'style-map-field': 'style-map',
+  style: 'style',
+  'style-field': 'style',
+  'style-map': 'style',
+  'style-map-field': 'style',
   'object-list': 'object-list',
   'object-list-field': 'object-list',
   group: 'group',
@@ -46,11 +48,14 @@ export type SelectFieldComponent = {
   options: Array<{ value: string; label: string }>;
 };
 
-export type StyleMapFieldComponent = {
-  kind: 'style-map';
+export type StyleFieldComponent = {
+  kind: 'style';
   key: string;
   label?: string;
+  keys?: string[];
 };
+
+export type StyleMapFieldComponent = StyleFieldComponent;
 
 export type ObjectListFieldComponent = {
   kind: 'object-list';
@@ -85,17 +90,19 @@ export type FormField =
   | TextareaFieldComponent
   | BooleanFieldComponent
   | SelectFieldComponent
-  | StyleMapFieldComponent
+  | StyleFieldComponent
   | ObjectListFieldComponent
   | FieldGroupComponent;
 
-export const isStyleMapFieldComponent = (v: unknown): v is StyleMapFieldComponent => {
+export const isStyleMapFieldComponent = (v: unknown): v is StyleFieldComponent => {
   if (typeof v !== 'object' || v === null || Array.isArray(v)) return false;
   const c = v as Record<string, unknown>;
   return (
-    normalizeFormFieldKind(String(c.kind)) === 'style-map' &&
+    normalizeFormFieldKind(String(c.kind)) === 'style' &&
     typeof c.key === 'string' &&
-    (c.label === undefined || typeof c.label === 'string')
+    (c.label === undefined || typeof c.label === 'string') &&
+    (c.keys === undefined ||
+      (Array.isArray(c.keys) && c.keys.every((key) => typeof key === 'string')))
   );
 };
 

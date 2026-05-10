@@ -41,7 +41,7 @@ export const blankFromSchema = (fields: SchemaField[]): Record<string, unknown> 
     if (kind === 'number') obj[field.key] = 0;
     else if (kind === 'boolean') obj[field.key] = false;
     else if (kind === 'text' || kind === 'textarea') obj[field.key] = '';
-    else if (kind === 'style-map') obj[field.key] = {};
+    else if (kind === 'style') obj[field.key] = {};
     else if (kind === 'object-list') obj[field.key] = [];
   }
   return obj;

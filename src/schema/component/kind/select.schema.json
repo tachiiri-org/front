@@ -8,7 +8,7 @@
       { "kind": "text-field", "key": "itemsPath", "label": "itemsPath" },
       { "kind": "text-field", "key": "valueKey", "label": "valueKey" },
       { "kind": "text-field", "key": "labelKey", "label": "labelKey" },
-      { "kind": "style-map-field", "key": "headers", "label": "headers" }
+      { "kind": "style-field", "key": "headers", "label": "headers" }
     ]
   },
   { "kind": "text-field", "key": "targetComponentId", "label": "targetComponentId" },
