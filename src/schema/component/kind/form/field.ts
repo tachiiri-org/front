@@ -31,8 +31,6 @@ const FORM_FIELD_KIND_ALIASES: Record<string, FormFieldKind> = {
   'select-field': 'select',
   style: 'style',
   'style-field': 'style',
-  'style-map': 'style',
-  'style-map-field': 'style',
   'object-list': 'object-list',
   'object-list-field': 'object-list',
   group: 'group',
