@@ -59,18 +59,23 @@ export const createLabeledRow = (label: string): HTMLDivElement => {
   Object.assign(row.style, {
     display: 'flex',
     alignItems: 'center',
-    padding: '6px 8px',
+    padding: '8px 10px',
     gap: '4px',
-    minHeight: '30px',
-    borderBottom: '1px solid rgba(0,0,0,0.06)',
-    marginBottom: '4px',
+    minHeight: '32px',
+    border: '1px solid rgba(0,0,0,0.08)',
+    borderRadius: '8px',
+    background: 'rgba(243,244,246,0.95)',
+    marginBottom: '8px',
   });
   const rowLabel = document.createElement('span');
   rowLabel.textContent = label;
   Object.assign(rowLabel.style, {
     fontSize: '10px',
-    color: 'rgba(0,0,0,0.65)',
-    width: '80px',
+    fontWeight: '600',
+    color: 'rgba(0,0,0,0.56)',
+    textTransform: 'uppercase',
+    letterSpacing: '0.08em',
+    width: '88px',
     flexShrink: '0',
   });
   row.appendChild(rowLabel);

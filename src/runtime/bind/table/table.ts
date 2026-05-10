@@ -1112,7 +1112,7 @@ const renderDataSection = (
     alignItems: 'center',
     justifyContent: 'space-between',
     gap: '8px',
-    padding: '0 8px 6px',
+    padding: '0 8px 8px',
   });
 
   const addBtn = document.createElement('button');
@@ -1185,15 +1185,20 @@ const renderDataSection = (
     const th = document.createElement('th');
     th.textContent = column.label || column.key;
     th.style.textAlign = 'left';
-    th.style.borderBottom = '1px solid rgba(0,0,0,0.12)';
-    th.style.padding = '4px 6px';
+    th.style.borderBottom = '1px solid rgba(0,0,0,0.14)';
+    th.style.padding = '7px 8px';
+    th.style.background = 'rgba(248,250,252,0.95)';
     th.style.whiteSpace = 'nowrap';
+    th.style.fontSize = '11px';
+    th.style.fontWeight = '600';
+    th.style.color = 'rgba(0,0,0,0.62)';
     headRow.appendChild(th);
   }
   const actionHead = document.createElement('th');
   actionHead.textContent = '';
-  actionHead.style.borderBottom = '1px solid rgba(0,0,0,0.12)';
-  actionHead.style.padding = '4px 6px';
+  actionHead.style.borderBottom = '1px solid rgba(0,0,0,0.14)';
+  actionHead.style.padding = '7px 8px';
+  actionHead.style.background = 'rgba(248,250,252,0.95)';
   headRow.appendChild(actionHead);
   thead.appendChild(headRow);
   table.appendChild(thead);
@@ -1203,7 +1208,7 @@ const renderDataSection = (
     const tr = document.createElement('tr');
     const td = document.createElement('td');
     td.colSpan = Math.max(visibleColumns.length + 1, 1);
-    td.style.padding = '8px 6px';
+    td.style.padding = '10px 8px';
     td.style.color = 'rgba(0,0,0,0.55)';
     const emptyWrap = document.createElement('div');
     Object.assign(emptyWrap.style, {

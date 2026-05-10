@@ -2,7 +2,7 @@
 
 - **component**: like textarea,table,form
 - **component-editor**: define components in screen as json
-- **schema-editor**: crud json schema of compoonent,screen or others. it may edit data also, not only schema
+- **schema-editor**: a screen defineed by json. crud json schema of compoonent,screen or others. it may edit data also, not only schema
 
 ## System structure
 

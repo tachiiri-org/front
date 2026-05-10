@@ -369,6 +369,7 @@ const renderEditableTable = (
     labelInput.style.display = 'inline-block';
     labelInput.style.boxSizing = 'border-box';
     labelInput.style.fontSize = '12px';
+    labelInput.style.fontWeight = '700';
     labelInput.style.border = 'none';
     labelInput.style.borderRadius = '0';
     labelInput.style.padding = '10px 8px';
@@ -420,6 +421,11 @@ const renderEditableTable = (
     cell.style.border = '1px solid rgba(0,0,0,0.14)';
     cell.style.padding = '0';
     cell.style.verticalAlign = 'top';
+    if (isDraftRow) {
+      cell.style.background = 'white';
+      cell.style.color = 'rgba(0,0,0,0.46)';
+      cell.style.fontWeight = '600';
+    }
     if (issue) {
       cell.style.background = 'rgba(239, 68, 68, 0.10)';
       cell.style.boxShadow = 'inset 0 0 0 1px rgba(239, 68, 68, 0.25)';
@@ -443,6 +449,8 @@ const renderEditableTable = (
         border: 'none',
         background: 'transparent',
         padding: '10px 8px',
+        color: 'inherit',
+        fontWeight: 'inherit',
       });
       select.dataset.autoSize = 'true';
       const currentValue = typeof current === 'string' ? current : '';
@@ -497,6 +505,8 @@ const renderEditableTable = (
         border: 'none',
         background: 'transparent',
         padding: '10px 8px',
+        color: 'inherit',
+        fontWeight: 'inherit',
       });
       select.dataset.autoSize = 'true';
       const empty = document.createElement('option');
@@ -545,6 +555,8 @@ const renderEditableTable = (
       background: 'transparent',
       padding: '10px 8px',
       outline: 'none',
+      color: 'inherit',
+      fontWeight: 'inherit',
     });
     input.dataset.autoSize = 'true';
     input.value = current === undefined || current === null ? '' : String(current);
@@ -646,9 +658,13 @@ const renderEditableTable = (
       Object.assign(th.style, {
         verticalAlign: 'bottom',
         textAlign: 'left',
-        padding: '0 8px 4px',
+        padding: '0 8px 6px',
         border: 'none',
-        background: column.hidden ? 'rgba(0,0,0,0.02)' : 'transparent',
+        background: 'transparent',
+        fontSize: '11px',
+        fontWeight: '700',
+        color: 'rgba(0,0,0,0.58)',
+        letterSpacing: '0.02em',
       });
       th.appendChild(renderColumnHeaderAction(column));
       headActionRow.appendChild(th);
@@ -663,7 +679,7 @@ const renderEditableTable = (
         textAlign: 'left',
         padding: '0',
         border: '1px solid rgba(0,0,0,0.14)',
-        background: column.hidden ? 'rgba(0,0,0,0.02)' : 'transparent',
+        background: 'transparent',
       });
       th.appendChild(renderColumnHeaderLabel(column));
       headLabelRow.appendChild(th);
@@ -700,6 +716,7 @@ const renderEditableTable = (
     for (const [rowIndex, row] of draft.data.rows.entries()) {
       const tr = document.createElement('tr');
       tr.dataset.rowId = row.id;
+      tr.style.background = 'rgba(255,255,255,0.96)';
       const issueMap = rowIssues.get(row.id);
       const rowHasIssue = Boolean(issueMap && Object.keys(issueMap).length > 0);
       if (rowHasIssue) {
@@ -752,6 +769,8 @@ const renderEditableTable = (
 
     const draftRow = document.createElement('tr');
     draftRow.dataset.rowId = 'pending';
+    draftRow.style.background = 'white';
+    draftRow.style.color = 'rgba(0,0,0,0.46)';
     for (const column of visibleColumns) {
       draftRow.appendChild(
         renderCellEditor(
@@ -777,6 +796,7 @@ const renderEditableTable = (
     draftActionCell.style.verticalAlign = 'middle';
     draftActionCell.style.textAlign = 'left';
     draftActionCell.style.whiteSpace = 'nowrap';
+    draftActionCell.style.background = 'white';
     const addRowBtn = document.createElement('button');
     addRowBtn.type = 'button';
     addRowBtn.textContent = '行追加';
