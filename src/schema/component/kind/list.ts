@@ -1,4 +1,6 @@
 import type { FormField } from './form/field';
+import type { SchemaField } from './form/field';
+import listSchemaJson from './list.schema.json';
 
 const isStyle = (value: unknown): value is Record<string, string> =>
   typeof value === 'object' &&
@@ -30,13 +32,7 @@ export const listDefaults: ListComponent = {
   itemStyle: {},
 };
 
-export const listSchema: FormField[] = [
-  { kind: 'text-field', key: 'padding', label: 'padding' },
-  { kind: 'select-field', key: 'resource', label: 'resource', options: LIST_RESOURCE_OPTIONS },
-  { kind: 'text-field', key: 'targetComponentId', label: 'targetComponentId' },
-  { kind: 'style-map-field', key: 'style', label: 'style' },
-  { kind: 'style-map-field', key: 'itemStyle', label: 'itemStyle' },
-];
+export const listSchema = listSchemaJson as SchemaField[];
 
 export const isListComponent = (value: unknown): value is ListComponent => {
   if (typeof value !== 'object' || value === null || Array.isArray(value)) return false;

@@ -1,4 +1,5 @@
 import type { FormField } from '../schema/component';
+import componentEditorSchemaJson from './component-editor.schema.json';
 
 const isStyle = (value: unknown): value is Record<string, string> =>
   typeof value === 'object' &&
@@ -62,10 +63,7 @@ export const editorDefaults: EditorComponent = {
   fieldStyle: { wrapper: {}, label: {}, input: {} },
 };
 
-export const editorSchema: FormField[] = [
-  { kind: 'text-field', key: 'name', label: 'name' },
-  { kind: 'style-map-field', key: 'style', label: 'style' },
-];
+export const editorSchema = componentEditorSchemaJson as FormField[];
 
 export const isEditorComponent = (value: unknown): value is EditorComponent => {
   if (typeof value !== 'object' || value === null || Array.isArray(value)) return false;

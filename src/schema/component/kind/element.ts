@@ -1,4 +1,6 @@
 import type { FormField } from './form/field';
+import type { SchemaField } from './form/field';
+import elementSchemaJson from './element.schema.json';
 
 const isStyle = (value: unknown): value is Record<string, string> =>
   typeof value === 'object' &&
@@ -17,12 +19,7 @@ export type ElementComponent = {
 
 export const elementDefaults: ElementComponent = { kind: 'element', name: '', tag: 'div', style: {}, text: '', padding: '' };
 
-export const elementSchema: FormField[] = [
-  { kind: 'text-field', key: 'tag', label: 'tag' },
-  { kind: 'style-map-field', key: 'style', label: 'style' },
-  { kind: 'text-field', key: 'text', label: 'text' },
-  { kind: 'text-field', key: 'padding', label: 'padding' },
-];
+export const elementSchema = elementSchemaJson as SchemaField[];
 
 export const isElementComponent = (value: unknown): value is ElementComponent => {
   if (typeof value !== 'object' || value === null || Array.isArray(value)) return false;

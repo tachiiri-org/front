@@ -1,4 +1,6 @@
 import type { FormField } from './form/field';
+import type { SchemaField } from './form/field';
+import tableSchemaJson from './table.schema.json';
 
 const isStringRecord = (value: unknown): value is Record<string, string> =>
   typeof value === 'object' &&
@@ -107,9 +109,7 @@ export const tableDefaults: TableComponent = {
   padding: '',
 };
 
-export const tableSchema: FormField[] = [
-  { kind: 'text-field', key: 'padding', label: 'padding' },
-];
+export const tableSchema = tableSchemaJson as SchemaField[];
 
 export const isTableSelectOption = (value: unknown): value is TableSelectOption => {
   if (typeof value !== 'object' || value === null || Array.isArray(value)) return false;

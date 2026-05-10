@@ -1,4 +1,6 @@
 import type { FormField } from './form/field';
+import type { SchemaField } from './form/field';
+import buttonSchemaJson from './button.schema.json';
 
 export type ButtonComponent = {
   kind: 'button';
@@ -9,10 +11,7 @@ export type ButtonComponent = {
 
 export const buttonDefaults: ButtonComponent = { kind: 'button', name: '', text: '', padding: '' };
 
-export const buttonSchema: FormField[] = [
-  { kind: 'text-field', key: 'text', label: 'text' },
-  { kind: 'text-field', key: 'padding', label: 'padding' },
-];
+export const buttonSchema = buttonSchemaJson as SchemaField[];
 
 export const isButtonComponent = (value: unknown): value is ButtonComponent => {
   if (typeof value !== 'object' || value === null || Array.isArray(value)) return false;

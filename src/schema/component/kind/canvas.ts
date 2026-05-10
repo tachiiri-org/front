@@ -1,4 +1,6 @@
 import type { FormField } from './form/field';
+import type { SchemaField } from './form/field';
+import canvasSchemaJson from './canvas.schema.json';
 
 const isStyle = (value: unknown): value is Record<string, string> =>
   typeof value === 'object' &&
@@ -26,13 +28,7 @@ export const canvasDefaults: CanvasComponent = {
   cellStyle: {},
 };
 
-export const canvasSchema: FormField[] = [
-  { kind: 'text-field', key: 'padding', label: 'padding' },
-  { kind: 'number-field', key: 'viewportWidth', label: 'viewportWidth' },
-  { kind: 'number-field', key: 'viewportHeight', label: 'viewportHeight' },
-  { kind: 'style-map-field', key: 'style', label: 'style' },
-  { kind: 'style-map-field', key: 'cellStyle', label: 'cellStyle' },
-];
+export const canvasSchema = canvasSchemaJson as SchemaField[];
 
 const isPositiveInteger = (value: unknown): value is number =>
   typeof value === 'number' && Number.isInteger(value) && value > 0;

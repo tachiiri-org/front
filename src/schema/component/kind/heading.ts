@@ -1,4 +1,6 @@
 import type { FormField } from './form/field';
+import type { SchemaField } from './form/field';
+import headingSchemaJson from './heading.schema.json';
 
 export type HeadingComponent = {
   kind: 'heading';
@@ -10,11 +12,7 @@ export type HeadingComponent = {
 
 export const headingDefaults: HeadingComponent = { kind: 'heading', name: '', level: 1, text: '', padding: '' };
 
-export const headingSchema: FormField[] = [
-  { kind: 'number-field', key: 'level', label: 'level' },
-  { kind: 'text-field', key: 'text', label: 'text' },
-  { kind: 'text-field', key: 'padding', label: 'padding' },
-];
+export const headingSchema = headingSchemaJson as SchemaField[];
 
 export const isHeadingComponent = (value: unknown): value is HeadingComponent => {
   if (typeof value !== 'object' || value === null || Array.isArray(value)) return false;

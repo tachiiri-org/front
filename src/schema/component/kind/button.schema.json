@@ -1,0 +1,4 @@
+[
+  { "kind": "text-field", "key": "text", "label": "text" },
+  { "kind": "text-field", "key": "padding", "label": "padding" }
+]

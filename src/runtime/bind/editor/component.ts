@@ -13,17 +13,19 @@ import { putComponent, updateScreen, fetchScreen } from './save';
 import { appendSection, createLabeledRow, renderSectionContent } from '../../render/editor/section';
 import { renderPlacementRow } from '../../render/editor/placement';
 import { hydrateTableEditor } from '../table/table';
-import { getComponentPropertySchema, pickEditableComponentData } from './component-properties';
+import { loadComponentPropertySchema, pickEditableComponentData } from './component-properties';
+import type { SchemaField } from '../../../schema/component';
 
 const renderPropertiesSection = (
   componentData: Record<string, unknown>,
   componentKind: string | null,
+  componentSchema: SchemaField[] | null,
   onSave: (patch: Record<string, unknown>) => Promise<void>,
   ctx: FieldStyleContext,
 ): HTMLElement =>
   renderSectionContent(
-    pickEditableComponentData(componentData, componentKind),
-    getComponentPropertySchema(componentKind),
+    pickEditableComponentData(componentData, componentKind, componentSchema),
+    componentSchema,
     async (draft) => onSave(draft as Record<string, unknown>),
     ctx,
     true,
@@ -192,6 +194,8 @@ export const hydrateComponentEditor = async (
     editorEl.appendChild(sourceCanvasRow);
   }
 
+  const componentSchema = await loadComponentPropertySchema(componentKind);
+
   for (const section of sections) {
     if (section.source !== 'placement') continue;
     const placementData = JSON.parse(JSON.stringify(frame.placement)) as Record<string, unknown>;
@@ -216,7 +220,7 @@ export const hydrateComponentEditor = async (
     appendSection(
       editorEl,
       section,
-      renderPropertiesSection(componentData, componentKind, onSave, ctx),
+      renderPropertiesSection(componentData, componentKind, componentSchema, onSave, ctx),
     );
     renderedProperties = true;
   }
@@ -228,7 +232,7 @@ export const hydrateComponentEditor = async (
     appendSection(
       editorEl,
       { source: 'properties', label: 'properties' },
-      renderPropertiesSection(componentData, componentKind, onSave, ctx),
+      renderPropertiesSection(componentData, componentKind, componentSchema, onSave, ctx),
     );
   }
 };

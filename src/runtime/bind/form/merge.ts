@@ -1,17 +1,17 @@
-import type { FormField } from '../../../schema/component';
+import type { SchemaField } from '../../../schema/component';
 
 export function mergeWithSchema(
-  inferred: FormField[],
-  schema: FormField[],
-): FormField[] {
-  const schemaByKey = new Map<string, FormField>();
+  inferred: SchemaField[],
+  schema: SchemaField[],
+): SchemaField[] {
+  const schemaByKey = new Map<string, SchemaField>();
   for (const f of schema) {
     const key = 'key' in f && f.key ? f.key : undefined;
     if (key) schemaByKey.set(key, f);
   }
 
   const usedKeys = new Set<string>();
-  const result: FormField[] = [];
+  const result: SchemaField[] = [];
 
   for (const f of inferred) {
     const key = 'key' in f && f.key ? f.key : undefined;

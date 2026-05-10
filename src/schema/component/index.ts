@@ -16,7 +16,7 @@ import { isSelectComponent, selectDefaults, selectSchema } from './kind/select';
 import { isFormComponent, formDefaults, formSchema } from './kind/form';
 import { isTextareaComponent, textareaDefaults, textareaSchema } from './kind/textarea';
 import { isTableComponent, tableDefaults, tableSchema } from './kind/table';
-import type { FormField } from './kind/form/field';
+import type { FormField, SchemaField } from './kind/form/field';
 
 export const isStyle = (value: unknown): value is Record<string, string> =>
   typeof value === 'object' &&
@@ -56,7 +56,7 @@ export {
   tableDefaults,
   tableSchema,
 } from './kind/table';
-export { type FormField, isFormField } from './kind/form/field';
+export { type FormField, type SchemaField, isFormField, isSchemaField } from './kind/form/field';
 
 export type Component =
   | ElementComponent
@@ -92,7 +92,7 @@ export const componentDefaults: Record<string, Record<string, unknown>> = {
   table: tableDefaults as Record<string, unknown>,
 };
 
-export const componentSchemas: Record<string, FormField[]> = {
+export const componentSchemas: Record<string, SchemaField[]> = {
   element: elementSchema,
   heading: headingSchema,
   button: buttonSchema,

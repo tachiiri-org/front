@@ -1,4 +1,6 @@
 import type { FormField } from './form/field';
+import type { SchemaField } from './form/field';
+import selectSchemaJson from './select.schema.json';
 
 const isStyle = (value: unknown): value is Record<string, string> =>
   typeof value === 'object' &&
@@ -57,22 +59,7 @@ export const selectDefaults: SelectComponent = {
   padding: '',
 };
 
-export const selectSchema: FormField[] = [
-  {
-    kind: 'field-group',
-    key: 'source',
-    label: 'source',
-    fields: [
-      { kind: 'text-field', key: 'url', label: 'url' },
-      { kind: 'text-field', key: 'itemsPath', label: 'itemsPath' },
-      { kind: 'text-field', key: 'valueKey', label: 'valueKey' },
-      { kind: 'text-field', key: 'labelKey', label: 'labelKey' },
-      { kind: 'style-map-field', key: 'headers', label: 'headers' },
-    ],
-  },
-  { kind: 'text-field', key: 'targetComponentId', label: 'targetComponentId' },
-  { kind: 'text-field', key: 'padding', label: 'padding' },
-];
+export const selectSchema = selectSchemaJson as SchemaField[];
 
 export const isSelectComponent = (value: unknown): value is SelectComponent => {
   if (typeof value !== 'object' || value === null || Array.isArray(value)) return false;

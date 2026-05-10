@@ -37,6 +37,17 @@ export type FieldGroupComponent = {
   defaultCollapsed?: boolean;
 };
 
+export type SchemaField = {
+  kind: string;
+  key?: string;
+  label?: string;
+  fields?: SchemaField[];
+  options?: Array<{ value: string; label: string }>;
+  collapsible?: boolean;
+  defaultCollapsed?: boolean;
+  [key: string]: unknown;
+};
+
 export type FormField =
   | TextFieldComponent
   | NumberFieldComponent
@@ -83,6 +94,28 @@ export const isFieldGroupComponent = (v: unknown): v is FieldGroupComponent => {
   );
 };
 
+const isSchemaFieldOption = (value: unknown): value is { value: string; label: string } => {
+  if (typeof value !== 'object' || value === null || Array.isArray(value)) return false;
+  const c = value as Record<string, unknown>;
+  return typeof c.value === 'string' && typeof c.label === 'string';
+};
+
+export const isSchemaField = (value: unknown): value is SchemaField => {
+  if (typeof value !== 'object' || value === null || Array.isArray(value)) return false;
+  const c = value as Record<string, unknown>;
+  return (
+    typeof c.kind === 'string' &&
+    (c.key === undefined || typeof c.key === 'string') &&
+    (c.label === undefined || typeof c.label === 'string') &&
+    (c.fields === undefined ||
+      (Array.isArray(c.fields) && c.fields.every((field) => isSchemaField(field)))) &&
+    (c.options === undefined ||
+      (Array.isArray(c.options) && c.options.every(isSchemaFieldOption))) &&
+    (c.collapsible === undefined || typeof c.collapsible === 'boolean') &&
+    (c.defaultCollapsed === undefined || typeof c.defaultCollapsed === 'boolean')
+  );
+};
+
 export const isSelectFieldComponent = (v: unknown): v is SelectFieldComponent => {
   if (typeof v !== 'object' || v === null || Array.isArray(v)) return false;
   const c = v as Record<string, unknown>;
@@ -106,4 +139,3 @@ export const isFormField = (v: unknown): v is FormField =>
   isStyleMapFieldComponent(v) ||
   isObjectListFieldComponent(v) ||
   isFieldGroupComponent(v);
-

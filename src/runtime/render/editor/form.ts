@@ -1,4 +1,4 @@
-import type { FormField } from '../../../schema/component';
+import type { SchemaField } from '../../../schema/component';
 import { renderFieldFromSchema } from './field';
 import { buildFieldStyleContext, type FieldStyleContext } from './context';
 
@@ -11,7 +11,7 @@ export type RenderFormOptions = {
 
 export function renderFormFromSchema(
   data: Record<string, unknown>,
-  fields: FormField[],
+  fields: SchemaField[],
   onSave: (draft: unknown) => Promise<void>,
   ctx?: FieldStyleContext,
   options: RenderFormOptions = {},

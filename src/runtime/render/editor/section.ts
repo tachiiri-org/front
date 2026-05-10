@@ -1,5 +1,5 @@
 import type { EditorSection } from '../../../editor/component-editor';
-import type { FormField } from '../../../schema/component';
+import type { SchemaField } from '../../../schema/component';
 import { renderFormFromSchema } from './form';
 import type { FieldStyleContext } from './context';
 import { inferFieldsFromData } from '../../bind/form/infer';
@@ -79,7 +79,7 @@ export const createLabeledRow = (label: string): HTMLDivElement => {
 
 export const renderSectionContent = (
   data: Record<string, unknown>,
-  schema: FormField[] | null,
+  schema: SchemaField[] | null,
   onSave: (draft: unknown) => Promise<void>,
   ctx: FieldStyleContext,
   saveOnBlur = false,

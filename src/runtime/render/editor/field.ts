@@ -1,4 +1,4 @@
-import type { FormField } from '../../../schema/component';
+import { isFormField, type SchemaField } from '../../../schema/component';
 import { type FieldStyleContext, SUMMARY_STYLE } from './context';
 import { getAtPath, setAtPath, blankFromSchema } from '../../bind/field/path';
 
@@ -140,6 +140,38 @@ const isStringRecord = (v: unknown): v is Record<string, string> =>
   !Array.isArray(v) &&
   Object.values(v as Record<string, unknown>).every((x) => typeof x === 'string');
 
+function renderUnsupportedField(
+  field: SchemaField,
+  draft: Record<string, unknown>,
+  ctx: FieldStyleContext,
+): HTMLElement {
+  const wrapper = mk('div');
+  Object.assign(wrapper.style, ctx.wrapper);
+  const lbl = mk('label');
+  lbl.textContent = field.label ?? field.key ?? field.kind;
+  Object.assign(lbl.style, ctx.label);
+  const note = mk('div');
+  note.textContent = `Unsupported field kind: ${field.kind}`;
+  note.style.fontSize = '10px';
+  note.style.color = 'rgba(0,0,0,0.45)';
+  note.style.fontFamily = 'monospace';
+  const preview = mk('textarea');
+  preview.readOnly = true;
+  preview.style.width = '100%';
+  preview.style.boxSizing = 'border-box';
+  preview.style.minHeight = '64px';
+  preview.style.fontFamily = 'monospace';
+  preview.style.fontSize = '11px';
+  const previewValue = field.key && Object.prototype.hasOwnProperty.call(draft, field.key)
+    ? JSON.stringify(getAtPath(draft, field.key), null, 2)
+    : JSON.stringify(field, null, 2);
+  preview.value = previewValue ?? 'undefined';
+  wrapper.appendChild(lbl);
+  wrapper.appendChild(note);
+  wrapper.appendChild(preview);
+  return wrapper;
+}
+
 function renderStyleMap(
   label: string,
   path: string,
@@ -221,11 +253,12 @@ function renderStyleMap(
 }
 
 export function renderFieldFromSchema(
-  field: FormField,
+  field: SchemaField,
   draft: Record<string, unknown>,
   ctx: FieldStyleContext,
   onBlurSave?: () => void,
 ): HTMLElement {
+  if (!isFormField(field)) return renderUnsupportedField(field, draft, ctx);
   const label: string = ('label' in field && field.label) ? field.label : (('key' in field && field.key) ? field.key : '');
 
   switch (field.kind) {

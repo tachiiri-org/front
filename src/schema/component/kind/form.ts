@@ -1,4 +1,6 @@
 import type { FormField } from './form/field';
+import type { SchemaField } from './form/field';
+import formSchemaJson from './form.schema.json';
 
 export type FormComponent = {
   kind: 'form';
@@ -18,11 +20,7 @@ export const formDefaults: FormComponent = {
   padding: '',
 };
 
-export const formSchema: FormField[] = [
-  { kind: 'text-field', key: 'title', label: 'title' },
-  { kind: 'text-field', key: 'sourceComponentId', label: 'sourceComponentId' },
-  { kind: 'text-field', key: 'padding', label: 'padding' },
-];
+export const formSchema = formSchemaJson as SchemaField[];
 
 export const isFormComponent = (value: unknown): value is FormComponent => {
   if (typeof value !== 'object' || value === null || Array.isArray(value)) return false;

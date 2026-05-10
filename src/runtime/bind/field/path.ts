@@ -1,4 +1,4 @@
-import type { FormField } from '../../../schema/component';
+import type { SchemaField } from '../../../schema/component';
 
 export const getAtPath = (obj: unknown, path: string): unknown => {
   if (!path) return obj;
@@ -33,7 +33,7 @@ export const setAtPath = (obj: unknown, path: string, value: unknown): void => {
   }
 };
 
-export const blankFromSchema = (fields: FormField[]): Record<string, unknown> => {
+export const blankFromSchema = (fields: SchemaField[]): Record<string, unknown> => {
   const obj: Record<string, unknown> = {};
   for (const field of fields) {
     if (!('key' in field) || !field.key) continue;
