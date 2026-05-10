@@ -1372,6 +1372,7 @@ export const hydrateTableEditor = async (
 ): Promise<void> => {
   const ctx = buildFieldStyleContext(editorFrame.fieldStyle);
   const draft = clone(applyDefaults('table', componentData)) as TableEditorDraft;
+  let isDirty = false;
   const status = document.createElement('div');
   Object.assign(status.style, {
     fontSize: '10px',
@@ -1388,16 +1389,46 @@ export const hydrateTableEditor = async (
   const schemaSectionMount = document.createElement('div');
   const dataSectionMount = document.createElement('div');
 
+  const saveBtn = document.createElement('button');
+  saveBtn.type = 'button';
+  saveBtn.textContent = 'Save all';
+  Object.assign(saveBtn.style, {
+    fontSize: '11px',
+    padding: '2px 10px',
+    cursor: 'pointer',
+    border: '1px solid rgba(0,0,0,0.14)',
+    borderRadius: '4px',
+    background: 'white',
+  });
+  saveBtn.disabled = true;
+
+  const updateStatus = (): void => {
+    const message = validateDraft(draft);
+    if (message) {
+      renderStatus(status, message);
+      saveBtn.disabled = true;
+      saveBtn.style.opacity = '0.65';
+      saveBtn.style.cursor = 'not-allowed';
+      return;
+    }
+
+    renderStatus(status, isDirty ? 'Unsaved changes' : 'Saved');
+    saveBtn.disabled = !isDirty;
+    saveBtn.style.opacity = isDirty ? '1' : '0.65';
+    saveBtn.style.cursor = isDirty ? 'pointer' : 'not-allowed';
+  };
+
+  const markDirty = (): void => {
+    isDirty = true;
+    updateStatus();
+  };
+
   const refreshSchema = (): void => {
-    renderSchemaSection(draft, schemaMount, refreshSchema, refreshData, updateStatus, ctx, addColumn);
+    renderSchemaSection(draft, schemaMount, refreshSchema, refreshData, markDirty, ctx, addColumn);
   };
 
   const refreshData = (): void => {
-    renderDataSection(draft, dataMount, refreshData, updateStatus, addRow, addColumn);
-  };
-
-  const updateStatus = (): void => {
-    renderStatus(status, validateDraft(draft) ?? '');
+    renderDataSection(draft, dataMount, refreshData, markDirty, addRow, addColumn);
   };
 
   const addColumn = (type: TableColumnType): void => {
@@ -1406,7 +1437,7 @@ export const hydrateTableEditor = async (
     addColumnToRows(draft.data.rows, column);
     refreshSchema();
     refreshData();
-    updateStatus();
+    markDirty();
   };
 
   const addRow = (): void => {
@@ -1416,7 +1447,7 @@ export const hydrateTableEditor = async (
     };
     draft.data.rows.push(row);
     refreshData();
-    updateStatus();
+    markDirty();
   };
 
   const saveDraft = async (): Promise<void> => {
@@ -1427,13 +1458,38 @@ export const hydrateTableEditor = async (
     }
     renderStatus(status, 'Saving...');
     await onSave(clone(draft) as Record<string, unknown>);
+    isDirty = false;
     renderStatus(status, 'Saved');
+    saveBtn.disabled = true;
+    saveBtn.style.opacity = '0.65';
+    saveBtn.style.cursor = 'not-allowed';
   };
 
   editorEl.replaceChildren();
+  const toolbar = document.createElement('div');
+  Object.assign(toolbar.style, {
+    display: 'flex',
+    alignItems: 'center',
+    gap: '8px',
+    padding: '8px 8px 10px',
+    position: 'sticky',
+    top: '0',
+    zIndex: '1',
+    background: 'rgba(255,255,255,0.96)',
+    backdropFilter: 'blur(6px)',
+    borderBottom: '1px solid rgba(0,0,0,0.06)',
+  });
+  saveBtn.addEventListener('click', () => {
+    void saveDraft().catch((error: unknown) => {
+      renderStatus(status, error instanceof Error ? error.message : String(error));
+    });
+  });
+  toolbar.appendChild(saveBtn);
+  toolbar.appendChild(status);
+  editorEl.appendChild(toolbar);
   renderKindSelector(kindMount, draft, onSave);
   appendSection(editorEl, { source: 'properties', label: 'kind' }, kindMount);
-  propertiesMount.replaceChildren(renderPropertiesSection(draft, ctx, updateStatus));
+  propertiesMount.replaceChildren(renderPropertiesSection(draft, ctx, markDirty));
   appendSection(editorEl, { source: 'properties', label: 'properties' }, propertiesMount);
   refreshSchema();
   appendSection(editorEl, { source: 'properties', label: 'schema' }, schemaMount);
@@ -1444,27 +1500,5 @@ export const hydrateTableEditor = async (
     { source: 'properties', label: 'advanced JSON', collapsible: true, defaultCollapsed: true },
     renderAdvancedJsonSection(draft, onSave),
   );
-
-  const footer = document.createElement('div');
-  Object.assign(footer.style, {
-    display: 'flex',
-    alignItems: 'center',
-    gap: '8px',
-    padding: '8px',
-  });
-  const saveBtn = document.createElement('button');
-  saveBtn.type = 'button';
-  saveBtn.textContent = 'Save all';
-  saveBtn.style.fontSize = '11px';
-  saveBtn.style.padding = '2px 10px';
-  saveBtn.style.cursor = 'pointer';
-  saveBtn.addEventListener('click', () => {
-    void saveDraft().catch((error: unknown) => {
-      renderStatus(status, error instanceof Error ? error.message : String(error));
-    });
-  });
-  footer.appendChild(saveBtn);
-  footer.appendChild(status);
-  editorEl.appendChild(footer);
   updateStatus();
 };
