@@ -1,5 +1,5 @@
 [
   { "kind": "text-field", "key": "tag", "label": "tag" },
   { "kind": "text-field", "key": "text", "label": "text" },
-  { "kind": "text-field", "key": "padding", "label": "padding" }
+  { "kind": "style", "key": "style", "label": "padding", "styleSpecKey": "padding" }
 ]

@@ -58,6 +58,8 @@ export {
 } from './kind/table';
 export { type FormField, type SchemaField, isFormField, isSchemaField } from './kind/form/field';
 export { normalizeFormFieldKind } from './kind/form/field';
+export { STYLE_SPECS, getStyleSpec } from './style';
+export type { StyleEntrySpec, StyleSpec, StyleValueTarget } from './style';
 
 export type Component =
   | ElementComponent

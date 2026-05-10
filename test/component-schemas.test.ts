@@ -1,5 +1,9 @@
 import { describe, expect, it } from 'vitest';
-import { handleComponentSchemaPut, SCHEMA_TABLE_SCHEMA } from '../src/api/component-schemas';
+import {
+  handleComponentSchemaDefinitionGet,
+  handleComponentSchemaPut,
+  SCHEMA_TABLE_SCHEMA,
+} from '../src/api/component-schemas';
 import type { LayoutBackend } from '../src/storage/layouts/r2';
 
 const makeBackend = (): { backend: LayoutBackend; writes: Record<string, string> } => {
@@ -31,6 +35,7 @@ describe('component schemas', () => {
       'options_json',
       'fields_json',
       'style_json',
+      'style_spec_key',
       'keys_json',
       'raw_json',
     ]);
@@ -59,6 +64,7 @@ describe('component schemas', () => {
                 options_json: '',
                 fields_json: '',
                 style_json: '',
+                style_spec_key: '',
               },
             },
           ],
@@ -70,6 +76,60 @@ describe('component schemas', () => {
     expect(response.status).toBe(200);
     expect(JSON.parse(writes['schemas/element.json'])).toEqual([
       { kind: 'text', key: 'name', label: 'name' },
+    ]);
+  });
+
+  it('stores style spec keys on style fields', async () => {
+    const { backend, writes } = makeBackend();
+    const request = new Request('http://localhost/api/component-schemas/element', {
+      method: 'PUT',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        data: {
+          rows: [
+            {
+              id: '1',
+              values: {
+                type: 'style',
+                key: 'shell',
+                label: 'shell',
+                options_json: '',
+                fields_json: '',
+                style_json: '',
+                style_spec_key: 'shell',
+              },
+            },
+          ],
+        },
+      }),
+    });
+
+    const response = await handleComponentSchemaPut(request, backend, 'element');
+    expect(response.status).toBe(200);
+    expect(JSON.parse(writes['schemas/element.json'])).toEqual([
+      { kind: 'style', key: 'shell', label: 'shell', styleSpecKey: 'shell' },
+    ]);
+  });
+
+  it('migrates legacy padding fields when reading component schema definitions', async () => {
+    const backend: LayoutBackend = {
+      async list() {
+        return { objects: [], truncated: false };
+      },
+      async getText(key: string) {
+        if (key === 'schemas/element.json') {
+          return JSON.stringify([{ kind: 'text-field', key: 'padding', label: 'padding' }]);
+        }
+        return null;
+      },
+      async putText() {},
+      async deleteKey() {},
+    };
+
+    const response = await handleComponentSchemaDefinitionGet(backend, 'element');
+    expect(response.status).toBe(200);
+    await expect(response.json()).resolves.toEqual([
+      { kind: 'style', key: 'style', label: 'padding', styleSpecKey: 'padding' },
     ]);
   });
 });

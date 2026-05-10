@@ -1,5 +1,6 @@
 import { isTableData, type TableData } from './kind/table';
 import { isSchemaField, normalizeFormFieldKind, type SchemaField } from './kind/form/field';
+import { getStyleSpec } from './style';
 
 const ALLOWED_FIELD_KINDS = new Set([
   'text',
@@ -58,6 +59,10 @@ const fieldToRow = (
       fields_json: Array.isArray(f.fields) ? JSON.stringify(f.fields) : '',
       style_json:
         typeof f.style === 'object' && f.style !== null ? JSON.stringify(f.style) : '',
+      style_spec_key:
+        typeof (f as Record<string, unknown>).styleSpecKey === 'string'
+          ? String((f as Record<string, unknown>).styleSpecKey)
+          : '',
       keys_json: Array.isArray((f as Record<string, unknown>).keys)
         ? JSON.stringify((f as Record<string, unknown>).keys)
         : '',
@@ -160,6 +165,15 @@ export const validateSchemaEditorTableDraftDetail = (draft: unknown): SchemaEdit
       }
     }
 
+    const styleSpecKey = row.values.style_spec_key;
+    if (typeof styleSpecKey === 'string' && styleSpecKey.trim() !== '') {
+      const normalized = styleSpecKey.trim();
+      if (!getStyleSpec(normalized)) {
+        markIssue(row.id, 'style_spec_key', `Unknown style spec: ${normalized}`);
+        setMessage(`Unknown style spec: ${normalized}`);
+      }
+    }
+
     const keysJson = row.values.keys_json;
     if (typeof keysJson === 'string' && keysJson.trim() !== '') {
       const parsed = parseJson(keysJson);
@@ -200,6 +214,11 @@ export const schemaEditorTableDataToSchema = (draft: TableData): SchemaField[] =
     const style = parseJson(row.values.style_json);
     if (isStringRecord(style)) {
       base.style = style;
+    }
+
+    const styleSpecKey = row.values.style_spec_key;
+    if (typeof styleSpecKey === 'string' && styleSpecKey.trim()) {
+      base.styleSpecKey = styleSpecKey.trim();
     }
 
     const keys = parseJson(row.values.keys_json);

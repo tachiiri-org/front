@@ -2,6 +2,12 @@ import type { FormField } from './form/field';
 import type { SchemaField } from './form/field';
 import tableSchemaJson from './table.schema.json';
 
+const isStyle = (value: unknown): value is Record<string, string> =>
+  typeof value === 'object' &&
+  value !== null &&
+  !Array.isArray(value) &&
+  Object.values(value as Record<string, unknown>).every((x) => typeof x === 'string');
+
 const isStringRecord = (value: unknown): value is Record<string, string> =>
   typeof value === 'object' &&
   value !== null &&
@@ -99,6 +105,7 @@ export type TableComponent = {
   schema: TableSchema;
   data: TableData;
   padding?: string;
+  style?: Record<string, string>;
 };
 
 export const tableDefaults: TableComponent = {
@@ -107,6 +114,7 @@ export const tableDefaults: TableComponent = {
   schema: { version: 1, columns: [] },
   data: { rows: [] },
   padding: '',
+  style: {},
 };
 
 export const tableSchema = tableSchemaJson as SchemaField[];
@@ -221,6 +229,7 @@ export const isTableComponent = (value: unknown): value is TableComponent => {
     (c.name === undefined || typeof c.name === 'string') &&
     isTableSchema(c.schema) &&
     isTableData(c.data) &&
-    (c.padding === undefined || typeof c.padding === 'string')
+    (c.padding === undefined || typeof c.padding === 'string') &&
+    (c.style === undefined || isStyle(c.style))
   );
 };

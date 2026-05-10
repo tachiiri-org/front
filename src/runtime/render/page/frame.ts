@@ -2,6 +2,7 @@ import {
   type ListComponent,
   type CanvasComponent,
   type TableComponent,
+  isStyle,
 } from '../../../schema/component';
 import type { EditorComponent } from '../../../editor/component-editor';
 
@@ -31,6 +32,7 @@ export const renderTable = (id: string, component: TableComponent): HTMLElement 
   wrapper.dataset.frameId = id;
   wrapper.style.overflow = 'auto';
   wrapper.style.boxSizing = 'border-box';
+  if (isStyle(component.style)) Object.assign(wrapper.style, component.style);
   if (component.padding) wrapper.style.padding = component.padding;
   return wrapper;
 };

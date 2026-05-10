@@ -20,7 +20,7 @@ const screenEditSchema: FormField[] = [
     label: 'head',
     fields: headSchema,
   },
-  { kind: 'style', key: 'shell', label: 'shell' },
+  { kind: 'style', key: 'shell', label: 'shell', styleSpecKey: 'shell' },
   { kind: 'number', key: 'columns', label: 'columns' },
   { kind: 'number', key: 'rows', label: 'rows' },
 ];

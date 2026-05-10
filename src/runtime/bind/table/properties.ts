@@ -4,7 +4,7 @@ import { renderFormFromSchema } from '../../render/editor/form';
 
 const TABLE_PROPERTIES_SCHEMA: FormField[] = [
   { kind: 'text', key: 'name', label: 'name' },
-  { kind: 'text', key: 'padding', label: 'padding' },
+  { kind: 'style', key: 'style', label: 'padding', styleSpecKey: 'padding' },
 ];
 
 export const renderTablePropertiesContent = (
@@ -14,7 +14,12 @@ export const renderTablePropertiesContent = (
 ): HTMLElement => {
   const propertiesData: Record<string, unknown> = {
     name: typeof componentData.name === 'string' ? componentData.name : '',
-    padding: typeof componentData.padding === 'string' ? componentData.padding : '',
+    style:
+      typeof componentData.style === 'object' &&
+      componentData.style !== null &&
+      !Array.isArray(componentData.style)
+        ? { ...(componentData.style as Record<string, string>) }
+        : {},
   };
 
   return renderFormFromSchema(
@@ -24,7 +29,12 @@ export const renderTablePropertiesContent = (
       const d = draft as Record<string, unknown>;
       await onSave({
         name: typeof d.name === 'string' ? d.name : '',
-        padding: typeof d.padding === 'string' ? d.padding : '',
+        style:
+          typeof d.style === 'object' &&
+          d.style !== null &&
+          !Array.isArray(d.style)
+            ? { ...(d.style as Record<string, string>) }
+            : {},
       });
     },
     ctx,

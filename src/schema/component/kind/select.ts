@@ -30,6 +30,7 @@ export type SelectComponent = {
   source: SelectSource;
   targetComponentId?: string;
   padding?: string;
+  style?: Record<string, string>;
 };
 
 export const isSelectOption = (value: unknown): value is SelectOption => {
@@ -57,6 +58,7 @@ export const selectDefaults: SelectComponent = {
   source: { kind: 'endpoint', url: '', itemsPath: '', valueKey: '', labelKey: '', headers: {} },
   targetComponentId: '',
   padding: '',
+  style: {},
 };
 
 export const selectSchema = selectSchemaJson as SchemaField[];
@@ -69,6 +71,7 @@ export const isSelectComponent = (value: unknown): value is SelectComponent => {
     (c.name === undefined || typeof c.name === 'string') &&
     isSelectSource(c.source) &&
     (c.targetComponentId === undefined || typeof c.targetComponentId === 'string') &&
-    (c.padding === undefined || typeof c.padding === 'string')
+    (c.padding === undefined || typeof c.padding === 'string') &&
+    (c.style === undefined || isStyle(c.style))
   );
 };

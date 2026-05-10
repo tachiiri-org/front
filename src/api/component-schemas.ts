@@ -1,6 +1,7 @@
 import {
   COMPONENT_KINDS,
   type SchemaField,
+  normalizeFormFieldKind,
 } from '../schema/component';
 import type { TableData, TableSchema } from '../schema/component/kind/table';
 import { editorSchema } from '../editor/component-editor';
@@ -24,6 +25,30 @@ const FORM_FIELD_KIND_OPTIONS = [
   'group',
 ].map((k) => ({ value: k, label: k }));
 
+const migrateSchemaField = (field: SchemaField): SchemaField => {
+  const nestedFields = Array.isArray(field.fields) ? field.fields.map(migrateSchemaField) : undefined;
+  const kind = normalizeFormFieldKind(String(field.kind));
+  const isLegacyPaddingField = kind === 'text' && field.key === 'padding';
+
+  if (isLegacyPaddingField) {
+    return {
+      ...field,
+      kind: 'style',
+      key: 'style',
+      label: field.label ?? 'padding',
+      styleSpecKey: 'padding',
+      ...(nestedFields ? { fields: nestedFields } : {}),
+    };
+  }
+
+  return {
+    ...field,
+    ...(nestedFields ? { fields: nestedFields } : {}),
+  };
+};
+
+const migrateSchema = (schema: SchemaField[]): SchemaField[] => schema.map(migrateSchemaField);
+
 export const SCHEMA_TABLE_SCHEMA: TableSchema = {
   version: 1,
   columns: [
@@ -38,6 +63,7 @@ export const SCHEMA_TABLE_SCHEMA: TableSchema = {
     { key: 'options_json', label: 'options', type: 'string', hidden: true, nullable: true },
     { key: 'fields_json', label: 'fields', type: 'string', hidden: true, nullable: true },
     { key: 'style_json', label: 'style', type: 'string', hidden: true, nullable: true },
+    { key: 'style_spec_key', label: 'style spec', type: 'string', hidden: true, nullable: true },
     { key: 'keys_json', label: 'keys', type: 'string', hidden: true, nullable: true },
     { key: 'raw_json', label: 'raw', type: 'string', hidden: true, nullable: true },
   ],
@@ -54,8 +80,8 @@ const loadStoredSchema = async (backend: LayoutBackend, kind: string): Promise<S
   if (stored) {
     try {
       const parsed = JSON.parse(stored) as unknown;
-      if (Array.isArray(parsed)) return parsed as SchemaField[];
-      if (isTableDataLike(parsed)) return schemaEditorTableDataToSchema(parsed);
+      if (Array.isArray(parsed)) return migrateSchema(parsed as SchemaField[]);
+      if (isTableDataLike(parsed)) return migrateSchema(schemaEditorTableDataToSchema(parsed));
     } catch {
       // fall through to defaults
     }
@@ -114,9 +140,9 @@ export const handleComponentSchemaPut = async (
 
   let schema: SchemaField[] | null = null;
   if (Array.isArray(rawData)) {
-    schema = rawData as SchemaField[];
+    schema = migrateSchema(rawData as SchemaField[]);
   } else if (isTableDataLike(rawData)) {
-    schema = schemaEditorTableDataToSchema(rawData);
+    schema = migrateSchema(schemaEditorTableDataToSchema(rawData));
   }
 
   if (!schema) return new Response('Bad Request', { status: 400 });

@@ -3,6 +3,7 @@ import {
   isCanvasComponent,
   isTextareaComponent,
   isTableComponent,
+  isStyle,
   applyDefaults,
   type TableComponent,
   type Component,
@@ -15,6 +16,10 @@ import { renderEditableTable } from './table-editor';
 
 const applyPadding = (el: HTMLElement, c: Record<string, unknown>): void => {
   if (typeof c.padding === 'string') el.style.padding = c.padding;
+};
+
+const applyStyleObject = (el: HTMLElement, c: Record<string, unknown>): void => {
+  if (isStyle(c.style)) Object.assign(el.style, c.style);
 };
 
 const isPositiveInteger = (value: unknown): value is number =>
@@ -39,6 +44,7 @@ const renderResolved = (
     const el = document.createElement(`h${level}` as keyof HTMLElementTagNameMap);
     el.dataset.frameId = id;
     if (typeof c.text === 'string') el.textContent = c.text;
+    applyStyleObject(el, c);
     applyPadding(el, c);
     return el;
   }
@@ -56,6 +62,7 @@ const renderResolved = (
     const button = document.createElement('button');
     button.dataset.frameId = id;
     button.textContent = typeof c.text === 'string' ? c.text : String(c.kind);
+    applyStyleObject(button, c);
     applyPadding(button, c);
     return button;
   }
@@ -66,6 +73,7 @@ const renderResolved = (
     if (typeof c.targetComponentId === 'string') {
       select.dataset.targetComponentId = c.targetComponentId;
     }
+    applyStyleObject(select, c);
     applyPadding(select, c);
     return select;
   }
@@ -81,6 +89,7 @@ const renderResolved = (
       p.textContent = c.title;
       form.appendChild(p);
     }
+    applyStyleObject(form, c);
     applyPadding(form, c);
     return form;
   }
@@ -88,6 +97,7 @@ const renderResolved = (
   if (c.kind === 'table' && isTableComponent(c)) {
     const wrapper = renderTable(id, c);
     const table = document.createElement('table');
+    applyStyleObject(wrapper, c);
     table.style.width = '100%';
     table.style.borderCollapse = 'collapse';
     table.style.fontSize = '12px';
