@@ -1,5 +1,5 @@
 import type { FormField } from '../../../schema/component';
-import { isStyle } from '../../../schema/component';
+import { isStyleRecord } from '../../../schema/component';
 import { headDefaults, headSchema } from '../../../schema/screen/head';
 import { isHead, type EditorFrame } from '../../../schema/screen/screen';
 import { buildFieldStyleContext } from '../../render/editor/context';
@@ -7,10 +7,10 @@ import { SECTION_HEADING_STYLE, renderSectionContent } from '../../render/editor
 import { domMap } from '../../../state';
 import { fetchScreen, updateScreen } from './save';
 
-const DEVICE_PRESETS: { label: string; shell: Record<string, string> }[] = [
-  { label: 'Desktop', shell: { width: '1920px', height: '1080px' } },
-  { label: 'Tablet', shell: { width: '768px', height: '1024px' } },
-  { label: 'Mobile', shell: { width: '375px', height: '812px' } },
+const DEVICE_PRESETS: { label: string; sizing: Record<string, string> }[] = [
+  { label: 'Desktop', sizing: { width: '1920px', height: '1080px' } },
+  { label: 'Tablet', sizing: { width: '768px', height: '1024px' } },
+  { label: 'Mobile', sizing: { width: '375px', height: '812px' } },
 ];
 
 const screenEditSchema: FormField[] = [
@@ -20,7 +20,9 @@ const screenEditSchema: FormField[] = [
     label: 'head',
     fields: headSchema,
   },
-  { kind: 'style', key: 'shell', label: 'shell', styleSpecKey: 'shell' },
+  { kind: 'style', key: 'sizing', label: 'sizing' },
+  { kind: 'style', key: 'layout', label: 'layout' },
+  { kind: 'style', key: 'appearance', label: 'appearance' },
   { kind: 'number', key: 'columns', label: 'columns' },
   { kind: 'number', key: 'rows', label: 'rows' },
 ];
@@ -36,11 +38,13 @@ export const hydrateScreenEditor = async (
   const value = await fetchScreen(screenId);
   if (!value) { editorEl.replaceChildren(); return; }
 
-  const ctx = buildFieldStyleContext(editorFrame.fieldStyle);
+  const ctx = buildFieldStyleContext();
 
   const editData: Record<string, unknown> = {
     head: { ...headDefaults, ...value.head },
-    shell: value.shell ?? {},
+    sizing: value.sizing ?? {},
+    layout: value.layout ?? {},
+    appearance: value.appearance ?? {},
     columns: value.grid.columns,
     rows: value.grid.rows,
   };
@@ -54,10 +58,9 @@ export const hydrateScreenEditor = async (
         isHead(nextHead) && typeof nextHead === 'object' && nextHead !== null
           ? { ...s.head, ...nextHead }
           : s.head,
-      shell:
-        isStyle(d.shell) && typeof d.shell === 'object' && d.shell !== null
-          ? { ...d.shell }
-          : s.shell,
+      sizing: isStyleRecord(d.sizing) ? { ...d.sizing } : s.sizing,
+      layout: isStyleRecord(d.layout) ? { ...d.layout } : s.layout,
+      appearance: isStyleRecord(d.appearance) ? { ...d.appearance } : s.appearance,
       grid: {
         kind: 'grid',
         columns: typeof d.columns === 'number' && d.columns > 0 ? d.columns : s.grid.columns,
@@ -107,7 +110,7 @@ export const hydrateScreenEditor = async (
   });
 
   const currentPreset = DEVICE_PRESETS.find(
-    (p) => p.shell?.width === value.shell?.width && p.shell?.height === value.shell?.height,
+    (p) => p.sizing?.width === value.sizing?.width && p.sizing?.height === value.sizing?.height,
   );
   for (const preset of DEVICE_PRESETS) {
     const opt = document.createElement('option');
@@ -124,7 +127,7 @@ export const hydrateScreenEditor = async (
   deviceSelect.addEventListener('change', async () => {
     const preset = DEVICE_PRESETS.find((p) => p.label === deviceSelect.value);
     if (!preset) return;
-    await updateScreen(screenId, (s) => ({ ...s, shell: { ...preset.shell } }));
+    await updateScreen(screenId, (s) => ({ ...s, sizing: { ...preset.sizing } }));
     onAfterSave();
   });
 

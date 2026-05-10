@@ -1,9 +1,66 @@
 import { isScreen, isGridLayout, isFrame, isPlacement, screenDefaults, type Screen, type Frame, type Placement } from '../../schema/screen/screen';
-import { isComponent, applyDefaults } from '../../schema/component';
+import { isComponent, applyDefaults, STYLE_SPECS, STYLE_SPEC_KEYS } from '../../schema/component';
 import { headDefaults, isHead } from '../../schema/screen/head';
 import { allocateDefaultEntityName, assignDefaultEntityNames } from '../../schema/component/name';
 import { isStringRecord, isPositiveInteger, isFrameCandidate, type FrameCandidate } from './validate';
 import { migrateFrameKind, migrateEditorSource, migrateLegacyCanvasIds } from './migrate';
+
+const buildCssToSpecMap = (): Record<string, string> => {
+  const map: Record<string, string> = {};
+  for (const [specKey, spec] of Object.entries(STYLE_SPECS)) {
+    for (const entry of spec.entries) {
+      const targets = Array.isArray(entry.target) ? entry.target : [entry.target];
+      for (const cssKey of targets) {
+        if (!map[cssKey]) map[cssKey] = specKey;
+      }
+    }
+  }
+  return map;
+};
+
+const CSS_TO_SPEC = buildCssToSpecMap();
+
+const migrateStyleToSpecProps = (obj: Record<string, unknown>): Record<string, unknown> => {
+  const result: Record<string, unknown> = { ...obj };
+  // Remove legacy string-typed spec keys (old format stored them as strings)
+  for (const specKey of STYLE_SPEC_KEYS) {
+    if (typeof result[specKey] === 'string') delete result[specKey];
+  }
+  // Remove legacy flat style object and convert its CSS props to spec buckets
+  const style = result.style;
+  delete result.style;
+  if (!isStringRecord(style)) return result;
+  const buckets: Record<string, Record<string, string>> = {};
+  for (const [cssKey, value] of Object.entries(style)) {
+    const specKey = CSS_TO_SPEC[cssKey];
+    if (!specKey) continue;
+    buckets[specKey] = buckets[specKey] ?? {};
+    buckets[specKey][cssKey] = value;
+  }
+  for (const [specKey, bucket] of Object.entries(buckets)) {
+    const existing = result[specKey];
+    result[specKey] = { ...(isStringRecord(existing) ? existing : {}), ...bucket };
+  }
+  return result;
+};
+
+const migrateShellToSpecProps = (obj: Record<string, unknown>): Record<string, unknown> => {
+  const shell = obj.shell;
+  if (!isStringRecord(shell)) return obj;
+  const result: Record<string, unknown> = { ...obj };
+  delete result.shell;
+  const buckets: Record<string, Record<string, string>> = {};
+  for (const [cssKey, value] of Object.entries(shell)) {
+    const specKey = CSS_TO_SPEC[cssKey] ?? 'sizing';
+    buckets[specKey] = buckets[specKey] ?? {};
+    buckets[specKey][cssKey] = value;
+  }
+  for (const [specKey, bucket] of Object.entries(buckets)) {
+    const existing = result[specKey];
+    result[specKey] = { ...(isStringRecord(existing) ? existing : {}), ...bucket };
+  }
+  return result;
+};
 import type { LayoutBackend } from './r2';
 
 const DEFAULT_GRID_CANVAS_VIEWPORT = {
@@ -55,13 +112,16 @@ export const normalizeScreen = (value: unknown): Screen | null => {
     return null;
   }
 
-  const candidate = value as Record<string, unknown>;
+  const candidate = migrateShellToSpecProps(value as Record<string, unknown>);
   if (!isHead(candidate.head)) return null;
-  if (candidate.shell !== undefined && !isStringRecord(candidate.shell)) return null;
   if (!Array.isArray(candidate.frames) || !candidate.frames.every(isFrameCandidate)) return null;
 
   const frames = migrateEditorSource(
-    migrateLegacyCanvasIds((candidate.frames as FrameCandidate[]).map(migrateFrameKind)),
+    migrateLegacyCanvasIds(
+      (candidate.frames as FrameCandidate[])
+        .map(migrateFrameKind)
+        .map((f) => migrateStyleToSpecProps(f as Record<string, unknown>) as FrameCandidate),
+    ),
   );
   const namedFrames = assignDefaultEntityNames(frames);
   const placedFrames = namedFrames.filter((f) => isFrame(f)) as Frame[];
@@ -107,9 +167,13 @@ export const normalizeScreen = (value: unknown): Screen | null => {
 
   const normalized: Screen = {
     head: { ...headDefaults, ...(candidate.head as Screen['head']) },
-    shell: candidate.shell
-      ? { ...(candidate.shell as Record<string, string>) }
-      : { ...screenDefaults.shell },
+    sizing: isStringRecord(candidate.sizing)
+      ? { ...(candidate.sizing as Record<string, string>) }
+      : { ...screenDefaults.sizing },
+    ...(isStringRecord(candidate.layout) ? { layout: { ...candidate.layout } } : {}),
+    ...(isStringRecord(candidate.appearance) ? { appearance: { ...candidate.appearance } } : {}),
+    ...(isStringRecord(candidate.padding) ? { padding: { ...candidate.padding } } : {}),
+    ...(isStringRecord(candidate.margin) ? { margin: { ...candidate.margin } } : {}),
     grid,
     frames: normalizedFrames,
   };
@@ -158,7 +222,7 @@ export const normalizeComponentValue = async (
 ): Promise<Record<string, unknown> | null> => {
   if (!isComponent(value)) return null;
 
-  const component = value as Record<string, unknown>;
+  const component = migrateStyleToSpecProps(value as Record<string, unknown>);
   const kind = component.kind as string;
   const normalizedComponent = applyDefaults(kind, component);
   if (isMeaningfulString(normalizedComponent.name)) return normalizedComponent;

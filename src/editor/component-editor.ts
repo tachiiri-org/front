@@ -1,18 +1,6 @@
 import type { FormField } from '../schema/component';
 import componentEditorSchemaJson from './component-editor.schema.json';
 
-const isStyle = (value: unknown): value is Record<string, string> =>
-  typeof value === 'object' &&
-  value !== null &&
-  !Array.isArray(value) &&
-  Object.values(value as Record<string, unknown>).every((x) => typeof x === 'string');
-
-export type FieldStyleConfig = {
-  wrapper?: Record<string, string>;
-  label?: Record<string, string>;
-  input?: Record<string, string>;
-};
-
 export type EditorSection = {
   label?: string;
   source: 'placement' | 'properties';
@@ -25,18 +13,6 @@ export type EditorComponent = {
   name?: string;
   sourceCanvasId?: string;
   sections?: EditorSection[];
-  style?: Record<string, string>;
-  fieldStyle?: FieldStyleConfig;
-};
-
-const isFieldStyleConfig = (v: unknown): boolean => {
-  if (typeof v !== 'object' || v === null || Array.isArray(v)) return false;
-  const c = v as Record<string, unknown>;
-  return (
-    (c.wrapper === undefined || isStyle(c.wrapper)) &&
-    (c.label === undefined || isStyle(c.label)) &&
-    (c.input === undefined || isStyle(c.input))
-  );
 };
 
 const isEditorSection = (v: unknown): v is EditorSection => {
@@ -58,8 +34,6 @@ export const editorDefaults: EditorComponent = {
     { source: 'properties', label: 'properties' },
     { source: 'placement' },
   ],
-  style: {},
-  fieldStyle: { wrapper: {}, label: {}, input: {} },
 };
 
 export const editorSchema = componentEditorSchemaJson as FormField[];
@@ -72,8 +46,6 @@ export const isEditorComponent = (value: unknown): value is EditorComponent => {
     (c.name === undefined || typeof c.name === 'string') &&
     (c.sourceCanvasId === undefined || typeof c.sourceCanvasId === 'string') &&
     (c.sections === undefined ||
-      (Array.isArray(c.sections) && c.sections.every(isEditorSection))) &&
-    (c.style === undefined || isStyle(c.style)) &&
-    (c.fieldStyle === undefined || isFieldStyleConfig(c.fieldStyle))
+      (Array.isArray(c.sections) && c.sections.every(isEditorSection)))
   );
 };

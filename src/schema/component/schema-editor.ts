@@ -1,6 +1,5 @@
 import { isTableData, type TableData } from './kind/table';
 import { isSchemaField, normalizeFormFieldKind, type SchemaField } from './kind/form/field';
-import { getStyleSpec } from './style';
 
 const ALLOWED_FIELD_KINDS = new Set([
   'text',
@@ -16,9 +15,6 @@ const ALLOWED_FIELD_KINDS = new Set([
 const isSchemaFieldArray = (value: unknown): value is SchemaField[] =>
   Array.isArray(value) && value.every(isSchemaField);
 
-const isStringArray = (value: unknown): value is string[] =>
-  Array.isArray(value) && value.every((item) => typeof item === 'string');
-
 const parseJson = (value: unknown): unknown => {
   if (typeof value !== 'string' || value.trim() === '') return undefined;
   try {
@@ -27,12 +23,6 @@ const parseJson = (value: unknown): unknown => {
     return undefined;
   }
 };
-
-const isStringRecord = (value: unknown): value is Record<string, string> =>
-  typeof value === 'object' &&
-  value !== null &&
-  !Array.isArray(value) &&
-  Object.values(value as Record<string, unknown>).every((x) => typeof x === 'string');
 
 export type SchemaEditorCellIssueMap = Record<string, string>;
 
@@ -57,15 +47,6 @@ const fieldToRow = (
       label: typeof f.label === 'string' ? f.label : '',
       options_json: Array.isArray(f.options) ? JSON.stringify(f.options) : '',
       fields_json: Array.isArray(f.fields) ? JSON.stringify(f.fields) : '',
-      style_json:
-        typeof f.style === 'object' && f.style !== null ? JSON.stringify(f.style) : '',
-      style_spec_key:
-        typeof (f as Record<string, unknown>).styleSpecKey === 'string'
-          ? String((f as Record<string, unknown>).styleSpecKey)
-          : '',
-      keys_json: Array.isArray((f as Record<string, unknown>).keys)
-        ? JSON.stringify((f as Record<string, unknown>).keys)
-        : '',
       raw_json: JSON.stringify(field),
     },
   };
@@ -156,32 +137,6 @@ export const validateSchemaEditorTableDraftDetail = (draft: unknown): SchemaEdit
       }
     }
 
-    const styleJson = row.values.style_json;
-    if (typeof styleJson === 'string' && styleJson.trim() !== '') {
-      const parsed = parseJson(styleJson);
-      if (!isStringRecord(parsed)) {
-        markIssue(row.id, 'style_json', 'Invalid style JSON.');
-        setMessage(`Invalid style JSON: ${key || row.id}`);
-      }
-    }
-
-    const styleSpecKey = row.values.style_spec_key;
-    if (typeof styleSpecKey === 'string' && styleSpecKey.trim() !== '') {
-      const normalized = styleSpecKey.trim();
-      if (!getStyleSpec(normalized)) {
-        markIssue(row.id, 'style_spec_key', `Unknown style spec: ${normalized}`);
-        setMessage(`Unknown style spec: ${normalized}`);
-      }
-    }
-
-    const keysJson = row.values.keys_json;
-    if (typeof keysJson === 'string' && keysJson.trim() !== '') {
-      const parsed = parseJson(keysJson);
-      if (!isStringArray(parsed)) {
-        markIssue(row.id, 'keys_json', 'Invalid keys JSON.');
-        setMessage(`Invalid keys JSON: ${key || row.id}`);
-      }
-    }
   }
 
   return { message, rowIssues };
@@ -210,21 +165,6 @@ export const schemaEditorTableDataToSchema = (draft: TableData): SchemaField[] =
 
     const fields = parseJson(row.values.fields_json);
     if (isSchemaFieldArray(fields)) base.fields = fields;
-
-    const style = parseJson(row.values.style_json);
-    if (isStringRecord(style)) {
-      base.style = style;
-    }
-
-    const styleSpecKey = row.values.style_spec_key;
-    if (typeof styleSpecKey === 'string' && styleSpecKey.trim()) {
-      base.styleSpecKey = styleSpecKey.trim();
-    }
-
-    const keys = parseJson(row.values.keys_json);
-    if (isStringArray(keys)) {
-      base.keys = keys;
-    }
 
     return base as SchemaField;
   });

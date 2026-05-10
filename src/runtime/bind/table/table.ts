@@ -210,7 +210,6 @@ const renderPropertiesSection = (
   const wrap = document.createElement('div');
   const fields = [
     { key: 'name', label: 'name', placeholder: 'table name' },
-    { key: 'padding', label: 'padding', placeholder: '12px' },
   ] as const;
 
   for (const field of fields) {
@@ -1375,7 +1374,7 @@ export const hydrateTableEditor = async (
   componentData: Record<string, unknown>,
   onSave: (patch: Record<string, unknown>) => Promise<void>,
 ): Promise<void> => {
-  const ctx = buildFieldStyleContext(editorFrame.fieldStyle);
+  const ctx = buildFieldStyleContext();
   const draft = clone(applyDefaults('table', componentData)) as TableEditorDraft;
   let isDirty = false;
   const status = document.createElement('div');

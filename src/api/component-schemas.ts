@@ -28,21 +28,24 @@ const FORM_FIELD_KIND_OPTIONS = [
 const migrateSchemaField = (field: SchemaField): SchemaField => {
   const nestedFields = Array.isArray(field.fields) ? field.fields.map(migrateSchemaField) : undefined;
   const kind = normalizeFormFieldKind(String(field.kind));
-  const isLegacyPaddingField = kind === 'text' && field.key === 'padding';
 
-  if (isLegacyPaddingField) {
-    return {
-      ...field,
-      kind: 'style',
-      key: 'style',
-      label: field.label ?? 'padding',
-      styleSpecKey: 'padding',
-      ...(nestedFields ? { fields: nestedFields } : {}),
-    };
+  if (kind === 'style') {
+    const styleSpecKey = (field as Record<string, unknown>).styleSpecKey;
+    const key = typeof styleSpecKey === 'string' && styleSpecKey
+      ? styleSpecKey
+      : (typeof field.key === 'string' && field.key !== 'style' ? field.key : 'padding');
+    const result: SchemaField = { kind: 'style', key, label: field.label ?? key };
+    if (nestedFields) result.fields = nestedFields;
+    return result;
+  }
+
+  if (kind === 'text' && field.key === 'padding') {
+    return { kind: 'style', key: 'padding', label: field.label ?? 'padding' };
   }
 
   return {
     ...field,
+    kind,
     ...(nestedFields ? { fields: nestedFields } : {}),
   };
 };
@@ -62,9 +65,6 @@ export const SCHEMA_TABLE_SCHEMA: TableSchema = {
     },
     { key: 'options_json', label: 'options', type: 'string', hidden: true, nullable: true },
     { key: 'fields_json', label: 'fields', type: 'string', hidden: true, nullable: true },
-    { key: 'style_json', label: 'style', type: 'string', hidden: true, nullable: true },
-    { key: 'style_spec_key', label: 'style spec', type: 'string', hidden: true, nullable: true },
-    { key: 'keys_json', label: 'keys', type: 'string', hidden: true, nullable: true },
     { key: 'raw_json', label: 'raw', type: 'string', hidden: true, nullable: true },
   ],
 };

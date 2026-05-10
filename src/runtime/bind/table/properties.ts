@@ -1,10 +1,11 @@
 import type { FormField } from '../../../schema/component';
+import { isStyleRecord } from '../../../schema/component';
 import type { FieldStyleContext } from '../../render/editor/context';
 import { renderFormFromSchema } from '../../render/editor/form';
 
 const TABLE_PROPERTIES_SCHEMA: FormField[] = [
   { kind: 'text', key: 'name', label: 'name' },
-  { kind: 'style', key: 'style', label: 'padding', styleSpecKey: 'padding' },
+  { kind: 'style', key: 'padding', label: 'padding' },
 ];
 
 export const renderTablePropertiesContent = (
@@ -14,12 +15,7 @@ export const renderTablePropertiesContent = (
 ): HTMLElement => {
   const propertiesData: Record<string, unknown> = {
     name: typeof componentData.name === 'string' ? componentData.name : '',
-    style:
-      typeof componentData.style === 'object' &&
-      componentData.style !== null &&
-      !Array.isArray(componentData.style)
-        ? { ...(componentData.style as Record<string, string>) }
-        : {},
+    padding: isStyleRecord(componentData.padding) ? { ...componentData.padding } : {},
   };
 
   return renderFormFromSchema(
@@ -29,12 +25,7 @@ export const renderTablePropertiesContent = (
       const d = draft as Record<string, unknown>;
       await onSave({
         name: typeof d.name === 'string' ? d.name : '',
-        style:
-          typeof d.style === 'object' &&
-          d.style !== null &&
-          !Array.isArray(d.style)
-            ? { ...(d.style as Record<string, string>) }
-            : {},
+        padding: isStyleRecord(d.padding) ? { ...d.padding } : {},
       });
     },
     ctx,

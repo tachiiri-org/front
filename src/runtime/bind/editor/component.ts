@@ -73,7 +73,7 @@ export const hydrateComponentEditor = async (
   }
 
   const sections = (editorFrame.sections ?? editorDefaults.sections) as EditorSection[];
-  const ctx = buildFieldStyleContext(editorFrame.fieldStyle);
+  const ctx = buildFieldStyleContext();
   const selectEndpointVariables: Record<string, string> = selectedScreenId
     ? { screenId: selectedScreenId }
     : {};

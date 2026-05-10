@@ -52,8 +52,6 @@ export type StyleFieldComponent = {
   kind: 'style';
   key: string;
   label?: string;
-  keys?: string[];
-  styleSpecKey?: string;
 };
 
 export type StyleMapFieldComponent = StyleFieldComponent;
@@ -101,10 +99,7 @@ export const isStyleMapFieldComponent = (v: unknown): v is StyleFieldComponent =
   return (
     normalizeFormFieldKind(String(c.kind)) === 'style' &&
     typeof c.key === 'string' &&
-    (c.label === undefined || typeof c.label === 'string') &&
-    (c.keys === undefined ||
-      (Array.isArray(c.keys) && c.keys.every((key) => typeof key === 'string'))) &&
-    (c.styleSpecKey === undefined || typeof c.styleSpecKey === 'string')
+    (c.label === undefined || typeof c.label === 'string')
   );
 };
 

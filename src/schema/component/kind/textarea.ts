@@ -1,12 +1,6 @@
-import type { FormField } from './form/field';
 import type { SchemaField } from './form/field';
+import { STYLE_SPEC_KEYS, isStyleRecord } from '../style';
 import textareaSchemaJson from './textarea.schema.json';
-
-const isStyle = (value: unknown): value is Record<string, string> =>
-  typeof value === 'object' &&
-  value !== null &&
-  !Array.isArray(value) &&
-  Object.values(value as Record<string, unknown>).every((x) => typeof x === 'string');
 
 export type TextareaComponent = {
   kind: 'textarea';
@@ -14,7 +8,11 @@ export type TextareaComponent = {
   language?: 'json' | 'plain';
   value?: string;
   rows?: number;
-  style?: Record<string, string>;
+  padding?: Record<string, string>;
+  margin?: Record<string, string>;
+  sizing?: Record<string, string>;
+  layout?: Record<string, string>;
+  appearance?: Record<string, string>;
 };
 
 export const textareaDefaults: TextareaComponent = {
@@ -23,7 +21,6 @@ export const textareaDefaults: TextareaComponent = {
   language: 'plain',
   value: '',
   rows: 4,
-  style: {},
 };
 
 export const textareaSchema = textareaSchemaJson as SchemaField[];
@@ -37,6 +34,6 @@ export const isTextareaComponent = (value: unknown): value is TextareaComponent 
     (c.language === undefined || c.language === 'json' || c.language === 'plain') &&
     (c.value === undefined || typeof c.value === 'string') &&
     (c.rows === undefined || (typeof c.rows === 'number' && Number.isInteger(c.rows) && c.rows > 0)) &&
-    (c.style === undefined || isStyle(c.style))
+    STYLE_SPEC_KEYS.every((k) => c[k] === undefined || isStyleRecord(c[k]))
   );
 };

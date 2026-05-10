@@ -18,12 +18,6 @@ import { isTextareaComponent, textareaDefaults, textareaSchema } from './kind/te
 import { isTableComponent, tableDefaults, tableSchema } from './kind/table';
 import type { FormField, SchemaField } from './kind/form/field';
 
-export const isStyle = (value: unknown): value is Record<string, string> =>
-  typeof value === 'object' &&
-  value !== null &&
-  !Array.isArray(value) &&
-  Object.values(value as Record<string, unknown>).every((x) => typeof x === 'string');
-
 export { type ElementComponent, isElementComponent, elementDefaults, elementSchema } from './kind/element';
 export { type HeadingComponent, isHeadingComponent, headingDefaults, headingSchema } from './kind/heading';
 export { type ButtonComponent, isButtonComponent, buttonDefaults, buttonSchema } from './kind/button';
@@ -58,8 +52,8 @@ export {
 } from './kind/table';
 export { type FormField, type SchemaField, isFormField, isSchemaField } from './kind/form/field';
 export { normalizeFormFieldKind } from './kind/form/field';
-export { STYLE_SPECS, getStyleSpec } from './style';
-export type { StyleEntrySpec, StyleSpec, StyleValueTarget } from './style';
+export { STYLE_SPECS, STYLE_SPEC_KEYS, isStyleRecord, getStyleSpec } from './style';
+export type { StyleEntrySpec, StyleSpec, StyleValueTarget, StyleSpecKey, StyleSpecProps } from './style';
 
 export type Component =
   | ElementComponent

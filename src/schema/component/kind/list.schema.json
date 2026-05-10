@@ -1,5 +1,5 @@
 [
-  { "kind": "style", "key": "style", "label": "padding", "styleSpecKey": "padding" },
+  { "kind": "style", "key": "padding", "label": "padding" },
   {
     "kind": "select-field",
     "key": "resource",

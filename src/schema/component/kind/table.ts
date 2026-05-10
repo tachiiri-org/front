@@ -1,18 +1,8 @@
-import type { FormField } from './form/field';
 import type { SchemaField } from './form/field';
+import { STYLE_SPEC_KEYS, isStyleRecord } from '../style';
 import tableSchemaJson from './table.schema.json';
 
-const isStyle = (value: unknown): value is Record<string, string> =>
-  typeof value === 'object' &&
-  value !== null &&
-  !Array.isArray(value) &&
-  Object.values(value as Record<string, unknown>).every((x) => typeof x === 'string');
-
-const isStringRecord = (value: unknown): value is Record<string, string> =>
-  typeof value === 'object' &&
-  value !== null &&
-  !Array.isArray(value) &&
-  Object.values(value as Record<string, unknown>).every((x) => typeof x === 'string');
+const isStringRecord = isStyleRecord;
 
 export type TableSelectOption = {
   value: string;
@@ -104,8 +94,11 @@ export type TableComponent = {
   name?: string;
   schema: TableSchema;
   data: TableData;
-  padding?: string;
-  style?: Record<string, string>;
+  padding?: Record<string, string>;
+  margin?: Record<string, string>;
+  sizing?: Record<string, string>;
+  layout?: Record<string, string>;
+  appearance?: Record<string, string>;
 };
 
 export const tableDefaults: TableComponent = {
@@ -113,8 +106,6 @@ export const tableDefaults: TableComponent = {
   name: '',
   schema: { version: 1, columns: [] },
   data: { rows: [] },
-  padding: '',
-  style: {},
 };
 
 export const tableSchema = tableSchemaJson as SchemaField[];
@@ -229,7 +220,6 @@ export const isTableComponent = (value: unknown): value is TableComponent => {
     (c.name === undefined || typeof c.name === 'string') &&
     isTableSchema(c.schema) &&
     isTableData(c.data) &&
-    (c.padding === undefined || typeof c.padding === 'string') &&
-    (c.style === undefined || isStyle(c.style))
+    STYLE_SPEC_KEYS.every((k) => c[k] === undefined || isStyleRecord(c[k]))
   );
 };

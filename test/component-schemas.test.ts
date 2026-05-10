@@ -34,9 +34,6 @@ describe('component schemas', () => {
       'type',
       'options_json',
       'fields_json',
-      'style_json',
-      'style_spec_key',
-      'keys_json',
       'raw_json',
     ]);
     expect(columns.find((column) => column.key === 'type')?.label).toBe('type');
@@ -63,8 +60,6 @@ describe('component schemas', () => {
                 label: 'name',
                 options_json: '',
                 fields_json: '',
-                style_json: '',
-                style_spec_key: '',
               },
             },
           ],
@@ -79,7 +74,7 @@ describe('component schemas', () => {
     ]);
   });
 
-  it('stores style spec keys on style fields', async () => {
+  it('stores style fields with key as spec key', async () => {
     const { backend, writes } = makeBackend();
     const request = new Request('http://localhost/api/component-schemas/element', {
       method: 'PUT',
@@ -91,12 +86,10 @@ describe('component schemas', () => {
               id: '1',
               values: {
                 type: 'style',
-                key: 'shell',
-                label: 'shell',
+                key: 'padding',
+                label: 'padding',
                 options_json: '',
                 fields_json: '',
-                style_json: '',
-                style_spec_key: 'shell',
               },
             },
           ],
@@ -107,7 +100,7 @@ describe('component schemas', () => {
     const response = await handleComponentSchemaPut(request, backend, 'element');
     expect(response.status).toBe(200);
     expect(JSON.parse(writes['schemas/element.json'])).toEqual([
-      { kind: 'style', key: 'shell', label: 'shell', styleSpecKey: 'shell' },
+      { kind: 'style', key: 'padding', label: 'padding' },
     ]);
   });
 
@@ -129,7 +122,7 @@ describe('component schemas', () => {
     const response = await handleComponentSchemaDefinitionGet(backend, 'element');
     expect(response.status).toBe(200);
     await expect(response.json()).resolves.toEqual([
-      { kind: 'style', key: 'style', label: 'padding', styleSpecKey: 'padding' },
+      { kind: 'style', key: 'padding', label: 'padding' },
     ]);
   });
 });

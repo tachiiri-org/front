@@ -3,7 +3,8 @@ import {
   isCanvasComponent,
   isTextareaComponent,
   isTableComponent,
-  isStyle,
+  isStyleRecord,
+  STYLE_SPEC_KEYS,
   applyDefaults,
   type TableComponent,
   type Component,
@@ -14,20 +15,15 @@ import type { FrameState } from '../../../state';
 import { renderList, renderCanvas, renderEditor, renderTable } from './frame';
 import { renderEditableTable } from './table-editor';
 
-const applyPadding = (el: HTMLElement, c: Record<string, unknown>): void => {
-  if (typeof c.padding === 'string') el.style.padding = c.padding;
-};
-
-const applyStyleObject = (el: HTMLElement, c: Record<string, unknown>): void => {
-  if (isStyle(c.style)) Object.assign(el.style, c.style);
+const applySpecStyles = (el: HTMLElement, c: Record<string, unknown>): void => {
+  for (const specKey of STYLE_SPEC_KEYS) {
+    const v = c[specKey];
+    if (isStyleRecord(v)) Object.assign(el.style, v);
+  }
 };
 
 const isPositiveInteger = (value: unknown): value is number =>
   typeof value === 'number' && Number.isInteger(value) && value > 0;
-
-const isStringRecord = (v: unknown): v is Record<string, string> =>
-  typeof v === 'object' && v !== null && !Array.isArray(v) &&
-  Object.values(v as Record<string, unknown>).every((x) => typeof x === 'string');
 
 type RenderOptions = {
   screenId?: string;
@@ -44,17 +40,15 @@ const renderResolved = (
     const el = document.createElement(`h${level}` as keyof HTMLElementTagNameMap);
     el.dataset.frameId = id;
     if (typeof c.text === 'string') el.textContent = c.text;
-    applyStyleObject(el, c);
-    applyPadding(el, c);
+    applySpecStyles(el, c);
     return el;
   }
 
-  if (c.kind === 'element' && typeof c.tag === 'string' && isStringRecord(c.style)) {
+  if (c.kind === 'element' && typeof c.tag === 'string') {
     const el = document.createElement(c.tag as keyof HTMLElementTagNameMap);
-    Object.assign(el.style, c.style);
     el.dataset.frameId = id;
     if (typeof c.text === 'string') el.textContent = c.text;
-    applyPadding(el, c);
+    applySpecStyles(el, c);
     return el;
   }
 
@@ -62,8 +56,7 @@ const renderResolved = (
     const button = document.createElement('button');
     button.dataset.frameId = id;
     button.textContent = typeof c.text === 'string' ? c.text : String(c.kind);
-    applyStyleObject(button, c);
-    applyPadding(button, c);
+    applySpecStyles(button, c);
     return button;
   }
 
@@ -73,8 +66,7 @@ const renderResolved = (
     if (typeof c.targetComponentId === 'string') {
       select.dataset.targetComponentId = c.targetComponentId;
     }
-    applyStyleObject(select, c);
-    applyPadding(select, c);
+    applySpecStyles(select, c);
     return select;
   }
 
@@ -89,15 +81,14 @@ const renderResolved = (
       p.textContent = c.title;
       form.appendChild(p);
     }
-    applyStyleObject(form, c);
-    applyPadding(form, c);
+    applySpecStyles(form, c);
     return form;
   }
 
   if (c.kind === 'table' && isTableComponent(c)) {
     const wrapper = renderTable(id, c);
     const table = document.createElement('table');
-    applyStyleObject(wrapper, c);
+    applySpecStyles(wrapper, c);
     table.style.width = '100%';
     table.style.borderCollapse = 'collapse';
     table.style.fontSize = '12px';
@@ -138,7 +129,7 @@ const renderResolved = (
   const pre = document.createElement('pre');
   pre.dataset.frameId = id;
   pre.textContent = JSON.stringify(component, null, 2);
-  applyPadding(pre, c);
+  applySpecStyles(pre, c);
   return pre;
 };
 
@@ -148,7 +139,7 @@ const renderTextareaComponent = (id: string, c: Record<string, unknown>): HTMLEl
   wrapper.style.display = 'flex';
   wrapper.style.flexDirection = 'column';
   wrapper.style.gap = '4px';
-  if (isStringRecord(c.style)) Object.assign(wrapper.style, c.style);
+  applySpecStyles(wrapper, c);
 
   const ta = document.createElement('textarea');
   ta.style.flex = '1';

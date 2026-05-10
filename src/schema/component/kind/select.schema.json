@@ -11,5 +11,5 @@
     ]
   },
   { "kind": "text-field", "key": "targetComponentId", "label": "targetComponentId" },
-  { "kind": "style", "key": "style", "label": "padding", "styleSpecKey": "padding" }
+  { "kind": "style", "key": "padding", "label": "padding" }
 ]

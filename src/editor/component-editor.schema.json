@@ -34,5 +34,6 @@
         "label": "defaultCollapsed"
       }
     ]
-  }
+  },
+  { "kind": "style", "key": "padding", "label": "padding" }
 ]

@@ -1,12 +1,6 @@
-import type { FormField } from './form/field';
 import type { SchemaField } from './form/field';
+import { STYLE_SPEC_KEYS, isStyleRecord } from '../style';
 import selectSchemaJson from './select.schema.json';
-
-const isStyle = (value: unknown): value is Record<string, string> =>
-  typeof value === 'object' &&
-  value !== null &&
-  !Array.isArray(value) &&
-  Object.values(value as Record<string, unknown>).every((x) => typeof x === 'string');
 
 export type SelectOption = {
   value: string;
@@ -29,8 +23,11 @@ export type SelectComponent = {
   name?: string;
   source: SelectSource;
   targetComponentId?: string;
-  padding?: string;
-  style?: Record<string, string>;
+  padding?: Record<string, string>;
+  margin?: Record<string, string>;
+  sizing?: Record<string, string>;
+  layout?: Record<string, string>;
+  appearance?: Record<string, string>;
 };
 
 export const isSelectOption = (value: unknown): value is SelectOption => {
@@ -48,7 +45,7 @@ export const isSelectSource = (value: unknown): value is SelectSource => {
     (c.itemsPath === undefined || typeof c.itemsPath === 'string') &&
     (c.valueKey === undefined || typeof c.valueKey === 'string') &&
     (c.labelKey === undefined || typeof c.labelKey === 'string') &&
-    (c.headers === undefined || isStyle(c.headers))
+    (c.headers === undefined || isStyleRecord(c.headers))
   );
 };
 
@@ -57,8 +54,6 @@ export const selectDefaults: SelectComponent = {
   name: '',
   source: { kind: 'endpoint', url: '', itemsPath: '', valueKey: '', labelKey: '', headers: {} },
   targetComponentId: '',
-  padding: '',
-  style: {},
 };
 
 export const selectSchema = selectSchemaJson as SchemaField[];
@@ -71,7 +66,6 @@ export const isSelectComponent = (value: unknown): value is SelectComponent => {
     (c.name === undefined || typeof c.name === 'string') &&
     isSelectSource(c.source) &&
     (c.targetComponentId === undefined || typeof c.targetComponentId === 'string') &&
-    (c.padding === undefined || typeof c.padding === 'string') &&
-    (c.style === undefined || isStyle(c.style))
+    STYLE_SPEC_KEYS.every((k) => c[k] === undefined || isStyleRecord(c[k]))
   );
 };

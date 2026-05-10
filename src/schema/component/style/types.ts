@@ -13,3 +13,6 @@ export type StyleSpec = {
   entries: StyleEntrySpec[];
   allowCustom?: boolean;
 };
+
+export type StyleSpecKey = 'padding' | 'margin' | 'sizing' | 'layout' | 'appearance';
+export type StyleSpecProps = Partial<Record<StyleSpecKey, Record<string, string>>>;
