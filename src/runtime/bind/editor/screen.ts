@@ -1,4 +1,5 @@
 import type { FormField } from '../../../schema/component';
+import { isStyle } from '../../../schema/component';
 import { headDefaults, headSchema } from '../../../schema/screen/head';
 import { isHead, type EditorFrame } from '../../../schema/screen/screen';
 import { buildFieldStyleContext } from '../../render/editor/context';
@@ -19,6 +20,7 @@ const screenEditSchema: FormField[] = [
     label: 'head',
     fields: headSchema,
   },
+  { kind: 'style-map-field', key: 'shell', label: 'shell' },
   { kind: 'number-field', key: 'columns', label: 'columns' },
   { kind: 'number-field', key: 'rows', label: 'rows' },
 ];
@@ -38,6 +40,7 @@ export const hydrateScreenEditor = async (
 
   const editData: Record<string, unknown> = {
     head: { ...headDefaults, ...value.head },
+    shell: value.shell ?? {},
     columns: value.grid.columns,
     rows: value.grid.rows,
   };
@@ -51,6 +54,10 @@ export const hydrateScreenEditor = async (
         isHead(nextHead) && typeof nextHead === 'object' && nextHead !== null
           ? { ...s.head, ...nextHead }
           : s.head,
+      shell:
+        isStyle(d.shell) && typeof d.shell === 'object' && d.shell !== null
+          ? { ...d.shell }
+          : s.shell,
       grid: {
         kind: 'grid',
         columns: typeof d.columns === 'number' && d.columns > 0 ? d.columns : s.grid.columns,

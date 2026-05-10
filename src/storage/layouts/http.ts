@@ -8,6 +8,12 @@ type ListItem = {
   label: string;
 };
 
+type JsonNormalizer = (
+  backend: LayoutBackend,
+  id: string,
+  value: unknown,
+) => Promise<unknown | null> | unknown | null;
+
 const buildJsonFileItems = async (
   backend: LayoutBackend,
   prefixKey: string,
@@ -31,25 +37,10 @@ const buildJsonFileItems = async (
   return [...seen.values()].sort((a, b) => a.label.localeCompare(b.label));
 };
 
-export const handleScreenGet = async (backend: LayoutBackend, id: string): Promise<Response> => {
-  const body = await backend.getText(`${id}.json`);
-  if (body === null) return new Response('Not Found', { status: 404 });
-  try {
-    const value = JSON.parse(body) as unknown;
-    const normalized = normalizeScreen(value);
-    if (!normalized) return new Response('Invalid screen', { status: 400 });
+const normalizeScreenJson: JsonNormalizer = (_, __, value) => normalizeScreen(value);
 
-    if (JSON.stringify(value) !== JSON.stringify(normalized)) {
-      await backend.putText(`${id}.json`, JSON.stringify(normalized));
-    }
-
-    return new Response(JSON.stringify(normalized), {
-      headers: { 'Content-Type': 'application/json' },
-    });
-  } catch {
-    return new Response('Invalid JSON', { status: 400 });
-  }
-};
+export const handleScreenGet = async (backend: LayoutBackend, id: string): Promise<Response> =>
+  handleResourceGet(backend, '', id, normalizeScreenJson);
 
 export const handleScreensJsonFilesGet = async (backend: LayoutBackend): Promise<Response> => {
   const items = await buildJsonFileItems(backend, '', { excludeNested: true });
@@ -80,18 +71,8 @@ export const handleJsonFilesGet = async (backend: LayoutBackend, screenId: strin
   return new Response(JSON.stringify({ items }), { headers: { 'Content-Type': 'application/json' } });
 };
 
-export const handleScreenPut = async (request: Request, backend: LayoutBackend, id: string): Promise<Response> => {
-  const body = await request.text();
-  try {
-    const value = JSON.parse(body) as unknown;
-    const normalized = normalizeScreen(value);
-    if (!normalized) return new Response('Invalid screen', { status: 400 });
-    await backend.putText(`${id}.json`, JSON.stringify(normalized));
-  } catch {
-    return new Response('Invalid JSON', { status: 400 });
-  }
-  return new Response(null, { status: 204 });
-};
+export const handleScreenPut = async (request: Request, backend: LayoutBackend, id: string): Promise<Response> =>
+  handleResourcePut(request, backend, '', id, normalizeScreenJson);
 
 export const deleteScreenObjects = async (backend: LayoutBackend, screenId: string): Promise<void> => {
   await backend.deleteKey(`${screenId}.json`);
@@ -186,17 +167,44 @@ export const handleResourceListGet = async (backend: LayoutBackend, storagePrefi
   });
 };
 
-export const handleResourceGet = async (backend: LayoutBackend, storagePrefix: string, id: string): Promise<Response> => {
+export const handleResourceGet = async (
+  backend: LayoutBackend,
+  storagePrefix: string,
+  id: string,
+  normalize?: JsonNormalizer,
+): Promise<Response> => {
   const body = await backend.getText(`${storagePrefix}${id}.json`);
   if (body === null) return new Response('Not Found', { status: 404 });
-  return new Response(body, { headers: { 'Content-Type': 'application/json' } });
+  if (!normalize) return new Response(body, { headers: { 'Content-Type': 'application/json' } });
+  try {
+    const value = JSON.parse(body) as unknown;
+    const normalized = await normalize(backend, id, value);
+    if (!normalized) return new Response('Invalid JSON', { status: 400 });
+    const normalizedBody = JSON.stringify(normalized);
+    if (body !== normalizedBody) {
+      await backend.putText(`${storagePrefix}${id}.json`, normalizedBody);
+    }
+    return new Response(normalizedBody, {
+      headers: { 'Content-Type': 'application/json' },
+    });
+  } catch {
+    return new Response('Invalid JSON', { status: 400 });
+  }
 };
 
-export const handleResourcePut = async (request: Request, backend: LayoutBackend, storagePrefix: string, id: string): Promise<Response> => {
+export const handleResourcePut = async (
+  request: Request,
+  backend: LayoutBackend,
+  storagePrefix: string,
+  id: string,
+  normalize?: JsonNormalizer,
+): Promise<Response> => {
   const body = await request.text();
   try {
     const parsed = JSON.parse(body) as unknown;
-    await backend.putText(`${storagePrefix}${id}.json`, JSON.stringify(parsed));
+    const normalized = normalize ? await normalize(backend, id, parsed) : parsed;
+    if (!normalized) return new Response('Invalid JSON', { status: 400 });
+    await backend.putText(`${storagePrefix}${id}.json`, JSON.stringify(normalized));
   } catch {
     return new Response('Invalid JSON', { status: 400 });
   }

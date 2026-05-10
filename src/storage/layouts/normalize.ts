@@ -1,5 +1,5 @@
-import { isScreen, isGridLayout, isFrame, isPlacement, type Screen, type Frame, type Placement } from '../../schema/screen/screen';
-import { isComponent } from '../../schema/component';
+import { isScreen, isGridLayout, isFrame, isPlacement, screenDefaults, type Screen, type Frame, type Placement } from '../../schema/screen/screen';
+import { isComponent, applyDefaults } from '../../schema/component';
 import { headDefaults, isHead } from '../../schema/screen/head';
 import { allocateDefaultEntityName, assignDefaultEntityNames } from '../../schema/component/name';
 import { isStringRecord, isPositiveInteger, isFrameCandidate, type FrameCandidate } from './validate';
@@ -107,7 +107,9 @@ export const normalizeScreen = (value: unknown): Screen | null => {
 
   const normalized: Screen = {
     head: { ...headDefaults, ...(candidate.head as Screen['head']) },
-    shell: candidate.shell as Record<string, string> | undefined,
+    shell: candidate.shell
+      ? { ...(candidate.shell as Record<string, string>) }
+      : { ...screenDefaults.shell },
     grid,
     frames: normalizedFrames,
   };
@@ -157,7 +159,9 @@ export const normalizeComponentValue = async (
   if (!isComponent(value)) return null;
 
   const component = value as Record<string, unknown>;
-  if (isMeaningfulString(component.name)) return component;
+  const kind = component.kind as string;
+  const normalizedComponent = applyDefaults(kind, component);
+  if (isMeaningfulString(normalizedComponent.name)) return normalizedComponent;
 
   const componentKey = `${screenId}/components/${componentId}.json`;
   const hasNameKey = Object.prototype.hasOwnProperty.call(component, 'name');
@@ -170,7 +174,7 @@ export const normalizeComponentValue = async (
         if (isComponent(existingValue)) {
           const existingName = (existingValue as Record<string, unknown>).name;
           if (isMeaningfulString(existingName)) {
-            return { ...component, name: existingName };
+            return { ...normalizedComponent, name: existingName };
           }
         }
       } catch {
@@ -180,9 +184,8 @@ export const normalizeComponentValue = async (
   }
 
   const siblings = await listScreenComponents(backend, screenId, componentKey);
-  const kind = component.kind as string;
   return {
-    ...component,
+    ...normalizedComponent,
     name: allocateDefaultEntityName(siblings, kind),
   };
 };

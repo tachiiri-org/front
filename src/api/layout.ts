@@ -1,9 +1,8 @@
 import { createLayoutsBackend, type LayoutsEnv, type LayoutBackend } from '../storage/layouts/r2';
+import { normalizeScreen } from '../storage/layouts/normalize';
 import {
-  handleScreenGet,
   handleComponentGet,
   handleJsonFilesGet,
-  handleScreenPut,
   handleScreenDelete,
   handleScreenRename,
   handleComponentPut,
@@ -28,14 +27,16 @@ type ResourceConfig = {
   handlePut?: (request: Request, backend: LayoutBackend, id: string) => Promise<Response>;
   handleDelete?: (backend: LayoutBackend, id: string) => Promise<Response>;
   handleRename?: (request: Request, backend: LayoutBackend, id: string) => Promise<Response>;
+  normalizeGet?: (backend: LayoutBackend, id: string, value: unknown) => Promise<unknown | null>;
+  normalizePut?: (backend: LayoutBackend, id: string, value: unknown) => Promise<unknown | null>;
 };
 
 const RESOURCE_CONFIGS: ResourceConfig[] = [
   {
     name: 'layouts',
     storagePrefix: '',
-    handleGet: handleScreenGet,
-    handlePut: handleScreenPut,
+    normalizeGet: async (_backend, _id, value) => normalizeScreen(value),
+    normalizePut: async (_backend, _id, value) => normalizeScreen(value),
     handleDelete: handleScreenDelete,
     handleRename: handleScreenRename,
   },
@@ -100,12 +101,12 @@ export const handleApiRequest = async (request: Request, env: Env): Promise<Resp
     if (request.method === 'GET') {
       return config.handleGet
         ? config.handleGet(backend, id)
-        : handleResourceGet(backend, config.storagePrefix, id);
+        : handleResourceGet(backend, config.storagePrefix, id, config.normalizeGet);
     }
     if (request.method === 'PUT') {
       return config.handlePut
         ? config.handlePut(request, backend, id)
-        : handleResourcePut(request, backend, config.storagePrefix, id);
+        : handleResourcePut(request, backend, config.storagePrefix, id, config.normalizePut);
     }
     if (request.method === 'DELETE') {
       return config.handleDelete

@@ -16,6 +16,7 @@
 
 - `component` 側の properties editor を schema 登録ベースに拡張済み
 - `screen.head` を schema ベースで編集できるようにし、`lang` と `meta` も扱えるようにした
+- `screen.shell` を既存 screen editor で編集できるようにし、保存時に `style` map として検証されるようにした
 - `normalizeScreen` は `head` の defaults を補うように揃えた
 - `table` の JSON editor を `render/editor` 側の共通部品へ切り出した
 - component editor の properties schema を kind ごとの登録表に寄せた
@@ -30,7 +31,7 @@
 
 現状の保存経路:
 
-- `handleResourcePut` は JSON の parse だけで保存している
+- `handleResourcePut` は resource ごとの normalizer を通して保存する
 - `handleScreenPut` と `handleComponentPut` は normalize を通す
 - UI 側の `updateScreen` / `putComponent` は最終的に R2 API を通す
 
