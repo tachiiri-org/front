@@ -12,6 +12,7 @@ import {
 import { type Frame, isFrameRef } from '../../../schema/screen/screen';
 import { putComponent, putComponentSchema, updateScreen } from '../../bind/editor/save';
 import { renderTable } from './frame';
+import { showToast } from '../toast';
 
 type TableEditorDraft = TableComponent;
 type TableSaveTarget =
@@ -230,16 +231,10 @@ const renderEditableTable = (
   let pendingRowValues = makeRowFromSchema(draft.schema);
   let showHiddenColumns = false;
 
-  const status = document.createElement('div');
-  status.style.fontSize = '10px';
-  status.style.fontFamily = 'monospace';
-  status.style.minHeight = '14px';
-  status.style.color = 'rgba(0,0,0,0.6)';
-
   let isDirty = false;
   const saveBtn = document.createElement('button');
   saveBtn.type = 'button';
-  saveBtn.textContent = 'Save all';
+  saveBtn.textContent = 'Save';
   Object.assign(saveBtn.style, {
     fontSize: '11px',
     padding: '2px 10px',
@@ -252,15 +247,11 @@ const renderEditableTable = (
 
   const updateStatus = (): void => {
     if (!saveTarget) {
-      status.textContent = '';
-      status.style.color = 'rgba(0,0,0,0.6)';
       saveBtn.disabled = true;
       saveBtn.style.opacity = '0.65';
       saveBtn.style.cursor = 'not-allowed';
       return;
     }
-    status.textContent = isDirty ? 'Unsaved changes' : 'Saved';
-    status.style.color = 'rgba(0,0,0,0.6)';
     saveBtn.disabled = !isDirty;
     saveBtn.style.opacity = isDirty ? '1' : '0.65';
     saveBtn.style.cursor = isDirty ? 'pointer' : 'not-allowed';
@@ -281,20 +272,17 @@ const renderEditableTable = (
     if (saveTarget.kind === 'component-schema') {
       const message = validateSchemaEditorTableDraftDetail(draft.data).message;
       if (message) {
-        status.style.color = '#c0392b';
-        status.textContent = message;
+        showToast(message, 'error');
         return;
       }
     }
-    status.style.color = 'rgba(0,0,0,0.6)';
-    status.textContent = 'Saving...';
     try {
       await persistTableDraft(draft, saveTarget);
       isDirty = false;
       updateStatus();
+      showToast('Saved', 'success');
     } catch (error) {
-      status.style.color = '#c0392b';
-      status.textContent = error instanceof Error ? error.message : String(error);
+      showToast(error instanceof Error ? error.message : String(error), 'error');
     }
   };
 
@@ -530,7 +518,6 @@ const renderEditableTable = (
     hiddenLabel.appendChild(hiddenToggle);
     hiddenLabel.appendChild(document.createTextNode('show hidden columns'));
     toolbar.appendChild(hiddenLabel);
-    toolbar.appendChild(status);
     wrapper.appendChild(toolbar);
 
     const visibleColumns = draft.schema.columns.filter(
@@ -717,7 +704,7 @@ const renderEditableTable = (
 
   saveBtn.addEventListener('click', () => {
     void saveDraft().catch((error: unknown) => {
-      status.textContent = error instanceof Error ? error.message : String(error);
+      showToast(error instanceof Error ? error.message : String(error), 'error');
     });
   });
 
