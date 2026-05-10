@@ -8,7 +8,5 @@
       { "value": "layouts", "label": "layouts" }
     ]
   },
-  { "kind": "text-field", "key": "targetComponentId", "label": "targetComponentId" },
-  { "kind": "style-field", "key": "style", "label": "style" },
-  { "kind": "style-field", "key": "itemStyle", "label": "itemStyle" }
+  { "kind": "text-field", "key": "targetComponentId", "label": "targetComponentId" }
 ]

@@ -1,5 +1,4 @@
 [
   { "kind": "text-field", "key": "language", "label": "language" },
-  { "kind": "number-field", "key": "rows", "label": "rows" },
-  { "kind": "style-field", "key": "style", "label": "style" }
+  { "kind": "number-field", "key": "rows", "label": "rows" }
 ]

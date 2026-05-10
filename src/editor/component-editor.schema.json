@@ -12,7 +12,6 @@
       "labelKey": "label"
     }
   },
-  { "kind": "style-field", "key": "style", "label": "style" },
   {
     "kind": "object-list",
     "key": "sections",
@@ -34,16 +33,6 @@
         "key": "defaultCollapsed",
         "label": "defaultCollapsed"
       }
-    ]
-  },
-  {
-    "kind": "field-group",
-    "key": "fieldStyle",
-    "label": "fieldStyle",
-    "fields": [
-      { "kind": "style-field", "key": "wrapper", "label": "wrapper" },
-      { "kind": "style-field", "key": "label", "label": "label" },
-      { "kind": "style-field", "key": "input", "label": "input" }
     ]
   }
 ]

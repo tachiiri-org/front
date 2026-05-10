@@ -1,7 +1,5 @@
 [
   { "kind": "text-field", "key": "padding", "label": "padding" },
   { "kind": "number-field", "key": "viewportWidth", "label": "viewportWidth" },
-  { "kind": "number-field", "key": "viewportHeight", "label": "viewportHeight" },
-  { "kind": "style-field", "key": "style", "label": "style" },
-  { "kind": "style-field", "key": "cellStyle", "label": "cellStyle" }
+  { "kind": "number-field", "key": "viewportHeight", "label": "viewportHeight" }
 ]

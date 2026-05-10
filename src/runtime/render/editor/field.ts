@@ -10,57 +10,6 @@ import { getAtPath, setAtPath, blankFromSchema } from '../../bind/field/path';
 const mk = <K extends keyof HTMLElementTagNameMap>(tag: K): HTMLElementTagNameMap[K] =>
   document.createElement(tag);
 
-const COMMON_STYLE_KEYS = [
-  'padding',
-  'paddingTop',
-  'paddingRight',
-  'paddingBottom',
-  'paddingLeft',
-  'margin',
-  'marginTop',
-  'marginRight',
-  'marginBottom',
-  'marginLeft',
-  'width',
-  'height',
-  'minWidth',
-  'minHeight',
-  'maxWidth',
-  'maxHeight',
-  'display',
-  'gap',
-  'flex',
-  'flexDirection',
-  'alignItems',
-  'justifyContent',
-  'textAlign',
-  'fontSize',
-  'fontWeight',
-  'color',
-  'background',
-  'backgroundColor',
-  'border',
-  'borderRadius',
-  'boxShadow',
-  'overflow',
-  'overflowX',
-  'overflowY',
-  'position',
-  'inset',
-  'top',
-  'right',
-  'bottom',
-  'left',
-  'cursor',
-  'whiteSpace',
-  'opacity',
-  'transform',
-  'transformOrigin',
-  'userSelect',
-  'pointerEvents',
-  'lineHeight',
-] as const;
-
 function renderTextField(
   label: string,
   path: string,
@@ -346,7 +295,7 @@ function renderStyleMap(
     Array.isArray((field as Record<string, unknown>).keys) &&
     ((field as Record<string, unknown>).keys as unknown[]).every((key) => typeof key === 'string')
       ? ((field as Record<string, unknown>).keys as string[])
-      : [...COMMON_STYLE_KEYS];
+      : [];
 
   const renderRows = (): void => {
     list.innerHTML = '';

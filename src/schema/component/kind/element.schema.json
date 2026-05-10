@@ -1,6 +1,5 @@
 [
   { "kind": "text-field", "key": "tag", "label": "tag" },
-  { "kind": "style-field", "key": "style", "label": "style" },
   { "kind": "text-field", "key": "text", "label": "text" },
   { "kind": "text-field", "key": "padding", "label": "padding" }
 ]

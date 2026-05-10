@@ -31,6 +31,7 @@ describe('component schemas', () => {
       'options_json',
       'fields_json',
       'style_json',
+      'keys_json',
       'raw_json',
     ]);
     expect(columns.find((column) => column.key === 'type')?.label).toBe('type');
