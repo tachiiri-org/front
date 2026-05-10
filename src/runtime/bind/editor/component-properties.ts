@@ -2,17 +2,8 @@ import {
   componentSchemas,
   isSchemaField,
   normalizeFormFieldKind,
-  type FormField,
   type SchemaField,
 } from '../../../schema/component';
-
-const NAME_FIELD: FormField = { kind: 'text', key: 'name', label: 'name' };
-
-const withName = (fields: SchemaField[] | null): SchemaField[] => {
-  if (!fields) return [NAME_FIELD];
-  if (fields.some((field) => field.key === 'name')) return fields;
-  return [NAME_FIELD, ...fields];
-};
 
 const isSchemaFieldArray = (value: unknown): value is SchemaField[] =>
   Array.isArray(value) && value.every(isSchemaField);
@@ -63,9 +54,7 @@ export const loadComponentPropertySchema = async (
   componentKind: string | null,
 ): Promise<SchemaField[] | null> => {
   if (!componentKind) return null;
-  const schema = await loadSchemaDefinition(componentKind);
-  if (!schema) return [NAME_FIELD];
-  return withName(schema);
+  return loadSchemaDefinition(componentKind);
 };
 
 export const pickEditableComponentData = (
@@ -74,10 +63,6 @@ export const pickEditableComponentData = (
   schema: SchemaField[] | null = null,
 ): Record<string, unknown> => {
   const fields = schema ?? (componentKind ? componentSchemas[componentKind] ?? null : null);
-  if (!fields) {
-    const editable: Record<string, unknown> = {};
-    if (Object.prototype.hasOwnProperty.call(data, 'name')) editable.name = data.name;
-    return editable;
-  }
+  if (!fields) return {};
   return pickEditableData(data, fields);
 };

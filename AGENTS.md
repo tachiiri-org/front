@@ -1,1 +1,2 @@
 - follow principles in README.md
+- 作業前に `README.md` を読む

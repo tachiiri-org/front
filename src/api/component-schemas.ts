@@ -1,5 +1,4 @@
 import {
-  componentSchemas,
   COMPONENT_KINDS,
   type SchemaField,
 } from '../schema/component';
@@ -62,7 +61,7 @@ const loadStoredSchema = async (backend: LayoutBackend, kind: string): Promise<S
     }
   }
   if (kind === 'component-editor') return editorSchema as SchemaField[];
-  return componentSchemas[kind] ?? [];
+  return [];
 };
 
 export const handleComponentSchemasList = (): Response =>
