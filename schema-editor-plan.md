@@ -17,6 +17,9 @@
 - `component` 側の properties editor を schema 登録ベースに拡張済み
 - `screen.head` を schema ベースで編集できるようにし、`lang` と `meta` も扱えるようにした
 - `normalizeScreen` は `head` の defaults を補うように揃えた
+- `table` の JSON editor を `render/editor` 側の共通部品へ切り出した
+- component editor の properties schema を kind ごとの登録表に寄せた
+- resource 保存も parse だけでなく正規化して通すように揃えた
 - 以後の細かい進捗はローカルコミット単位で追うので、必要なら直近コミットを参照する
 
 ## 論点

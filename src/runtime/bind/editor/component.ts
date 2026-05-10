@@ -1,13 +1,11 @@
 import {
   isComponent,
   componentDefaults,
-  componentSchemas,
   COMPONENT_KINDS,
-  type FormField,
 } from '../../../schema/component';
 import { isFrameRef, isCanvasFrame, type EditorFrame } from '../../../schema/screen/screen';
 import type { EditorSection } from '../../../editor/component-editor';
-import { editorDefaults, editorSchema } from '../../../editor/component-editor';
+import { editorDefaults } from '../../../editor/component-editor';
 import { getEntityDisplayName } from '../../../schema/component/name';
 import { buildFieldStyleContext, type FieldStyleContext } from '../../render/editor/context';
 import { domMap } from '../../../state';
@@ -15,48 +13,7 @@ import { putComponent, updateScreen, fetchScreen } from './save';
 import { appendSection, createLabeledRow, renderSectionContent } from '../../render/editor/section';
 import { renderPlacementRow } from '../../render/editor/placement';
 import { hydrateTableEditor } from '../table/table';
-
-const getPropertiesSchema = (componentKind: string | null): FormField[] | null => {
-  if (!componentKind) return null;
-  if (componentKind === 'component-editor') return editorSchema;
-  return componentSchemas[componentKind] ?? null;
-};
-
-const pickEditableData = (
-  data: Record<string, unknown>,
-  fields: FormField[] | null,
-): Record<string, unknown> => {
-  if (!fields) {
-    const editable: Record<string, unknown> = {};
-    if (Object.prototype.hasOwnProperty.call(data, 'name')) editable.name = data.name;
-    return editable;
-  }
-
-  const picked: Record<string, unknown> = {};
-  for (const field of fields) {
-    if (!('key' in field) || !field.key) continue;
-    const value = data[field.key];
-    if (field.kind === 'field-group') {
-      if (typeof value === 'object' && value !== null && !Array.isArray(value)) {
-        picked[field.key] = pickEditableData(value as Record<string, unknown>, field.fields);
-      } else {
-        picked[field.key] = pickEditableData({}, field.fields);
-      }
-      continue;
-    }
-    if (field.kind === 'object-list-field') {
-      picked[field.key] = Array.isArray(value)
-        ? value.map((item) =>
-          typeof item === 'object' && item !== null && !Array.isArray(item)
-            ? pickEditableData(item as Record<string, unknown>, field.fields)
-            : pickEditableData({}, field.fields))
-        : [];
-      continue;
-    }
-    if (value !== undefined) picked[field.key] = value;
-  }
-  return picked;
-};
+import { getComponentPropertySchema, pickEditableComponentData } from './component-properties';
 
 const renderPropertiesSection = (
   componentData: Record<string, unknown>,
@@ -65,8 +22,8 @@ const renderPropertiesSection = (
   ctx: FieldStyleContext,
 ): HTMLElement =>
   renderSectionContent(
-    pickEditableData(componentData, getPropertiesSchema(componentKind)),
-    getPropertiesSchema(componentKind),
+    pickEditableComponentData(componentData, componentKind),
+    getComponentPropertySchema(componentKind),
     async (draft) => onSave(draft as Record<string, unknown>),
     ctx,
     true,

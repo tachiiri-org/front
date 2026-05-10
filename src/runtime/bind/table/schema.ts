@@ -1,5 +1,5 @@
 import { isTableSchema } from '../../../schema/component';
-import { renderJsonEditorRow } from './json-editor';
+import { renderJsonEditorRow } from '../../render/editor/json-editor';
 
 export const validateTableSchemaDraft = (draft: unknown): string | null => {
   if (!isTableSchema(draft)) return 'Invalid table schema.';

@@ -11,7 +11,7 @@ import {
 import type { EditorFrame } from '../../../schema/screen/screen';
 import { appendSection, createLabeledRow } from '../../render/editor/section';
 import { buildFieldStyleContext, type FieldStyleContext } from '../../render/editor/context';
-import { renderJsonEditorRow } from './json-editor';
+import { renderJsonEditorRow } from '../../render/editor/json-editor';
 import { validateTableSchemaDraft } from './schema';
 import { validateTableDataDraft } from './data';
 

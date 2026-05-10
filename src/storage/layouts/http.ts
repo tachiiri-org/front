@@ -195,11 +195,11 @@ export const handleResourceGet = async (backend: LayoutBackend, storagePrefix: s
 export const handleResourcePut = async (request: Request, backend: LayoutBackend, storagePrefix: string, id: string): Promise<Response> => {
   const body = await request.text();
   try {
-    JSON.parse(body);
+    const parsed = JSON.parse(body) as unknown;
+    await backend.putText(`${storagePrefix}${id}.json`, JSON.stringify(parsed));
   } catch {
     return new Response('Invalid JSON', { status: 400 });
   }
-  await backend.putText(`${storagePrefix}${id}.json`, body);
   return new Response(null, { status: 204 });
 };
 
