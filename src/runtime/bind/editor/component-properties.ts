@@ -5,12 +5,12 @@ import {
   type FormField,
   type SchemaField,
 } from '../../../schema/component';
-import { editorSchema } from '../../../editor/component-editor';
 
 const NAME_FIELD: FormField = { kind: 'text', key: 'name', label: 'name' };
 
 const withName = (fields: SchemaField[] | null): SchemaField[] => {
   if (!fields) return [NAME_FIELD];
+  if (fields.some((field) => field.key === 'name')) return fields;
   return [NAME_FIELD, ...fields];
 };
 
@@ -52,8 +52,6 @@ const pickEditableData = (
 };
 
 const loadSchemaDefinition = async (kind: string): Promise<SchemaField[] | null> => {
-  if (kind === 'component-editor') return editorSchema as SchemaField[];
-
   const response = await fetch(`/api/component-schemas/${encodeURIComponent(kind)}/definition`);
   if (!response.ok) return null;
   const payload = (await response.json()) as unknown;

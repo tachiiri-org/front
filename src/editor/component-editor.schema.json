@@ -1,4 +1,49 @@
 [
   { "kind": "text-field", "key": "name", "label": "name" },
-  { "kind": "style-field", "key": "style", "label": "style" }
+  {
+    "kind": "select",
+    "key": "sourceCanvasId",
+    "label": "source",
+    "source": {
+      "kind": "endpoint",
+      "url": "/api/layouts/:screenId/canvases",
+      "itemsPath": "items",
+      "valueKey": "value",
+      "labelKey": "label"
+    }
+  },
+  { "kind": "style-field", "key": "style", "label": "style" },
+  {
+    "kind": "object-list",
+    "key": "sections",
+    "label": "sections",
+    "fields": [
+      {
+        "kind": "select",
+        "key": "source",
+        "label": "source",
+        "options": [
+          { "value": "placement", "label": "placement" },
+          { "value": "properties", "label": "properties" }
+        ]
+      },
+      { "kind": "text-field", "key": "label", "label": "label" },
+      { "kind": "boolean-field", "key": "collapsible", "label": "collapsible" },
+      {
+        "kind": "boolean-field",
+        "key": "defaultCollapsed",
+        "label": "defaultCollapsed"
+      }
+    ]
+  },
+  {
+    "kind": "field-group",
+    "key": "fieldStyle",
+    "label": "fieldStyle",
+    "fields": [
+      { "kind": "style-field", "key": "wrapper", "label": "wrapper" },
+      { "kind": "style-field", "key": "label", "label": "label" },
+      { "kind": "style-field", "key": "input", "label": "input" }
+    ]
+  }
 ]

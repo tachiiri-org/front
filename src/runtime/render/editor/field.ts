@@ -140,9 +140,10 @@ function renderTextarea(
 function renderSelectField(
   label: string,
   path: string,
-  options: Array<{ value: string; label: string }>,
+  field: SchemaField,
   draft: Record<string, unknown>,
   ctx: FieldStyleContext,
+  selectEndpointVariables: Record<string, string>,
   onBlurSave?: () => void,
 ): HTMLElement {
   const wrapper = mk('div');
@@ -153,17 +154,64 @@ function renderSelectField(
   const select = mk('select');
   Object.assign(select.style, ctx.input);
   const current = getAtPath(draft, path);
-  for (const opt of options) {
-    const option = mk('option');
-    option.value = opt.value;
-    option.textContent = opt.label;
-    select.appendChild(option);
-  }
-  select.value = typeof current === 'string' ? current : '';
   select.addEventListener('change', () => { setAtPath(draft, path, select.value); });
   if (onBlurSave) select.addEventListener('change', onBlurSave);
   wrapper.appendChild(lbl);
   wrapper.appendChild(select);
+
+  const fieldRecord = field as Record<string, unknown>;
+  const staticOptions = Array.isArray(fieldRecord.options)
+    ? (fieldRecord.options as Array<{ value: string; label: string }>)
+    : [];
+  const source = typeof fieldRecord.source === 'object' &&
+    fieldRecord.source !== null &&
+    !Array.isArray(fieldRecord.source)
+    ? (fieldRecord.source as Record<string, unknown>)
+    : null;
+
+  const syncOptions = async (): Promise<void> => {
+    select.replaceChildren();
+    const loading = mk('option');
+    loading.value = '';
+    loading.textContent = 'Loading...';
+    select.appendChild(loading);
+
+    let options = staticOptions;
+    if (source) {
+      try {
+        options = await resolveEndpointOptions(source, selectEndpointVariables);
+      } catch (error) {
+        select.replaceChildren();
+        const opt = mk('option');
+        opt.value = typeof current === 'string' ? current : '';
+        opt.textContent = typeof current === 'string' ? current : 'Failed to load options';
+        select.appendChild(opt);
+        select.title = error instanceof Error ? error.message : String(error);
+        return;
+      }
+    }
+
+    select.replaceChildren();
+    if (typeof current === 'string' && current !== '' && !options.some((opt) => opt.value === current)) {
+      const currentOption = mk('option');
+      currentOption.value = current;
+      currentOption.textContent = current;
+      select.appendChild(currentOption);
+    }
+    const empty = mk('option');
+    empty.value = '';
+    empty.textContent = '';
+    select.appendChild(empty);
+    for (const opt of options) {
+      const option = mk('option');
+      option.value = opt.value;
+      option.textContent = opt.label;
+      select.appendChild(option);
+    }
+    select.value = typeof current === 'string' ? current : '';
+  };
+
+  void syncOptions();
   return wrapper;
 }
 
@@ -195,6 +243,57 @@ const isStringRecord = (v: unknown): v is Record<string, string> =>
   v !== null &&
   !Array.isArray(v) &&
   Object.values(v as Record<string, unknown>).every((x) => typeof x === 'string');
+
+const resolveTemplate = (value: string, variables: Record<string, string> = {}): string =>
+  value.replace(/:([A-Za-z0-9_]+)/g, (_match, key: string) => variables[key] ?? '');
+
+const resolveEndpointOptions = async (
+  source: Record<string, unknown>,
+  variables: Record<string, string>,
+): Promise<Array<{ value: string; label: string }>> => {
+  const url = typeof source.url === 'string' ? resolveTemplate(source.url, variables) : '';
+  if (!url) return [];
+
+  const headers = typeof source.headers === 'object' &&
+    source.headers !== null &&
+    !Array.isArray(source.headers)
+    ? (source.headers as Record<string, string>)
+    : undefined;
+
+  const response = await fetch(url, headers ? { headers } : undefined);
+  if (!response.ok) {
+    throw new Error(`Failed to fetch options: ${response.status} ${response.statusText}`);
+  }
+
+  const payload = (await response.json()) as unknown;
+  const itemsPath = typeof source.itemsPath === 'string' ? source.itemsPath : '';
+  const items = itemsPath
+    ? itemsPath.split('.').reduce((acc: unknown, key: string) => {
+      if (acc === null || typeof acc !== 'object') return undefined;
+      if (Array.isArray(acc)) {
+        const idx = parseInt(key, 10);
+        return isNaN(idx) ? undefined : (acc as unknown[])[idx];
+      }
+      return (acc as Record<string, unknown>)[key];
+    }, payload)
+    : payload;
+  if (!Array.isArray(items)) return [];
+
+  const valueKey = typeof source.valueKey === 'string' && source.valueKey ? source.valueKey : 'value';
+  const labelKey = typeof source.labelKey === 'string' && source.labelKey ? source.labelKey : 'label';
+  return items
+    .map((item) => {
+      if (typeof item !== 'object' || item === null || Array.isArray(item)) return null;
+      const record = item as Record<string, unknown>;
+      const value = record[valueKey];
+      if (typeof value !== 'string') return null;
+      return {
+        value,
+        label: typeof record[labelKey] === 'string' ? (record[labelKey] as string) : value,
+      };
+    })
+    .filter((entry): entry is { value: string; label: string } => entry !== null);
+};
 
 function renderUnsupportedField(
   field: SchemaField,
@@ -354,6 +453,7 @@ export function renderFieldFromSchema(
   field: SchemaField,
   draft: Record<string, unknown>,
   ctx: FieldStyleContext,
+  selectEndpointVariables: Record<string, string> = {},
   onBlurSave?: () => void,
 ): HTMLElement {
   if (!isFormField(field)) return renderUnsupportedField(field, draft, ctx);
@@ -381,9 +481,10 @@ export function renderFieldFromSchema(
       return renderSelectField(
         label,
         (field as Extract<FormField, { kind: 'select' }>).key,
-        (field as Extract<FormField, { kind: 'select' }>).options,
+        field,
         draft,
         ctx,
+        selectEndpointVariables,
         onBlurSave,
       );
     case 'style': {
@@ -432,7 +533,7 @@ export function renderFieldFromSchema(
           removeBtn.addEventListener('click', () => { arr.splice(i, 1); renderItems(); });
           section.appendChild(removeBtn);
           for (const subField of listField.fields) {
-            section.appendChild(renderFieldFromSchema(subField, item, ctx, onBlurSave));
+            section.appendChild(renderFieldFromSchema(subField, item, ctx, selectEndpointVariables, onBlurSave));
           }
           list.appendChild(section);
         });
@@ -457,7 +558,7 @@ export function renderFieldFromSchema(
         Object.assign(summary.style, SUMMARY_STYLE);
         details.appendChild(summary);
         for (const subField of groupField.fields) {
-          details.appendChild(renderFieldFromSchema(subField, subDraft, ctx, onBlurSave));
+          details.appendChild(renderFieldFromSchema(subField, subDraft, ctx, selectEndpointVariables, onBlurSave));
         }
         return details;
       }
@@ -472,7 +573,7 @@ export function renderFieldFromSchema(
         wrapper.appendChild(headingRow);
       }
       for (const subField of groupField.fields) {
-        wrapper.appendChild(renderFieldFromSchema(subField, subDraft, ctx, onBlurSave));
+        wrapper.appendChild(renderFieldFromSchema(subField, subDraft, ctx, selectEndpointVariables, onBlurSave));
       }
       return wrapper;
     }

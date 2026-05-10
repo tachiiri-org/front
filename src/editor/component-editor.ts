@@ -25,7 +25,6 @@ export type EditorComponent = {
   name?: string;
   sourceCanvasId?: string;
   sections?: EditorSection[];
-  excludeKeys?: string[];
   style?: Record<string, string>;
   fieldStyle?: FieldStyleConfig;
 };
@@ -74,8 +73,6 @@ export const isEditorComponent = (value: unknown): value is EditorComponent => {
     (c.sourceCanvasId === undefined || typeof c.sourceCanvasId === 'string') &&
     (c.sections === undefined ||
       (Array.isArray(c.sections) && c.sections.every(isEditorSection))) &&
-    (c.excludeKeys === undefined ||
-      (Array.isArray(c.excludeKeys) && c.excludeKeys.every((e) => typeof e === 'string'))) &&
     (c.style === undefined || isStyle(c.style)) &&
     (c.fieldStyle === undefined || isFieldStyleConfig(c.fieldStyle))
   );

@@ -3,10 +3,9 @@ import {
   componentDefaults,
   COMPONENT_KINDS,
 } from '../../../schema/component';
-import { isFrameRef, isCanvasFrame, type EditorFrame } from '../../../schema/screen/screen';
+import { isFrameRef, type EditorFrame } from '../../../schema/screen/screen';
 import type { EditorSection } from '../../../editor/component-editor';
 import { editorDefaults } from '../../../editor/component-editor';
-import { getEntityDisplayName } from '../../../schema/component/name';
 import { buildFieldStyleContext, type FieldStyleContext } from '../../render/editor/context';
 import { domMap } from '../../../state';
 import { putComponent, updateScreen, fetchScreen } from './save';
@@ -20,6 +19,7 @@ const renderPropertiesSection = (
   componentData: Record<string, unknown>,
   componentKind: string | null,
   componentSchema: SchemaField[] | null,
+  selectEndpointVariables: Record<string, string>,
   onSave: (patch: Record<string, unknown>) => Promise<void>,
   ctx: FieldStyleContext,
 ): HTMLElement =>
@@ -29,6 +29,7 @@ const renderPropertiesSection = (
     async (draft) => onSave(draft as Record<string, unknown>),
     ctx,
     true,
+    selectEndpointVariables,
   );
 
 export const hydrateComponentEditor = async (
@@ -73,6 +74,9 @@ export const hydrateComponentEditor = async (
 
   const sections = (editorFrame.sections ?? editorDefaults.sections) as EditorSection[];
   const ctx = buildFieldStyleContext(editorFrame.fieldStyle);
+  const selectEndpointVariables: Record<string, string> = selectedScreenId
+    ? { screenId: selectedScreenId }
+    : {};
 
   editorEl.replaceChildren();
   let renderedProperties = false;
@@ -144,56 +148,6 @@ export const hydrateComponentEditor = async (
     renderedProperties = true;
   }
 
-  if (componentKind === 'component-editor' && componentData) {
-    const sourceCanvasRow = createLabeledRow('source');
-    const sourceCanvasSelect = document.createElement('select');
-    Object.assign(sourceCanvasSelect.style, {
-      flex: '1',
-      fontSize: '12px',
-      border: 'none',
-      borderBottom: '1px solid rgba(0,0,0,0.12)',
-      background: 'transparent',
-      padding: '3px 2px',
-      minWidth: '0',
-      outline: 'none',
-      cursor: 'pointer',
-    });
-
-    const currentSourceCanvasId = typeof componentData.sourceCanvasId === 'string'
-      ? componentData.sourceCanvasId
-      : '';
-    const canvasFrames = screenValue.frames.filter(isCanvasFrame);
-    const knownCanvasIds = new Set(canvasFrames.map((cf) => cf.id));
-
-    const noneOption = document.createElement('option');
-    noneOption.value = '';
-    noneOption.textContent = '(none)';
-    sourceCanvasSelect.appendChild(noneOption);
-
-    if (currentSourceCanvasId && !knownCanvasIds.has(currentSourceCanvasId)) {
-      const option = document.createElement('option');
-      option.value = currentSourceCanvasId;
-      option.textContent = `${currentSourceCanvasId} (missing)`;
-      sourceCanvasSelect.appendChild(option);
-    }
-
-    for (const canvasFrame of canvasFrames) {
-      const option = document.createElement('option');
-      option.value = canvasFrame.id;
-      option.textContent = getEntityDisplayName(canvasFrame as Record<string, unknown> & { id: string });
-      option.title = canvasFrame.id;
-      sourceCanvasSelect.appendChild(option);
-    }
-
-    sourceCanvasSelect.value = currentSourceCanvasId;
-    sourceCanvasSelect.addEventListener('change', () => {
-      void saveSelectedFrameUpdate({ sourceCanvasId: sourceCanvasSelect.value });
-    });
-
-    sourceCanvasRow.appendChild(sourceCanvasSelect);
-    editorEl.appendChild(sourceCanvasRow);
-  }
-
   const componentSchema = await loadComponentPropertySchema(componentKind);
 
   for (const section of sections) {
@@ -220,7 +174,14 @@ export const hydrateComponentEditor = async (
     appendSection(
       editorEl,
       section,
-      renderPropertiesSection(componentData, componentKind, componentSchema, onSave, ctx),
+      renderPropertiesSection(
+        componentData,
+        componentKind,
+        componentSchema,
+        selectEndpointVariables,
+        onSave,
+        ctx,
+      ),
     );
     renderedProperties = true;
   }
@@ -232,7 +193,14 @@ export const hydrateComponentEditor = async (
     appendSection(
       editorEl,
       { source: 'properties', label: 'properties' },
-      renderPropertiesSection(componentData, componentKind, componentSchema, onSave, ctx),
+      renderPropertiesSection(
+        componentData,
+        componentKind,
+        componentSchema,
+        selectEndpointVariables,
+        onSave,
+        ctx,
+      ),
     );
   }
 };

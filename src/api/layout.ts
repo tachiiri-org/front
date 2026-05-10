@@ -1,5 +1,7 @@
 import { createLayoutsBackend, type LayoutsEnv, type LayoutBackend } from '../storage/layouts/r2';
 import { normalizeScreen } from '../storage/layouts/normalize';
+import { isScreen, isCanvasFrame } from '../schema/screen/screen';
+import { getEntityDisplayName } from '../schema/component/name';
 import {
   handleComponentGet,
   handleJsonFilesGet,
@@ -54,12 +56,39 @@ const isNavigationRequest = (request: Request): boolean => {
   return accept.includes('text/html');
 };
 
+const handleCanvasOptionsGet = async (backend: LayoutBackend, screenId: string): Promise<Response> => {
+  const body = await backend.getText(`${screenId}.json`);
+  if (!body) return new Response('Not Found', { status: 404 });
+  try {
+    const parsed = JSON.parse(body) as unknown;
+    if (!isScreen(parsed)) return new Response('Invalid screen', { status: 400 });
+    const items = parsed.frames
+      .filter(isCanvasFrame)
+      .map((frame) => ({
+        value: frame.id,
+        label: getEntityDisplayName(frame as Record<string, unknown> & { id: string }),
+      }));
+    return new Response(JSON.stringify({ items }), {
+      headers: { 'Content-Type': 'application/json' },
+    });
+  } catch {
+    return new Response('Invalid JSON', { status: 400 });
+  }
+};
+
 export const handleApiRequest = async (request: Request, env: Env): Promise<Response> => {
   const url = new URL(request.url);
   const backend = createLayoutsBackend(env);
 
   if (url.pathname === '/api/component-schemas') {
     if (request.method === 'GET') return handleComponentSchemasList();
+    return new Response('Method Not Allowed', { status: 405 });
+  }
+
+  const canvasOptionsMatch = url.pathname.match(/^\/api\/layouts\/([^/]+)\/canvases$/);
+  if (canvasOptionsMatch) {
+    const screenId = decodeURIComponent(canvasOptionsMatch[1]);
+    if (request.method === 'GET') return handleCanvasOptionsGet(backend, screenId);
     return new Response('Method Not Allowed', { status: 405 });
   }
 

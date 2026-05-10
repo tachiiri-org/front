@@ -7,6 +7,7 @@ const mk = <K extends keyof HTMLElementTagNameMap>(tag: K): HTMLElementTagNameMa
 
 export type RenderFormOptions = {
   saveOnBlur?: boolean;
+  selectEndpointVariables?: Record<string, string>;
 };
 
 export function renderFormFromSchema(
@@ -20,11 +21,18 @@ export function renderFormFromSchema(
   const draft = JSON.parse(JSON.stringify(data)) as Record<string, unknown>;
   const form = mk('form');
   const saveOnBlur = options.saveOnBlur ?? false;
+  const selectEndpointVariables = options.selectEndpointVariables ?? {};
 
   for (const field of fields) {
-    form.appendChild(renderFieldFromSchema(field, draft, resolvedCtx, saveOnBlur ? () => {
-      void onSave(draft);
-    } : undefined));
+    form.appendChild(renderFieldFromSchema(
+      field,
+      draft,
+      resolvedCtx,
+      selectEndpointVariables,
+      saveOnBlur ? () => {
+        void onSave(draft);
+      } : undefined,
+    ));
   }
 
   if (!saveOnBlur) {

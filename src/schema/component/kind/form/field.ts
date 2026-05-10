@@ -2,6 +2,7 @@ import { type TextFieldComponent, isTextFieldComponent } from './field/text';
 import { type NumberFieldComponent, isNumberFieldComponent } from './field/number';
 import { type TextareaFieldComponent, isTextareaFieldComponent } from './field/textarea';
 import { type BooleanFieldComponent, isBooleanFieldComponent } from './field/boolean';
+import type { SelectSource } from '../select';
 
 export type { TextFieldComponent } from './field/text';
 export type { NumberFieldComponent } from './field/number';
@@ -43,7 +44,8 @@ export type SelectFieldComponent = {
   kind: 'select';
   key: string;
   label?: string;
-  options: Array<{ value: string; label: string }>;
+  options?: Array<{ value: string; label: string }>;
+  source?: SelectSource;
 };
 
 export type StyleFieldComponent = {
@@ -136,6 +138,23 @@ const isSchemaFieldOption = (value: unknown): value is { value: string; label: s
   return typeof c.value === 'string' && typeof c.label === 'string';
 };
 
+const isSelectSource = (value: unknown): value is SelectSource => {
+  if (typeof value !== 'object' || value === null || Array.isArray(value)) return false;
+  const c = value as Record<string, unknown>;
+  return (
+    c.kind === 'endpoint' &&
+    typeof c.url === 'string' &&
+    (c.itemsPath === undefined || typeof c.itemsPath === 'string') &&
+    (c.valueKey === undefined || typeof c.valueKey === 'string') &&
+    (c.labelKey === undefined || typeof c.labelKey === 'string') &&
+    (c.headers === undefined ||
+      (typeof c.headers === 'object' &&
+        c.headers !== null &&
+        !Array.isArray(c.headers) &&
+        Object.values(c.headers as Record<string, unknown>).every((x) => typeof x === 'string')))
+  );
+};
+
 export const isSchemaField = (value: unknown): value is SchemaField => {
   if (typeof value !== 'object' || value === null || Array.isArray(value)) return false;
   const c = value as Record<string, unknown>;
@@ -159,10 +178,17 @@ export const isSelectFieldComponent = (v: unknown): v is SelectFieldComponent =>
     normalizeFormFieldKind(String(c.kind)) === 'select' &&
     typeof c.key === 'string' &&
     (c.label === undefined || typeof c.label === 'string') &&
-    Array.isArray(c.options) &&
-    (c.options as unknown[]).every(
-      (o) => typeof o === 'object' && o !== null && typeof (o as Record<string, unknown>).value === 'string' && typeof (o as Record<string, unknown>).label === 'string',
-    )
+    (c.options === undefined ||
+      (Array.isArray(c.options) &&
+        (c.options as unknown[]).every(
+          (o) =>
+            typeof o === 'object' &&
+            o !== null &&
+            typeof (o as Record<string, unknown>).value === 'string' &&
+            typeof (o as Record<string, unknown>).label === 'string',
+        ))) &&
+    (c.source === undefined || isSelectSource(c.source)) &&
+    (c.options !== undefined || c.source !== undefined)
   );
 };
 

@@ -4,12 +4,15 @@ import {
   type SchemaField,
 } from '../schema/component';
 import type { TableData, TableSchema } from '../schema/component/kind/table';
+import { editorSchema } from '../editor/component-editor';
 import {
   schemaEditorTableDataToSchema,
   schemaEditorSchemaToTableData,
   validateSchemaEditorTableDraft,
 } from '../schema/component/schema-editor';
 import type { LayoutBackend } from '../storage/layouts/r2';
+
+const SCHEMA_EDITABLE_KINDS = [...COMPONENT_KINDS, 'component-editor'];
 
 const FORM_FIELD_KIND_OPTIONS = [
   'text',
@@ -58,12 +61,13 @@ const loadStoredSchema = async (backend: LayoutBackend, kind: string): Promise<S
       // fall through to defaults
     }
   }
+  if (kind === 'component-editor') return editorSchema as SchemaField[];
   return componentSchemas[kind] ?? [];
 };
 
 export const handleComponentSchemasList = (): Response =>
   new Response(
-    JSON.stringify({ items: COMPONENT_KINDS.map((k) => ({ value: k, label: k })) }),
+    JSON.stringify({ items: SCHEMA_EDITABLE_KINDS.map((k) => ({ value: k, label: k })) }),
     { headers: { 'Content-Type': 'application/json' } },
   );
 
@@ -71,7 +75,7 @@ export const handleComponentSchemaDefinitionGet = async (
   backend: LayoutBackend,
   kind: string,
 ): Promise<Response> => {
-  if (!COMPONENT_KINDS.includes(kind)) return new Response('Not Found', { status: 404 });
+  if (!SCHEMA_EDITABLE_KINDS.includes(kind)) return new Response('Not Found', { status: 404 });
   const schema = await loadStoredSchema(backend, kind);
   return new Response(JSON.stringify(schema), {
     headers: { 'Content-Type': 'application/json' },
@@ -82,7 +86,7 @@ export const handleComponentSchemaGet = async (
   backend: LayoutBackend,
   kind: string,
 ): Promise<Response> => {
-  if (!COMPONENT_KINDS.includes(kind)) return new Response('Not Found', { status: 404 });
+  if (!SCHEMA_EDITABLE_KINDS.includes(kind)) return new Response('Not Found', { status: 404 });
   const data = schemaEditorSchemaToTableData(await loadStoredSchema(backend, kind));
 
   return new Response(
@@ -96,7 +100,7 @@ export const handleComponentSchemaPut = async (
   backend: LayoutBackend,
   kind: string,
 ): Promise<Response> => {
-  if (!COMPONENT_KINDS.includes(kind)) return new Response('Not Found', { status: 404 });
+  if (!SCHEMA_EDITABLE_KINDS.includes(kind)) return new Response('Not Found', { status: 404 });
 
   const body = (await request.json()) as unknown;
   const rawData =

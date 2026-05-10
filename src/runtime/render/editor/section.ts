@@ -3,7 +3,6 @@ import type { SchemaField } from '../../../schema/component';
 import { renderFormFromSchema } from './form';
 import type { FieldStyleContext } from './context';
 import { inferFieldsFromData } from '../../bind/form/infer';
-import { mergeWithSchema } from '../../bind/form/merge';
 
 export const SECTION_SUMMARY_STYLE: Record<string, string> = {
   fontSize: '11px',
@@ -88,8 +87,11 @@ export const renderSectionContent = (
   onSave: (draft: unknown) => Promise<void>,
   ctx: FieldStyleContext,
   saveOnBlur = false,
+  selectEndpointVariables: Record<string, string> = {},
 ): HTMLElement => {
-  const inferred = inferFieldsFromData(data);
-  const fields = schema ? mergeWithSchema(inferred, schema) : inferred;
-  return renderFormFromSchema(data, fields, onSave, ctx, { saveOnBlur });
+  const fields = schema ?? inferFieldsFromData(data);
+  return renderFormFromSchema(data, fields, onSave, ctx, {
+    saveOnBlur,
+    selectEndpointVariables,
+  });
 };
