@@ -1,30 +1,16 @@
-import type { FormField } from '../../../schema/component';
 import { isStyleRecord } from '../../../schema/component';
-import { headDefaults, headSchema } from '../../../schema/screen/head';
+import { headDefaults } from '../../../schema/screen/head';
 import { isHead, type EditorFrame } from '../../../schema/screen/screen';
 import { buildFieldStyleContext } from '../../render/editor/context';
 import { SECTION_HEADING_STYLE, renderSectionContent } from '../../render/editor/section';
 import { domMap } from '../../../state';
 import { fetchScreen, updateScreen } from './save';
+import { loadComponentPropertySchema } from './component-properties';
 
 const DEVICE_PRESETS: { label: string; sizing: Record<string, string> }[] = [
   { label: 'Desktop', sizing: { width: '1920px', height: '1080px' } },
   { label: 'Tablet', sizing: { width: '768px', height: '1024px' } },
   { label: 'Mobile', sizing: { width: '375px', height: '812px' } },
-];
-
-const screenEditSchema: FormField[] = [
-  {
-    kind: 'group',
-    key: 'head',
-    label: 'head',
-    fields: headSchema,
-  },
-  { kind: 'style', key: 'sizing', label: 'sizing' },
-  { kind: 'style', key: 'layout', label: 'layout' },
-  { kind: 'style', key: 'appearance', label: 'appearance' },
-  { kind: 'number', key: 'columns', label: 'columns' },
-  { kind: 'number', key: 'rows', label: 'rows' },
 ];
 
 export const hydrateScreenEditor = async (
@@ -39,6 +25,7 @@ export const hydrateScreenEditor = async (
   if (!value) { editorEl.replaceChildren(); return; }
 
   const ctx = buildFieldStyleContext();
+  const screenSchema = await loadComponentPropertySchema('screen');
 
   const editData: Record<string, unknown> = {
     head: { ...headDefaults, ...value.head },
@@ -135,5 +122,5 @@ export const hydrateScreenEditor = async (
   deviceRow.appendChild(deviceSelect);
   editorEl.appendChild(deviceRow);
 
-  editorEl.appendChild(renderSectionContent(editData, screenEditSchema, onSave, ctx, true));
+  editorEl.appendChild(renderSectionContent(editData, screenSchema, onSave, ctx, true));
 };

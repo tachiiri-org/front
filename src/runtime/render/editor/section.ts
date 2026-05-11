@@ -2,7 +2,6 @@ import type { EditorSection } from '../../../editor/component-editor';
 import type { SchemaField } from '../../../schema/component';
 import { renderFormFromSchema } from './form';
 import type { FieldStyleContext } from './context';
-import { inferFieldsFromData } from '../../bind/form/infer';
 
 export const SECTION_SUMMARY_STYLE: Record<string, string> = {
   fontSize: '11px',
@@ -89,7 +88,7 @@ export const renderSectionContent = (
   saveOnBlur = false,
   selectEndpointVariables: Record<string, string> = {},
 ): HTMLElement => {
-  const fields = schema ?? inferFieldsFromData(data);
+  const fields = schema ?? [];
   return renderFormFromSchema(data, fields, onSave, ctx, {
     saveOnBlur,
     selectEndpointVariables,

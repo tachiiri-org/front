@@ -12,7 +12,7 @@ import {
 } from '../schema/component/schema-editor';
 import type { LayoutBackend } from '../storage/layouts/r2';
 
-const SCHEMA_EDITABLE_KINDS = [...COMPONENT_KINDS, 'component-editor'];
+const SCHEMA_EDITABLE_KINDS = [...COMPONENT_KINDS, 'component-editor', 'screen'];
 
 const FORM_FIELD_KIND_OPTIONS = [
   'text',
