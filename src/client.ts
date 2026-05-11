@@ -7,6 +7,21 @@ import type { FrameState } from './state';
 const root = document.createElement('div');
 document.body.appendChild(root);
 
+const applyViewportLayout = (): void => {
+  document.documentElement.style.height = '100%';
+  document.documentElement.style.width = '100%';
+  document.body.style.height = '100%';
+  document.body.style.width = '100%';
+  document.body.style.margin = '0';
+  document.body.style.padding = '0';
+  document.body.style.overflow = 'hidden';
+
+  root.style.width = '100%';
+  root.style.height = '100%';
+  root.style.minHeight = '100vh';
+  root.style.boxSizing = 'border-box';
+};
+
 const getScreenIdFromPathname = (): string | null => {
   const pathname = window.location.pathname.replace(/\/+$/, '');
   if (!pathname || pathname === '/') return null;
@@ -27,7 +42,7 @@ const applyPlacement = (el: HTMLElement, frame: Frame): void => {
 };
 
 const showLoadError = (message: string): void => {
-  document.body.style.margin = '0';
+  applyViewportLayout();
   document.body.style.padding = '24px';
   document.body.style.fontFamily = 'monospace';
   root.replaceChildren();
@@ -55,9 +70,7 @@ const renderScreen = async (screenId: string): Promise<void> => {
   store.frameComponents.clear();
   domMap.clear();
 
-  document.body.style.margin = '0';
-  document.body.style.padding = '0';
-  document.body.style.overflow = 'hidden';
+  applyViewportLayout();
 
   root.innerHTML = '';
   document.title = store.screen.head.title;
