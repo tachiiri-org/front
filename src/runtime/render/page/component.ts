@@ -3,8 +3,7 @@ import {
   isCanvasComponent,
   isTextareaComponent,
   isTableComponent,
-  isStyleRecord,
-  STYLE_SPEC_KEYS,
+  CSS_PROP_KEYS,
   applyDefaults,
   type TableComponent,
   type Component,
@@ -15,10 +14,10 @@ import type { FrameState } from '../../../state';
 import { renderList, renderCanvas, renderEditor, renderTable } from './frame';
 import { renderEditableTable } from './table-editor';
 
-const applySpecStyles = (el: HTMLElement, c: Record<string, unknown>): void => {
-  for (const specKey of STYLE_SPEC_KEYS) {
-    const v = c[specKey];
-    if (isStyleRecord(v)) Object.assign(el.style, v);
+const applyCssProps = (el: HTMLElement, c: Record<string, unknown>): void => {
+  for (const propKey of CSS_PROP_KEYS) {
+    const v = c[propKey];
+    if (typeof v === 'string') (el.style as unknown as Record<string, string>)[propKey] = v;
   }
 };
 
@@ -40,7 +39,7 @@ const renderResolved = (
     const el = document.createElement(`h${level}` as keyof HTMLElementTagNameMap);
     el.dataset.frameId = id;
     if (typeof c.text === 'string') el.textContent = c.text;
-    applySpecStyles(el, c);
+    applyCssProps(el, c);
     return el;
   }
 
@@ -48,7 +47,7 @@ const renderResolved = (
     const el = document.createElement(c.tag as keyof HTMLElementTagNameMap);
     el.dataset.frameId = id;
     if (typeof c.text === 'string') el.textContent = c.text;
-    applySpecStyles(el, c);
+    applyCssProps(el, c);
     return el;
   }
 
@@ -56,7 +55,7 @@ const renderResolved = (
     const button = document.createElement('button');
     button.dataset.frameId = id;
     button.textContent = typeof c.text === 'string' ? c.text : String(c.kind);
-    applySpecStyles(button, c);
+    applyCssProps(button, c);
     return button;
   }
 
@@ -66,7 +65,7 @@ const renderResolved = (
     if (typeof c.targetComponentId === 'string') {
       select.dataset.targetComponentId = c.targetComponentId;
     }
-    applySpecStyles(select, c);
+    applyCssProps(select, c);
     return select;
   }
 
@@ -81,14 +80,14 @@ const renderResolved = (
       p.textContent = c.title;
       form.appendChild(p);
     }
-    applySpecStyles(form, c);
+    applyCssProps(form, c);
     return form;
   }
 
   if (c.kind === 'table' && isTableComponent(c)) {
     const wrapper = renderTable(id, c);
     const table = document.createElement('table');
-    applySpecStyles(wrapper, c);
+    applyCssProps(wrapper, c);
     table.style.width = '100%';
     table.style.borderCollapse = 'collapse';
     table.style.fontSize = '12px';
@@ -129,7 +128,7 @@ const renderResolved = (
   const pre = document.createElement('pre');
   pre.dataset.frameId = id;
   pre.textContent = JSON.stringify(component, null, 2);
-  applySpecStyles(pre, c);
+  applyCssProps(pre, c);
   return pre;
 };
 
@@ -139,7 +138,7 @@ const renderTextareaComponent = (id: string, c: Record<string, unknown>): HTMLEl
   wrapper.style.display = 'flex';
   wrapper.style.flexDirection = 'column';
   wrapper.style.gap = '4px';
-  applySpecStyles(wrapper, c);
+  applyCssProps(wrapper, c);
 
   const ta = document.createElement('textarea');
   ta.style.flex = '1';

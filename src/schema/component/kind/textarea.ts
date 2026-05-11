@@ -1,5 +1,5 @@
 import type { SchemaField } from './form/field';
-import { STYLE_SPEC_KEYS, isStyleRecord } from '../style';
+import { CSS_PROP_KEYS, type CssStyleProps } from '../style';
 import textareaSchemaJson from './textarea.schema.json';
 
 export type TextareaComponent = {
@@ -8,12 +8,7 @@ export type TextareaComponent = {
   language?: 'json' | 'plain';
   value?: string;
   rows?: number;
-  padding?: Record<string, string>;
-  margin?: Record<string, string>;
-  sizing?: Record<string, string>;
-  layout?: Record<string, string>;
-  appearance?: Record<string, string>;
-};
+} & CssStyleProps;
 
 export const textareaDefaults: TextareaComponent = {
   kind: 'textarea',
@@ -34,6 +29,6 @@ export const isTextareaComponent = (value: unknown): value is TextareaComponent 
     (c.language === undefined || c.language === 'json' || c.language === 'plain') &&
     (c.value === undefined || typeof c.value === 'string') &&
     (c.rows === undefined || (typeof c.rows === 'number' && Number.isInteger(c.rows) && c.rows > 0)) &&
-    STYLE_SPEC_KEYS.every((k) => c[k] === undefined || isStyleRecord(c[k]))
+    CSS_PROP_KEYS.every((k) => c[k] === undefined || typeof c[k] === 'string')
   );
 };

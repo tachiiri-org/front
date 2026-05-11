@@ -1,5 +1,5 @@
 import type { SchemaField } from './form/field';
-import { STYLE_SPEC_KEYS, isStyleRecord } from '../style';
+import { CSS_PROP_KEYS, type CssStyleProps } from '../style';
 import elementSchemaJson from './element.schema.json';
 
 export type ElementComponent = {
@@ -7,12 +7,7 @@ export type ElementComponent = {
   name?: string;
   tag?: string;
   text?: string;
-  padding?: Record<string, string>;
-  margin?: Record<string, string>;
-  sizing?: Record<string, string>;
-  layout?: Record<string, string>;
-  appearance?: Record<string, string>;
-};
+} & CssStyleProps;
 
 export const elementDefaults: ElementComponent = { kind: 'element', name: '', tag: 'div', text: '' };
 
@@ -26,6 +21,6 @@ export const isElementComponent = (value: unknown): value is ElementComponent =>
     (c.name === undefined || typeof c.name === 'string') &&
     (c.tag === undefined || typeof c.tag === 'string') &&
     (c.text === undefined || typeof c.text === 'string') &&
-    STYLE_SPEC_KEYS.every((k) => c[k] === undefined || isStyleRecord(c[k]))
+    CSS_PROP_KEYS.every((k) => c[k] === undefined || typeof c[k] === 'string')
   );
 };

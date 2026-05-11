@@ -1,63 +1,57 @@
 import { isScreen, isGridLayout, isFrame, isPlacement, screenDefaults, type Screen, type Frame, type Placement } from '../../schema/screen/screen';
-import { isComponent, applyDefaults, STYLE_SPECS, STYLE_SPEC_KEYS } from '../../schema/component';
+import { isComponent, applyDefaults, CSS_PROP_KEYS } from '../../schema/component';
 import { headDefaults, isHead } from '../../schema/screen/head';
 import { allocateDefaultEntityName, assignDefaultEntityNames } from '../../schema/component/name';
 import { isStringRecord, isPositiveInteger, isFrameCandidate, type FrameCandidate } from './validate';
 import { migrateFrameKind, migrateEditorSource, migrateLegacyCanvasIds } from './migrate';
 
-const buildCssToSpecMap = (): Record<string, string> => {
-  const map: Record<string, string> = {};
-  for (const [specKey, spec] of Object.entries(STYLE_SPECS)) {
-    for (const entry of spec.entries) {
-      const targets = Array.isArray(entry.target) ? entry.target : [entry.target];
-      for (const cssKey of targets) {
-        map[cssKey] = specKey;
+const CSS_PROP_SET = new Set<string>(CSS_PROP_KEYS);
+const LEGACY_SPEC_KEYS = ['padding', 'margin', 'sizing', 'layout', 'appearance'];
+
+const kebabToCamel = (s: string): string =>
+  s.replace(/-([a-z])/g, (_, c: string) => c.toUpperCase());
+
+const migrateToCssProps = (obj: Record<string, unknown>): Record<string, unknown> => {
+  const result: Record<string, unknown> = { ...obj };
+
+  // Remove string-typed legacy spec keys (very old format)
+  for (const specKey of LEGACY_SPEC_KEYS) {
+    if (typeof result[specKey] === 'string') delete result[specKey];
+  }
+
+  // Convert old flat style object: { style: { 'padding-top': '8px' } } → { paddingTop: '8px' }
+  const style = result.style;
+  delete result.style;
+  if (isStringRecord(style)) {
+    for (const [k, v] of Object.entries(style)) {
+      const camelKey = kebabToCamel(k);
+      if (CSS_PROP_SET.has(camelKey)) result[camelKey] = v;
+    }
+  }
+
+  // Convert spec bucket objects: { padding: { 'padding-top': '8px' } } → { paddingTop: '8px' }
+  for (const specKey of LEGACY_SPEC_KEYS) {
+    const bucket = result[specKey];
+    if (isStringRecord(bucket)) {
+      delete result[specKey];
+      for (const [k, v] of Object.entries(bucket)) {
+        const camelKey = kebabToCamel(k);
+        if (CSS_PROP_SET.has(camelKey)) result[camelKey] = v;
       }
     }
   }
-  return map;
-};
 
-const CSS_TO_SPEC = buildCssToSpecMap();
-
-const migrateStyleToSpecProps = (obj: Record<string, unknown>): Record<string, unknown> => {
-  const result: Record<string, unknown> = { ...obj };
-  // Remove legacy string-typed spec keys (old format stored them as strings)
-  for (const specKey of STYLE_SPEC_KEYS) {
-    if (typeof result[specKey] === 'string') delete result[specKey];
-  }
-  // Remove legacy flat style object and convert its CSS props to spec buckets
-  const style = result.style;
-  delete result.style;
-  if (!isStringRecord(style)) return result;
-  const buckets: Record<string, Record<string, string>> = {};
-  for (const [cssKey, value] of Object.entries(style)) {
-    const specKey = CSS_TO_SPEC[cssKey];
-    if (!specKey) continue;
-    buckets[specKey] = buckets[specKey] ?? {};
-    buckets[specKey][cssKey] = value;
-  }
-  for (const [specKey, bucket] of Object.entries(buckets)) {
-    const existing = result[specKey];
-    result[specKey] = { ...(isStringRecord(existing) ? existing : {}), ...bucket };
-  }
   return result;
 };
 
-const migrateShellToSpecProps = (obj: Record<string, unknown>): Record<string, unknown> => {
+const migrateShellToCssProps = (obj: Record<string, unknown>): Record<string, unknown> => {
   const shell = obj.shell;
   if (!isStringRecord(shell)) return obj;
   const result: Record<string, unknown> = { ...obj };
   delete result.shell;
-  const buckets: Record<string, Record<string, string>> = {};
-  for (const [cssKey, value] of Object.entries(shell)) {
-    const specKey = CSS_TO_SPEC[cssKey] ?? 'sizing';
-    buckets[specKey] = buckets[specKey] ?? {};
-    buckets[specKey][cssKey] = value;
-  }
-  for (const [specKey, bucket] of Object.entries(buckets)) {
-    const existing = result[specKey];
-    result[specKey] = { ...(isStringRecord(existing) ? existing : {}), ...bucket };
+  for (const [k, v] of Object.entries(shell)) {
+    const camelKey = kebabToCamel(k);
+    if (CSS_PROP_SET.has(camelKey)) result[camelKey] = v;
   }
   return result;
 };
@@ -112,7 +106,7 @@ export const normalizeScreen = (value: unknown): Screen | null => {
     return null;
   }
 
-  const candidate = migrateShellToSpecProps(value as Record<string, unknown>);
+  const candidate = migrateToCssProps(migrateShellToCssProps(value as Record<string, unknown>));
   if (!isHead(candidate.head)) return null;
   if (!Array.isArray(candidate.frames) || !candidate.frames.every(isFrameCandidate)) return null;
 
@@ -120,7 +114,7 @@ export const normalizeScreen = (value: unknown): Screen | null => {
     migrateLegacyCanvasIds(
       (candidate.frames as FrameCandidate[])
         .map(migrateFrameKind)
-        .map((f) => migrateStyleToSpecProps(f as Record<string, unknown>) as FrameCandidate),
+        .map((f) => migrateToCssProps(f as Record<string, unknown>) as FrameCandidate),
     ),
   );
   const namedFrames = assignDefaultEntityNames(frames);
@@ -165,15 +159,16 @@ export const normalizeScreen = (value: unknown): Screen | null => {
     ? { kind: 'grid', columns, rows }
     : { kind: 'grid', columns };
 
-  const normalized: Screen = {
+  const cssProps: Record<string, string> = {};
+  for (const k of CSS_PROP_KEYS) {
+    if (typeof candidate[k] === 'string') cssProps[k] = candidate[k] as string;
+  }
+  if (!cssProps.width) cssProps.width = '100%';
+  if (!cssProps.height) cssProps.height = '100%';
+
+  const normalized = {
     head: { ...headDefaults, ...(candidate.head as Screen['head']) },
-    sizing: isStringRecord(candidate.sizing)
-      ? { ...(candidate.sizing as Record<string, string>) }
-      : { ...screenDefaults.sizing },
-    ...(isStringRecord(candidate.layout) ? { layout: { ...candidate.layout } } : {}),
-    ...(isStringRecord(candidate.appearance) ? { appearance: { ...candidate.appearance } } : {}),
-    ...(isStringRecord(candidate.padding) ? { padding: { ...candidate.padding } } : {}),
-    ...(isStringRecord(candidate.margin) ? { margin: { ...candidate.margin } } : {}),
+    ...cssProps,
     grid,
     frames: normalizedFrames,
   };
@@ -222,7 +217,7 @@ export const normalizeComponentValue = async (
 ): Promise<Record<string, unknown> | null> => {
   if (!isComponent(value)) return null;
 
-  const component = migrateStyleToSpecProps(value as Record<string, unknown>);
+  const component = migrateToCssProps(value as Record<string, unknown>);
   const kind = component.kind as string;
   const normalizedComponent = applyDefaults(kind, component);
   if (isMeaningfulString(normalizedComponent.name)) return normalizedComponent;

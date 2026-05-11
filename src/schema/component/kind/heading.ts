@@ -1,5 +1,5 @@
 import type { SchemaField } from './form/field';
-import { STYLE_SPEC_KEYS, isStyleRecord } from '../style';
+import { CSS_PROP_KEYS, type CssStyleProps } from '../style';
 import headingSchemaJson from './heading.schema.json';
 
 export type HeadingComponent = {
@@ -7,12 +7,7 @@ export type HeadingComponent = {
   name?: string;
   level?: number;
   text?: string;
-  padding?: Record<string, string>;
-  margin?: Record<string, string>;
-  sizing?: Record<string, string>;
-  layout?: Record<string, string>;
-  appearance?: Record<string, string>;
-};
+} & CssStyleProps;
 
 export const headingDefaults: HeadingComponent = {
   kind: 'heading',
@@ -31,6 +26,6 @@ export const isHeadingComponent = (value: unknown): value is HeadingComponent =>
     (c.name === undefined || typeof c.name === 'string') &&
     (c.level === undefined || (typeof c.level === 'number' && Number.isInteger(c.level))) &&
     (c.text === undefined || typeof c.text === 'string') &&
-    STYLE_SPEC_KEYS.every((k) => c[k] === undefined || isStyleRecord(c[k]))
+    CSS_PROP_KEYS.every((k) => c[k] === undefined || typeof c[k] === 'string')
   );
 };

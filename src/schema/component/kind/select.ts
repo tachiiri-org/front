@@ -1,5 +1,5 @@
 import type { SchemaField } from './form/field';
-import { STYLE_SPEC_KEYS, isStyleRecord } from '../style';
+import { CSS_PROP_KEYS, isStyleRecord, type CssStyleProps } from '../style';
 import selectSchemaJson from './select.schema.json';
 
 export type SelectOption = {
@@ -28,12 +28,7 @@ export type SelectComponent = {
   name?: string;
   source: SelectSource;
   targetComponentId?: string;
-  padding?: Record<string, string>;
-  margin?: Record<string, string>;
-  sizing?: Record<string, string>;
-  layout?: Record<string, string>;
-  appearance?: Record<string, string>;
-};
+} & CssStyleProps;
 
 export const isSelectOption = (value: unknown): value is SelectOption => {
   if (typeof value !== 'object' || value === null || Array.isArray(value)) return false;
@@ -80,6 +75,6 @@ export const isSelectComponent = (value: unknown): value is SelectComponent => {
     (c.name === undefined || typeof c.name === 'string') &&
     isSelectSource(c.source) &&
     (c.targetComponentId === undefined || typeof c.targetComponentId === 'string') &&
-    STYLE_SPEC_KEYS.every((k) => c[k] === undefined || isStyleRecord(c[k]))
+    CSS_PROP_KEYS.every((k) => c[k] === undefined || typeof c[k] === 'string')
   );
 };

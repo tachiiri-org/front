@@ -1,5 +1,5 @@
 import type { SchemaField } from './form/field';
-import { STYLE_SPEC_KEYS, isStyleRecord } from '../style';
+import { CSS_PROP_KEYS, isStyleRecord, type CssStyleProps } from '../style';
 import listSchemaJson from './list.schema.json';
 
 export const LIST_RESOURCE_OPTIONS: Array<{ value: string; label: string }> = [
@@ -11,13 +11,8 @@ export type ListComponent = {
   name?: string;
   resource?: string;
   targetComponentId?: string;
-  padding?: Record<string, string>;
-  margin?: Record<string, string>;
-  sizing?: Record<string, string>;
-  layout?: Record<string, string>;
-  appearance?: Record<string, string>;
   itemStyle?: Record<string, string>;
-};
+} & CssStyleProps;
 
 export const listDefaults: ListComponent = {
   kind: 'list',
@@ -37,6 +32,6 @@ export const isListComponent = (value: unknown): value is ListComponent => {
     (c.resource === undefined || typeof c.resource === 'string') &&
     (c.targetComponentId === undefined || typeof c.targetComponentId === 'string') &&
     (c.itemStyle === undefined || isStyleRecord(c.itemStyle)) &&
-    STYLE_SPEC_KEYS.every((k) => c[k] === undefined || isStyleRecord(c[k]))
+    CSS_PROP_KEYS.every((k) => c[k] === undefined || typeof c[k] === 'string')
   );
 };

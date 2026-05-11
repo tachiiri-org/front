@@ -1,5 +1,5 @@
 import type { SchemaField } from './form/field';
-import { STYLE_SPEC_KEYS, isStyleRecord } from '../style';
+import { CSS_PROP_KEYS, isStyleRecord, type CssStyleProps } from '../style';
 import canvasSchemaJson from './canvas.schema.json';
 
 export type CanvasComponent = {
@@ -7,13 +7,8 @@ export type CanvasComponent = {
   name?: string;
   viewportWidth?: number;
   viewportHeight?: number;
-  padding?: Record<string, string>;
-  margin?: Record<string, string>;
-  sizing?: Record<string, string>;
-  layout?: Record<string, string>;
-  appearance?: Record<string, string>;
   cellStyle?: Record<string, string>;
-};
+} & CssStyleProps;
 
 export const canvasDefaults: CanvasComponent = {
   kind: 'canvas',
@@ -36,6 +31,6 @@ export const isCanvasComponent = (value: unknown): value is CanvasComponent => {
     (c.viewportWidth === undefined || isPositiveInteger(c.viewportWidth)) &&
     (c.viewportHeight === undefined || isPositiveInteger(c.viewportHeight)) &&
     (c.cellStyle === undefined || isStyleRecord(c.cellStyle)) &&
-    STYLE_SPEC_KEYS.every((k) => c[k] === undefined || isStyleRecord(c[k]))
+    CSS_PROP_KEYS.every((k) => c[k] === undefined || typeof c[k] === 'string')
   );
 };

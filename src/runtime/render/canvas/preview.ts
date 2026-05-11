@@ -1,6 +1,6 @@
 import type { Frame, CanvasFrame } from '../../../schema/screen/screen';
 import type { Component } from '../../../schema/component';
-import { STYLE_SPEC_KEYS, isStyleRecord } from '../../../schema/component/style';
+import { CSS_PROP_KEYS } from '../../../schema/component/style';
 import { renderComponent } from '../page/component';
 
 export const EDITOR_ONLY_KINDS = new Set(['canvas', 'list', 'component-editor']);
@@ -22,9 +22,9 @@ export const renderCanvasPreview = (
   grid.style.boxSizing = 'border-box';
   grid.style.width = '100%';
   grid.style.height = '100%';
-  for (const specKey of STYLE_SPEC_KEYS) {
-    const v = (frame as Record<string, unknown>)[specKey];
-    if (isStyleRecord(v)) Object.assign(grid.style, v);
+  for (const propKey of CSS_PROP_KEYS) {
+    const v = (frame as Record<string, unknown>)[propKey];
+    if (typeof v === 'string') (grid.style as unknown as Record<string, string>)[propKey] = v;
   }
   for (let row = 1; row <= rows; row += 1) {
     for (let col = 1; col <= cols; col += 1) {

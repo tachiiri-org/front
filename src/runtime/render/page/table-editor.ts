@@ -5,7 +5,7 @@ import {
   type TableData,
   type TableSchema,
 } from '../../../schema/component';
-import { STYLE_SPEC_KEYS } from '../../../schema/component/style';
+import { CSS_PROP_KEYS } from '../../../schema/component/style';
 import {
   validateSchemaEditorTableDraft,
   validateSchemaEditorTableDraftDetail,
@@ -409,7 +409,7 @@ const renderEditableTable = (
       empty.value = '';
       empty.textContent = '';
       select.appendChild(empty);
-      for (const optionValue of STYLE_SPEC_KEYS) {
+      for (const optionValue of CSS_PROP_KEYS) {
         const el = document.createElement('option');
         el.value = optionValue;
         el.textContent = optionValue;

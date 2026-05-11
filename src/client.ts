@@ -1,6 +1,6 @@
 import { isScreen, isFrameRef, type Screen, type Frame } from './schema/screen/screen';
 import type { Component } from './schema/component';
-import { STYLE_SPEC_KEYS, isStyleRecord } from './schema/component/style';
+import { CSS_PROP_KEYS } from './schema/component/style';
 import { renderComponent, fetchFrameComponent, findEditorScreenId, hydrateEditor, store, domMap } from './runtime';
 import type { FrameState } from './state';
 
@@ -68,9 +68,9 @@ const renderScreen = async (screenId: string): Promise<void> => {
     document.head.appendChild(meta);
   }
 
-  for (const specKey of STYLE_SPEC_KEYS) {
-    const v = (store.screen as Record<string, unknown>)[specKey];
-    if (isStyleRecord(v)) Object.assign(root.style, v);
+  for (const propKey of CSS_PROP_KEYS) {
+    const v = (store.screen as Record<string, unknown>)[propKey];
+    if (typeof v === 'string') (root.style as unknown as Record<string, string>)[propKey] = v;
   }
   const canvas = document.createElement('div');
   canvas.style.display = 'grid';

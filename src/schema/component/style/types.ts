@@ -7,13 +7,3 @@ export type StyleEntrySpec = {
   placeholder?: string;
   defaultValue?: string;
 };
-
-export type StyleSpec = {
-  key: string;
-  label?: string;
-  entries: StyleEntrySpec[];
-  allowCustom?: boolean;
-};
-
-export type StyleSpecKey = 'padding' | 'margin' | 'sizing' | 'layout' | 'appearance';
-export type StyleSpecProps = Partial<Record<StyleSpecKey, Record<string, string>>>;

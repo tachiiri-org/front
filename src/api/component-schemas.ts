@@ -3,7 +3,7 @@ import {
   type SchemaField,
   normalizeFormFieldKind,
 } from '../schema/component';
-import { STYLE_MAP_KEYS } from '../schema/component/style';
+import { CSS_PROP_KEYS } from '../schema/component/style';
 import type { TableData, TableSchema } from '../schema/component/kind/table';
 import { editorSchema } from '../editor/component-editor';
 import {
@@ -12,18 +12,12 @@ import {
   validateSchemaEditorTableDraft,
 } from '../schema/component/schema-editor';
 import type { LayoutBackend } from '../storage/layouts/r2';
-import {
-  STYLE_SPEC_EDITABLE_KINDS,
-  isStyleSpecKind,
-  handleStyleSpecGet,
-  handleStyleSpecPut,
-} from './style-specs';
 
 const COMPONENT_SCHEMA_KINDS = [...COMPONENT_KINDS, 'component-editor', 'screen'];
-const SCHEMA_EDITABLE_KINDS = [...COMPONENT_SCHEMA_KINDS, ...STYLE_SPEC_EDITABLE_KINDS];
-const STYLE_PROP_SCHEMA_KINDS: string[] = [...STYLE_MAP_KEYS];
+const SCHEMA_EDITABLE_KINDS = [...COMPONENT_SCHEMA_KINDS];
+const CSS_PROP_SCHEMA_KINDS: string[] = [...CSS_PROP_KEYS];
 
-const isStylePropKind = (kind: string): boolean => STYLE_PROP_SCHEMA_KINDS.includes(kind);
+const isCssPropKind = (kind: string): boolean => CSS_PROP_SCHEMA_KINDS.includes(kind);
 
 const FORM_FIELD_KIND_OPTIONS = [
   'text',
@@ -107,9 +101,9 @@ export const handleComponentSchemasList = (searchParams?: URLSearchParams): Resp
   if (category === 'component') {
     kinds = COMPONENT_SCHEMA_KINDS;
   } else if (category === 'style') {
-    kinds = STYLE_PROP_SCHEMA_KINDS;
+    kinds = CSS_PROP_SCHEMA_KINDS;
   } else {
-    kinds = SCHEMA_EDITABLE_KINDS;
+    kinds = [...SCHEMA_EDITABLE_KINDS, ...CSS_PROP_SCHEMA_KINDS];
   }
   return new Response(
     JSON.stringify({ items: kinds.map((k) => ({ value: k, label: k })) }),
@@ -121,7 +115,7 @@ export const handleComponentSchemaDefinitionGet = async (
   backend: LayoutBackend,
   kind: string,
 ): Promise<Response> => {
-  if (!SCHEMA_EDITABLE_KINDS.includes(kind) && !isStylePropKind(kind)) return new Response('Not Found', { status: 404 });
+  if (!SCHEMA_EDITABLE_KINDS.includes(kind) && !isCssPropKind(kind)) return new Response('Not Found', { status: 404 });
   const schema = await loadStoredSchema(backend, kind);
   return new Response(JSON.stringify(schema), {
     headers: { 'Content-Type': 'application/json' },
@@ -132,8 +126,7 @@ export const handleComponentSchemaGet = async (
   backend: LayoutBackend,
   kind: string,
 ): Promise<Response> => {
-  if (!SCHEMA_EDITABLE_KINDS.includes(kind) && !isStylePropKind(kind)) return new Response('Not Found', { status: 404 });
-  if (isStyleSpecKind(kind)) return handleStyleSpecGet(backend, kind);
+  if (!SCHEMA_EDITABLE_KINDS.includes(kind) && !isCssPropKind(kind)) return new Response('Not Found', { status: 404 });
   const data = schemaEditorSchemaToTableData(await loadStoredSchema(backend, kind));
 
   return new Response(
@@ -147,8 +140,7 @@ export const handleComponentSchemaPut = async (
   backend: LayoutBackend,
   kind: string,
 ): Promise<Response> => {
-  if (!SCHEMA_EDITABLE_KINDS.includes(kind) && !isStylePropKind(kind)) return new Response('Not Found', { status: 404 });
-  if (isStyleSpecKind(kind)) return handleStyleSpecPut(request, backend, kind);
+  if (!SCHEMA_EDITABLE_KINDS.includes(kind) && !isCssPropKind(kind)) return new Response('Not Found', { status: 404 });
 
   const body = (await request.json()) as unknown;
   const rawData =

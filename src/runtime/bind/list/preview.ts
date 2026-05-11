@@ -1,5 +1,5 @@
 import type { ListFrame } from '../../../schema/screen/screen';
-import { STYLE_SPEC_KEYS, isStyleRecord } from '../../../schema/component/style';
+import { CSS_PROP_KEYS, isStyleRecord } from '../../../schema/component/style';
 import { fetchItems } from './fetch';
 import { RESOURCES } from './resources';
 
@@ -11,9 +11,9 @@ export const renderListPreview = async (
   if (!resource) { wrapper.replaceChildren(); return; }
   const items = await fetchItems(resource.listUrl);
   const ul = document.createElement('ul');
-  for (const specKey of STYLE_SPEC_KEYS) {
-    const v = (frame as Record<string, unknown>)[specKey];
-    if (isStyleRecord(v)) Object.assign(ul.style, v);
+  for (const propKey of CSS_PROP_KEYS) {
+    const v = (frame as Record<string, unknown>)[propKey];
+    if (typeof v === 'string') (ul.style as unknown as Record<string, string>)[propKey] = v;
   }
   for (const id of items) {
     const li = document.createElement('li');

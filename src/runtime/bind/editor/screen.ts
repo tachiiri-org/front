@@ -1,4 +1,4 @@
-import { isStyleRecord } from '../../../schema/component';
+import { CSS_PROP_KEYS } from '../../../schema/component/style';
 import { headDefaults } from '../../../schema/screen/head';
 import { isHead, type EditorFrame } from '../../../schema/screen/screen';
 import { buildFieldStyleContext } from '../../render/editor/context';
@@ -7,10 +7,10 @@ import { domMap } from '../../../state';
 import { fetchScreen, updateScreen } from './save';
 import { loadComponentPropertySchema } from './component-properties';
 
-const DEVICE_PRESETS: { label: string; sizing: Record<string, string> }[] = [
-  { label: 'Desktop', sizing: { width: '1920px', height: '1080px' } },
-  { label: 'Tablet', sizing: { width: '768px', height: '1024px' } },
-  { label: 'Mobile', sizing: { width: '375px', height: '812px' } },
+const DEVICE_PRESETS: { label: string; width: string; height: string }[] = [
+  { label: 'Desktop', width: '1920px', height: '1080px' },
+  { label: 'Tablet', width: '768px', height: '1024px' },
+  { label: 'Mobile', width: '375px', height: '812px' },
 ];
 
 export const hydrateScreenEditor = async (
@@ -29,25 +29,28 @@ export const hydrateScreenEditor = async (
 
   const editData: Record<string, unknown> = {
     head: { ...headDefaults, ...value.head },
-    sizing: value.sizing ?? {},
-    layout: value.layout ?? {},
-    appearance: value.appearance ?? {},
     columns: value.grid.columns,
     rows: value.grid.rows,
   };
+  for (const k of CSS_PROP_KEYS) {
+    const v = (value as Record<string, unknown>)[k];
+    if (typeof v === 'string') editData[k] = v;
+  }
 
   const onSave = async (draft: unknown): Promise<void> => {
     const d = draft as Record<string, unknown>;
     const nextHead = d.head;
+    const cssUpdates: Record<string, string> = {};
+    for (const k of CSS_PROP_KEYS) {
+      if (typeof d[k] === 'string') cssUpdates[k] = d[k] as string;
+    }
     await updateScreen(screenId, (s) => ({
       ...s,
       head:
         isHead(nextHead) && typeof nextHead === 'object' && nextHead !== null
           ? { ...s.head, ...nextHead }
           : s.head,
-      sizing: isStyleRecord(d.sizing) ? { ...d.sizing } : s.sizing,
-      layout: isStyleRecord(d.layout) ? { ...d.layout } : s.layout,
-      appearance: isStyleRecord(d.appearance) ? { ...d.appearance } : s.appearance,
+      ...cssUpdates,
       grid: {
         kind: 'grid',
         columns: typeof d.columns === 'number' && d.columns > 0 ? d.columns : s.grid.columns,
@@ -97,7 +100,7 @@ export const hydrateScreenEditor = async (
   });
 
   const currentPreset = DEVICE_PRESETS.find(
-    (p) => p.sizing?.width === value.sizing?.width && p.sizing?.height === value.sizing?.height,
+    (p) => p.width === value.width && p.height === value.height,
   );
   for (const preset of DEVICE_PRESETS) {
     const opt = document.createElement('option');
@@ -114,7 +117,7 @@ export const hydrateScreenEditor = async (
   deviceSelect.addEventListener('change', async () => {
     const preset = DEVICE_PRESETS.find((p) => p.label === deviceSelect.value);
     if (!preset) return;
-    await updateScreen(screenId, (s) => ({ ...s, sizing: { ...preset.sizing } }));
+    await updateScreen(screenId, (s) => ({ ...s, width: preset.width, height: preset.height }));
     onAfterSave();
   });
 

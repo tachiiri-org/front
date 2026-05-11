@@ -4,12 +4,7 @@ import {
   type FormField,
   type SchemaField,
 } from '../../../schema/component';
-import {
-  getStyleSpec,
-  readStyleValue,
-  writeStyleValue,
-  type StyleEntrySpec,
-} from '../../../schema/component/style';
+import type { StyleEntrySpec, StyleValueTarget } from '../../../schema/component/style';
 import { type FieldStyleContext, SUMMARY_STYLE } from './context';
 import { getAtPath, setAtPath, blankFromSchema } from '../../bind/field/path';
 
@@ -282,96 +277,116 @@ function renderUnsupportedField(
   return wrapper;
 }
 
-function renderStyleMap(
+const readCssProp = (draft: Record<string, unknown>, target: StyleValueTarget): string => {
+  if (Array.isArray(target)) {
+    const values = target.map((k) => (typeof draft[k] === 'string' ? draft[k] as string : ''));
+    const first = values[0] ?? '';
+    return values.every((v) => v === first) ? first : '';
+  }
+  return typeof draft[target] === 'string' ? draft[target] as string : '';
+};
+
+const writeCssProp = (draft: Record<string, unknown>, target: StyleValueTarget, value: string): void => {
+  if (Array.isArray(target)) {
+    for (const k of target) draft[k] = value;
+    return;
+  }
+  draft[target] = value;
+};
+
+function renderStyleField(
   label: string,
-  path: string,
   field: SchemaField,
   draft: Record<string, unknown>,
   ctx: FieldStyleContext,
   onBlurSave?: () => void,
 ): HTMLElement {
-  const wrapper = mk('div');
-
-  const raw = getAtPath(draft, path);
-  const map: Record<string, string> = isStringRecord(raw) ? (raw as Record<string, string>) : {};
-  setAtPath(draft, path, map);
-
   const fieldRecord = field as Record<string, unknown>;
-  const inlineEntries = Array.isArray(fieldRecord.entries)
-    ? (fieldRecord.entries as StyleEntrySpec[])
-    : undefined;
-  const styleSpec = getStyleSpec(
-    typeof fieldRecord.key === 'string' ? String(fieldRecord.key) : '',
-  );
-  const entries = inlineEntries ?? styleSpec?.entries;
+  const key = typeof fieldRecord.key === 'string' ? fieldRecord.key : '';
+  const entries = Array.isArray(fieldRecord.entries) ? (fieldRecord.entries as StyleEntrySpec[]) : undefined;
 
-  if (entries) {
+  if (entries && entries.length > 0) {
+    const wrapper = mk('div');
+
     for (const entry of entries) {
-      if (entry.defaultValue !== undefined && readStyleValue(map, entry.target) === '') {
-        writeStyleValue(map, entry.target, entry.defaultValue);
+      if (entry.defaultValue !== undefined && readCssProp(draft, entry.target) === '') {
+        writeCssProp(draft, entry.target, entry.defaultValue);
       }
     }
+
+    const headingRow = mk('div');
+    Object.assign(headingRow.style, ctx.wrapper);
+    const heading = mk('span');
+    heading.textContent = label;
+    Object.assign(heading.style, ctx.label);
+    headingRow.appendChild(heading);
+    wrapper.appendChild(headingRow);
+
+    const n = entries.length;
+    const colDefs = ['1fr', ...entries.flatMap((_, i) => i < n - 1 ? ['2fr', '1fr'] : ['2fr']), '1fr'];
+    const grid = mk('div');
+    Object.assign(grid.style, {
+      display: 'grid',
+      gridTemplateColumns: colDefs.join(' '),
+      rowGap: '2px',
+      padding: '2px 0 6px',
+    });
+
+    entries.forEach(({ key: entryKey, label: entryLabel, target, placeholder }, i) => {
+      const col = String(2 + i * 2);
+
+      const lbl = mk('span');
+      lbl.textContent = entryLabel ?? entryKey;
+      Object.assign(lbl.style, {
+        gridColumn: col,
+        gridRow: '1',
+        fontSize: '10px',
+        fontWeight: '500',
+        color: 'rgba(0,0,0,0.45)',
+        letterSpacing: '0.06em',
+      });
+
+      const input = mk('input');
+      input.type = 'text';
+      input.placeholder = placeholder ?? '';
+      input.value = readCssProp(draft, target);
+      Object.assign(input.style, {
+        gridColumn: col,
+        gridRow: '2',
+        minWidth: '0',
+        fontSize: '12px',
+        border: 'none',
+        borderBottom: '1px solid rgba(0,0,0,0.15)',
+        background: 'transparent',
+        padding: '2px 4px',
+        outline: 'none',
+        textAlign: 'center',
+        boxSizing: 'border-box',
+      });
+      input.addEventListener('input', () => { writeCssProp(draft, target, input.value); });
+      if (onBlurSave) input.addEventListener('blur', onBlurSave);
+
+      grid.appendChild(lbl);
+      grid.appendChild(input);
+    });
+
+    wrapper.appendChild(grid);
+    return wrapper;
   }
 
-  const headingRow = mk('div');
-  Object.assign(headingRow.style, ctx.wrapper);
-  const heading = mk('span');
-  heading.textContent = label;
-  Object.assign(heading.style, ctx.label);
-  headingRow.appendChild(heading);
-  wrapper.appendChild(headingRow);
-
-  if (!entries) return wrapper;
-
-  const n = entries.length;
-  const colDefs = ['1fr', ...entries.flatMap((_, i) => i < n - 1 ? ['2fr', '1fr'] : ['2fr']), '1fr'];
-  const grid = mk('div');
-  Object.assign(grid.style, {
-    display: 'grid',
-    gridTemplateColumns: colDefs.join(' '),
-    rowGap: '2px',
-    padding: '2px 0 6px',
-  });
-
-  entries.forEach(({ key, label: entryLabel, target, placeholder }, i) => {
-    const col = String(2 + i * 2);
-
-    const lbl = mk('span');
-    lbl.textContent = entryLabel ?? key;
-    Object.assign(lbl.style, {
-      gridColumn: col,
-      gridRow: '1',
-      fontSize: '10px',
-      fontWeight: '500',
-      color: 'rgba(0,0,0,0.45)',
-      letterSpacing: '0.06em',
-    });
-
-    const input = mk('input');
-    input.type = 'text';
-    input.placeholder = placeholder ?? '';
-    input.value = readStyleValue(map, target);
-    Object.assign(input.style, {
-      gridColumn: col,
-      gridRow: '2',
-      minWidth: '0',
-      fontSize: '12px',
-      border: 'none',
-      borderBottom: '1px solid rgba(0,0,0,0.15)',
-      background: 'transparent',
-      padding: '2px 4px',
-      outline: 'none',
-      textAlign: 'center',
-      boxSizing: 'border-box',
-    });
-    input.addEventListener('input', () => { writeStyleValue(map, target, input.value); });
-    if (onBlurSave) input.addEventListener('blur', onBlurSave);
-
-    grid.appendChild(lbl);
-    grid.appendChild(input);
-  });
-
-  wrapper.appendChild(grid);
+  const wrapper = mk('div');
+  Object.assign(wrapper.style, ctx.wrapper);
+  const lbl = mk('label');
+  lbl.textContent = label;
+  Object.assign(lbl.style, ctx.label);
+  const input = mk('input');
+  input.type = 'text';
+  Object.assign(input.style, ctx.input);
+  input.value = typeof draft[key] === 'string' ? draft[key] as string : '';
+  input.addEventListener('input', () => { draft[key] = input.value; });
+  if (onBlurSave) input.addEventListener('blur', onBlurSave);
+  wrapper.appendChild(lbl);
+  wrapper.appendChild(input);
   return wrapper;
 }
 
@@ -414,8 +429,7 @@ export function renderFieldFromSchema(
         onBlurSave,
       );
     case 'style': {
-      const styleField = field as Extract<FormField, { kind: 'style' }>;
-      return renderStyleMap(label, styleField.key, styleField, draft, ctx, onBlurSave);
+      return renderStyleField(label, field, draft, ctx, onBlurSave);
     }
     case 'object-list': {
       const listField = field as Extract<FormField, { kind: 'object-list' }>;

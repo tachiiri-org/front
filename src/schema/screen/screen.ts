@@ -1,7 +1,6 @@
-import { isStyleRecord } from '../component';
 import { type Head, isHead, headDefaults } from './head';
 import { type GridLayout, type Frame, isGridLayout, isFrame } from './frame';
-import { STYLE_SPEC_KEYS } from '../component/style';
+import { CSS_PROP_KEYS, type CssStyleProps } from '../component/style';
 
 export type { MetaTag, Head } from './head';
 export { headDefaults, isHead } from './head';
@@ -10,21 +9,16 @@ export { isGridLayout, isPlacement, isFrameRef, isFrame, isListFrame, isCanvasFr
 
 export type Screen = {
   head: Head;
-  sizing?: Record<string, string>;
-  layout?: Record<string, string>;
-  appearance?: Record<string, string>;
-  padding?: Record<string, string>;
-  margin?: Record<string, string>;
   grid: GridLayout;
   frames: Frame[];
-};
+} & CssStyleProps;
 
 export const isScreen = (value: unknown): value is Screen => {
   if (typeof value !== 'object' || value === null) return false;
-  const c = value as Partial<Screen>;
+  const c = value as Record<string, unknown>;
   return (
     isHead(c.head) &&
-    STYLE_SPEC_KEYS.every((k) => (c as Record<string, unknown>)[k] === undefined || isStyleRecord((c as Record<string, unknown>)[k])) &&
+    CSS_PROP_KEYS.every((k) => c[k] === undefined || typeof c[k] === 'string') &&
     isGridLayout(c.grid) &&
     Array.isArray(c.frames) &&
     c.frames.every(isFrame)
@@ -33,7 +27,8 @@ export const isScreen = (value: unknown): value is Screen => {
 
 export const screenDefaults: Screen = {
   head: headDefaults,
-  sizing: { width: '100%', height: '100%' },
+  width: '100%',
+  height: '100%',
   grid: { kind: 'grid', columns: 120, rows: 120 },
   frames: [],
 };

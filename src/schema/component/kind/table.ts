@@ -1,5 +1,5 @@
 import type { SchemaField } from './form/field';
-import { STYLE_SPEC_KEYS, isStyleRecord } from '../style';
+import { CSS_PROP_KEYS, isStyleRecord, type CssStyleProps } from '../style';
 import tableSchemaJson from './table.schema.json';
 
 const isStringRecord = isStyleRecord;
@@ -94,12 +94,7 @@ export type TableComponent = {
   name?: string;
   schema: TableSchema;
   data: TableData;
-  padding?: Record<string, string>;
-  margin?: Record<string, string>;
-  sizing?: Record<string, string>;
-  layout?: Record<string, string>;
-  appearance?: Record<string, string>;
-};
+} & CssStyleProps;
 
 export const tableDefaults: TableComponent = {
   kind: 'table',
@@ -220,6 +215,6 @@ export const isTableComponent = (value: unknown): value is TableComponent => {
     (c.name === undefined || typeof c.name === 'string') &&
     isTableSchema(c.schema) &&
     isTableData(c.data) &&
-    STYLE_SPEC_KEYS.every((k) => c[k] === undefined || isStyleRecord(c[k]))
+    CSS_PROP_KEYS.every((k) => c[k] === undefined || typeof c[k] === 'string')
   );
 };

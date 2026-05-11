@@ -56,8 +56,6 @@ export type StyleFieldComponent = {
   entries?: StyleEntrySpec[];
 };
 
-export type StyleMapFieldComponent = StyleFieldComponent;
-
 export type ObjectListFieldComponent = {
   kind: 'object-list';
   key: string;
@@ -108,7 +106,7 @@ const isStyleEntrySpec = (v: unknown): v is StyleEntrySpec => {
   );
 };
 
-export const isStyleMapFieldComponent = (v: unknown): v is StyleFieldComponent => {
+export const isStyleFieldComponent = (v: unknown): v is StyleFieldComponent => {
   if (typeof v !== 'object' || v === null || Array.isArray(v)) return false;
   const c = v as Record<string, unknown>;
   return (
@@ -212,6 +210,6 @@ export const isFormField = (v: unknown): v is FormField =>
   isTextareaFieldComponent(v) ||
   isBooleanFieldComponent(v) ||
   isSelectFieldComponent(v) ||
-  isStyleMapFieldComponent(v) ||
+  isStyleFieldComponent(v) ||
   isObjectListFieldComponent(v) ||
   isFieldGroupComponent(v);
