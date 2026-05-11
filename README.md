@@ -23,6 +23,7 @@
 
 - Local dev goes through `authorize-local` and the same R2 API path as deployed environments
 - Define initial value of components in script
+- no legacy code for compatibility
 
 ## Quality
 
