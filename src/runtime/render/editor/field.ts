@@ -5,7 +5,6 @@ import {
   type SchemaField,
 } from '../../../schema/component';
 import {
-  deleteStyleValue,
   getStyleSpec,
   readStyleValue,
   writeStyleValue,
@@ -296,47 +295,19 @@ function renderStyleMap(
   const map: Record<string, string> = isStringRecord(raw) ? (raw as Record<string, string>) : {};
   setAtPath(draft, path, map);
 
-  const list = mk('div');
   const styleSpec = getStyleSpec(
     typeof (field as Record<string, unknown>).key === 'string'
       ? String((field as Record<string, unknown>).key)
       : '',
   );
 
-  const renderRows = (): void => {
-    list.innerHTML = '';
-    if (!styleSpec) return;
+  if (styleSpec) {
     for (const entry of styleSpec.entries) {
-      const row = mk('div');
-      Object.assign(row.style, ctx.wrapper);
-      const keyLabel = mk('span');
-      keyLabel.textContent = entry.label ?? entry.key;
-      Object.assign(keyLabel.style, ctx.label);
-      keyLabel.style.width = '';
-      keyLabel.style.flex = '0 0 auto';
-      const valInput = mk('input');
-      valInput.placeholder = entry.placeholder ?? 'value';
-      valInput.value = readStyleValue(map, entry.target);
-      Object.assign(valInput.style, ctx.input);
-      const removeBtn = mk('button');
-      removeBtn.type = 'button';
-      removeBtn.textContent = '×';
-      removeBtn.style.fontSize = '10px';
-      removeBtn.style.cursor = 'pointer';
-      removeBtn.style.flexShrink = '0';
-      removeBtn.style.border = 'none';
-      removeBtn.style.background = 'transparent';
-      valInput.addEventListener('input', () => { writeStyleValue(map, entry.target, valInput.value); });
-      if (onBlurSave) valInput.addEventListener('blur', onBlurSave);
-      removeBtn.addEventListener('click', () => { deleteStyleValue(map, entry.target); renderRows(); });
-      row.appendChild(keyLabel);
-      row.appendChild(valInput);
-      row.appendChild(removeBtn);
-      list.appendChild(row);
+      if (entry.defaultValue !== undefined && readStyleValue(map, entry.target) === '') {
+        writeStyleValue(map, entry.target, entry.defaultValue);
+      }
     }
-  };
-
-  renderRows();
+  }
 
   const headingRow = mk('div');
   Object.assign(headingRow.style, ctx.wrapper);
@@ -344,9 +315,59 @@ function renderStyleMap(
   heading.textContent = label;
   Object.assign(heading.style, ctx.label);
   headingRow.appendChild(heading);
-
   wrapper.appendChild(headingRow);
-  wrapper.appendChild(list);
+
+  if (!styleSpec) return wrapper;
+
+  const n = styleSpec.entries.length;
+  const colDefs = ['1fr', ...styleSpec.entries.flatMap((_, i) => i < n - 1 ? ['2fr', '1fr'] : ['2fr']), '1fr'];
+  const grid = mk('div');
+  Object.assign(grid.style, {
+    display: 'grid',
+    gridTemplateColumns: colDefs.join(' '),
+    rowGap: '2px',
+    padding: '2px 0 6px',
+  });
+
+  styleSpec.entries.forEach(({ key, label: entryLabel, target, placeholder }, i) => {
+    const col = String(2 + i * 2);
+
+    const lbl = mk('span');
+    lbl.textContent = entryLabel ?? key;
+    Object.assign(lbl.style, {
+      gridColumn: col,
+      gridRow: '1',
+      fontSize: '10px',
+      fontWeight: '500',
+      color: 'rgba(0,0,0,0.45)',
+      letterSpacing: '0.06em',
+    });
+
+    const input = mk('input');
+    input.type = 'text';
+    input.placeholder = placeholder ?? '';
+    input.value = readStyleValue(map, target);
+    Object.assign(input.style, {
+      gridColumn: col,
+      gridRow: '2',
+      minWidth: '0',
+      fontSize: '12px',
+      border: 'none',
+      borderBottom: '1px solid rgba(0,0,0,0.15)',
+      background: 'transparent',
+      padding: '2px 4px',
+      outline: 'none',
+      textAlign: 'center',
+      boxSizing: 'border-box',
+    });
+    input.addEventListener('input', () => { writeStyleValue(map, target, input.value); });
+    if (onBlurSave) input.addEventListener('blur', onBlurSave);
+
+    grid.appendChild(lbl);
+    grid.appendChild(input);
+  });
+
+  wrapper.appendChild(grid);
   return wrapper;
 }
 

@@ -5,6 +5,7 @@ export type StyleEntrySpec = {
   label?: string;
   target: StyleValueTarget;
   placeholder?: string;
+  defaultValue?: string;
 };
 
 export type StyleSpec = {

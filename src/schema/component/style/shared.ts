@@ -41,9 +41,11 @@ export const makeStyleEntry = (
   target: StyleValueTarget,
   label?: string,
   placeholder?: string,
+  defaultValue?: string,
 ): StyleEntrySpec => ({
   key,
   target,
   ...(label ? { label } : {}),
   ...(placeholder ? { placeholder } : {}),
+  ...(defaultValue !== undefined ? { defaultValue } : {}),
 });
