@@ -125,4 +125,56 @@ describe('component schemas', () => {
       { kind: 'style', key: 'padding', label: 'padding' },
     ]);
   });
+
+  it('exposes margin style fields in the component-editor schema definition', async () => {
+    const backend: LayoutBackend = {
+      async list() {
+        return { objects: [], truncated: false };
+      },
+      async getText() {
+        return null;
+      },
+      async putText() {},
+      async deleteKey() {},
+    };
+
+    const response = await handleComponentSchemaDefinitionGet(backend, 'component-editor');
+    expect(response.status).toBe(200);
+    await expect(response.json()).resolves.toEqual([
+      { kind: 'text-field', key: 'name', label: 'name' },
+      {
+        kind: 'select',
+        key: 'sourceCanvasId',
+        label: 'source',
+        source: {
+          kind: 'endpoint',
+          url: '/api/layouts/:screenId/canvases',
+          itemsPath: 'items',
+          valueKey: 'value',
+          labelKey: 'label',
+        },
+      },
+      {
+        kind: 'object-list',
+        key: 'sections',
+        label: 'sections',
+        fields: [
+          {
+            kind: 'select',
+            key: 'source',
+            label: 'source',
+            options: [
+              { value: 'placement', label: 'placement' },
+              { value: 'properties', label: 'properties' },
+            ],
+          },
+          { kind: 'text-field', key: 'label', label: 'label' },
+          { kind: 'boolean-field', key: 'collapsible', label: 'collapsible' },
+          { kind: 'boolean-field', key: 'defaultCollapsed', label: 'defaultCollapsed' },
+        ],
+      },
+      { kind: 'style', key: 'padding', label: 'padding' },
+      { kind: 'style', key: 'margin', label: 'margin' },
+    ]);
+  });
 });

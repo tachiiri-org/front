@@ -11,7 +11,7 @@ const buildCssToSpecMap = (): Record<string, string> => {
     for (const entry of spec.entries) {
       const targets = Array.isArray(entry.target) ? entry.target : [entry.target];
       for (const cssKey of targets) {
-        if (!map[cssKey]) map[cssKey] = specKey;
+        map[cssKey] = specKey;
       }
     }
   }

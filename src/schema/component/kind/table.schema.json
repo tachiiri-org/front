@@ -1,3 +1,4 @@
 [
-  { "kind": "style", "key": "padding", "label": "padding" }
+  { "kind": "style", "key": "padding", "label": "padding" },
+  { "kind": "style", "key": "margin", "label": "margin" }
 ]

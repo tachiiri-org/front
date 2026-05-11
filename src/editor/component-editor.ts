@@ -12,6 +12,8 @@ export type EditorComponent = {
   kind: 'component-editor';
   name?: string;
   sourceCanvasId?: string;
+  padding?: Record<string, string>;
+  margin?: Record<string, string>;
   sections?: EditorSection[];
 };
 
