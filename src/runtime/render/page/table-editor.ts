@@ -5,6 +5,7 @@ import {
   type TableData,
   type TableSchema,
 } from '../../../schema/component';
+import { STYLE_MAP_KEYS } from '../../../schema/component/style';
 import {
   validateSchemaEditorTableDraft,
   validateSchemaEditorTableDraftDetail,
@@ -81,56 +82,6 @@ const scheduleAutoSizedControls = (root: HTMLElement): void => {
 };
 
 const ACTION_COL_MIN_WIDTH = '72px';
-const STYLE_MAP_KEY_OPTIONS = [
-  'padding',
-  'paddingTop',
-  'paddingRight',
-  'paddingBottom',
-  'paddingLeft',
-  'margin',
-  'marginTop',
-  'marginRight',
-  'marginBottom',
-  'marginLeft',
-  'width',
-  'height',
-  'minWidth',
-  'minHeight',
-  'maxWidth',
-  'maxHeight',
-  'display',
-  'gap',
-  'flex',
-  'flexDirection',
-  'alignItems',
-  'justifyContent',
-  'textAlign',
-  'fontSize',
-  'fontWeight',
-  'color',
-  'background',
-  'backgroundColor',
-  'border',
-  'borderRadius',
-  'boxShadow',
-  'overflow',
-  'overflowX',
-  'overflowY',
-  'position',
-  'inset',
-  'top',
-  'right',
-  'bottom',
-  'left',
-  'cursor',
-  'whiteSpace',
-  'opacity',
-  'transform',
-  'transformOrigin',
-  'userSelect',
-  'pointerEvents',
-  'lineHeight',
-] as const;
 
 const randomId = (): string => {
   const cryptoObj = globalThis.crypto as Crypto | undefined;
@@ -458,7 +409,7 @@ const renderEditableTable = (
       empty.value = '';
       empty.textContent = '';
       select.appendChild(empty);
-      for (const optionValue of STYLE_MAP_KEY_OPTIONS) {
+      for (const optionValue of STYLE_MAP_KEYS) {
         const el = document.createElement('option');
         el.value = optionValue;
         el.textContent = optionValue;
