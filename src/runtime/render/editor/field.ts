@@ -8,6 +8,7 @@ import {
   getStyleSpec,
   readStyleValue,
   writeStyleValue,
+  type StyleEntrySpec,
 } from '../../../schema/component/style';
 import { type FieldStyleContext, SUMMARY_STYLE } from './context';
 import { getAtPath, setAtPath, blankFromSchema } from '../../bind/field/path';
@@ -295,14 +296,17 @@ function renderStyleMap(
   const map: Record<string, string> = isStringRecord(raw) ? (raw as Record<string, string>) : {};
   setAtPath(draft, path, map);
 
+  const fieldRecord = field as Record<string, unknown>;
+  const inlineEntries = Array.isArray(fieldRecord.entries)
+    ? (fieldRecord.entries as StyleEntrySpec[])
+    : undefined;
   const styleSpec = getStyleSpec(
-    typeof (field as Record<string, unknown>).key === 'string'
-      ? String((field as Record<string, unknown>).key)
-      : '',
+    typeof fieldRecord.key === 'string' ? String(fieldRecord.key) : '',
   );
+  const entries = inlineEntries ?? styleSpec?.entries;
 
-  if (styleSpec) {
-    for (const entry of styleSpec.entries) {
+  if (entries) {
+    for (const entry of entries) {
       if (entry.defaultValue !== undefined && readStyleValue(map, entry.target) === '') {
         writeStyleValue(map, entry.target, entry.defaultValue);
       }
@@ -317,10 +321,10 @@ function renderStyleMap(
   headingRow.appendChild(heading);
   wrapper.appendChild(headingRow);
 
-  if (!styleSpec) return wrapper;
+  if (!entries) return wrapper;
 
-  const n = styleSpec.entries.length;
-  const colDefs = ['1fr', ...styleSpec.entries.flatMap((_, i) => i < n - 1 ? ['2fr', '1fr'] : ['2fr']), '1fr'];
+  const n = entries.length;
+  const colDefs = ['1fr', ...entries.flatMap((_, i) => i < n - 1 ? ['2fr', '1fr'] : ['2fr']), '1fr'];
   const grid = mk('div');
   Object.assign(grid.style, {
     display: 'grid',
@@ -329,7 +333,7 @@ function renderStyleMap(
     padding: '2px 0 6px',
   });
 
-  styleSpec.entries.forEach(({ key, label: entryLabel, target, placeholder }, i) => {
+  entries.forEach(({ key, label: entryLabel, target, placeholder }, i) => {
     const col = String(2 + i * 2);
 
     const lbl = mk('span');

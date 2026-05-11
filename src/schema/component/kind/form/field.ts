@@ -3,6 +3,7 @@ import { type NumberFieldComponent, isNumberFieldComponent } from './field/numbe
 import { type TextareaFieldComponent, isTextareaFieldComponent } from './field/textarea';
 import { type BooleanFieldComponent, isBooleanFieldComponent } from './field/boolean';
 import type { SelectSource } from '../select';
+import type { StyleEntrySpec } from '../../style';
 
 export type { TextFieldComponent } from './field/text';
 export type { NumberFieldComponent } from './field/number';
@@ -52,6 +53,7 @@ export type StyleFieldComponent = {
   kind: 'style';
   key: string;
   label?: string;
+  entries?: StyleEntrySpec[];
 };
 
 export type StyleMapFieldComponent = StyleFieldComponent;
@@ -93,13 +95,28 @@ export type FormField =
   | ObjectListFieldComponent
   | FieldGroupComponent;
 
+const isStyleEntrySpec = (v: unknown): v is StyleEntrySpec => {
+  if (typeof v !== 'object' || v === null || Array.isArray(v)) return false;
+  const c = v as Record<string, unknown>;
+  return (
+    typeof c.key === 'string' &&
+    (typeof c.target === 'string' ||
+      (Array.isArray(c.target) && c.target.every((t) => typeof t === 'string'))) &&
+    (c.label === undefined || typeof c.label === 'string') &&
+    (c.placeholder === undefined || typeof c.placeholder === 'string') &&
+    (c.defaultValue === undefined || typeof c.defaultValue === 'string')
+  );
+};
+
 export const isStyleMapFieldComponent = (v: unknown): v is StyleFieldComponent => {
   if (typeof v !== 'object' || v === null || Array.isArray(v)) return false;
   const c = v as Record<string, unknown>;
   return (
     normalizeFormFieldKind(String(c.kind)) === 'style' &&
     typeof c.key === 'string' &&
-    (c.label === undefined || typeof c.label === 'string')
+    (c.label === undefined || typeof c.label === 'string') &&
+    (c.entries === undefined ||
+      (Array.isArray(c.entries) && c.entries.every(isStyleEntrySpec)))
   );
 };
 
