@@ -58,14 +58,109 @@ const loadSchemaIntoTable = async (
   onFrameRerender?.(tableFrame.id);
 };
 
+const populateSelectFromEndpoint = async (
+  selectEl: HTMLSelectElement,
+  url: string,
+  source: Record<string, unknown>,
+): Promise<void> => {
+  const itemsPath = typeof source.itemsPath === 'string' ? source.itemsPath : '';
+  const valueKey = typeof source.valueKey === 'string' && source.valueKey ? source.valueKey : 'value';
+  const labelKey = typeof source.labelKey === 'string' && source.labelKey ? source.labelKey : 'label';
+  try {
+    const res = await fetch(url);
+    if (!res.ok) return;
+    const raw = (await res.json()) as unknown;
+    const items = getByPath(raw, itemsPath);
+    if (!Array.isArray(items)) return;
+    while (selectEl.options.length > 0) selectEl.remove(0);
+    for (const item of items as Record<string, unknown>[]) {
+      const opt = document.createElement('option');
+      opt.value = String(item[valueKey] ?? '');
+      opt.textContent = String(item[labelKey] ?? opt.value);
+      selectEl.appendChild(opt);
+    }
+  } catch {
+    // ignore fetch errors
+  }
+};
+
 const hydrateSelectTableBindings = async (
   onFrameRerender?: (frameId: string) => void,
 ): Promise<void> => {
   if (!store.screen) return;
 
+  const cascadeTargetIds = new Set<string>();
+
+  // First pass: cascade-driver selects (inline source with filterTargetId)
   for (const frame of store.screen.frames) {
     const c = frame as Record<string, unknown>;
     if (c.kind !== 'select') continue;
+    const filterTargetId = typeof c.filterTargetId === 'string' ? c.filterTargetId : '';
+    if (!filterTargetId) continue;
+
+    const source = c.source as Record<string, unknown> | undefined;
+    if (source?.kind !== 'inline' || !Array.isArray(source.options)) continue;
+
+    const categoryEl = domMap.get(frame.id);
+    if (!(categoryEl instanceof HTMLSelectElement)) continue;
+
+    const kindFrame = store.screen.frames.find((f) => f.id === filterTargetId);
+    if (!kindFrame) continue;
+    const kindEl = domMap.get(filterTargetId);
+    if (!(kindEl instanceof HTMLSelectElement)) continue;
+
+    const kindC = kindFrame as Record<string, unknown>;
+    const kindSource = kindC.source as Record<string, unknown> | undefined;
+    if (kindSource?.kind !== 'endpoint' || typeof kindSource.url !== 'string') continue;
+
+    const tableId = typeof kindC.targetComponentId === 'string' ? kindC.targetComponentId : '';
+    const tableFrame = tableId ? store.screen.frames.find((f) => f.id === tableId) : undefined;
+
+    cascadeTargetIds.add(filterTargetId);
+
+    const filterParamKey = typeof c.filterParamKey === 'string' ? c.filterParamKey : 'category';
+
+    for (const opt of source.options as Array<Record<string, unknown>>) {
+      const el = document.createElement('option');
+      el.value = String(opt.value ?? '');
+      el.textContent = String(opt.label ?? el.value);
+      categoryEl.appendChild(el);
+    }
+
+    const populateKindSelect = async (categoryValue: string): Promise<void> => {
+      const u = new URL(kindSource.url as string, window.location.origin);
+      u.searchParams.set(filterParamKey, categoryValue);
+      await populateSelectFromEndpoint(kindEl, u.toString(), kindSource);
+    };
+
+    if (categoryEl.options.length > 0) {
+      await populateKindSelect(categoryEl.value);
+      if (tableFrame && kindEl.options.length > 0) {
+        await loadSchemaIntoTable(kindEl.value, tableFrame, onFrameRerender);
+      }
+    }
+
+    categoryEl.addEventListener('change', () => {
+      void populateKindSelect(categoryEl.value).then(async () => {
+        if (tableFrame && kindEl.options.length > 0) {
+          await loadSchemaIntoTable(kindEl.value, tableFrame, onFrameRerender);
+        }
+      });
+    });
+
+    if (tableFrame) {
+      kindEl.addEventListener('change', () => {
+        void loadSchemaIntoTable(kindEl.value, tableFrame, onFrameRerender);
+      });
+    }
+  }
+
+  // Second pass: standalone endpoint selects (not cascade targets)
+  for (const frame of store.screen.frames) {
+    const c = frame as Record<string, unknown>;
+    if (c.kind !== 'select') continue;
+    if (cascadeTargetIds.has(frame.id)) continue;
+
     const targetId = typeof c.targetComponentId === 'string' ? c.targetComponentId : '';
     if (!targetId) continue;
 
@@ -77,30 +172,10 @@ const hydrateSelectTableBindings = async (
 
     const source = c.source as Record<string, unknown> | undefined;
     if (source?.kind === 'endpoint' && typeof source.url === 'string' && source.url) {
-      try {
-        const res = await fetch(source.url);
-        if (res.ok) {
-          const raw = (await res.json()) as unknown;
-          const itemsPath = typeof source.itemsPath === 'string' ? source.itemsPath : '';
-          const items = getByPath(raw, itemsPath);
-          const valueKey = typeof source.valueKey === 'string' && source.valueKey ? source.valueKey : 'value';
-          const labelKey = typeof source.labelKey === 'string' && source.labelKey ? source.labelKey : 'label';
-
-          if (Array.isArray(items)) {
-            for (const item of items as Record<string, unknown>[]) {
-              const opt = document.createElement('option');
-              opt.value = String(item[valueKey] ?? '');
-              opt.textContent = String(item[labelKey] ?? opt.value);
-              selectEl.appendChild(opt);
-            }
-            if (selectEl.options.length > 0) {
-              selectEl.value = selectEl.options[0].value;
-              await loadSchemaIntoTable(selectEl.value, tableFrame, onFrameRerender);
-            }
-          }
-        }
-      } catch {
-        // ignore fetch errors
+      await populateSelectFromEndpoint(selectEl, source.url, source);
+      if (selectEl.options.length > 0) {
+        selectEl.value = selectEl.options[0].value;
+        await loadSchemaIntoTable(selectEl.value, tableFrame, onFrameRerender);
       }
     }
 

@@ -81,7 +81,7 @@ export const handleApiRequest = async (request: Request, env: Env): Promise<Resp
   const backend = createLayoutsBackend(env);
 
   if (url.pathname === '/api/component-schemas') {
-    if (request.method === 'GET') return handleComponentSchemasList();
+    if (request.method === 'GET') return handleComponentSchemasList(url.searchParams);
     return new Response('Method Not Allowed', { status: 405 });
   }
 

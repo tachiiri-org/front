@@ -16,7 +16,12 @@ export type SelectEndpointSource = {
   headers?: Record<string, string>;
 };
 
-export type SelectSource = SelectEndpointSource;
+export type SelectInlineSource = {
+  kind: 'inline';
+  options: SelectOption[];
+};
+
+export type SelectSource = SelectEndpointSource | SelectInlineSource;
 
 export type SelectComponent = {
   kind: 'select';
@@ -36,7 +41,7 @@ export const isSelectOption = (value: unknown): value is SelectOption => {
   return typeof c.value === 'string' && typeof c.label === 'string';
 };
 
-export const isSelectSource = (value: unknown): value is SelectSource => {
+const isSelectEndpointSource = (value: unknown): value is SelectEndpointSource => {
   if (typeof value !== 'object' || value === null || Array.isArray(value)) return false;
   const c = value as Record<string, unknown>;
   if (c.kind !== 'endpoint') return false;
@@ -48,6 +53,15 @@ export const isSelectSource = (value: unknown): value is SelectSource => {
     (c.headers === undefined || isStyleRecord(c.headers))
   );
 };
+
+const isSelectInlineSource = (value: unknown): value is SelectInlineSource => {
+  if (typeof value !== 'object' || value === null || Array.isArray(value)) return false;
+  const c = value as Record<string, unknown>;
+  return c.kind === 'inline' && Array.isArray(c.options) && (c.options as unknown[]).every(isSelectOption);
+};
+
+export const isSelectSource = (value: unknown): value is SelectSource =>
+  isSelectEndpointSource(value) || isSelectInlineSource(value);
 
 export const selectDefaults: SelectComponent = {
   kind: 'select',

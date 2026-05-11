@@ -18,7 +18,8 @@ import {
   handleStyleSpecPut,
 } from './style-specs';
 
-const SCHEMA_EDITABLE_KINDS = [...COMPONENT_KINDS, 'component-editor', 'screen', ...STYLE_SPEC_EDITABLE_KINDS];
+const COMPONENT_SCHEMA_KINDS = [...COMPONENT_KINDS, 'component-editor', 'screen'];
+const SCHEMA_EDITABLE_KINDS = [...COMPONENT_SCHEMA_KINDS, ...STYLE_SPEC_EDITABLE_KINDS];
 
 const FORM_FIELD_KIND_OPTIONS = [
   'text',
@@ -96,11 +97,21 @@ const loadStoredSchema = async (backend: LayoutBackend, kind: string): Promise<S
   return [];
 };
 
-export const handleComponentSchemasList = (): Response =>
-  new Response(
-    JSON.stringify({ items: SCHEMA_EDITABLE_KINDS.map((k) => ({ value: k, label: k })) }),
+export const handleComponentSchemasList = (searchParams?: URLSearchParams): Response => {
+  const category = searchParams?.get('category');
+  let kinds: string[];
+  if (category === 'component') {
+    kinds = COMPONENT_SCHEMA_KINDS;
+  } else if (category === 'style') {
+    kinds = STYLE_SPEC_EDITABLE_KINDS;
+  } else {
+    kinds = SCHEMA_EDITABLE_KINDS;
+  }
+  return new Response(
+    JSON.stringify({ items: kinds.map((k) => ({ value: k, label: k })) }),
     { headers: { 'Content-Type': 'application/json' } },
   );
+};
 
 export const handleComponentSchemaDefinitionGet = async (
   backend: LayoutBackend,
