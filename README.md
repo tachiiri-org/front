@@ -30,6 +30,7 @@
 - File tree expresses whole structure
 - Folder should express concept
 - Less definition in ts, more definition in json
+- Include all files in git commit　if the files is not related with changes in this time
 
 ## Hint
 

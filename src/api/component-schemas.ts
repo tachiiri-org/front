@@ -11,8 +11,14 @@ import {
   validateSchemaEditorTableDraft,
 } from '../schema/component/schema-editor';
 import type { LayoutBackend } from '../storage/layouts/r2';
+import {
+  STYLE_SPEC_EDITABLE_KINDS,
+  isStyleSpecKind,
+  handleStyleSpecGet,
+  handleStyleSpecPut,
+} from './style-specs';
 
-const SCHEMA_EDITABLE_KINDS = [...COMPONENT_KINDS, 'component-editor', 'screen'];
+const SCHEMA_EDITABLE_KINDS = [...COMPONENT_KINDS, 'component-editor', 'screen', ...STYLE_SPEC_EDITABLE_KINDS];
 
 const FORM_FIELD_KIND_OPTIONS = [
   'text',
@@ -112,6 +118,7 @@ export const handleComponentSchemaGet = async (
   kind: string,
 ): Promise<Response> => {
   if (!SCHEMA_EDITABLE_KINDS.includes(kind)) return new Response('Not Found', { status: 404 });
+  if (isStyleSpecKind(kind)) return handleStyleSpecGet(backend, kind);
   const data = schemaEditorSchemaToTableData(await loadStoredSchema(backend, kind));
 
   return new Response(
@@ -126,6 +133,7 @@ export const handleComponentSchemaPut = async (
   kind: string,
 ): Promise<Response> => {
   if (!SCHEMA_EDITABLE_KINDS.includes(kind)) return new Response('Not Found', { status: 404 });
+  if (isStyleSpecKind(kind)) return handleStyleSpecPut(request, backend, kind);
 
   const body = (await request.json()) as unknown;
   const rawData =
