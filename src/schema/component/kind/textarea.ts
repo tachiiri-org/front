@@ -1,5 +1,5 @@
 import type { SchemaField } from './form/field';
-import { CSS_PROP_KEYS, type CssStyleProps } from '../style';
+import { ALL_CSS_PROP_KEYS, type CssStyleProps } from '../style';
 import textareaSchemaJson from './textarea.schema.json';
 
 export type TextareaComponent = {
@@ -29,6 +29,6 @@ export const isTextareaComponent = (value: unknown): value is TextareaComponent 
     (c.language === undefined || c.language === 'json' || c.language === 'plain') &&
     (c.value === undefined || typeof c.value === 'string') &&
     (c.rows === undefined || (typeof c.rows === 'number' && Number.isInteger(c.rows) && c.rows > 0)) &&
-    CSS_PROP_KEYS.every((k) => c[k] === undefined || typeof c[k] === 'string')
+    ALL_CSS_PROP_KEYS.every((k) => c[k] === undefined || typeof c[k] === 'string')
   );
 };

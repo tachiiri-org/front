@@ -1,6 +1,6 @@
 import { type Head, isHead, headDefaults } from './head';
 import { type GridLayout, type Frame, isGridLayout, isFrame } from './frame';
-import { CSS_PROP_KEYS, type CssStyleProps } from '../component/style';
+import { ALL_CSS_PROP_KEYS, type CssStyleProps } from '../component/style';
 
 export type { MetaTag, Head } from './head';
 export { headDefaults, isHead } from './head';
@@ -18,7 +18,7 @@ export const isScreen = (value: unknown): value is Screen => {
   const c = value as Record<string, unknown>;
   return (
     isHead(c.head) &&
-    CSS_PROP_KEYS.every((k) => c[k] === undefined || typeof c[k] === 'string') &&
+    ALL_CSS_PROP_KEYS.every((k) => c[k] === undefined || typeof c[k] === 'string') &&
     isGridLayout(c.grid) &&
     Array.isArray(c.frames) &&
     c.frames.every(isFrame)

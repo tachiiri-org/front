@@ -1,5 +1,6 @@
 import { describe, expect, it } from 'vitest';
 import {
+  handleComponentSchemasList,
   handleComponentSchemaDefinitionGet,
   handleComponentSchemaPut,
   SCHEMA_TABLE_SCHEMA,
@@ -104,6 +105,16 @@ describe('component schemas', () => {
     ]);
   });
 
+  it('lists only current style keys in the style category', async () => {
+    const response = handleComponentSchemasList(new URLSearchParams('category=style'));
+    const payload = await response.json() as { items: Array<{ value: string; label: string }> };
+
+    expect(payload.items.some((item) => item.value === 'paddingTop')).toBe(false);
+    expect(payload.items.some((item) => item.value === 'marginTop')).toBe(false);
+    expect(payload.items.some((item) => item.value === 'padding')).toBe(true);
+    expect(payload.items.some((item) => item.value === 'margin')).toBe(true);
+  });
+
   it('migrates legacy padding fields when reading component schema definitions', async () => {
     const backend: LayoutBackend = {
       async list() {
@@ -173,8 +184,28 @@ describe('component schemas', () => {
           { kind: 'boolean-field', key: 'defaultCollapsed', label: 'defaultCollapsed' },
         ],
       },
-      { kind: 'style', key: 'padding', label: 'padding' },
-      { kind: 'style', key: 'margin', label: 'margin' },
+      {
+        kind: 'style',
+        key: 'padding',
+        label: 'padding',
+        entries: [
+          { key: 't', label: 't', target: 'paddingTop' },
+          { key: 'r', label: 'r', target: 'paddingRight' },
+          { key: 'b', label: 'b', target: 'paddingBottom' },
+          { key: 'l', label: 'l', target: 'paddingLeft' },
+        ],
+      },
+      {
+        kind: 'style',
+        key: 'margin',
+        label: 'margin',
+        entries: [
+          { key: 't', label: 't', target: 'marginTop' },
+          { key: 'r', label: 'r', target: 'marginRight' },
+          { key: 'b', label: 'b', target: 'marginBottom' },
+          { key: 'l', label: 'l', target: 'marginLeft' },
+        ],
+      },
     ]);
   });
 });

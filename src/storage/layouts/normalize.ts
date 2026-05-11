@@ -1,11 +1,11 @@
 import { isScreen, isGridLayout, isFrame, isPlacement, screenDefaults, type Screen, type Frame, type Placement } from '../../schema/screen/screen';
-import { isComponent, applyDefaults, CSS_PROP_KEYS } from '../../schema/component';
+import { isComponent, applyDefaults, ALL_CSS_PROP_KEYS } from '../../schema/component';
 import { headDefaults, isHead } from '../../schema/screen/head';
 import { allocateDefaultEntityName, assignDefaultEntityNames } from '../../schema/component/name';
 import { isStringRecord, isPositiveInteger, isFrameCandidate, type FrameCandidate } from './validate';
 import { migrateFrameKind, migrateEditorSource, migrateLegacyCanvasIds } from './migrate';
 
-const CSS_PROP_SET = new Set<string>(CSS_PROP_KEYS);
+const CSS_PROP_SET = new Set<string>(ALL_CSS_PROP_KEYS);
 const LEGACY_SPEC_KEYS = ['padding', 'margin', 'sizing', 'layout', 'appearance'];
 
 const kebabToCamel = (s: string): string =>
@@ -160,7 +160,7 @@ export const normalizeScreen = (value: unknown): Screen | null => {
     : { kind: 'grid', columns };
 
   const cssProps: Record<string, string> = {};
-  for (const k of CSS_PROP_KEYS) {
+  for (const k of ALL_CSS_PROP_KEYS) {
     if (typeof candidate[k] === 'string') cssProps[k] = candidate[k] as string;
   }
   if (!cssProps.width) cssProps.width = '100%';

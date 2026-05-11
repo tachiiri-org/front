@@ -1,7 +1,7 @@
 import type { EditorFrame, Screen } from '../../../schema/screen/screen';
 import type { EditorSection } from '../../../editor/component-editor';
 import { editorDefaults } from '../../../editor/component-editor';
-import { CSS_PROP_KEYS } from '../../../schema/component/style';
+import { ALL_CSS_PROP_KEYS } from '../../../schema/component/style';
 import { getFrameSelection } from '../../../state';
 import { EDITOR_ONLY_KINDS } from '../../render/canvas/preview';
 import { appendSection } from '../../render/editor/section';
@@ -28,7 +28,7 @@ export const renderEditorPreview = async (
   const sections = (frame.sections ?? editorDefaults.sections) as EditorSection[];
 
   const container = document.createElement('div');
-  for (const propKey of CSS_PROP_KEYS) {
+  for (const propKey of ALL_CSS_PROP_KEYS) {
     const v = (frame as Record<string, unknown>)[propKey];
     if (typeof v === 'string') (container.style as unknown as Record<string, string>)[propKey] = v;
   }

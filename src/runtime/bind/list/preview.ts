@@ -1,5 +1,5 @@
 import type { ListFrame } from '../../../schema/screen/screen';
-import { CSS_PROP_KEYS, isStyleRecord } from '../../../schema/component/style';
+import { ALL_CSS_PROP_KEYS, isStyleRecord } from '../../../schema/component/style';
 import { fetchItems } from './fetch';
 import { RESOURCES } from './resources';
 
@@ -11,7 +11,7 @@ export const renderListPreview = async (
   if (!resource) { wrapper.replaceChildren(); return; }
   const items = await fetchItems(resource.listUrl);
   const ul = document.createElement('ul');
-  for (const propKey of CSS_PROP_KEYS) {
+  for (const propKey of ALL_CSS_PROP_KEYS) {
     const v = (frame as Record<string, unknown>)[propKey];
     if (typeof v === 'string') (ul.style as unknown as Record<string, string>)[propKey] = v;
   }

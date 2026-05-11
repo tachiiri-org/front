@@ -2,15 +2,7 @@ export type { StyleEntrySpec, StyleValueTarget } from './types';
 
 export const CSS_PROP_KEYS = [
   'padding',
-  'paddingTop',
-  'paddingRight',
-  'paddingBottom',
-  'paddingLeft',
   'margin',
-  'marginTop',
-  'marginRight',
-  'marginBottom',
-  'marginLeft',
   'width',
   'height',
   'minWidth',
@@ -51,7 +43,20 @@ export const CSS_PROP_KEYS = [
   'lineHeight',
 ] as const;
 
-export type CssStyleProps = Partial<Record<typeof CSS_PROP_KEYS[number], string>>;
+export const CSS_PROP_LEGACY_KEYS = [
+  'paddingTop',
+  'paddingRight',
+  'paddingBottom',
+  'paddingLeft',
+  'marginTop',
+  'marginRight',
+  'marginBottom',
+  'marginLeft',
+] as const;
+
+export const ALL_CSS_PROP_KEYS = [...CSS_PROP_KEYS, ...CSS_PROP_LEGACY_KEYS] as const;
+
+export type CssStyleProps = Partial<Record<typeof ALL_CSS_PROP_KEYS[number], string>>;
 
 export const isStyleRecord = (v: unknown): v is Record<string, string> =>
   typeof v === 'object' &&

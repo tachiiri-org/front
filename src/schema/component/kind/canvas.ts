@@ -1,5 +1,5 @@
 import type { SchemaField } from './form/field';
-import { CSS_PROP_KEYS, isStyleRecord, type CssStyleProps } from '../style';
+import { ALL_CSS_PROP_KEYS, isStyleRecord, type CssStyleProps } from '../style';
 import canvasSchemaJson from './canvas.schema.json';
 
 export type CanvasComponent = {
@@ -31,6 +31,6 @@ export const isCanvasComponent = (value: unknown): value is CanvasComponent => {
     (c.viewportWidth === undefined || isPositiveInteger(c.viewportWidth)) &&
     (c.viewportHeight === undefined || isPositiveInteger(c.viewportHeight)) &&
     (c.cellStyle === undefined || isStyleRecord(c.cellStyle)) &&
-    CSS_PROP_KEYS.every((k) => c[k] === undefined || typeof c[k] === 'string')
+    ALL_CSS_PROP_KEYS.every((k) => c[k] === undefined || typeof c[k] === 'string')
   );
 };

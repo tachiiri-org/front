@@ -3,7 +3,7 @@ import {
   isCanvasComponent,
   isTextareaComponent,
   isTableComponent,
-  CSS_PROP_KEYS,
+  ALL_CSS_PROP_KEYS,
   applyDefaults,
   type TableComponent,
   type Component,
@@ -15,7 +15,7 @@ import { renderList, renderCanvas, renderEditor, renderTable } from './frame';
 import { renderEditableTable } from './table-editor';
 
 const applyCssProps = (el: HTMLElement, c: Record<string, unknown>): void => {
-  for (const propKey of CSS_PROP_KEYS) {
+  for (const propKey of ALL_CSS_PROP_KEYS) {
     const v = c[propKey];
     if (typeof v === 'string') (el.style as unknown as Record<string, string>)[propKey] = v;
   }

@@ -1,5 +1,5 @@
 import type { SchemaField } from './form/field';
-import { CSS_PROP_KEYS, type CssStyleProps } from '../style';
+import { ALL_CSS_PROP_KEYS, type CssStyleProps } from '../style';
 import formSchemaJson from './form.schema.json';
 
 export type FormComponent = {
@@ -30,6 +30,6 @@ export const isFormComponent = (value: unknown): value is FormComponent => {
     (c.sourceComponentId === undefined || typeof c.sourceComponentId === 'string') &&
     (c.excludeKeys === undefined ||
       (Array.isArray(c.excludeKeys) && c.excludeKeys.every((e) => typeof e === 'string'))) &&
-    CSS_PROP_KEYS.every((k) => c[k] === undefined || typeof c[k] === 'string')
+    ALL_CSS_PROP_KEYS.every((k) => c[k] === undefined || typeof c[k] === 'string')
   );
 };

@@ -1,4 +1,4 @@
-import { CSS_PROP_KEYS } from '../../../schema/component/style';
+import { ALL_CSS_PROP_KEYS } from '../../../schema/component/style';
 import { headDefaults } from '../../../schema/screen/head';
 import { isHead, type EditorFrame } from '../../../schema/screen/screen';
 import { buildFieldStyleContext } from '../../render/editor/context';
@@ -32,7 +32,7 @@ export const hydrateScreenEditor = async (
     columns: value.grid.columns,
     rows: value.grid.rows,
   };
-  for (const k of CSS_PROP_KEYS) {
+  for (const k of ALL_CSS_PROP_KEYS) {
     const v = (value as Record<string, unknown>)[k];
     if (typeof v === 'string') editData[k] = v;
   }
@@ -41,7 +41,7 @@ export const hydrateScreenEditor = async (
     const d = draft as Record<string, unknown>;
     const nextHead = d.head;
     const cssUpdates: Record<string, string> = {};
-    for (const k of CSS_PROP_KEYS) {
+    for (const k of ALL_CSS_PROP_KEYS) {
       if (typeof d[k] === 'string') cssUpdates[k] = d[k] as string;
     }
     await updateScreen(screenId, (s) => ({

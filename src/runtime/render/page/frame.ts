@@ -2,12 +2,12 @@ import {
   type ListComponent,
   type CanvasComponent,
   type TableComponent,
-  CSS_PROP_KEYS,
+  ALL_CSS_PROP_KEYS,
 } from '../../../schema/component';
 import type { EditorComponent } from '../../../editor/component-editor';
 
 const applyCssProps = (el: HTMLElement, c: Record<string, unknown>): void => {
-  for (const propKey of CSS_PROP_KEYS) {
+  for (const propKey of ALL_CSS_PROP_KEYS) {
     const v = c[propKey];
     if (typeof v === 'string') (el.style as unknown as Record<string, string>)[propKey] = v;
   }

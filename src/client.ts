@@ -1,6 +1,6 @@
 import { isScreen, isFrameRef, type Screen, type Frame } from './schema/screen/screen';
 import type { Component } from './schema/component';
-import { CSS_PROP_KEYS } from './schema/component/style';
+import { ALL_CSS_PROP_KEYS } from './schema/component/style';
 import { renderComponent, fetchFrameComponent, findEditorScreenId, hydrateEditor, store, domMap } from './runtime';
 import type { FrameState } from './state';
 
@@ -81,7 +81,7 @@ const renderScreen = async (screenId: string): Promise<void> => {
     document.head.appendChild(meta);
   }
 
-  for (const propKey of CSS_PROP_KEYS) {
+  for (const propKey of ALL_CSS_PROP_KEYS) {
     const v = (store.screen as Record<string, unknown>)[propKey];
     if (typeof v === 'string') (root.style as unknown as Record<string, string>)[propKey] = v;
   }

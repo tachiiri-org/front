@@ -1,5 +1,5 @@
 import type { SchemaField } from './form/field';
-import { CSS_PROP_KEYS, isStyleRecord, type CssStyleProps } from '../style';
+import { ALL_CSS_PROP_KEYS, isStyleRecord, type CssStyleProps } from '../style';
 import selectSchemaJson from './select.schema.json';
 
 export type SelectOption = {
@@ -75,6 +75,6 @@ export const isSelectComponent = (value: unknown): value is SelectComponent => {
     (c.name === undefined || typeof c.name === 'string') &&
     isSelectSource(c.source) &&
     (c.targetComponentId === undefined || typeof c.targetComponentId === 'string') &&
-    CSS_PROP_KEYS.every((k) => c[k] === undefined || typeof c[k] === 'string')
+    ALL_CSS_PROP_KEYS.every((k) => c[k] === undefined || typeof c[k] === 'string')
   );
 };
