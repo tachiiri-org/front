@@ -78,6 +78,14 @@ export const hydrateComponentEditor = async (
     : {};
 
   editorEl.replaceChildren();
+  const contentEl = document.createElement('div');
+  Object.assign(contentEl.style, {
+    display: 'flex',
+    flexDirection: 'column',
+    flex: '1',
+    minHeight: '0',
+    overflow: 'auto',
+  });
   let renderedProperties = false;
 
   const saveSelectedFrameUpdate = async (patch: Record<string, unknown>): Promise<void> => {
@@ -137,7 +145,7 @@ export const hydrateComponentEditor = async (
       })();
     });
     kindRow.appendChild(kindSelect);
-    editorEl.appendChild(kindRow);
+    contentEl.appendChild(kindRow);
   }
 
   const componentSchema = await loadComponentPropertySchema(componentKind);
@@ -154,7 +162,7 @@ export const hydrateComponentEditor = async (
       }));
       onAfterSave();
     };
-    appendSection(editorEl, { ...section, label: undefined }, renderPlacementRow(placementData, onSave));
+    appendSection(contentEl, { ...section, label: undefined }, renderPlacementRow(placementData, onSave));
   }
 
   for (const section of sections) {
@@ -164,7 +172,7 @@ export const hydrateComponentEditor = async (
       await saveSelectedFrameUpdate(draft as Record<string, unknown>);
     };
     appendSection(
-      editorEl,
+      contentEl,
       section,
       renderPropertiesSection(
         componentData,
@@ -183,7 +191,7 @@ export const hydrateComponentEditor = async (
       await saveSelectedFrameUpdate(draft as Record<string, unknown>);
     };
     appendSection(
-      editorEl,
+      contentEl,
       { source: 'properties', label: 'properties' },
       renderPropertiesSection(
         componentData,
@@ -195,4 +203,6 @@ export const hydrateComponentEditor = async (
       ),
     );
   }
+
+  editorEl.appendChild(contentEl);
 };
