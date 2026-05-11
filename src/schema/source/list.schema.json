@@ -1,0 +1,12 @@
+[
+  { "kind": "text-field", "key": "name", "label": "name" },
+  {
+    "kind": "object-list",
+    "key": "items",
+    "label": "items",
+    "fields": [
+      { "kind": "text-field", "key": "value", "label": "value" },
+      { "kind": "text-field", "key": "label", "label": "label" }
+    ]
+  }
+]

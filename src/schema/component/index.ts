@@ -53,6 +53,7 @@ export {
 export { type FormField, type SchemaField, isFormField, isSchemaField } from './kind/form/field';
 export { normalizeFormFieldKind } from './kind/form/field';
 export { CSS_PROP_KEYS, CSS_PROP_LEGACY_KEYS, ALL_CSS_PROP_KEYS, isStyleRecord } from './style';
+export { STYLE_FIELD_SPECS, resolveStyleFieldEntries, type StyleSpecKey } from './style';
 export type { StyleEntrySpec, StyleValueTarget, CssStyleProps } from './style';
 
 export type Component =

@@ -91,7 +91,7 @@ const hydrateSelectTableBindings = async (
 
   const cascadeTargetIds = new Set<string>();
 
-  // First pass: cascade-driver selects (inline source with filterTargetId)
+  // First pass: cascade-driver selects
   for (const frame of store.screen.frames) {
     const c = frame as Record<string, unknown>;
     if (c.kind !== 'select') continue;
@@ -99,7 +99,6 @@ const hydrateSelectTableBindings = async (
     if (!filterTargetId) continue;
 
     const source = c.source as Record<string, unknown> | undefined;
-    if (source?.kind !== 'inline' || !Array.isArray(source.options)) continue;
 
     const categoryEl = domMap.get(frame.id);
     if (!(categoryEl instanceof HTMLSelectElement)) continue;
@@ -120,11 +119,18 @@ const hydrateSelectTableBindings = async (
 
     const filterParamKey = typeof c.filterParamKey === 'string' ? c.filterParamKey : 'category';
 
-    for (const opt of source.options as Array<Record<string, unknown>>) {
-      const el = document.createElement('option');
-      el.value = String(opt.value ?? '');
-      el.textContent = String(opt.label ?? el.value);
-      categoryEl.appendChild(el);
+    if (source?.kind === 'inline' && Array.isArray(source.options)) {
+      for (const opt of source.options as Array<Record<string, unknown>>) {
+        const el = document.createElement('option');
+        el.value = String(opt.value ?? '');
+        el.textContent = String(opt.label ?? el.value);
+        categoryEl.appendChild(el);
+      }
+    } else if (source?.kind === 'endpoint' && typeof source.url === 'string' && source.url) {
+      await populateSelectFromEndpoint(categoryEl, source.url, source);
+      if (!categoryEl.value && categoryEl.options.length > 0) {
+        categoryEl.value = categoryEl.options[0].value;
+      }
     }
 
     const populateKindSelect = async (categoryValue: string): Promise<void> => {

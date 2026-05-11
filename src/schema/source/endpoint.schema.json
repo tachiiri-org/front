@@ -1,0 +1,8 @@
+[
+  { "kind": "text-field", "key": "name", "label": "name" },
+  { "kind": "text-field", "key": "url", "label": "url" },
+  { "kind": "text-field", "key": "itemsPath", "label": "itemsPath" },
+  { "kind": "text-field", "key": "valueKey", "label": "valueKey" },
+  { "kind": "text-field", "key": "labelKey", "label": "labelKey" },
+  { "kind": "textarea-field", "key": "headers_json", "label": "headers_json" }
+]

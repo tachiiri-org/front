@@ -1,4 +1,5 @@
 export type { StyleEntrySpec, StyleValueTarget } from './types';
+export { STYLE_FIELD_SPECS, resolveStyleFieldEntries, type StyleSpecKey } from './specs';
 
 export const CSS_PROP_KEYS = [
   'padding',
