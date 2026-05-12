@@ -31,6 +31,9 @@ workers_dev = false
 name = "front-local"
 workers_dev = true
 
+[env.local.vars]
+LAYOUTS_BUCKET_ID = "bucket-local"
+
 [[env.local.services]]
 binding = "AUTHORIZE"
 service = "authorize-local"
