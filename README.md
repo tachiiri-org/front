@@ -7,6 +7,10 @@
 ## System structure
 
 - using cloudflare worker. basically no static assets
+- system has front,identify,authorize,execute
+- front has web, mcp, api(future). workers are `front` and `front-dev`, and developed in localhost.
+- authorize
+
 - json is in R2
 - worker uses R2 via 'authorize' worker which is service binded, not on internet
 - Probably bypass authorize when developing in localhost

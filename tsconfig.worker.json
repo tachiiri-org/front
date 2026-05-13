@@ -13,6 +13,7 @@
   "include": [
     "src/worker.ts",
     "src/auth/**/*.ts",
+    "src/identify.ts",
     "src/mcp/**/*.ts",
     "src/web/api/**/*.ts",
     "src/web/storage/**/*.ts",

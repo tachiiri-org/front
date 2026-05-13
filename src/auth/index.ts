@@ -2,9 +2,16 @@ export type AuthorizeEnv = {
   readonly AUTHORIZE?: {
     fetch(request: Request): Promise<Response>;
   };
+  readonly IDENTIFY?: {
+    fetch(request: Request): Promise<Response>;
+  };
+  readonly IDENTIFY_ORIGIN?: string;
+  readonly FRONT_TO_IDENTIFY_TOKEN?: string;
   readonly FRONT_TO_AUTHORIZE_TOKEN?: string;
   readonly INTERNAL_AUTH_SIGNING_KEY?: string;
   readonly INTERNAL_AUTH_TOKEN_ISSUER?: string;
+  readonly FRONTEND_ORIGIN?: string;
+  readonly GITHUB_OAUTH_CLIENT_ID?: string;
 };
 
 export function hasAuthorizeConfig(env: AuthorizeEnv): boolean {

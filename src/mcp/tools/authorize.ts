@@ -1,5 +1,5 @@
 import { authorizeFetch, type AuthorizeEnv } from "../../auth";
-import { getGithubToken } from "../token-store";
+import { buildGitHubOAuthStartUrl, readGitHubSession } from "../../identify";
 
 type Tool = {
   name: string;
@@ -9,17 +9,15 @@ type Tool = {
 
 const methodsEnum = (methods: string[]) => ({ type: "string", enum: methods });
 
-const GITHUB_CLIENT_ID = "Ov23litfbD8WRrXkM4iR";
-
 export const TOOLS: Tool[] = [
   {
     name: "authorize_github_login",
     description:
-      "Generate a GitHub OAuth URL. Open the URL in a browser to authenticate — the callback will store the token automatically for subsequent authorize_github calls.",
+      "Generate the public front GitHub OAuth URL. Open the URL in a browser to authenticate — identify stores the session and subsequent authorize_github calls read it from identify.",
     inputSchema: {
       type: "object",
       properties: {
-        scope: { type: "string", description: "GitHub OAuth scopes space-separated (default: 'repo')" },
+        scope: { type: "string", description: "GitHub OAuth scopes space-separated (default: 'repo read:user')" },
       },
     },
   },
@@ -101,11 +99,20 @@ export async function callTool(
   env: AuthorizeEnv,
 ): Promise<ToolResult> {
   if (name === "authorize_github_login") {
-    const scope = String(args.scope ?? "repo");
-    const url = new URL("https://github.com/login/oauth/authorize");
-    url.searchParams.set("client_id", GITHUB_CLIENT_ID);
-    url.searchParams.set("scope", scope);
-    return { content: [{ type: "text", text: `Open this URL in your browser to authenticate with GitHub:\n${url.toString()}` }] };
+    const scope = String(args.scope ?? "repo read:user");
+    try {
+      const url = buildGitHubOAuthStartUrl(env, scope);
+      return {
+        content: [
+          {
+            type: "text",
+            text: `Open this URL in your browser to authenticate with GitHub:\n${url}`,
+          },
+        ],
+      };
+    } catch (error) {
+      return { content: [{ type: "text", text: String(error) }], isError: true };
+    }
   }
 
   const basePath = BASE_PATHS[name];
@@ -121,8 +128,19 @@ export async function callTool(
 
   const headers: Record<string, string> = {};
   if (name === "authorize_github") {
-    const token = getGithubToken();
-    if (token) headers["x-github-access-token"] = token;
+    const session = await readGitHubSession(env);
+    if (!session) {
+      return {
+        content: [
+          {
+            type: "text",
+            text: "GitHub session not found. Run authorize_github_login first.",
+          },
+        ],
+        isError: true,
+      };
+    }
+    headers["x-github-access-token"] = session.accessToken;
   }
 
   try {

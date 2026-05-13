@@ -20,6 +20,15 @@ workers_dev = true
 binding = "LAYOUTS"
 bucket_name = "layouts-dev"
 
+[env.dev.vars]
+FRONTEND_ORIGIN = "https://front-dev.workers.dev"
+FRONT_TO_IDENTIFY_TOKEN = "828298b87ee5fdb66350e2ae2892473b139abd3523e189e9c8781b77f94b06ed"
+GITHUB_OAUTH_CLIENT_ID = "Ov23lihhhvT7GB1IGasP"
+
+[[env.dev.services]]
+binding = "IDENTIFY"
+service = "identify-dev"
+
 [[env.production.r2_buckets]]
 binding = "LAYOUTS"
 bucket_name = "layouts-prod"
@@ -27,11 +36,24 @@ bucket_name = "layouts-prod"
 [env.production]
 workers_dev = false
 
+[env.production.vars]
+FRONTEND_ORIGIN = "https://front.workers.dev"
+FRONT_TO_IDENTIFY_TOKEN = "3fcc68b9faf6906846b810611cd13831a3cded421f498b75888a7ce592208752"
+GITHUB_OAUTH_CLIENT_ID = "Ov23li098QXLtF5UbEg5"
+
+[[env.production.services]]
+binding = "IDENTIFY"
+service = "identify"
+
 [env.local]
 name = "front-local"
 workers_dev = true
 
 [env.local.vars]
+FRONTEND_ORIGIN = "http://localhost:8787"
+IDENTIFY_ORIGIN = "http://localhost:8788"
+GITHUB_OAUTH_CLIENT_ID = "Ov23litfbD8WRrXkM4iR"
+FRONT_TO_IDENTIFY_TOKEN = "828298b87ee5fdb66350e2ae2892473b139abd3523e189e9c8781b77f94b06ed"
 LAYOUTS_BUCKET_ID = "bucket-local"
 FRONT_TO_AUTHORIZE_TOKEN = "0M3WHY4RVirHPPeiUHbwbkqWH8kL4pgUaUZxbHYEOTQ"
 INTERNAL_AUTH_SIGNING_KEY = '{"key_ops":["sign"],"ext":true,"kty":"EC","x":"zXGyZOvOTgwcGdQrUrr2DBGsRJwuUvHLFTZ90CM02_U","y":"CZoC3CzhEdot39TRf-lJrFH76SN2EfVlFF53c7gGMjg","crv":"P-256","d":"RJHEcL766qLh04aZHAoLlcw5PFIRNkkHQPyBR7n0fuU"}'
@@ -39,3 +61,7 @@ INTERNAL_AUTH_SIGNING_KEY = '{"key_ops":["sign"],"ext":true,"kty":"EC","x":"zXGy
 [[env.local.services]]
 binding = "AUTHORIZE"
 service = "authorize-local"
+
+[[env.local.services]]
+binding = "IDENTIFY"
+service = "identify-local"

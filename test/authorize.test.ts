@@ -1,5 +1,16 @@
-import { beforeEach, describe, expect, it, vi } from "vitest";
-import { authorizeFetch, hasAuthorizeConfig, issueInternalToken, type AuthorizeEnv } from "../src/authorize";
+import { afterEach, beforeAll, beforeEach, describe, expect, it, vi } from "vitest";
+import { webcrypto } from "node:crypto";
+import {
+  authorizeFetch,
+  hasAuthorizeConfig,
+  issueInternalToken,
+  type AuthorizeEnv,
+} from "../src/auth";
+import {
+  buildGitHubOAuthStartUrl,
+  exchangeGitHubOAuthCode,
+  readGitHubSession,
+} from "../src/identify";
 
 const encoder = new TextEncoder();
 const decoder = new TextDecoder();
@@ -29,6 +40,13 @@ describe("authorize helpers", () => {
   let publicKeyJwk: string;
   let privateKeyJwk: string;
 
+  beforeAll(() => {
+    Object.defineProperty(globalThis, "crypto", {
+      value: webcrypto,
+      configurable: true,
+    });
+  });
+
   beforeEach(async () => {
     const keyPair = (await crypto.subtle.generateKey(
       { name: "ECDSA", namedCurve: "P-256" },
@@ -37,6 +55,10 @@ describe("authorize helpers", () => {
     )) as CryptoKeyPair;
     privateKeyJwk = JSON.stringify(await crypto.subtle.exportKey("jwk", keyPair.privateKey));
     publicKeyJwk = JSON.stringify(await crypto.subtle.exportKey("jwk", keyPair.publicKey));
+  });
+
+  afterEach(() => {
+    vi.unstubAllGlobals();
   });
 
   it("detects authorize config only when all required bindings are present", () => {
@@ -109,5 +131,71 @@ describe("authorize helpers", () => {
 
     expect(response.status).toBe(200);
     expect(fetch).toHaveBeenCalledOnce();
+  });
+
+  it("builds the front GitHub OAuth start URL", () => {
+    expect(
+      buildGitHubOAuthStartUrl({
+        FRONTEND_ORIGIN: "https://front-dev.tachiiri.workers.dev",
+      }),
+    ).toBe(
+      "https://front-dev.tachiiri.workers.dev/oauth/github/start?scope=repo+read%3Auser",
+    );
+  });
+
+  it("reads the GitHub session from identify", async () => {
+    const fetch = vi.fn(async (input: RequestInfo | URL) => {
+      expect(String(input)).toBe(
+        "https://identify-dev.tachiiri.workers.dev/internal/github/session",
+      );
+      return Response.json({
+        authenticated: true,
+        accessToken: "github-token",
+        viewer: {
+          login: "octocat",
+          name: "Mona",
+        },
+      });
+    });
+
+    vi.stubGlobal("fetch", fetch);
+
+    await expect(
+      readGitHubSession({
+        IDENTIFY_ORIGIN: "https://identify-dev.tachiiri.workers.dev",
+        FRONT_TO_IDENTIFY_TOKEN: "front-token",
+      }),
+    ).resolves.toEqual({
+      authenticated: true,
+      accessToken: "github-token",
+      viewer: {
+        login: "octocat",
+        name: "Mona",
+      },
+    });
+  });
+
+  it("exchanges the GitHub oauth code through identify", async () => {
+    const identify = {
+      fetch: vi.fn(async (request: Request) => {
+        expect(request.url).toBe("https://identify.internal/internal/github/oauth/callback");
+        expect(request.method).toBe("POST");
+        expect(request.headers.get("x-front-to-identify-token")).toBe("front-token");
+        await expect(request.json()).resolves.toEqual({ code: "oauth-code" });
+        return new Response(null, { status: 204 });
+      }),
+    };
+
+    await expect(
+      exchangeGitHubOAuthCode(
+        {
+          IDENTIFY: identify,
+          FRONT_TO_IDENTIFY_TOKEN: "front-token",
+        },
+        "oauth-code",
+      ),
+    ).resolves.toBeUndefined();
+
+    expect(identify.fetch).toHaveBeenCalledOnce();
   });
 });
