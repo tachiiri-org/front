@@ -12,13 +12,11 @@
   },
   "include": [
     "src/worker.ts",
-    "src/api/**/*.ts",
     "src/auth/**/*.ts",
-    "src/layouts/**/*.ts",
-    "src/storage/**/*.ts",
-    "src/schema/**/*.ts",
-    "src/component/**/*.ts",
-    "src/screen/**/*.ts",
-    "src/editor/component-editor.ts"
+    "src/mcp/**/*.ts",
+    "src/web/api/**/*.ts",
+    "src/web/storage/**/*.ts",
+    "src/web/schema/**/*.ts",
+    "src/web/editor/component-editor.ts"
   ]
 }
