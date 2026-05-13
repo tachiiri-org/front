@@ -37,3 +37,4 @@
 - Use api to create, edit, delete json
 - Basically local dev server runs in other terminal
 - local layouts data is still available through the configured R2 bucket
+- secrets_store_secrets is not string. use `.get()` to get secret value
