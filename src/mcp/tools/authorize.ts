@@ -1,4 +1,5 @@
 import { authorizeFetch, type AuthorizeEnv } from "../../auth";
+import { getGithubToken } from "../token-store";
 
 type Tool = {
   name: string;
@@ -8,7 +9,20 @@ type Tool = {
 
 const methodsEnum = (methods: string[]) => ({ type: "string", enum: methods });
 
+const GITHUB_CLIENT_ID = "Ov23litfbD8WRrXkM4iR";
+
 export const TOOLS: Tool[] = [
+  {
+    name: "authorize_github_login",
+    description:
+      "Generate a GitHub OAuth URL. Open the URL in a browser to authenticate — the callback will store the token automatically for subsequent authorize_github calls.",
+    inputSchema: {
+      type: "object",
+      properties: {
+        scope: { type: "string", description: "GitHub OAuth scopes space-separated (default: 'repo')" },
+      },
+    },
+  },
   {
     name: "authorize_health",
     description: "Check authorize service health.",
@@ -21,19 +35,6 @@ export const TOOLS: Tool[] = [
       type: "object",
       properties: {
         path: { type: "string", description: "Sub-path below /api/v1/github (e.g. '/repos/owner/repo/issues')" },
-        method: methodsEnum(["GET", "POST"]),
-        body: { type: "object", description: "Request body for POST" },
-      },
-      required: ["path", "method"],
-    },
-  },
-  {
-    name: "authorize_google_drive",
-    description: "Proxy a request to the Google Drive adapter via authorize (/api/v1/google-drive/*).",
-    inputSchema: {
-      type: "object",
-      properties: {
-        path: { type: "string", description: "Method path (e.g. '/files')" },
         method: methodsEnum(["GET", "POST"]),
         body: { type: "object", description: "Request body for POST" },
       },
@@ -84,7 +85,6 @@ export const TOOLS: Tool[] = [
 const BASE_PATHS: Record<string, string> = {
   authorize_health: "/health",
   authorize_github: "/api/v1/github",
-  authorize_google_drive: "/api/v1/google-drive",
   authorize_r2_s3: "/api/v1/cloudflare-r2-adapter/s3",
   authorize_r2_control: "/api/v1/cloudflare-r2-adapter/control",
   authorize_d1: "/api/v1/d1",
@@ -100,6 +100,14 @@ export async function callTool(
   args: Record<string, unknown>,
   env: AuthorizeEnv,
 ): Promise<ToolResult> {
+  if (name === "authorize_github_login") {
+    const scope = String(args.scope ?? "repo");
+    const url = new URL("https://github.com/login/oauth/authorize");
+    url.searchParams.set("client_id", GITHUB_CLIENT_ID);
+    url.searchParams.set("scope", scope);
+    return { content: [{ type: "text", text: `Open this URL in your browser to authenticate with GitHub:\n${url.toString()}` }] };
+  }
+
   const basePath = BASE_PATHS[name];
   if (!basePath) {
     return { content: [{ type: "text", text: `Unknown tool: ${name}` }], isError: true };
@@ -111,8 +119,14 @@ export async function callTool(
   const method = isHealth ? "GET" : String(args.method ?? "GET");
   const body = args.body !== undefined ? JSON.stringify(args.body) : undefined;
 
+  const headers: Record<string, string> = {};
+  if (name === "authorize_github") {
+    const token = getGithubToken();
+    if (token) headers["x-github-access-token"] = token;
+  }
+
   try {
-    const response = await authorizeFetch(env, { path, method, body });
+    const response = await authorizeFetch(env, { path, method, body, headers });
     const text = await response.text();
     if (!response.ok) {
       return { content: [{ type: "text", text: `Error ${response.status}: ${text}` }], isError: true };
