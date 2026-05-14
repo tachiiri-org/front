@@ -1,9 +1,22 @@
 import { handleGitHubOAuthCallback, handleGitHubOAuthStart } from './auth/github';
 import type { AuthorizeEnv } from './auth';
+import { handleApiRequest } from './api/data';
 
 type AssetsEnv = {
   readonly ASSETS: {
     fetch(request: Request): Promise<Response>;
+  };
+  readonly LAYOUTS?: {
+    get(key: string): Promise<{ text(): Promise<string> } | null>;
+    put(
+      key: string,
+      value: string,
+      options?: {
+        httpMetadata?: {
+          contentType?: string;
+        };
+      },
+    ): Promise<unknown>;
   };
 };
 
@@ -22,6 +35,12 @@ export default {
   async fetch(request: Request, env: Env): Promise<Response> {
     const pathname = new URL(request.url).pathname;
 
+    if (pathname === '/api/spec-document' || pathname === '/api/ui-shell-settings') {
+      const apiResponse = await handleApiRequest(request, env);
+      if (apiResponse) {
+        return apiResponse;
+      }
+    }
     if (pathname === '/oauth/github/start') {
       return handleGitHubOAuthStart({ request, env });
     }

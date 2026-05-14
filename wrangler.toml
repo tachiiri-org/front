@@ -21,7 +21,7 @@ binding = "LAYOUTS"
 bucket_name = "layouts-dev"
 
 [env.dev.vars]
-FRONTEND_ORIGIN = "https://front-dev.workers.dev"
+FRONTEND_ORIGIN = "https://front-dev.tachiiri.workers.dev"
 GITHUB_OAUTH_CLIENT_ID = "Ov23lihhhvT7GB1IGasP"
 
 [[env.dev.services]]
@@ -55,7 +55,7 @@ bucket_name = "layouts-prod"
 workers_dev = false
 
 [env.production.vars]
-FRONTEND_ORIGIN = "https://front.workers.dev"
+FRONTEND_ORIGIN = "https://front.tachiiri.workers.dev"
 GITHUB_OAUTH_CLIENT_ID = "Ov23li098QXLtF5UbEg5"
 
 [[env.production.services]]
@@ -87,9 +87,12 @@ workers_dev = true
 
 [env.local.vars]
 FRONTEND_ORIGIN = "http://localhost:8787"
-IDENTIFY_ORIGIN = "http://localhost:8788"
 GITHUB_OAUTH_CLIENT_ID = "Ov23litfbD8WRrXkM4iR"
 LAYOUTS_BUCKET_ID = "bucket-local"
+
+[[env.local.r2_buckets]]
+binding = "LAYOUTS"
+bucket_name = "layouts-dev"
 
 [[env.local.services]]
 binding = "AUTHORIZE"
