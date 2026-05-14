@@ -49,6 +49,19 @@ export async function authorizeFetch(
     headers.set("Content-Type", "application/json");
   }
 
+  if (env.AUTHORIZE_ORIGIN) {
+    return fetch(
+      new URL(input.path, env.AUTHORIZE_ORIGIN),
+      {
+        method: input.method,
+        headers,
+        body: input.body ?? null,
+        ...(input.body ? ({ duplex: "half" } as RequestInit) : {}),
+        redirect: "manual",
+      },
+    );
+  }
+
   return env.AUTHORIZE.fetch(
     new Request(new URL(input.path, "https://authorize.local").toString(), {
       method: input.method,

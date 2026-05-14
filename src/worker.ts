@@ -1,6 +1,6 @@
 import { handleGitHubOAuthCallback, handleGitHubOAuthStart } from './auth/github';
 import type { AuthorizeEnv } from './auth';
-import { handleApiRequest } from './api/data';
+import { handleApiRequest, handleGitHubAuthStatus } from './api/data';
 
 type AssetsEnv = {
   readonly ASSETS: {
@@ -41,10 +41,16 @@ export default {
         return apiResponse;
       }
     }
-    if (pathname === '/oauth/github/start') {
+    if (pathname === '/api/auth/github/status') {
+      const authStatusResponse = await handleGitHubAuthStatus(request, env);
+      if (authStatusResponse) {
+        return authStatusResponse;
+      }
+    }
+    if (pathname === '/oauth/github/start' || pathname === '/github/oauth/start') {
       return handleGitHubOAuthStart({ request, env });
     }
-    if (pathname === '/oauth/github/callback') {
+    if (pathname === '/oauth/github/callback' || pathname === '/github/oauth/callback') {
       return handleGitHubOAuthCallback({ request, env });
     }
 

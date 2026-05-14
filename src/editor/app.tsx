@@ -48,6 +48,8 @@ export const EditorScreen = ({
   const [documentLoadError, setDocumentLoadError] = useState<string | null>(bootstrapError);
   const [isBootstrapping, setIsBootstrapping] = useState(true);
   const [validationMessage, setValidationMessage] = useState('');
+  const [githubAuthStatus, setGithubAuthStatus] = useState<'checking' | 'connected' | 'disconnected' | 'error'>('checking');
+  const [githubAuthLogin, setGithubAuthLogin] = useState<string | null>(null);
   const [editorMode, setEditorMode] = useState<'spec' | 'issue' | 'ui'>('spec');
   const [theme, setTheme] = useState<'dark' | 'light'>(() => {
     const saved = localStorage.getItem('editor-theme');
@@ -56,6 +58,52 @@ export const EditorScreen = ({
   });
   const [isHelpOpen, setIsHelpOpen] = useState(false);
   const helpRef = useRef<HTMLDivElement | null>(null);
+  const isLocalHost = window.location.hostname === 'localhost' || window.location.hostname === '127.0.0.1';
+  const githubAuthStartHref = isLocalHost
+    ? 'https://identify-local.tachiiri.workers.dev/github/oauth/start?scope=repo+read%3Auser'
+    : '/oauth/github/start?scope=repo+read%3Auser';
+
+  useEffect(() => {
+    if (!isLocalHost) {
+      return;
+    }
+
+    const controller = new AbortController();
+
+    const loadGitHubStatus = async (): Promise<void> => {
+      try {
+        const response = await fetch('/api/auth/github/status', {
+          signal: controller.signal,
+          headers: { Accept: 'application/json' },
+        });
+
+        if (!response.ok) {
+          setGithubAuthStatus('error');
+          setGithubAuthLogin(null);
+          return;
+        }
+
+        const payload = (await response.json()) as {
+          authenticated: boolean;
+          login: string | null;
+        };
+
+        setGithubAuthStatus(payload.authenticated ? 'connected' : 'disconnected');
+        setGithubAuthLogin(payload.login);
+      } catch {
+        if (!controller.signal.aborted) {
+          setGithubAuthStatus('error');
+          setGithubAuthLogin(null);
+        }
+      }
+    };
+
+    void loadGitHubStatus();
+
+    return () => {
+      controller.abort();
+    };
+  }, [isLocalHost]);
 
   useEffect(() => {
     if (!runtimeServices) {
@@ -290,7 +338,37 @@ export const EditorScreen = ({
   return (
     <main className="editor-shell">
       <header className="editor-topbar">
-        <h1>ui-spec-editor</h1>
+        <div className="editor-topbar__brand">
+          <h1>ui-spec-editor</h1>
+          {isLocalHost ? (
+            githubAuthStatus === 'connected' ? (
+              <span
+                id="github-auth-badge"
+                className={`editor-auth-badge editor-auth-badge--${githubAuthStatus}`}
+                data-auth-status={githubAuthStatus}
+                title={githubAuthLogin ? `GitHub login: ${githubAuthLogin}` : undefined}
+              >
+                GitHub connected
+                {githubAuthLogin ? ` · ${githubAuthLogin}` : ''}
+              </span>
+            ) : (
+              <a
+                id="github-auth-badge"
+                className={`editor-auth-badge editor-auth-badge--${githubAuthStatus}`}
+                data-auth-status={githubAuthStatus}
+                href={githubAuthStartHref}
+                title="Open GitHub OAuth login"
+              >
+                GitHub{' '}
+                {githubAuthStatus === 'checking'
+                  ? 'checking'
+                  : githubAuthStatus === 'error'
+                    ? 'error'
+                    : 'disconnected'}
+              </a>
+            )
+          ) : null}
+        </div>
         <div className="editor-segmented">
           <button
             type="button"

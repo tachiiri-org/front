@@ -121,6 +121,13 @@ body {
   background: var(--editor-surface-alt);
 }
 
+.editor-topbar__brand {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  min-width: 0;
+}
+
 .editor-statusbar {
   display: flex;
   align-items: center;
@@ -134,6 +141,46 @@ body {
   margin: 0;
   font-size: 16px;
   font-weight: 600;
+}
+
+.editor-auth-badge {
+  display: inline-flex;
+  align-items: center;
+  padding: 3px 8px;
+  border: 1px solid var(--editor-border-strong);
+  border-radius: 999px;
+  background: var(--editor-surface);
+  color: var(--editor-text-muted);
+  font-size: 11px;
+  line-height: 1;
+  white-space: nowrap;
+}
+
+a.editor-auth-badge {
+  text-decoration: none;
+}
+
+a.editor-auth-badge:hover {
+  border-color: var(--editor-text-muted);
+}
+
+.editor-auth-badge--connected {
+  border-color: color-mix(in srgb, var(--editor-success) 55%, var(--editor-border-strong));
+  color: var(--editor-success);
+}
+
+.editor-auth-badge--disconnected {
+  border-color: color-mix(in srgb, var(--editor-danger) 55%, var(--editor-border-strong));
+  color: var(--editor-danger);
+}
+
+.editor-auth-badge--checking {
+  color: var(--editor-text-muted);
+}
+
+.editor-auth-badge--error {
+  border-color: color-mix(in srgb, var(--editor-danger) 70%, var(--editor-border-strong));
+  color: var(--editor-danger);
 }
 
 .editor-topbar__actions {

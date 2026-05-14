@@ -59,6 +59,17 @@ async function fetchIdentify(
     headers.set("x-front-to-identify-token", token);
   }
 
+  if (env.IDENTIFY_ORIGIN) {
+    return fetch(
+      new URL(path, env.IDENTIFY_ORIGIN),
+      {
+        ...init,
+        headers,
+        redirect: "manual",
+      },
+    );
+  }
+
   if (env.IDENTIFY) {
     return env.IDENTIFY.fetch(
       new Request(new URL(path, "https://identify.internal").toString(), {
@@ -71,18 +82,7 @@ async function fetchIdentify(
     );
   }
 
-  if (!env.IDENTIFY_ORIGIN) {
-    throw new Error("identify_not_configured");
-  }
-
-  return fetch(
-    new URL(path, env.IDENTIFY_ORIGIN),
-    {
-      ...init,
-      headers,
-      redirect: "manual",
-    },
-  );
+  throw new Error("identify_not_configured");
 }
 
 export async function readGitHubSession(

@@ -104,3 +104,45 @@ export async function handleApiRequest(request: Request, env: ApiEnv): Promise<R
 
   return null;
 }
+
+export async function handleGitHubAuthStatus(
+  request: Request,
+  env: {
+    readonly IDENTIFY_ORIGIN?: string;
+    readonly FRONT_TO_IDENTIFY_TOKEN?: string | { get(): Promise<string> };
+  },
+): Promise<Response | null> {
+  if (new URL(request.url).pathname !== '/api/auth/github/status') {
+    return null;
+  }
+
+  if (!env.IDENTIFY_ORIGIN) {
+    return json({ authenticated: false, login: null }, { status: 200 });
+  }
+
+  try {
+    const response = await fetch(new URL('/github/session', env.IDENTIFY_ORIGIN), {
+      headers: { Accept: 'application/json' },
+      redirect: 'manual',
+    });
+
+    if (!response.ok) {
+      return json({ authenticated: false, login: null }, { status: 200 });
+    }
+
+    const payload = (await response.json()) as {
+      connected: boolean;
+      viewer: { login: string; name: string | null } | null;
+    };
+
+    return json(
+      {
+        authenticated: payload.connected,
+        login: payload.connected ? payload.viewer?.login ?? null : null,
+      },
+      { status: 200 },
+    );
+  } catch {
+    return json({ authenticated: false, login: null }, { status: 200 });
+  }
+}

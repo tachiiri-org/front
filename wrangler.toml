@@ -87,6 +87,9 @@ workers_dev = true
 
 [env.local.vars]
 FRONTEND_ORIGIN = "http://localhost:8787"
+IDENTIFY_ORIGIN = "https://identify-local.tachiiri.workers.dev"
+AUTHORIZE_ORIGIN = "https://authorize-local.tachiiri.workers.dev"
+FRONT_TO_IDENTIFY_TOKEN = "828298b87ee5fdb66350e2ae2892473b139abd3523e189e9c8781b77f94b06ed"
 GITHUB_OAUTH_CLIENT_ID = "Ov23litfbD8WRrXkM4iR"
 LAYOUTS_BUCKET_ID = "bucket-local"
 
