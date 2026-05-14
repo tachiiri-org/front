@@ -15,6 +15,11 @@ export default defineConfig({
   build: {
     outDir: resolve('dist'),
     emptyOutDir: true,
+    rollupOptions: {
+      output: {
+        entryFileNames: 'assets/index.js',
+      },
+    },
   },
   define: {
     __APP_CHANNEL__: JSON.stringify(appChannel),
