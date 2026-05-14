@@ -11,7 +11,7 @@ const appBuildTime = process.env.APP_BUILD_TIME ?? new Date().toISOString();
 const appVersion = process.env.APP_VERSION ?? packageJson.version;
 
 export default defineConfig({
-  base: './',
+  base: '/',
   build: {
     outDir: resolve('dist'),
     emptyOutDir: true,
