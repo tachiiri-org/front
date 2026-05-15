@@ -25,9 +25,9 @@ import { authorizeFetch, type AuthorizeEnv } from '../auth';
 
 type Env = {
   readonly ASSETS: {
-    fetch(request: Request): Promiseh} & LayoutsEnv;  } & LayoutsEnv & AuthorizeEnv;
-<Response>;
+        fetch(request: Request): Promise<Response>;
   };
+} & LayoutsEnv & AuthorizeEnv;
 30
 
 
