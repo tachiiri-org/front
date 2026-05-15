@@ -11,10 +11,6 @@ binding = "ASSETS"
 binding = "LAYOUTS"
 bucket_name = "layouts-dev"
 
-[[r2_buckets]]
-binding = "LAYOUTS"
-bucket_name = "layouts-dev"
-
 [env.dev]
 name = "front-dev"
 workers_dev = true
