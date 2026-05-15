@@ -21,7 +21,7 @@ import {
   handleComponentSchemaGet,
   handleComponentSchemaPut,
 } from './component-schemas';
-import { type AuthorizeEnv } from '../auth';
+import { type AuthorizeEnv } from '../../auth';
 
 type Env = {
   readonly ASSETS: {

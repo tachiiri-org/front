@@ -15,9 +15,14 @@
     "src/auth/**/*.ts",
     "src/identify.ts",
     "src/mcp/**/*.ts",
+    "src/api/**/*.ts",
+    "src/shared/**/*.ts",
     "src/web/api/**/*.ts",
     "src/web/storage/**/*.ts",
     "src/web/schema/**/*.ts",
     "src/web/editor/component-editor.ts"
+  ],
+  "exclude": [
+    "src/**/*.test.ts"
   ]
 }

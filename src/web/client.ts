@@ -159,11 +159,39 @@ const loadEditor = async (screenId: string): Promise<void> => {
   await hydrateEditor(reloadEditor, screenId, rerender);
 };
 
+const renderAuthPage = async (): Promise<void> => {
+  const res = await fetch('/api/auth/github/status');
+  const status = (await res.json()) as { authenticated: boolean; login: string | null };
+
+  root.replaceChildren();
+  const wrap = document.createElement('div');
+  wrap.style.cssText = 'display:flex;align-items:center;justify-content:center;height:100vh;font-family:monospace;gap:1em;';
+
+  if (status.authenticated) {
+    const label = document.createElement('span');
+    label.textContent = `@${status.login ?? 'unknown'}`;
+    const btn = document.createElement('button');
+    btn.textContent = 'Logout';
+    btn.onclick = async () => {
+      await fetch('/api/auth/logout', { method: 'POST' });
+      void renderAuthPage();
+    };
+    wrap.append(label, btn);
+  } else {
+    const a = document.createElement('a');
+    a.href = '/oauth/github/start';
+    a.textContent = 'Login with GitHub';
+    wrap.appendChild(a);
+  }
+
+  root.appendChild(wrap);
+};
+
 const loadEditorBootstrap = async (): Promise<void> => {
   const pathnameScreenId = getScreenIdFromPathname();
   const screenId = pathnameScreenId ?? await findEditorScreenId();
   if (!screenId) {
-    root.replaceChildren();
+    void renderAuthPage();
     return;
   }
   await loadEditor(screenId);

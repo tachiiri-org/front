@@ -116,3 +116,7 @@ export async function exchangeGitHubOAuthCode(
     throw new Error(`identify_github_oauth_exchange_failed:${response.status}`);
   }
 }
+
+export async function logoutGitHub(env: IdentifyEnv): Promise<void> {
+  await fetchIdentify(env, "/github/session/logout", { method: "POST" });
+}

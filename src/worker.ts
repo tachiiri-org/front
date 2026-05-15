@@ -1,6 +1,7 @@
 import { handleGitHubOAuthCallback, handleGitHubOAuthStart } from './auth/github';
 import type { AuthorizeEnv } from './auth';
 import { handleApiRequest, handleGitHubAuthStatus } from './api/data';
+import { logoutGitHub } from './identify';
 
 type AssetsEnv = {
   readonly ASSETS: {
@@ -46,6 +47,10 @@ export default {
       if (authStatusResponse) {
         return authStatusResponse;
       }
+    }
+    if (pathname === '/api/auth/logout' && request.method === 'POST') {
+      await logoutGitHub(env);
+      return new Response(null, { status: 204 });
     }
     if (pathname === '/oauth/github/start' || pathname === '/github/oauth/start') {
       return handleGitHubOAuthStart({ request, env });
