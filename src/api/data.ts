@@ -1,5 +1,6 @@
 import type { SpecDocument } from '../shared/spec-document';
 import type { UiShellSettings } from '../shared/ui-shell-settings';
+import { readGitHubSession } from '../identify';
 
 type StoredObject = {
   text(): Promise<string>;
@@ -108,6 +109,9 @@ export async function handleApiRequest(request: Request, env: ApiEnv): Promise<R
 export async function handleGitHubAuthStatus(
   request: Request,
   env: {
+    readonly IDENTIFY?: {
+      fetch(request: Request): Promise<Response>;
+    };
     readonly IDENTIFY_ORIGIN?: string;
     readonly FRONT_TO_IDENTIFY_TOKEN?: string | { get(): Promise<string> };
   },
@@ -116,29 +120,36 @@ export async function handleGitHubAuthStatus(
     return null;
   }
 
-  if (!env.IDENTIFY_ORIGIN) {
-    return json({ authenticated: false, login: null }, { status: 200 });
-  }
-
   try {
-    const response = await fetch(new URL('/github/session', env.IDENTIFY_ORIGIN), {
-      headers: { Accept: 'application/json' },
-      redirect: 'manual',
-    });
+    if (env.IDENTIFY_ORIGIN && !env.IDENTIFY) {
+      const response = await fetch(new URL('/github/session', env.IDENTIFY_ORIGIN), {
+        headers: { Accept: 'application/json' },
+        redirect: 'manual',
+      });
 
-    if (!response.ok) {
-      return json({ authenticated: false, login: null }, { status: 200 });
+      if (!response.ok) {
+        return json({ authenticated: false, login: null }, { status: 200 });
+      }
+
+      const payload = (await response.json()) as {
+        connected: boolean;
+        viewer: { login: string; name: string | null } | null;
+      };
+
+      return json(
+        {
+          authenticated: payload.connected,
+          login: payload.connected ? payload.viewer?.login ?? null : null,
+        },
+        { status: 200 },
+      );
     }
 
-    const payload = (await response.json()) as {
-      connected: boolean;
-      viewer: { login: string; name: string | null } | null;
-    };
-
+    const session = await readGitHubSession(env);
     return json(
       {
-        authenticated: payload.connected,
-        login: payload.connected ? payload.viewer?.login ?? null : null,
+        authenticated: Boolean(session),
+        login: session?.viewer.login ?? null,
       },
       { status: 200 },
     );

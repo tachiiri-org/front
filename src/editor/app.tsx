@@ -64,10 +64,6 @@ export const EditorScreen = ({
     : '/oauth/github/start?scope=repo+read%3Auser';
 
   useEffect(() => {
-    if (!isLocalHost) {
-      return;
-    }
-
     const controller = new AbortController();
 
     const loadGitHubStatus = async (): Promise<void> => {
@@ -103,7 +99,7 @@ export const EditorScreen = ({
     return () => {
       controller.abort();
     };
-  }, [isLocalHost]);
+  }, []);
 
   useEffect(() => {
     if (!runtimeServices) {
@@ -340,34 +336,32 @@ export const EditorScreen = ({
       <header className="editor-topbar">
         <div className="editor-topbar__brand">
           <h1>ui-spec-editor</h1>
-          {isLocalHost ? (
-            githubAuthStatus === 'connected' ? (
-              <span
-                id="github-auth-badge"
-                className={`editor-auth-badge editor-auth-badge--${githubAuthStatus}`}
-                data-auth-status={githubAuthStatus}
-                title={githubAuthLogin ? `GitHub login: ${githubAuthLogin}` : undefined}
-              >
-                GitHub connected
-                {githubAuthLogin ? ` · ${githubAuthLogin}` : ''}
-              </span>
-            ) : (
-              <a
-                id="github-auth-badge"
-                className={`editor-auth-badge editor-auth-badge--${githubAuthStatus}`}
-                data-auth-status={githubAuthStatus}
-                href={githubAuthStartHref}
-                title="Open GitHub OAuth login"
-              >
-                GitHub{' '}
-                {githubAuthStatus === 'checking'
-                  ? 'checking'
-                  : githubAuthStatus === 'error'
-                    ? 'error'
-                    : 'disconnected'}
-              </a>
-            )
-          ) : null}
+          {githubAuthStatus === 'connected' ? (
+            <span
+              id="github-auth-badge"
+              className={`editor-auth-badge editor-auth-badge--${githubAuthStatus}`}
+              data-auth-status={githubAuthStatus}
+              title={githubAuthLogin ? `GitHub login: ${githubAuthLogin}` : undefined}
+            >
+              GitHub connected
+              {githubAuthLogin ? ` · ${githubAuthLogin}` : ''}
+            </span>
+          ) : (
+            <a
+              id="github-auth-badge"
+              className={`editor-auth-badge editor-auth-badge--${githubAuthStatus}`}
+              data-auth-status={githubAuthStatus}
+              href={githubAuthStartHref}
+              title="Open GitHub OAuth login"
+            >
+              GitHub{' '}
+              {githubAuthStatus === 'checking'
+                ? 'checking'
+                : githubAuthStatus === 'error'
+                  ? 'error'
+                  : 'disconnected'}
+            </a>
+          )}
         </div>
         <div className="editor-segmented">
           <button
