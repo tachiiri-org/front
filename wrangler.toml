@@ -51,6 +51,7 @@ binding = "LAYOUTS"
 bucket_name = "layouts-prod"
 
 [env.production]
+name = "front"
 workers_dev = true
 
 [env.production.vars]
