@@ -51,8 +51,10 @@ function buildGitHubAuthorizeUrl(request: Request, env: GitHubOAuthEnv, state: s
 }
 
 function getMissingConfigKeys(env: GitHubOAuthEnv): string[] {
-  const missing = ["GITHUB_OAUTH_CLIENT_ID"].filter((key) => !env[key as keyof GitHubOAuthEnv]);
-  return missing;
+  if (env.IDENTIFY_ORIGIN) {
+    return [];
+  }
+  return ["GITHUB_OAUTH_CLIENT_ID"].filter((key) => !env[key as keyof GitHubOAuthEnv]);
 }
 
 export function handleGitHubOAuthStart(context: RouteContext): Response {
