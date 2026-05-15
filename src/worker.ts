@@ -60,16 +60,8 @@ export default {
     }
 
     const url = new URL(request.url);
-    const { pathname } = url;
-    if (pathname === '/oauth/github/start') {
-      return handleGitHubOAuthStart({ request, env });
-    }
-    if (pathname === '/oauth/github/callback') {
-      return handleGitHubOAuthCallback({ request, env });
-    }
-    if (pathname === '/mcp' || pathname.startsWith('/mcp/')) {
-      return handleMcp(request, env);
-    }
-    return handleApiRequest(request, env);
+    const indexRequest = new Request(new URL('/index.html', url), request);
+
+    return env.ASSETS.fetch(indexRequest);
   },
 };
