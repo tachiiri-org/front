@@ -6,7 +6,10 @@ workers_dev = false
 [assets]
 directory = "./dist"
 binding = "ASSETS"
-not_found_handling = "single-page-application"
+
+[[r2_buckets]]
+binding = "LAYOUTS"
+bucket_name = "layouts-dev"
 
 [[r2_buckets]]
 binding = "LAYOUTS"
@@ -21,13 +24,31 @@ binding = "LAYOUTS"
 bucket_name = "layouts-dev"
 
 [env.dev.vars]
-FRONTEND_ORIGIN = "https://front-dev.workers.dev"
-FRONT_TO_IDENTIFY_TOKEN = "828298b87ee5fdb66350e2ae2892473b139abd3523e189e9c8781b77f94b06ed"
-GITHUB_OAUTH_CLIENT_ID = "Ov23lihhhvT7GB1IGasP"
+FRONTEND_ORIGIN = "https://front-dev.tachiiri.workers.dev"
+IDENTIFY_ORIGIN = "https://identify-dev.tachiiri.workers.dev"
 
 [[env.dev.services]]
 binding = "IDENTIFY"
 service = "identify-dev"
+
+[[env.dev.services]]
+binding = "AUTHORIZE"
+service = "authorize-dev"
+
+[[env.dev.secrets_store.bindings]]
+binding = "FRONT_TO_IDENTIFY_TOKEN"
+store_id = "4637b8eeef4d4774a131ba3cf7011234"
+secret_name = "FRONT_TO_IDENTIFY_TOKEN_DEV"
+
+[[env.dev.secrets_store.bindings]]
+binding = "FRONT_TO_AUTHORIZE_TOKEN"
+store_id = "4637b8eeef4d4774a131ba3cf7011234"
+secret_name = "FRONT_TO_AUTHORIZE_TOKEN"
+
+[[env.dev.secrets_store.bindings]]
+binding = "INTERNAL_AUTH_SIGNING_KEY"
+store_id = "4637b8eeef4d4774a131ba3cf7011234"
+secret_name = "INTERNAL_AUTH_SIGNING_KEY_DEV"
 
 [[env.production.r2_buckets]]
 binding = "LAYOUTS"
@@ -37,13 +58,31 @@ bucket_name = "layouts-prod"
 workers_dev = false
 
 [env.production.vars]
-FRONTEND_ORIGIN = "https://front.workers.dev"
-FRONT_TO_IDENTIFY_TOKEN = "3fcc68b9faf6906846b810611cd13831a3cded421f498b75888a7ce592208752"
+FRONTEND_ORIGIN = "https://front.tachiiri.workers.dev"
 GITHUB_OAUTH_CLIENT_ID = "Ov23li098QXLtF5UbEg5"
 
 [[env.production.services]]
 binding = "IDENTIFY"
 service = "identify"
+
+[[env.production.services]]
+binding = "AUTHORIZE"
+service = "authorize"
+
+[[env.production.secrets_store.bindings]]
+binding = "FRONT_TO_IDENTIFY_TOKEN"
+store_id = "4637b8eeef4d4774a131ba3cf7011234"
+secret_name = "FRONT_TO_IDENTIFY_TOKEN"
+
+[[env.production.secrets_store.bindings]]
+binding = "FRONT_TO_AUTHORIZE_TOKEN"
+store_id = "4637b8eeef4d4774a131ba3cf7011234"
+secret_name = "FRONT_TO_AUTHORIZE_TOKEN"
+
+[[env.production.secrets_store.bindings]]
+binding = "INTERNAL_AUTH_SIGNING_KEY"
+store_id = "4637b8eeef4d4774a131ba3cf7011234"
+secret_name = "INTERNAL_AUTH_SIGNING_KEY"
 
 [env.local]
 name = "front-local"
@@ -51,12 +90,15 @@ workers_dev = true
 
 [env.local.vars]
 FRONTEND_ORIGIN = "http://localhost:8787"
-IDENTIFY_ORIGIN = "http://localhost:8788"
-GITHUB_OAUTH_CLIENT_ID = "Ov23litfbD8WRrXkM4iR"
+IDENTIFY_ORIGIN = "https://identify-local.tachiiri.workers.dev"
+AUTHORIZE_ORIGIN = "https://authorize-local.tachiiri.workers.dev"
 FRONT_TO_IDENTIFY_TOKEN = "828298b87ee5fdb66350e2ae2892473b139abd3523e189e9c8781b77f94b06ed"
+GITHUB_OAUTH_CLIENT_ID = "Ov23litfbD8WRrXkM4iR"
 LAYOUTS_BUCKET_ID = "bucket-local"
-FRONT_TO_AUTHORIZE_TOKEN = "0M3WHY4RVirHPPeiUHbwbkqWH8kL4pgUaUZxbHYEOTQ"
-INTERNAL_AUTH_SIGNING_KEY = '{"key_ops":["sign"],"ext":true,"kty":"EC","x":"zXGyZOvOTgwcGdQrUrr2DBGsRJwuUvHLFTZ90CM02_U","y":"CZoC3CzhEdot39TRf-lJrFH76SN2EfVlFF53c7gGMjg","crv":"P-256","d":"RJHEcL766qLh04aZHAoLlcw5PFIRNkkHQPyBR7n0fuU"}'
+
+[[env.local.r2_buckets]]
+binding = "LAYOUTS"
+bucket_name = "layouts-dev"
 
 [[env.local.services]]
 binding = "AUTHORIZE"
@@ -65,3 +107,18 @@ service = "authorize-local"
 [[env.local.services]]
 binding = "IDENTIFY"
 service = "identify-local"
+
+[[env.local.secrets_store.bindings]]
+binding = "FRONT_TO_IDENTIFY_TOKEN"
+store_id = "4637b8eeef4d4774a131ba3cf7011234"
+secret_name = "FRONT_TO_IDENTIFY_TOKEN_DEV"
+
+[[env.local.secrets_store.bindings]]
+binding = "FRONT_TO_AUTHORIZE_TOKEN"
+store_id = "4637b8eeef4d4774a131ba3cf7011234"
+secret_name = "FRONT_TO_AUTHORIZE_TOKEN"
+
+[[env.local.secrets_store.bindings]]
+binding = "INTERNAL_AUTH_SIGNING_KEY"
+store_id = "4637b8eeef4d4774a131ba3cf7011234"
+secret_name = "INTERNAL_AUTH_SIGNING_KEY_DEV"

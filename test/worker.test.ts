@@ -62,3 +62,34 @@ it("exchanges the GitHub OAuth callback through identify", async () => {
   expect(response.headers.get("Set-Cookie")).toContain("github_explorer_oauth_state=");
   expect(identifyFetch).toHaveBeenCalledOnce();
 });
+
+it("accepts the legacy GitHub OAuth callback path", async () => {
+  const identifyFetch = vi.fn(async (request: Request) => {
+    expect(request.url).toBe("https://identify.internal/internal/github/oauth/callback");
+    expect(request.method).toBe("POST");
+    await expect(request.json()).resolves.toEqual({ code: "abc" });
+    return new Response(null, { status: 204 });
+  });
+
+  const response = await worker.fetch(
+    new Request("https://front.example.com/github/oauth/callback?code=abc&state=xyz", {
+      headers: {
+        Cookie: "github_explorer_oauth_state=xyz",
+      },
+    }),
+    {
+      ASSETS: {
+        fetch: async () => new Response("not used"),
+      },
+      FRONTEND_ORIGIN: "https://front.example.com",
+      FRONT_TO_IDENTIFY_TOKEN: "front-token",
+      IDENTIFY: { fetch: identifyFetch },
+    } as never,
+  );
+
+  expect(response.status).toBe(302);
+  expect(response.headers.get("Location")).toBe(
+    "https://front.example.com/?tab=openapi-explorer",
+  );
+  expect(identifyFetch).toHaveBeenCalledOnce();
+});

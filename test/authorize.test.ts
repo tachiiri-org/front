@@ -175,6 +175,72 @@ describe("authorize helpers", () => {
     });
   });
 
+  it("prefers IDENTIFY_ORIGIN over the identify service binding", async () => {
+    const identify = {
+      fetch: vi.fn(async () => new Response("should not be used", { status: 500 })),
+    };
+
+    const fetch = vi.fn(async (input: RequestInfo | URL) => {
+      expect(String(input)).toBe(
+        "https://identify-local.tachiiri.workers.dev/internal/github/session",
+      );
+      return Response.json({
+        authenticated: true,
+        accessToken: "github-token",
+        viewer: {
+          login: "octocat",
+          name: "Mona",
+        },
+      });
+    });
+
+    vi.stubGlobal("fetch", fetch);
+
+    await expect(
+      readGitHubSession({
+        IDENTIFY: identify,
+        IDENTIFY_ORIGIN: "https://identify-local.tachiiri.workers.dev",
+        FRONT_TO_IDENTIFY_TOKEN: "front-token",
+      }),
+    ).resolves.toEqual({
+      authenticated: true,
+      accessToken: "github-token",
+      viewer: {
+        login: "octocat",
+        name: "Mona",
+      },
+    });
+
+    expect(identify.fetch).not.toHaveBeenCalled();
+  });
+
+  it("prefers AUTHORIZE_ORIGIN over the authorize service binding", async () => {
+    const authorize = {
+      fetch: vi.fn(async () => new Response("should not be used", { status: 500 })),
+    };
+
+    const fetch = vi.fn(async (input: RequestInfo | URL) => {
+      expect(String(input)).toBe("https://authorize-local.tachiiri.workers.dev/health");
+      return new Response("ok", { status: 200 });
+    });
+
+    vi.stubGlobal("fetch", fetch);
+
+    await expect(
+      authorizeFetch(
+        {
+          AUTHORIZE: authorize,
+          AUTHORIZE_ORIGIN: "https://authorize-local.tachiiri.workers.dev",
+          FRONT_TO_AUTHORIZE_TOKEN: "internal-token",
+          INTERNAL_AUTH_SIGNING_KEY: privateKeyJwk,
+        },
+        { path: "/health", method: "GET" },
+      ),
+    ).resolves.toMatchObject({ status: 200 });
+
+    expect(authorize.fetch).not.toHaveBeenCalled();
+  });
+
   it("exchanges the GitHub oauth code through identify", async () => {
     const identify = {
       fetch: vi.fn(async (request: Request) => {

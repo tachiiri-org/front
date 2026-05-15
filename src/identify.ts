@@ -1,3 +1,5 @@
+type SecretValue = string | { get(): Promise<string> };
+
 export type IdentifyService = {
   fetch(request: Request): Promise<Response>;
 };
@@ -5,7 +7,7 @@ export type IdentifyService = {
 export type IdentifyEnv = {
   readonly IDENTIFY?: IdentifyService;
   readonly IDENTIFY_ORIGIN?: string;
-  readonly FRONT_TO_IDENTIFY_TOKEN?: string;
+  readonly FRONT_TO_IDENTIFY_TOKEN?: SecretValue;
   readonly FRONTEND_ORIGIN?: string;
 };
 
@@ -39,14 +41,22 @@ export function buildGitHubOAuthStartUrl(
   return url.toString();
 }
 
+async function resolveSecret(value: SecretValue | undefined): Promise<string | undefined> {
+  if (value && typeof value !== "string") {
+    return value.get();
+  }
+  return value;
+}
+
 async function fetchIdentify(
   env: IdentifyEnv,
   path: string,
   init: RequestInit = {},
 ): Promise<Response> {
   const headers = new Headers(init.headers);
-  if (env.FRONT_TO_IDENTIFY_TOKEN) {
-    headers.set("x-front-to-identify-token", env.FRONT_TO_IDENTIFY_TOKEN);
+  const token = await resolveSecret(env.FRONT_TO_IDENTIFY_TOKEN);
+  if (token) {
+    headers.set("x-front-to-identify-token", token);
   }
 
   if (env.IDENTIFY) {
@@ -61,18 +71,18 @@ async function fetchIdentify(
     );
   }
 
-  if (!env.IDENTIFY_ORIGIN) {
-    throw new Error("identify_not_configured");
+  if (env.IDENTIFY_ORIGIN) {
+    return fetch(
+      new URL(path, env.IDENTIFY_ORIGIN),
+      {
+        ...init,
+        headers,
+        redirect: "manual",
+      },
+    );
   }
 
-  return fetch(
-    new URL(path, env.IDENTIFY_ORIGIN),
-    {
-      ...init,
-      headers,
-      redirect: "manual",
-    },
-  );
+  throw new Error("identify_not_configured");
 }
 
 export async function readGitHubSession(

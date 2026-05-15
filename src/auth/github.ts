@@ -51,14 +51,23 @@ function buildGitHubAuthorizeUrl(request: Request, env: GitHubOAuthEnv, state: s
 }
 
 function getMissingConfigKeys(env: GitHubOAuthEnv): string[] {
-  const missing = ["GITHUB_OAUTH_CLIENT_ID"].filter((key) => !env[key as keyof GitHubOAuthEnv]);
-  return missing;
+  if (env.IDENTIFY_ORIGIN) {
+    return [];
+  }
+  return ["GITHUB_OAUTH_CLIENT_ID"].filter((key) => !env[key as keyof GitHubOAuthEnv]);
 }
 
 export function handleGitHubOAuthStart(context: RouteContext): Response {
   const missingKeys = getMissingConfigKeys(context.env);
   if (missingKeys.length > 0) {
     return new Response(`Missing ${missingKeys.join(", ")}`, { status: 503 });
+  }
+
+  if (context.env.IDENTIFY_ORIGIN) {
+    const scope = new URL(context.request.url).searchParams.get("scope") ?? "repo read:user";
+    const startUrl = new URL("/github/oauth/start", context.env.IDENTIFY_ORIGIN);
+    startUrl.searchParams.set("scope", scope);
+    return Response.redirect(startUrl.toString(), 302);
   }
 
   const state = createRandomState();
@@ -78,13 +87,21 @@ export function handleGitHubOAuthStart(context: RouteContext): Response {
 }
 
 export async function handleGitHubOAuthCallback(context: RouteContext): Promise<Response> {
-  if (!context.env.FRONT_TO_IDENTIFY_TOKEN || (!context.env.IDENTIFY && !context.env.IDENTIFY_ORIGIN)) {
+  if (!context.env.IDENTIFY && !context.env.IDENTIFY_ORIGIN) {
     return new Response("Missing IDENTIFY configuration", { status: 503 });
   }
 
   const url = new URL(context.request.url);
   const code = url.searchParams.get("code");
   const state = url.searchParams.get("state");
+
+  if (context.env.IDENTIFY_ORIGIN) {
+    const callbackUrl = new URL("/github/oauth/callback", context.env.IDENTIFY_ORIGIN);
+    callbackUrl.searchParams.set("code", code ?? "");
+    callbackUrl.searchParams.set("state", state ?? "");
+    return Response.redirect(callbackUrl.toString(), 302);
+  }
+
   const cookies = parseCookies(context.request);
   const storedState = cookies.get(STATE_COOKIE_NAME);
 

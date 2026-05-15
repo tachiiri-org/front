@@ -1,3 +1,5 @@
+type SecretValue = string | { get(): Promise<string> };
+
 export type AuthorizeEnv = {
   readonly AUTHORIZE?: {
     fetch(request: Request): Promise<Response>;
@@ -6,9 +8,10 @@ export type AuthorizeEnv = {
     fetch(request: Request): Promise<Response>;
   };
   readonly IDENTIFY_ORIGIN?: string;
+  readonly AUTHORIZE_ORIGIN?: string;
   readonly FRONT_TO_IDENTIFY_TOKEN?: string;
-  readonly FRONT_TO_AUTHORIZE_TOKEN?: string;
-  readonly INTERNAL_AUTH_SIGNING_KEY?: string;
+  readonly FRONT_TO_AUTHORIZE_TOKEN?: SecretValue;
+  readonly INTERNAL_AUTH_SIGNING_KEY?: SecretValue;
   readonly INTERNAL_AUTH_TOKEN_ISSUER?: string;
   readonly FRONTEND_ORIGIN?: string;
   readonly GITHUB_OAUTH_CLIENT_ID?: string;

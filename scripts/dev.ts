@@ -30,7 +30,7 @@ const main = async (): Promise<void> => {
   });
 
   const wrangler = Bun.spawn({
-    cmd: ['bunx', 'wrangler', 'dev', '--env', 'local', '--port', '8787', '--remote'],
+    cmd: ['bunx', 'wrangler', 'dev', '--config', 'wrangler.toml', '--local', '--ip', '127.0.0.1', '--port', '8787', '--env', 'local'],
     stdout: 'inherit',
     stderr: 'inherit',
     stdin: 'inherit',

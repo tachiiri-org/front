@@ -1,5 +1,7 @@
 const encoder = new TextEncoder();
 
+type SecretValue = string | { get(): Promise<string> };
+
 type InternalTokenClaims = {
   claims_set_version: number;
   actor_id: string;
@@ -38,15 +40,23 @@ async function importSigningKey(jwkJson: string): Promise<CryptoKey> {
   );
 }
 
+async function resolveSecret(value: SecretValue | undefined): Promise<string | undefined> {
+  if (value && typeof value !== "string") {
+    return value.get();
+  }
+  return value;
+}
+
 export async function issueInternalToken(
-  env: { INTERNAL_AUTH_SIGNING_KEY?: string; INTERNAL_AUTH_TOKEN_ISSUER?: string },
+  env: { INTERNAL_AUTH_SIGNING_KEY?: SecretValue; INTERNAL_AUTH_TOKEN_ISSUER?: string },
   input: { audience: string },
 ): Promise<string> {
-  if (!env.INTERNAL_AUTH_SIGNING_KEY) {
+  const signingKey = await resolveSecret(env.INTERNAL_AUTH_SIGNING_KEY);
+  if (!signingKey) {
     throw new Error("missing_internal_auth_signing_key");
   }
 
-  const key = await importSigningKey(env.INTERNAL_AUTH_SIGNING_KEY);
+  const key = await importSigningKey(signingKey);
   const now = Math.floor(Date.now() / 1000);
   const payload: InternalTokenClaims = {
     claims_set_version: 1,
