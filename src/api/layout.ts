@@ -180,19 +180,17 @@ export const handleApiRequest = async (request: Request, env: Env): Promise<Resp
   if (isNavigationRequest(request)) {
     return new Response('<!doctype html><script type="module" src="/client.js"></script>', {
       headers: { 'Content-Type': 'text/html; charset=UTF-8' },
-
-        // OAuth routing to proxy to identify service
+  // OAuth routing to proxy to identify service
         if (url.pathname.startsWith('/oauth/')) {
+          const body = await request.text().catch(() => '');
           return authorizeFetch(env, {
                   path: url.pathname + url.search,
                   method: request.method,
-                  body: request.method !== 'GET' && request.method !== 'HEAD' 
-                    ? await request.text().catch(() => undefined)
-                            : undefined,
+                  body: body || undefined,
                   headers: request.headers,
           });
     }
-    });
+        });
   }
 
   return env.ASSETS.fetch(request);
