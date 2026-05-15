@@ -25,9 +25,11 @@ import { authorizeFetch, type AuthorizeEnv } from '../auth';
 
 type Env = {
   readonly ASSETS: {
-    fetch(request: Request): Promise<Response>;
+    fetch(request: Request): Promiseh} & LayoutsEnv;  } & LayoutsEnv & AuthorizeEnv;
+<Response>;
   };
-} & LayoutsEnv;
+30
+
 
 type ResourceConfig = {
   name: string;
