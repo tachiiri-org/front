@@ -59,9 +59,8 @@ export default {
       return response;
     }
 
-    const url = new URL(request.url);
-    const indexRequest = new Request(new URL('/index.html', url), request);
-
-    return env.ASSETS.fetch(indexRequest);
+    return new Response('<!doctype html><script type="module" src="/assets/index.js"></script>', {
+      headers: { 'Content-Type': 'text/html; charset=UTF-8' },
+    });
   },
 };
