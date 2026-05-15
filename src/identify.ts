@@ -103,13 +103,14 @@ export async function readGitHubSession(
 export async function exchangeGitHubOAuthCode(
   env: IdentifyEnv,
   code: string,
+  redirectUri: string,
 ): Promise<void> {
   const response = await fetchIdentify(env, "/internal/github/oauth/callback", {
     method: "POST",
     headers: {
       "Content-Type": "application/json",
     },
-    body: JSON.stringify({ code }),
+    body: JSON.stringify({ code, redirectUri }),
   });
 
   if (!response.ok) {

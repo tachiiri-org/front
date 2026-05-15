@@ -109,7 +109,11 @@ export async function handleGitHubOAuthCallback(context: RouteContext): Promise<
     return new Response("GitHub OAuth state validation failed", { status: 400 });
   }
 
-  await exchangeGitHubOAuthCode(context.env, code);
+  try {
+    await exchangeGitHubOAuthCode(context.env, code, getGitHubCallbackUrl(context.request, context.env));
+  } catch (error) {
+    return new Response(`GitHub OAuth code exchange failed: ${String(error)}`, { status: 502 });
+  }
 
   const headers = new Headers();
   headers.append("Set-Cookie", clearCookie(STATE_COOKIE_NAME, context.request));
