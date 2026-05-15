@@ -31,17 +31,17 @@ service = "identify-dev"
 binding = "AUTHORIZE"
 service = "authorize-dev"
 
-[[env.dev.secrets_store.bindings]]
+[[env.dev.secrets_store_secrets]]
 binding = "FRONT_TO_IDENTIFY_TOKEN"
 store_id = "4637b8eeef4d4774a131ba3cf7011234"
 secret_name = "FRONT_TO_IDENTIFY_TOKEN_DEV"
 
-[[env.dev.secrets_store.bindings]]
+[[env.dev.secrets_store_secrets]]
 binding = "FRONT_TO_AUTHORIZE_TOKEN"
 store_id = "4637b8eeef4d4774a131ba3cf7011234"
 secret_name = "FRONT_TO_AUTHORIZE_TOKEN"
 
-[[env.dev.secrets_store.bindings]]
+[[env.dev.secrets_store_secrets]]
 binding = "INTERNAL_AUTH_SIGNING_KEY"
 store_id = "4637b8eeef4d4774a131ba3cf7011234"
 secret_name = "INTERNAL_AUTH_SIGNING_KEY_DEV"
@@ -66,17 +66,17 @@ service = "identify"
 binding = "AUTHORIZE"
 service = "authorize"
 
-[[env.production.secrets_store.bindings]]
+[[env.production.secrets_store_secrets]]
 binding = "FRONT_TO_IDENTIFY_TOKEN"
 store_id = "4637b8eeef4d4774a131ba3cf7011234"
 secret_name = "FRONT_TO_IDENTIFY_TOKEN"
 
-[[env.production.secrets_store.bindings]]
+[[env.production.secrets_store_secrets]]
 binding = "FRONT_TO_AUTHORIZE_TOKEN"
 store_id = "4637b8eeef4d4774a131ba3cf7011234"
 secret_name = "FRONT_TO_AUTHORIZE_TOKEN"
 
-[[env.production.secrets_store.bindings]]
+[[env.production.secrets_store_secrets]]
 binding = "INTERNAL_AUTH_SIGNING_KEY"
 store_id = "4637b8eeef4d4774a131ba3cf7011234"
 secret_name = "INTERNAL_AUTH_SIGNING_KEY"
@@ -105,17 +105,17 @@ service = "authorize-local"
 binding = "IDENTIFY"
 service = "identify-local"
 
-[[env.local.secrets_store.bindings]]
+[[env.local.secrets_store_secrets]]
 binding = "FRONT_TO_IDENTIFY_TOKEN"
 store_id = "4637b8eeef4d4774a131ba3cf7011234"
 secret_name = "FRONT_TO_IDENTIFY_TOKEN_DEV"
 
-[[env.local.secrets_store.bindings]]
+[[env.local.secrets_store_secrets]]
 binding = "FRONT_TO_AUTHORIZE_TOKEN"
 store_id = "4637b8eeef4d4774a131ba3cf7011234"
 secret_name = "FRONT_TO_AUTHORIZE_TOKEN"
 
-[[env.local.secrets_store.bindings]]
+[[env.local.secrets_store_secrets]]
 binding = "INTERNAL_AUTH_SIGNING_KEY"
 store_id = "4637b8eeef4d4774a131ba3cf7011234"
 secret_name = "INTERNAL_AUTH_SIGNING_KEY_DEV"
