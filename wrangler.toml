@@ -22,7 +22,7 @@ bucket_name = "layouts-dev"
 
 [env.dev.vars]
 FRONTEND_ORIGIN = "https://front-dev.tachiiri.workers.dev"
-GITHUB_OAUTH_CLIENT_ID = "Ov23lihhhvT7GB1IGasP"
+IDENTIFY_ORIGIN = "https://identify-dev.tachiiri.workers.dev"
 
 [[env.dev.services]]
 binding = "IDENTIFY"

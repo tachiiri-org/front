@@ -58,10 +58,7 @@ export const EditorScreen = ({
   });
   const [isHelpOpen, setIsHelpOpen] = useState(false);
   const helpRef = useRef<HTMLDivElement | null>(null);
-  const isLocalHost = window.location.hostname === 'localhost' || window.location.hostname === '127.0.0.1';
-  const githubAuthStartHref = isLocalHost
-    ? 'https://identify-local.tachiiri.workers.dev/github/oauth/start?scope=repo+read%3Auser'
-    : '/oauth/github/start?scope=repo+read%3Auser';
+  const githubAuthStartHref = '/oauth/github/start?scope=repo+read%3Auser';
 
   useEffect(() => {
     const controller = new AbortController();
