@@ -121,30 +121,6 @@ export async function handleGitHubAuthStatus(
   }
 
   try {
-    if (env.IDENTIFY_ORIGIN && !env.IDENTIFY) {
-      const response = await fetch(new URL('/github/session', env.IDENTIFY_ORIGIN), {
-        headers: { Accept: 'application/json' },
-        redirect: 'manual',
-      });
-
-      if (!response.ok) {
-        return json({ authenticated: false, login: null }, { status: 200 });
-      }
-
-      const payload = (await response.json()) as {
-        connected: boolean;
-        viewer: { login: string; name: string | null } | null;
-      };
-
-      return json(
-        {
-          authenticated: payload.connected,
-          login: payload.connected ? payload.viewer?.login ?? null : null,
-        },
-        { status: 200 },
-      );
-    }
-
     const session = await readGitHubSession(env);
     return json(
       {

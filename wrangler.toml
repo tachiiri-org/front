@@ -97,18 +97,6 @@ LAYOUTS_BUCKET_ID = "bucket-local"
 binding = "LAYOUTS"
 bucket_name = "layouts-dev"
 
-[[env.local.services]]
-binding = "AUTHORIZE"
-service = "authorize-local"
-
-[[env.local.services]]
-binding = "IDENTIFY"
-service = "identify-local"
-
-[[env.local.secrets_store_secrets]]
-binding = "FRONT_TO_IDENTIFY_TOKEN"
-store_id = "4637b8eeef4d4774a131ba3cf7011234"
-secret_name = "FRONT_TO_IDENTIFY_TOKEN_DEV"
 
 [[env.local.secrets_store_secrets]]
 binding = "FRONT_TO_AUTHORIZE_TOKEN"
