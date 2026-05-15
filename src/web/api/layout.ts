@@ -21,19 +21,17 @@ import {
   handleComponentSchemaGet,
   handleComponentSchemaPut,
 } from './component-schemas';
-import { authorizeFetch, type AuthorizeEnv } from '../auth';
+import { type AuthorizeEnv } from '../auth';
 
 type Env = {
   readonly ASSETS: {
         fetch(request: Request): Promise<Response>;
   };
 } & LayoutsEnv & AuthorizeEnv;
-30
-
 
 type ResourceConfig = {
   name: string;
-  storage& AuthorizeEnv;
+  storagePrefix: string;
   handleGet?: (backend: LayoutBackend, id: string) => Promise<Response>;
   handlePut?: (request: Request, backend: LayoutBackend, id: string) => Promise<Response>;
   handleDelete?: (backend: LayoutBackend, id: string) => Promise<Response>;
@@ -182,17 +180,7 @@ export const handleApiRequest = async (request: Request, env: Env): Promise<Resp
   if (isNavigationRequest(request)) {
     return new Response('<!doctype html><script type="module" src="/client.js"></script>', {
       headers: { 'Content-Type': 'text/html; charset=UTF-8' },
-  // OAuth routing to proxy to identify service
-        if (url.pathname.startsWith('/oauth/')) {
-          const body = await request.text().catch(() => '');
-          return authorizeFetch(env, {
-                  path: url.pathname + url.search,
-                  method: request.method,
-                  body: body || undefined,
-                  headers: request.headers,
-          });
-    }
-        });
+    });
   }
 
   return env.ASSETS.fetch(request);
