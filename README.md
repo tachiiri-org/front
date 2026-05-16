@@ -24,7 +24,7 @@
 # Secrets
 
 - all secrets are in cloudflare secrets store
-- secrets for dev envirinment should have suffix of `_DEV`
+- `.dev.vars` has secrets value when local dev
 - values are at `../secrets.json` on local
 
 ## Storage
