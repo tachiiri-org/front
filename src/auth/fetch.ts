@@ -27,7 +27,7 @@ export async function authorizeFetch(
     audience?: string;
   },
 ): Promise<Response> {
-  if (!env.AUTHORIZE || !env.FRONT_TO_AUTHORIZE_TOKEN || !env.INTERNAL_AUTH_SIGNING_KEY) {
+  if ((!env.AUTHORIZE && !env.AUTHORIZE_ORIGIN) || !env.FRONT_TO_AUTHORIZE_TOKEN || !env.INTERNAL_AUTH_SIGNING_KEY) {
     return Response.json({ error: "authorize_not_configured" }, { status: 500 });
   }
 

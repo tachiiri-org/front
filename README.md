@@ -27,6 +27,12 @@
 - secrets for dev envirinment should have suffix of `_DEV`
 - values are at `../secrets.json` on local
 
+## Storage
+
+- File storage is R2
+- `bucket-local` is for local dev. bucket is at remote, not at local miniflare
+- `bucket-dev` is for test environment
+
 ## Goals
 
 - create dom from json without html
