@@ -9,11 +9,23 @@
 - using cloudflare worker. basically no static assets
 - system has front,identify,authorize,execute
 - front has web, mcp, api(future). workers are `front` and `front-dev`, and developed in localhost.
-- authorize
-
 - json is in R2
 - worker uses R2 via 'authorize' worker which is service binded, not on internet
 - Probably bypass authorize when developing in localhost
+
+## Identify
+
+1. start `/oauth/github/start` in front
+2. generate identify url at `/github/oauth/start` in identify
+3. identify in github
+4. callback at `/github/oauth/callback` in front
+5. exchange code, save session in identify and redirect to front
+
+# Secrets
+
+- all secrets are in cloudflare secrets store
+- secrets for dev envirinment should have suffix of `_DEV`
+- values are at `../secrets.json` on local
 
 ## Goals
 
