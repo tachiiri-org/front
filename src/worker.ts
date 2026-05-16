@@ -1,6 +1,8 @@
 import { handleGitHubOAuthCallback, handleGitHubOAuthStart } from './auth/github';
 import type { AuthorizeEnv } from './auth';
-import { handleApiRequest, handleGitHubAuthStatus } from './api/data';
+import { handleApiRequest as handleDataApiRequest, handleGitHubAuthStatus } from './api/data';
+import { handleApiRequest as handleLayoutApiRequest } from './web/api/layout';
+import { handleMcp } from './mcp/handler';
 import { logoutGitHub } from './identify';
 
 type AssetsEnv = {
@@ -8,6 +10,11 @@ type AssetsEnv = {
     fetch(request: Request): Promise<Response>;
   };
   readonly LAYOUTS?: {
+    list(options: { prefix: string; cursor?: string }): Promise<{
+      objects: { key: string }[];
+      truncated: boolean;
+      cursor: string;
+    }>;
     get(key: string): Promise<{ text(): Promise<string> } | null>;
     put(
       key: string,
@@ -18,7 +25,9 @@ type AssetsEnv = {
         };
       },
     ): Promise<unknown>;
+    delete(keys: string | string[]): Promise<unknown>;
   };
+  readonly LAYOUTS_BUCKET_ID?: string;
 };
 
 type Env = AssetsEnv & AuthorizeEnv;
@@ -37,7 +46,7 @@ export default {
     const pathname = new URL(request.url).pathname;
 
     if (pathname === '/api/spec-document' || pathname === '/api/ui-shell-settings') {
-      const apiResponse = await handleApiRequest(request, env);
+      const apiResponse = await handleDataApiRequest(request, env);
       if (apiResponse) {
         return apiResponse;
       }
@@ -57,6 +66,14 @@ export default {
     }
     if (pathname === '/oauth/github/callback' || pathname === '/github/oauth/callback') {
       return handleGitHubOAuthCallback({ request, env });
+    }
+
+    if (pathname === '/mcp' || pathname.startsWith('/mcp/')) {
+      return handleMcp(request, env);
+    }
+
+    if (pathname.startsWith('/api/')) {
+      return handleLayoutApiRequest(request, env);
     }
 
     const response = await env.ASSETS.fetch(request);
