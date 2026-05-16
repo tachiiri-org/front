@@ -9,6 +9,7 @@
     "build": "vite build",
     "preview": "vite preview",
     "typecheck": "tsc -p tsconfig.node.json --noEmit && tsc -p tsconfig.json --noEmit && tsc -p tsconfig.worker.json --noEmit",
+    "deploy:stage": "bun run build && wrangler deploy --env stage",
     "deploy:dev": "bun run build && wrangler deploy --env dev",
     "deploy": "bun run build && wrangler deploy --env production"
   },
