@@ -16,6 +16,9 @@ const applyCssProps = (el: HTMLElement, c: Record<string, unknown>): void => {
 export const renderList = (id: string, component: ListComponent): HTMLElement => {
   const ul = document.createElement('ul');
   ul.dataset.frameId = id;
+  ul.style.listStyle = 'none';
+  ul.style.padding = '0';
+  ul.style.margin = '0';
   applyCssProps(ul, component as unknown as Record<string, unknown>);
   return ul;
 };

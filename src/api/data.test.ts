@@ -9,7 +9,7 @@ afterEach(() => {
 describe('handleGitHubAuthStatus', () => {
   it('reads the GitHub session from IDENTIFY_ORIGIN', async () => {
     const fetchMock = vi.fn(async (input: RequestInfo | URL) => {
-      expect(String(input)).toBe('https://identify-local.tachiiri.workers.dev/github/session');
+      expect(String(input)).toBe('https://identify-dev.tachiiri.workers.dev/github/session');
       return Response.json({
         connected: true,
         viewer: {
@@ -24,7 +24,7 @@ describe('handleGitHubAuthStatus', () => {
     const response = await handleGitHubAuthStatus(
       new Request('https://front.example.com/api/auth/github/status'),
       {
-        IDENTIFY_ORIGIN: 'https://identify-local.tachiiri.workers.dev',
+        IDENTIFY_ORIGIN: 'https://identify-dev.tachiiri.workers.dev',
       },
     );
 

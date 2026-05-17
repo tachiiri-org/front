@@ -89,6 +89,22 @@ const hydrateSelectTableBindings = async (
 ): Promise<void> => {
   if (!store.screen) return;
 
+  // Zero-th pass: populate inline selects
+  for (const frame of store.screen.frames) {
+    const c = frame as Record<string, unknown>;
+    if (c.kind !== 'select') continue;
+    const source = c.source as Record<string, unknown> | undefined;
+    if (source?.kind !== 'inline' || !Array.isArray(source.options)) continue;
+    const selectEl = domMap.get(frame.id);
+    if (!(selectEl instanceof HTMLSelectElement) || selectEl.options.length > 0) continue;
+    for (const opt of source.options as Array<Record<string, unknown>>) {
+      const el = document.createElement('option');
+      el.value = String(opt.value ?? '');
+      el.textContent = String(opt.label ?? el.value);
+      selectEl.appendChild(el);
+    }
+  }
+
   const cascadeTargetIds = new Set<string>();
 
   // First pass: cascade-driver selects
@@ -189,6 +205,145 @@ const hydrateSelectTableBindings = async (
       void loadSchemaIntoTable(selectEl.value, tableFrame, onFrameRerender);
     });
   }
+
+  // Third pass: sidebar nav list frames (list with endpoint source)
+  for (const frame of store.screen.frames) {
+    const c = frame as Record<string, unknown>;
+    if (c.kind !== 'list') continue;
+    const source = c.source as Record<string, unknown> | undefined;
+    if (!source || typeof source.url !== 'string' || !source.url) continue;
+
+    const listEl = domMap.get(frame.id);
+    if (!(listEl instanceof HTMLElement)) continue;
+
+    const targetId = typeof c.targetComponentId === 'string' ? c.targetComponentId : '';
+    const filterSourceId = typeof c.filterSourceId === 'string' ? c.filterSourceId : '';
+    const filterParamKey = typeof c.filterParamKey === 'string' ? c.filterParamKey : '';
+    const itemsPath = typeof source.itemsPath === 'string' ? source.itemsPath : '';
+    const valueKey = typeof source.valueKey === 'string' && source.valueKey ? source.valueKey : 'value';
+    const labelKey = typeof source.labelKey === 'string' && source.labelKey ? source.labelKey : 'label';
+
+    const tableFrame = targetId ? store.screen.frames.find((f) => f.id === targetId) : undefined;
+    const filterSourceEl = filterSourceId ? domMap.get(filterSourceId) : null;
+
+    let activeItem: HTMLElement | null = null;
+
+    const makeLeafItem = (value: string, label: string): HTMLLIElement => {
+      const li = document.createElement('li');
+      li.textContent = label;
+      li.dataset.value = value;
+      Object.assign(li.style, {
+        padding: '5px 10px',
+        cursor: 'pointer',
+        fontSize: '12px',
+        borderRadius: '3px',
+        userSelect: 'none',
+      });
+      li.addEventListener('mouseenter', () => {
+        if (li !== activeItem) li.style.backgroundColor = 'rgba(0,0,0,0.05)';
+      });
+      li.addEventListener('mouseleave', () => {
+        if (li !== activeItem) li.style.backgroundColor = '';
+      });
+      li.addEventListener('click', () => {
+        if (activeItem) { activeItem.style.backgroundColor = ''; activeItem.style.fontWeight = ''; }
+        li.style.backgroundColor = 'rgba(0,0,0,0.1)';
+        li.style.fontWeight = 'bold';
+        activeItem = li;
+        if (tableFrame) void loadSchemaIntoTable(value, tableFrame, onFrameRerender);
+      });
+      return li;
+    };
+
+    const makeCategoryItem = (label: string, children: Array<{ value: string; label: string }>): HTMLLIElement => {
+      const li = document.createElement('li');
+      let open = true;
+
+      const header = document.createElement('div');
+      header.dataset.categoryHeader = 'true';
+      Object.assign(header.style, {
+        padding: '5px 10px',
+        cursor: 'pointer',
+        fontSize: '11px',
+        fontWeight: 'bold',
+        color: 'rgba(0,0,0,0.5)',
+        userSelect: 'none',
+        display: 'flex',
+        alignItems: 'center',
+        gap: '4px',
+      });
+      const arrow = document.createElement('span');
+      arrow.textContent = '▾';
+      arrow.style.fontSize = '9px';
+      const labelSpan = document.createElement('span');
+      labelSpan.textContent = label.toUpperCase();
+      header.appendChild(arrow);
+      header.appendChild(labelSpan);
+
+      const childUl = document.createElement('ul');
+      childUl.style.listStyle = 'none';
+      childUl.style.padding = '0';
+      childUl.style.margin = '0';
+      for (const child of children) {
+        const childLi = makeLeafItem(child.value, child.label);
+        childLi.style.paddingLeft = '30px';
+        childUl.appendChild(childLi);
+      }
+
+      header.addEventListener('click', () => {
+        open = !open;
+        childUl.style.display = open ? '' : 'none';
+        arrow.textContent = open ? '▾' : '▸';
+      });
+
+      li.appendChild(header);
+      li.appendChild(childUl);
+      return li;
+    };
+
+    const populateNavList = async (filterValue?: string): Promise<void> => {
+      const u = new URL(source.url as string, window.location.origin);
+      if (filterValue && filterParamKey) u.searchParams.set(filterParamKey, filterValue);
+      try {
+        const res = await fetch(u.toString());
+        if (!res.ok) return;
+        const raw = (await res.json()) as unknown;
+        const items = getByPath(raw, itemsPath);
+        if (!Array.isArray(items)) return;
+
+        listEl.replaceChildren();
+        activeItem = null;
+
+        for (const item of items as Record<string, unknown>[]) {
+          const value = String(item[valueKey] ?? '');
+          const label = String(item[labelKey] ?? value);
+          if (!value) continue;
+
+          const children = item.children;
+          if (Array.isArray(children) && children.length >= 0) {
+            const childItems = (children as Record<string, unknown>[]).map((c) => ({
+              value: String(c[valueKey] ?? ''),
+              label: String(c[labelKey] ?? c[valueKey] ?? ''),
+            })).filter((c) => c.value);
+            listEl.appendChild(makeCategoryItem(label, childItems));
+          } else {
+            listEl.appendChild(makeLeafItem(value, label));
+          }
+        }
+      } catch {
+        // ignore fetch errors
+      }
+    };
+
+    const initialFilter = filterSourceEl instanceof HTMLSelectElement ? filterSourceEl.value : undefined;
+    await populateNavList(initialFilter);
+
+    if (filterSourceEl instanceof HTMLSelectElement) {
+      filterSourceEl.addEventListener('change', () => {
+        void populateNavList(filterSourceEl.value);
+      });
+    }
+  }
 };
 
 export const hydrateEditor = async (
@@ -199,7 +354,9 @@ export const hydrateEditor = async (
   if (!store.screen) return;
 
   const listFrames = store.screen.frames.filter(
-    (f): f is ListFrame => isListFrame(f),
+    (f): f is ListFrame =>
+      isListFrame(f) &&
+      (f.source === undefined || typeof (f.source as Record<string, unknown>).url !== 'string'),
   );
   const canvasFrames = store.screen.frames.filter(
     (f): f is CanvasFrame => isCanvasFrame(f),

@@ -182,7 +182,7 @@ describe("authorize helpers", () => {
 
     const fetch = vi.fn(async (input: RequestInfo | URL) => {
       expect(String(input)).toBe(
-        "https://identify-local.tachiiri.workers.dev/internal/github/session",
+        "https://identify-dev.tachiiri.workers.dev/internal/github/session",
       );
       return Response.json({
         authenticated: true,
@@ -199,7 +199,7 @@ describe("authorize helpers", () => {
     await expect(
       readGitHubSession({
         IDENTIFY: identify,
-        IDENTIFY_ORIGIN: "https://identify-local.tachiiri.workers.dev",
+        IDENTIFY_ORIGIN: "https://identify-dev.tachiiri.workers.dev",
         FRONT_TO_IDENTIFY_TOKEN: "front-token",
       }),
     ).resolves.toEqual({

@@ -8,13 +8,13 @@ describe('handleGitHubOAuthStart', () => {
       request: new Request('https://front.example.com/oauth/github/start?scope=repo+read%3Auser'),
       env: {
         GITHUB_OAUTH_CLIENT_ID: 'github-client-id',
-        IDENTIFY_ORIGIN: 'https://identify-local.tachiiri.workers.dev',
+        IDENTIFY_ORIGIN: 'https://identify-dev.tachiiri.workers.dev',
       },
     } as never);
 
     expect(response.status).toBe(302);
     expect(response.headers.get('Location')).toBe(
-      'https://identify-local.tachiiri.workers.dev/github/oauth/start?scope=repo+read%3Auser',
+      'https://identify-dev.tachiiri.workers.dev/github/oauth/start?scope=repo+read%3Auser',
     );
   });
 });
@@ -24,13 +24,13 @@ describe('handleGitHubOAuthCallback', () => {
     const response = await handleGitHubOAuthCallback({
       request: new Request('https://front.example.com/oauth/github/callback?code=abc&state=xyz'),
       env: {
-        IDENTIFY_ORIGIN: 'https://identify-local.tachiiri.workers.dev',
+        IDENTIFY_ORIGIN: 'https://identify-dev.tachiiri.workers.dev',
       },
     } as never);
 
     expect(response.status).toBe(302);
     expect(response.headers.get('Location')).toBe(
-      'https://identify-local.tachiiri.workers.dev/github/oauth/callback?code=abc&state=xyz',
+      'https://identify-dev.tachiiri.workers.dev/github/oauth/callback?code=abc&state=xyz',
     );
   });
 });

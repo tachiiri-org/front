@@ -17,6 +17,7 @@ import {
 } from '../storage/layouts/http';
 import {
   handleComponentSchemasList,
+  handleComponentSchemasTree,
   handleComponentSchemaDefinitionGet,
   handleComponentSchemaGet,
   handleComponentSchemaPut,
@@ -86,7 +87,10 @@ export const handleApiRequest = async (request: Request, env: Env): Promise<Resp
   const backend = createLayoutsBackend(env);
 
   if (url.pathname === '/api/component-schemas') {
-    if (request.method === 'GET') return handleComponentSchemasList(url.searchParams);
+    if (request.method === 'GET') {
+      if (url.searchParams.get('format') === 'tree') return handleComponentSchemasTree(backend);
+      return handleComponentSchemasList(backend, url.searchParams);
+    }
     return new Response('Method Not Allowed', { status: 405 });
   }
 

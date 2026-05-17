@@ -18,11 +18,11 @@ import type { LayoutBackend } from '../storage/layouts/r2';
 
 const COMPONENT_SCHEMA_KINDS = [...COMPONENT_KINDS, 'component-editor', 'screen'];
 const SOURCE_SCHEMA_KINDS = ['source/endpoint', 'source/list'];
-const LIST_SCHEMA_KINDS = ['list/category'];
-const SCHEMA_EDITABLE_KINDS = [...COMPONENT_SCHEMA_KINDS, ...SOURCE_SCHEMA_KINDS, ...LIST_SCHEMA_KINDS];
+const SCHEMA_EDITABLE_KINDS = [...COMPONENT_SCHEMA_KINDS, ...SOURCE_SCHEMA_KINDS];
 const CSS_PROP_SCHEMA_KINDS: string[] = [...CSS_PROP_KEYS];
 
 const isStyleKind = (kind: string): boolean => CSS_PROP_SCHEMA_KINDS.includes(kind);
+const isListKind = (kind: string): boolean => kind.startsWith('list/');
 const isScreenKind = (kind: string): boolean => kind === 'screen';
 
 const getSchemaStoragePath = (kind: string): string => {
@@ -63,6 +63,7 @@ export const LIST_TABLE_SCHEMA: TableSchema = {
   columns: [
     { key: 'value', label: 'value', type: 'string' },
     { key: 'label', label: 'label', type: 'string', nullable: true },
+    { key: 'childList', label: 'childList', type: 'string', nullable: true },
     { key: 'raw_json', label: 'raw', type: 'string', hidden: true, nullable: true },
   ],
 };
@@ -107,10 +108,16 @@ const isStyleEntrySpec = (value: unknown): value is StyleEntrySpec => {
   );
 };
 
-const isListEntrySpec = (value: unknown): value is { value: string; label?: string } => {
+type ListEntry = { value: string; label?: string; childList?: string };
+
+const isListEntrySpec = (value: unknown): value is ListEntry => {
   if (typeof value !== 'object' || value === null || Array.isArray(value)) return false;
   const c = value as Record<string, unknown>;
-  return typeof c.value === 'string' && (c.label === undefined || typeof c.label === 'string');
+  return (
+    typeof c.value === 'string' &&
+    (c.label === undefined || typeof c.label === 'string') &&
+    (c.childList === undefined || typeof c.childList === 'string')
+  );
 };
 
 const migrateSchemaField = (field: SchemaField): SchemaField => {
@@ -142,18 +149,19 @@ const migrateSchemaField = (field: SchemaField): SchemaField => {
 const migrateSchema = (schema: SchemaField[]): SchemaField[] => schema.map(migrateSchemaField);
 
 const listEntryToRow = (
-  entry: { value: string; label?: string },
+  entry: ListEntry,
   index: number,
 ): { id: string; values: Record<string, unknown> } => ({
   id: String(index),
   values: {
     value: entry.value,
     label: entry.label ?? '',
+    childList: entry.childList ?? '',
     raw_json: JSON.stringify(entry),
   },
 });
 
-const listEntriesTableDataToSpec = (draft: TableData): Array<{ value: string; label?: string }> =>
+const listEntriesTableDataToSpec = (draft: TableData): ListEntry[] =>
   draft.rows.map((row) => {
     const raw = parseJson(row.values.raw_json);
     const base: Record<string, unknown> =
@@ -161,7 +169,9 @@ const listEntriesTableDataToSpec = (draft: TableData): Array<{ value: string; la
 
     if (typeof row.values.value === 'string' && row.values.value.trim()) base.value = row.values.value.trim();
     if (typeof row.values.label === 'string' && row.values.label.trim()) base.label = row.values.label;
-    return base as { value: string; label?: string };
+    if (typeof row.values.childList === 'string' && row.values.childList.trim()) base.childList = row.values.childList.trim();
+    else if ('childList' in row.values && !row.values.childList) delete base.childList;
+    return base as ListEntry;
   });
 
 const validateListEntriesTableDraft = (draft: unknown): string | null => {
@@ -302,7 +312,7 @@ const loadStoredComponentSchema = async (backend: LayoutBackend, kind: string): 
 const loadStoredListEntries = async (
   backend: LayoutBackend,
   kind: string,
-): Promise<Array<{ value: string; label?: string }>> => {
+): Promise<ListEntry[]> => {
   let stored = await backend.getText(getSchemaStoragePath(kind));
   if (!stored) stored = await backend.getText(getLegacySchemaStoragePath(kind));
   if (stored) {
@@ -312,6 +322,9 @@ const loadStoredListEntries = async (
     } catch {
       // fall through to defaults
     }
+  }
+  if (kind === 'list/css-prop-keys') {
+    return CSS_PROP_KEYS.map((k) => ({ value: k }));
   }
   return [];
 };
@@ -347,7 +360,26 @@ export const SCHEMA_TABLE_SCHEMA: TableSchema = {
   ],
 };
 
-export const handleComponentSchemasList = (searchParams?: URLSearchParams): Response => {
+const listKindsFromBackend = async (backend: LayoutBackend): Promise<string[]> => {
+  const seen = new Set<string>();
+  let cursor: string | undefined;
+  do {
+    const result = await backend.list('list/', cursor);
+    for (const object of result.objects) {
+      if (!object.key.endsWith('.json')) continue;
+      const relative = object.key.slice('list/'.length);
+      if (relative.includes('/')) continue;
+      seen.add('list/' + relative.slice(0, -'.json'.length));
+    }
+    cursor = result.truncated ? result.cursor : undefined;
+  } while (cursor);
+  return [...seen].sort();
+};
+
+export const handleComponentSchemasList = async (
+  backend: LayoutBackend,
+  searchParams?: URLSearchParams,
+): Promise<Response> => {
   const category = searchParams?.get('category');
   let kinds: string[];
   if (category === 'component') {
@@ -357,11 +389,12 @@ export const handleComponentSchemasList = (searchParams?: URLSearchParams): Resp
   } else if (category === 'endpoint') {
     kinds = ['source/endpoint'];
   } else if (category === 'list') {
-    kinds = LIST_SCHEMA_KINDS;
+    kinds = await listKindsFromBackend(backend);
   } else if (category === 'style') {
     kinds = CSS_PROP_SCHEMA_KINDS;
   } else {
-    kinds = [...SCHEMA_EDITABLE_KINDS, ...CSS_PROP_SCHEMA_KINDS];
+    const listKinds = await listKindsFromBackend(backend);
+    kinds = [...SCHEMA_EDITABLE_KINDS, ...listKinds, ...CSS_PROP_SCHEMA_KINDS];
   }
   const labelForKind = (kind: string): string => {
     if (kind.startsWith('list/')) return kind.slice('list/'.length);
@@ -374,17 +407,37 @@ export const handleComponentSchemasList = (searchParams?: URLSearchParams): Resp
   );
 };
 
+type TreeItem = { value: string; label: string; children: Array<{ value: string; label: string }> };
+
+export const handleComponentSchemasTree = async (backend: LayoutBackend): Promise<Response> => {
+  const navEntries = await loadStoredListEntries(backend, 'list/schema-nav');
+  const items: TreeItem[] = await Promise.all(
+    navEntries.map(async (entry) => {
+      let children: Array<{ value: string; label: string }> = [];
+      if (entry.childList) {
+        const childEntries = await loadStoredListEntries(backend, `list/${entry.childList}`);
+        children = childEntries.map((e) => ({ value: e.value, label: e.label ?? e.value }));
+      } else {
+        const kinds = await listKindsFromBackend(backend);
+        children = kinds.map((k) => ({ value: k, label: k.startsWith('list/') ? k.slice('list/'.length) : k }));
+      }
+      return { value: entry.value, label: entry.label ?? entry.value, children };
+    }),
+  );
+  return new Response(JSON.stringify({ items }), { headers: { 'Content-Type': 'application/json' } });
+};
+
 export const handleComponentSchemaDefinitionGet = async (
   backend: LayoutBackend,
   kind: string,
 ): Promise<Response> => {
-  if (!SCHEMA_EDITABLE_KINDS.includes(kind) && !isStyleKind(kind)) return new Response('Not Found', { status: 404 });
+  if (!SCHEMA_EDITABLE_KINDS.includes(kind) && !isStyleKind(kind) && !isListKind(kind)) return new Response('Not Found', { status: 404 });
   if (isStyleKind(kind)) {
     return new Response(JSON.stringify(await loadStoredStyleSpec(backend, kind)), {
       headers: { 'Content-Type': 'application/json' },
     });
   }
-  if (kind.startsWith('list/')) {
+  if (isListKind(kind)) {
     return new Response(JSON.stringify(LIST_SCHEMA_DEFINITION), {
       headers: { 'Content-Type': 'application/json' },
     });
@@ -399,7 +452,7 @@ export const handleComponentSchemaGet = async (
   backend: LayoutBackend,
   kind: string,
 ): Promise<Response> => {
-  if (!SCHEMA_EDITABLE_KINDS.includes(kind) && !isStyleKind(kind)) return new Response('Not Found', { status: 404 });
+  if (!SCHEMA_EDITABLE_KINDS.includes(kind) && !isStyleKind(kind) && !isListKind(kind)) return new Response('Not Found', { status: 404 });
   if (isStyleKind(kind)) {
     const spec = await loadStoredStyleSpec(backend, kind);
     return new Response(
@@ -407,7 +460,7 @@ export const handleComponentSchemaGet = async (
       { headers: { 'Content-Type': 'application/json' } },
     );
   }
-  if (kind.startsWith('list/')) {
+  if (isListKind(kind)) {
     const spec = await loadStoredListEntries(backend, kind);
     return new Response(
       JSON.stringify({ kind: 'table', schema: LIST_TABLE_SCHEMA, data: { rows: spec.map(listEntryToRow) } }),
@@ -427,7 +480,7 @@ export const handleComponentSchemaPut = async (
   backend: LayoutBackend,
   kind: string,
 ): Promise<Response> => {
-  if (!SCHEMA_EDITABLE_KINDS.includes(kind) && !isStyleKind(kind)) return new Response('Not Found', { status: 404 });
+  if (!SCHEMA_EDITABLE_KINDS.includes(kind) && !isStyleKind(kind) && !isListKind(kind)) return new Response('Not Found', { status: 404 });
 
   const body = (await request.json()) as unknown;
   const rawData =
@@ -446,27 +499,6 @@ export const handleComponentSchemaPut = async (
       spec = rawData.every(isStyleEntrySpec) ? (rawData as StyleEntrySpec[]) : null;
     } else if (isTableDataLike(rawData)) {
       spec = styleEntriesTableDataToSpec(rawData);
-    }
-
-    if (!spec) return new Response('Bad Request', { status: 400 });
-
-    await backend.putText(getSchemaStoragePath(kind), JSON.stringify(spec));
-    return new Response(JSON.stringify({ ok: true }), {
-      headers: { 'Content-Type': 'application/json' },
-    });
-  }
-
-  if (kind.startsWith('list/')) {
-    if (isTableDataLike(rawData)) {
-      const message = validateListEntriesTableDraft(rawData);
-      if (message) return new Response(message, { status: 400 });
-    }
-
-    let spec: Array<{ value: string; label?: string }> | null = null;
-    if (Array.isArray(rawData)) {
-      spec = rawData.every(isListEntrySpec) ? (rawData as Array<{ value: string; label?: string }>) : null;
-    } else if (isTableDataLike(rawData)) {
-      spec = listEntriesTableDataToSpec(rawData);
     }
 
     if (!spec) return new Response('Bad Request', { status: 400 });

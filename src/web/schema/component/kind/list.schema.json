@@ -20,5 +20,18 @@
       { "value": "layouts", "label": "layouts" }
     ]
   },
+  {
+    "kind": "field-group",
+    "key": "source",
+    "label": "source (endpoint)",
+    "fields": [
+      { "kind": "text-field", "key": "url", "label": "url" },
+      { "kind": "text-field", "key": "itemsPath", "label": "itemsPath" },
+      { "kind": "text-field", "key": "valueKey", "label": "valueKey" },
+      { "kind": "text-field", "key": "labelKey", "label": "labelKey" }
+    ]
+  },
+  { "kind": "text-field", "key": "filterSourceId", "label": "filterSourceId" },
+  { "kind": "text-field", "key": "filterParamKey", "label": "filterParamKey" },
   { "kind": "text-field", "key": "targetComponentId", "label": "targetComponentId" }
 ]

@@ -17,7 +17,12 @@ export const migrateFrameKind = (frame: FrameCandidate): FrameCandidate => {
   }
   const result: Record<string, unknown> = { ...f, kind };
   if (result.kind === 'list') {
-    if (typeof result.resource !== 'string') {
+    const hasEndpointSource =
+      typeof result.source === 'object' &&
+      result.source !== null &&
+      typeof (result.source as Record<string, unknown>).url === 'string' &&
+      (result.source as Record<string, unknown>).url !== '';
+    if (!hasEndpointSource && typeof result.resource !== 'string') {
       result.resource = 'layouts';
     }
     delete result.src;

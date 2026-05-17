@@ -405,25 +405,49 @@ const renderEditableTable = (
       });
       select.dataset.autoSize = 'true';
       const currentValue = typeof current === 'string' ? current : '';
-      const empty = document.createElement('option');
-      empty.value = '';
-      empty.textContent = '';
-      select.appendChild(empty);
-      for (const optionValue of CSS_PROP_KEYS) {
-        const el = document.createElement('option');
-        el.value = optionValue;
-        el.textContent = optionValue;
-        select.appendChild(el);
-      }
-      if (currentValue && !Array.from(select.options).some((option) => option.value === currentValue)) {
-        const invalid = document.createElement('option');
-        invalid.value = currentValue;
-        invalid.textContent = `invalid: ${currentValue}`;
-        invalid.style.color = '#c0392b';
-        select.appendChild(invalid);
-      }
-      select.value = currentValue;
-      applyTextInputSize(select, select.value, '');
+
+      const populateCssPropOptions = (keys: readonly string[]): void => {
+        while (select.options.length > 0) select.remove(0);
+        const empty = document.createElement('option');
+        empty.value = '';
+        empty.textContent = '';
+        select.appendChild(empty);
+        for (const optionValue of keys) {
+          const el = document.createElement('option');
+          el.value = optionValue;
+          el.textContent = optionValue;
+          select.appendChild(el);
+        }
+        if (currentValue && !Array.from(select.options).some((option) => option.value === currentValue)) {
+          const invalid = document.createElement('option');
+          invalid.value = currentValue;
+          invalid.textContent = `invalid: ${currentValue}`;
+          invalid.style.color = '#c0392b';
+          select.appendChild(invalid);
+        }
+        select.value = currentValue;
+        applyTextInputSize(select, select.value, '');
+      };
+
+      populateCssPropOptions(CSS_PROP_KEYS);
+
+      fetch('/api/component-schemas/list/css-prop-keys')
+        .then((res) => (res.ok ? res.json() : null))
+        .then((payload: unknown) => {
+          if (!payload || typeof payload !== 'object' || payload === null) return;
+          const p = payload as Record<string, unknown>;
+          const data = p.data as Record<string, unknown> | undefined;
+          const rows = Array.isArray(data?.rows) ? (data.rows as Record<string, unknown>[]) : [];
+          const keys = rows
+            .map((row) => {
+              const values = row.values as Record<string, unknown> | undefined;
+              return typeof values?.value === 'string' ? values.value : '';
+            })
+            .filter(Boolean);
+          if (keys.length > 0) populateCssPropOptions(keys);
+        })
+        .catch(() => {});
+
       select.addEventListener('change', () => {
         setValue(select.value);
         commit();
