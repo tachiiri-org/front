@@ -21,7 +21,12 @@ export type SelectInlineSource = {
   options: SelectOption[];
 };
 
-export type SelectSource = SelectEndpointSource | SelectInlineSource;
+export type SelectListSource = {
+  kind: 'list';
+  id: string;
+};
+
+export type SelectSource = SelectEndpointSource | SelectInlineSource | SelectListSource;
 
 export type SelectComponent = {
   kind: 'select';
@@ -55,8 +60,14 @@ const isSelectInlineSource = (value: unknown): value is SelectInlineSource => {
   return c.kind === 'inline' && Array.isArray(c.options) && (c.options as unknown[]).every(isSelectOption);
 };
 
+const isSelectListSource = (value: unknown): value is SelectListSource => {
+  if (typeof value !== 'object' || value === null || Array.isArray(value)) return false;
+  const c = value as Record<string, unknown>;
+  return c.kind === 'list' && typeof c.id === 'string' && c.id.length > 0;
+};
+
 export const isSelectSource = (value: unknown): value is SelectSource =>
-  isSelectEndpointSource(value) || isSelectInlineSource(value);
+  isSelectEndpointSource(value) || isSelectInlineSource(value) || isSelectListSource(value);
 
 export const selectDefaults: SelectComponent = {
   kind: 'select',

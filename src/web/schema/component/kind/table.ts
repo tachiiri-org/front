@@ -23,7 +23,12 @@ export type TableEndpointSelectSource = {
   headers?: Record<string, string>;
 };
 
-export type TableSelectSource = TableInlineSelectSource | TableEndpointSelectSource;
+export type TableListSelectSource = {
+  kind: 'list';
+  id: string;
+};
+
+export type TableSelectSource = TableInlineSelectSource | TableEndpointSelectSource | TableListSelectSource;
 
 export type TableDefaultValue =
   | { kind: 'literal'; value: string | number | boolean | null }
@@ -125,6 +130,9 @@ export const isTableSelectSource = (value: unknown): value is TableSelectSource 
       (c.labelKey === undefined || typeof c.labelKey === 'string') &&
       (c.headers === undefined || isStringRecord(c.headers))
     );
+  }
+  if (c.kind === 'list') {
+    return typeof c.id === 'string' && c.id.length > 0;
   }
   return false;
 };

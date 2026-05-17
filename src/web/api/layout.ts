@@ -21,6 +21,11 @@ import {
   handleComponentSchemaDefinitionGet,
   handleComponentSchemaGet,
   handleComponentSchemaPut,
+  handleListResourceListGet,
+  handleListResourceGet,
+  handleListResourcePut,
+  handleListResourceDelete,
+  handleListResourceRename,
 } from './component-schemas';
 import { type AuthorizeEnv } from '../../auth';
 
@@ -53,6 +58,10 @@ const RESOURCE_CONFIGS: ResourceConfig[] = [
   {
     name: 'list',
     storagePrefix: 'list/',
+    handleGet: handleListResourceGet,
+    handlePut: handleListResourcePut,
+    handleDelete: handleListResourceDelete,
+    handleRename: handleListResourceRename,
   },
 ];
 
@@ -147,9 +156,13 @@ export const handleApiRequest = async (request: Request, env: Env): Promise<Resp
 
   const resourceJsonFilesMatch = url.pathname.match(/^\/api\/([^/]+)\/json-files$/);
   if (resourceJsonFilesMatch) {
-    const config = RESOURCE_CONFIGS.find((c) => c.name === decodeURIComponent(resourceJsonFilesMatch[1]));
+    const resourceName = decodeURIComponent(resourceJsonFilesMatch[1]);
+    const config = RESOURCE_CONFIGS.find((c) => c.name === resourceName);
     if (!config) return new Response('Not Found', { status: 404 });
-    if (request.method === 'GET') return handleResourceListGet(backend, config.storagePrefix);
+    if (request.method === 'GET') {
+      if (resourceName === 'list') return handleListResourceListGet(backend);
+      return handleResourceListGet(backend, config.storagePrefix);
+    }
     return new Response('Method Not Allowed', { status: 405 });
   }
 

@@ -484,28 +484,73 @@ const renderEditableTable = (
         fontWeight: 'inherit',
       });
       select.dataset.autoSize = 'true';
-      const empty = document.createElement('option');
-      empty.value = '';
-      empty.textContent = '';
-      select.appendChild(empty);
       const currentValue = typeof current === 'string' ? current : '';
-      if (column.source.kind === 'inline') {
-        for (const option of column.source.options) {
+
+      const populateSelectOptions = (options: Array<{ value: string; label: string }>): void => {
+        while (select.options.length > 0) select.remove(0);
+        const emptyOpt = document.createElement('option');
+        emptyOpt.value = '';
+        emptyOpt.textContent = '';
+        select.appendChild(emptyOpt);
+        for (const option of options) {
           const el = document.createElement('option');
           el.value = option.value;
           el.textContent = option.label;
           select.appendChild(el);
         }
+        if (currentValue && !Array.from(select.options).some((o) => o.value === currentValue)) {
+          const invalid = document.createElement('option');
+          invalid.value = currentValue;
+          invalid.textContent = `invalid: ${currentValue}`;
+          invalid.style.color = '#c0392b';
+          select.appendChild(invalid);
+        }
+        select.value = currentValue;
+        applyTextInputSize(select, select.value, '');
+      };
+
+      if (column.source.kind === 'inline') {
+        populateSelectOptions(column.source.options);
+      } else if (column.source.kind === 'list') {
+        populateSelectOptions([]);
+        fetch(`/api/component-schemas/list/${column.source.id}`)
+          .then((res) => (res.ok ? res.json() : null))
+          .then((payload: unknown) => {
+            if (!payload || typeof payload !== 'object' || payload === null) return;
+            const p = payload as Record<string, unknown>;
+            const data = p.data as Record<string, unknown> | undefined;
+            const rows = Array.isArray(data?.rows) ? (data.rows as Record<string, unknown>[]) : [];
+            const options = rows.flatMap((row) => {
+              const values = row.values as Record<string, unknown> | undefined;
+              const value = typeof values?.value === 'string' ? values.value : '';
+              if (!value) return [];
+              const label = typeof values?.label === 'string' && values.label ? values.label : value;
+              return [{ value, label }];
+            });
+            populateSelectOptions(options);
+          })
+          .catch(() => {});
+      } else if (column.source.kind === 'endpoint') {
+        populateSelectOptions([]);
+        fetch(column.source.url)
+          .then((res) => (res.ok ? res.json() : null))
+          .then((payload: unknown) => {
+            if (!payload || typeof payload !== 'object' || payload === null) return;
+            const p = payload as Record<string, unknown>;
+            const data = p.data as Record<string, unknown> | undefined;
+            const rows = Array.isArray(data?.rows) ? (data.rows as Record<string, unknown>[]) : [];
+            const options = rows.flatMap((row) => {
+              const values = row.values as Record<string, unknown> | undefined;
+              const value = typeof values?.value === 'string' ? values.value : '';
+              if (!value) return [];
+              const label = typeof values?.label === 'string' && values.label ? values.label : value;
+              return [{ value, label }];
+            });
+            populateSelectOptions(options);
+          })
+          .catch(() => {});
       }
-      if (currentValue && !Array.from(select.options).some((option) => option.value === currentValue)) {
-        const invalid = document.createElement('option');
-        invalid.value = currentValue;
-        invalid.textContent = `invalid: ${currentValue}`;
-        invalid.style.color = '#c0392b';
-        select.appendChild(invalid);
-      }
-      select.value = currentValue;
-      applyTextInputSize(select, select.value, '');
+
       if (issue) {
         select.style.background = 'rgba(239, 68, 68, 0.10)';
       }

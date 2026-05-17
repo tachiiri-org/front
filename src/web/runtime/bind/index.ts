@@ -62,15 +62,17 @@ const loadDataIntoTree = async (
   const tf = treeFrame as Record<string, unknown>;
   tf.treeId = treeId;
 
-  const res = await fetch(`/api/trees/${encodeURIComponent(treeId)}`);
-  if (res.ok) {
-    const payload = (await res.json()) as unknown;
-    if (typeof payload === 'object' && payload !== null) {
-      const nodes = (payload as Record<string, unknown>).nodes;
-      if (Array.isArray(nodes) && nodes.length > 0) {
-        tf.data = payload;
-        onFrameRerender?.(treeFrame.id);
-        return;
+  if (!treeId.startsWith('list/')) {
+    const res = await fetch(`/api/trees/${encodeURIComponent(treeId)}`);
+    if (res.ok) {
+      const payload = (await res.json()) as unknown;
+      if (typeof payload === 'object' && payload !== null) {
+        const nodes = (payload as Record<string, unknown>).nodes;
+        if (Array.isArray(nodes) && nodes.length > 0) {
+          tf.data = payload;
+          onFrameRerender?.(treeFrame.id);
+          return;
+        }
       }
     }
   }
@@ -194,6 +196,8 @@ const hydrateSelectTableBindings = async (
         el.textContent = String(opt.label ?? el.value);
         categoryEl.appendChild(el);
       }
+    } else if (source?.kind === 'list' && typeof source.id === 'string' && source.id) {
+      await populateSelectFromEndpoint(categoryEl, `/api/component-schemas/list/${String(source.id)}`, { itemsPath: 'data.rows', valueKey: 'values.value', labelKey: 'values.label' });
     } else if (source?.kind === 'endpoint' && typeof source.url === 'string' && source.url) {
       await populateSelectFromEndpoint(categoryEl, source.url, source);
       if (!categoryEl.value && categoryEl.options.length > 0) {
@@ -245,7 +249,13 @@ const hydrateSelectTableBindings = async (
     if (!(selectEl instanceof HTMLSelectElement)) continue;
 
     const source = c.source as Record<string, unknown> | undefined;
-    if (source?.kind === 'endpoint' && typeof source.url === 'string' && source.url) {
+    if (source?.kind === 'list' && typeof source.id === 'string' && source.id) {
+      await populateSelectFromEndpoint(selectEl, `/api/component-schemas/list/${String(source.id)}`, { itemsPath: 'data.rows', valueKey: 'values.value', labelKey: 'values.label' });
+      if (selectEl.options.length > 0) {
+        selectEl.value = selectEl.options[0].value;
+        await loadSchemaIntoTable(selectEl.value, tableFrame, onFrameRerender);
+      }
+    } else if (source?.kind === 'endpoint' && typeof source.url === 'string' && source.url) {
       await populateSelectFromEndpoint(selectEl, source.url, source);
       if (selectEl.options.length > 0) {
         selectEl.value = selectEl.options[0].value;
@@ -475,7 +485,9 @@ const hydrateSelectTableBindings = async (
         const items = getByPath(raw, itemsPath);
         if (!Array.isArray(items)) return;
 
-        listEl.replaceChildren();
+        const currentListEl = domMap.get(frame.id);
+        if (!(currentListEl instanceof HTMLElement)) return;
+        currentListEl.replaceChildren();
         activeItem = null;
 
         for (const item of items as Record<string, unknown>[]) {
@@ -489,9 +501,9 @@ const hydrateSelectTableBindings = async (
               value: String(c[valueKey] ?? ''),
               label: String(c[labelKey] ?? c[valueKey] ?? ''),
             })).filter((c) => c.value);
-            listEl.appendChild(makeCategoryItem(label, childItems));
+            currentListEl.appendChild(makeCategoryItem(label, childItems));
           } else {
-            listEl.appendChild(makeLeafItem(value, label));
+            currentListEl.appendChild(makeLeafItem(value, label));
           }
         }
       } catch {

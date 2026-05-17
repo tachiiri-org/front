@@ -30,6 +30,7 @@ export {
   type SelectOption,
   type SelectSource,
   type SelectEndpointSource,
+  type SelectListSource,
   isSelectComponent,
   isSelectOption,
   isSelectSource,

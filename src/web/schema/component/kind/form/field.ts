@@ -153,6 +153,7 @@ const isSchemaFieldOption = (value: unknown): value is { value: string; label: s
 const isSelectSource = (value: unknown): value is SelectSource => {
   if (typeof value !== 'object' || value === null || Array.isArray(value)) return false;
   const c = value as Record<string, unknown>;
+  if (c.kind === 'list') return typeof c.id === 'string' && c.id.length > 0;
   return (
     c.kind === 'endpoint' &&
     typeof c.url === 'string' &&
