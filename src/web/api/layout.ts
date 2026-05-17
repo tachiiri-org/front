@@ -94,6 +94,14 @@ export const handleApiRequest = async (request: Request, env: Env): Promise<Resp
     return new Response('Method Not Allowed', { status: 405 });
   }
 
+  const treesMatch = url.pathname.match(/^\/api\/trees\/(.+)$/);
+  if (treesMatch) {
+    const treeId = decodeURIComponent(treesMatch[1]);
+    if (request.method === 'GET') return handleResourceGet(backend, 'trees/', treeId);
+    if (request.method === 'PUT') return handleResourcePut(request, backend, 'trees/', treeId);
+    return new Response('Method Not Allowed', { status: 405 });
+  }
+
   const canvasOptionsMatch = url.pathname.match(/^\/api\/layouts\/([^/]+)\/canvases$/);
   if (canvasOptionsMatch) {
     const screenId = decodeURIComponent(canvasOptionsMatch[1]);

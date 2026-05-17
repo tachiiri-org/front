@@ -3,9 +3,11 @@ import {
   isCanvasComponent,
   isTextareaComponent,
   isTableComponent,
+  isTreeEditorComponent,
   ALL_CSS_PROP_KEYS,
   applyDefaults,
   type TableComponent,
+  type TreeEditorComponent,
   type Component,
 } from '../../../schema/component';
 import { type Frame, type FrameRef, isFrameRef } from '../../../schema/screen/screen';
@@ -13,6 +15,7 @@ import { isEditorComponent } from '../../../editor/component-editor';
 import type { FrameState } from '../../../state';
 import { renderList, renderCanvas, renderEditor, renderTable } from './frame';
 import { renderEditableTable } from './table-editor';
+import { renderEditableTree } from './tree-editor';
 
 const applyCssProps = (el: HTMLElement, c: Record<string, unknown>): void => {
   for (const propKey of ALL_CSS_PROP_KEYS) {
@@ -223,6 +226,12 @@ export const renderComponent = (
   if (isListComponent(frame)) return renderList(id, frame);
   if (isCanvasComponent(frame)) return renderCanvas(id, frame);
   if (isEditorComponent(frame)) return renderEditor(id, frame);
+  if (isTreeEditorComponent(frame)) {
+    const treeId = typeof (frame as Record<string, unknown>).treeId === 'string'
+      ? (frame as Record<string, unknown>).treeId as string
+      : undefined;
+    return renderEditableTree(id, frame as TreeEditorComponent, treeId);
+  }
   if (isTableComponent(frame) && options?.screenId) {
     return renderEditableTable(
       id,

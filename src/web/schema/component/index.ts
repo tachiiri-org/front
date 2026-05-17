@@ -7,6 +7,7 @@ import type { SelectComponent } from './kind/select';
 import type { FormComponent } from './kind/form';
 import type { TextareaComponent } from './kind/textarea';
 import type { TableComponent } from './kind/table';
+import type { TreeEditorComponent } from './kind/tree-editor';
 import { isElementComponent, elementDefaults, elementSchema } from './kind/element';
 import { isHeadingComponent, headingDefaults, headingSchema } from './kind/heading';
 import { isButtonComponent, buttonDefaults, buttonSchema } from './kind/button';
@@ -16,6 +17,7 @@ import { isSelectComponent, selectDefaults, selectSchema } from './kind/select';
 import { isFormComponent, formDefaults, formSchema } from './kind/form';
 import { isTextareaComponent, textareaDefaults, textareaSchema } from './kind/textarea';
 import { isTableComponent, tableDefaults, tableSchema } from './kind/table';
+import { isTreeEditorComponent, treeEditorDefaults, treeEditorSchema } from './kind/tree-editor';
 import type { FormField, SchemaField } from './kind/form/field';
 
 export { type ElementComponent, isElementComponent, elementDefaults, elementSchema } from './kind/element';
@@ -36,6 +38,14 @@ export {
 } from './kind/select';
 export { type FormComponent, isFormComponent, formDefaults, formSchema } from './kind/form';
 export { type TextareaComponent, isTextareaComponent, textareaDefaults, textareaSchema } from './kind/textarea';
+export {
+  type TreeEditorComponent,
+  type TreeNode,
+  type TreeEditorData,
+  isTreeEditorComponent,
+  treeEditorDefaults,
+  treeEditorSchema,
+} from './kind/tree-editor';
 export {
   type TableComponent,
   type TableSchema,
@@ -65,7 +75,8 @@ export type Component =
   | SelectComponent
   | FormComponent
   | TextareaComponent
-  | TableComponent;
+  | TableComponent
+  | TreeEditorComponent;
 
 export const isComponent = (value: unknown): value is Component =>
   isElementComponent(value) ||
@@ -76,7 +87,8 @@ export const isComponent = (value: unknown): value is Component =>
   isSelectComponent(value) ||
   isFormComponent(value) ||
   isTextareaComponent(value) ||
-  isTableComponent(value);
+  isTableComponent(value) ||
+  isTreeEditorComponent(value);
 
 export const componentDefaults: Record<string, Record<string, unknown>> = {
   element: elementDefaults as Record<string, unknown>,
@@ -88,6 +100,7 @@ export const componentDefaults: Record<string, Record<string, unknown>> = {
   list: listDefaults as Record<string, unknown>,
   textarea: textareaDefaults as Record<string, unknown>,
   table: tableDefaults as Record<string, unknown>,
+  'tree-editor': treeEditorDefaults as Record<string, unknown>,
 };
 
 export const componentSchemas: Record<string, SchemaField[]> = {
@@ -100,6 +113,7 @@ export const componentSchemas: Record<string, SchemaField[]> = {
   list: listSchema,
   textarea: textareaSchema,
   table: tableSchema,
+  'tree-editor': treeEditorSchema,
 };
 
 export const COMPONENT_KINDS = Object.keys(componentDefaults);

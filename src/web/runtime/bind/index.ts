@@ -41,6 +41,58 @@ const getByPath = (value: unknown, path: string | undefined): unknown => {
   return cur;
 };
 
+type TreeNode = { id: string; text: string; children?: TreeNode[] };
+
+const tableRowsToNodes = (payload: Record<string, unknown>): TreeNode[] | null => {
+  const data = payload.data as Record<string, unknown> | undefined;
+  const rows = data?.rows;
+  if (!Array.isArray(rows)) return null;
+  return (rows as Record<string, unknown>[]).map((row) => {
+    const values = row.values as Record<string, unknown> | undefined ?? {};
+    const text = String(values.label || values.value || '');
+    return { id: String(row.id ?? ''), text };
+  });
+};
+
+const loadDataIntoTree = async (
+  treeId: string,
+  treeFrame: Frame,
+  onFrameRerender?: (id: string) => void,
+): Promise<void> => {
+  const tf = treeFrame as Record<string, unknown>;
+  tf.treeId = treeId;
+
+  const res = await fetch(`/api/trees/${encodeURIComponent(treeId)}`);
+  if (res.ok) {
+    const payload = (await res.json()) as unknown;
+    if (typeof payload === 'object' && payload !== null) {
+      const nodes = (payload as Record<string, unknown>).nodes;
+      if (Array.isArray(nodes) && nodes.length > 0) {
+        tf.data = payload;
+        onFrameRerender?.(treeFrame.id);
+        return;
+      }
+    }
+  }
+
+  // trees/ が空か未存在 → component-schemas からフォールバック変換
+  const schemaRes = await fetch(`/api/component-schemas/${encodeURIComponent(treeId)}`);
+  if (schemaRes.ok) {
+    const schema = (await schemaRes.json()) as unknown;
+    if (typeof schema === 'object' && schema !== null) {
+      const nodes = tableRowsToNodes(schema as Record<string, unknown>);
+      if (nodes) {
+        tf.data = { nodes };
+        onFrameRerender?.(treeFrame.id);
+        return;
+      }
+    }
+  }
+
+  tf.data = { nodes: [] };
+  onFrameRerender?.(treeFrame.id);
+};
+
 const loadSchemaIntoTable = async (
   kind: string,
   tableFrame: Frame,
@@ -223,14 +275,24 @@ const hydrateSelectTableBindings = async (
     const valueKey = typeof source.valueKey === 'string' && source.valueKey ? source.valueKey : 'value';
     const labelKey = typeof source.labelKey === 'string' && source.labelKey ? source.labelKey : 'label';
 
-    const tableFrame = targetId ? store.screen.frames.find((f) => f.id === targetId) : undefined;
+    const targetFrame = targetId ? store.screen.frames.find((f) => f.id === targetId) : undefined;
     const filterSourceEl = filterSourceId ? domMap.get(filterSourceId) : null;
 
+    const loadIntoTarget = (value: string): void => {
+      if (!targetFrame) return;
+      const kind = (targetFrame as Record<string, unknown>).kind;
+      if (kind === 'tree-editor') {
+        void loadDataIntoTree(value, targetFrame, onFrameRerender);
+      } else {
+        void loadSchemaIntoTable(value, targetFrame, onFrameRerender);
+      }
+    };
+
     let activeItem: HTMLElement | null = null;
+    let currentFilter: string | undefined;
 
     const makeLeafItem = (value: string, label: string): HTMLLIElement => {
       const li = document.createElement('li');
-      li.textContent = label;
       li.dataset.value = value;
       Object.assign(li.style, {
         padding: '5px 10px',
@@ -238,20 +300,121 @@ const hydrateSelectTableBindings = async (
         fontSize: '12px',
         borderRadius: '3px',
         userSelect: 'none',
+        display: 'flex',
+        alignItems: 'center',
+        gap: '4px',
       });
+
+      const labelEl = document.createElement('span');
+      labelEl.textContent = label;
+      labelEl.style.flex = '1';
+      labelEl.style.overflow = 'hidden';
+      labelEl.style.textOverflow = 'ellipsis';
+      labelEl.style.whiteSpace = 'nowrap';
+
+      const editBtn = document.createElement('button');
+      editBtn.type = 'button';
+      editBtn.textContent = '編集';
+      Object.assign(editBtn.style, {
+        display: 'none',
+        border: 'none',
+        background: 'transparent',
+        cursor: 'pointer',
+        fontSize: '11px',
+        padding: '0',
+        color: 'rgba(0,0,0,0.4)',
+        flexShrink: '0',
+        lineHeight: '1',
+      });
+
+      li.appendChild(labelEl);
+      li.appendChild(editBtn);
+
       li.addEventListener('mouseenter', () => {
         if (li !== activeItem) li.style.backgroundColor = 'rgba(0,0,0,0.05)';
+        editBtn.style.display = '';
       });
       li.addEventListener('mouseleave', () => {
         if (li !== activeItem) li.style.backgroundColor = '';
+        editBtn.style.display = 'none';
       });
-      li.addEventListener('click', () => {
+      li.addEventListener('click', (e) => {
+        if ((e.target as HTMLElement).closest('button') === editBtn) return;
         if (activeItem) { activeItem.style.backgroundColor = ''; activeItem.style.fontWeight = ''; }
         li.style.backgroundColor = 'rgba(0,0,0,0.1)';
         li.style.fontWeight = 'bold';
         activeItem = li;
-        if (tableFrame) void loadSchemaIntoTable(value, tableFrame, onFrameRerender);
+        loadIntoTarget(value);
       });
+
+      editBtn.addEventListener('click', (e) => {
+        e.stopPropagation();
+        li.replaceChildren();
+        Object.assign(li.style, { padding: '3px 10px', cursor: 'default' });
+
+        const input = document.createElement('input');
+        input.type = 'text';
+        input.value = label;
+        Object.assign(input.style, {
+          flex: '1',
+          fontSize: '12px',
+          border: '1px solid rgba(0,0,0,0.25)',
+          borderRadius: '2px',
+          padding: '1px 4px',
+          outline: 'none',
+          minWidth: '0',
+          fontFamily: 'inherit',
+        });
+
+        const saveBtn = document.createElement('button');
+        saveBtn.type = 'button';
+        saveBtn.textContent = '✓';
+        Object.assign(saveBtn.style, {
+          border: 'none', background: 'transparent', cursor: 'pointer',
+          padding: '0 2px', color: 'rgba(0,0,0,0.6)', flexShrink: '0', fontSize: '12px',
+        });
+
+        const cancelBtn = document.createElement('button');
+        cancelBtn.type = 'button';
+        cancelBtn.textContent = '✕';
+        Object.assign(cancelBtn.style, {
+          border: 'none', background: 'transparent', cursor: 'pointer',
+          padding: '0 2px', color: 'rgba(0,0,0,0.4)', flexShrink: '0', fontSize: '10px',
+        });
+
+        li.appendChild(input);
+        li.appendChild(saveBtn);
+        li.appendChild(cancelBtn);
+        input.focus();
+        input.select();
+
+        const restore = (): void => {
+          li.replaceChildren(labelEl, editBtn);
+          Object.assign(li.style, { padding: '5px 10px', cursor: 'pointer' });
+        };
+
+        const doRename = (): void => {
+          const newName = input.value.trim();
+          if (!newName || newName === label) { restore(); return; }
+          const namePart = value.startsWith('list/') ? value.slice('list/'.length) : value;
+          void fetch(`/api/list/${encodeURIComponent(namePart)}/rename`, {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ to: newName }),
+          }).then(async (res) => {
+            if (!res.ok) { window.alert(`リネーム失敗: ${await res.text()}`); restore(); return; }
+            await populateNavList(currentFilter);
+          });
+        };
+
+        saveBtn.addEventListener('click', doRename);
+        cancelBtn.addEventListener('click', restore);
+        input.addEventListener('keydown', (ke: KeyboardEvent) => {
+          if (ke.key === 'Enter') { ke.preventDefault(); doRename(); }
+          if (ke.key === 'Escape') restore();
+        });
+      });
+
       return li;
     };
 
@@ -302,6 +465,7 @@ const hydrateSelectTableBindings = async (
     };
 
     const populateNavList = async (filterValue?: string): Promise<void> => {
+      currentFilter = filterValue;
       const u = new URL(source.url as string, window.location.origin);
       if (filterValue && filterParamKey) u.searchParams.set(filterParamKey, filterValue);
       try {
