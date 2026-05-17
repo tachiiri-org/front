@@ -6,7 +6,8 @@ import {
 import { CSS_PROP_KEYS } from '../schema/component/style';
 import { resolveStyleFieldEntries } from '../schema/component/style/specs';
 import type { StyleEntrySpec } from '../schema/component/style/types';
-import type { TableData, TableSchema } from '../schema/component/kind/table';
+import type { TableColumn, TableData, TableSchema } from '../schema/component/kind/table';
+import { isTableColumn } from '../schema/component/kind/table';
 import { editorSchema } from '../editor/component-editor';
 import { sourceEndpointSchema, sourceListSchema } from '../schema/source';
 import {
@@ -23,6 +24,7 @@ const CSS_PROP_SCHEMA_KINDS: string[] = [...CSS_PROP_KEYS];
 
 const isStyleKind = (kind: string): boolean => CSS_PROP_SCHEMA_KINDS.includes(kind);
 const isListKind = (kind: string): boolean => kind.startsWith('list/');
+const isColumnsKind = (kind: string): boolean => kind.startsWith('list/') && kind.endsWith('-columns');
 const isScreenKind = (kind: string): boolean => kind === 'screen';
 
 const getSchemaStoragePath = (kind: string): string => {
@@ -65,6 +67,22 @@ export const LIST_TABLE_SCHEMA: TableSchema = {
     { key: 'label', label: 'label', type: 'string', nullable: true },
     { key: 'childList', label: 'childList', type: 'string', nullable: true },
     { key: 'raw_json', label: 'raw', type: 'string', hidden: true, nullable: true },
+  ],
+};
+
+const COLUMN_TYPE_OPTIONS = ['string', 'int', 'boolean', 'date', 'select'].map((k) => ({
+  value: k,
+  label: k,
+}));
+
+export const LIST_COLUMNS_TABLE_SCHEMA: TableSchema = {
+  version: 1,
+  columns: [
+    { key: 'key', label: 'key', type: 'string' },
+    { key: 'label', label: 'label', type: 'string', nullable: true },
+    { key: 'type', label: 'type', type: 'select', source: { kind: 'inline', options: COLUMN_TYPE_OPTIONS } },
+    { key: 'nullable', label: 'nullable', type: 'boolean', nullable: true },
+    { key: 'hidden', label: 'hidden', type: 'boolean', nullable: true },
   ],
 };
 
@@ -119,6 +137,49 @@ const isListEntrySpec = (value: unknown): value is ListEntry => {
     (c.childList === undefined || typeof c.childList === 'string')
   );
 };
+
+const buildListTableSchema = (columns: TableColumn[]): TableSchema => ({
+  version: 1,
+  columns: [
+    ...columns,
+    { key: 'raw_json', label: 'raw', type: 'string', hidden: true, nullable: true },
+  ],
+});
+
+const listGenericEntryToRow = (
+  entry: Record<string, unknown>,
+  columns: TableColumn[],
+  index: number,
+): { id: string; values: Record<string, unknown> } => ({
+  id: String(index),
+  values: {
+    ...Object.fromEntries(columns.map((col) => [col.key, entry[col.key] ?? ''])),
+    raw_json: JSON.stringify(entry),
+  },
+});
+
+const listGenericRowsToEntries = (
+  draft: TableData,
+  columns: TableColumn[],
+): Record<string, unknown>[] =>
+  draft.rows.map((row) => {
+    const raw = parseJson(row.values.raw_json);
+    const base: Record<string, unknown> =
+      typeof raw === 'object' && raw !== null && !Array.isArray(raw) ? { ...raw } : {};
+    for (const col of columns) {
+      const v = row.values[col.key];
+      if (typeof v === 'boolean') {
+        base[col.key] = v;
+      } else if (typeof v === 'number') {
+        base[col.key] = v;
+      } else if (typeof v === 'string' && v.trim()) {
+        base[col.key] = v;
+      } else {
+        delete base[col.key];
+      }
+    }
+    return base;
+  });
 
 const migrateSchemaField = (field: SchemaField): SchemaField => {
   const nestedFields = Array.isArray(field.fields) ? field.fields.map(migrateSchemaField) : undefined;
@@ -309,24 +370,147 @@ const loadStoredComponentSchema = async (backend: LayoutBackend, kind: string): 
   return [];
 };
 
-const loadStoredListEntries = async (
+const treeNodesToColumns = (nodes: unknown[]): TableColumn[] =>
+  (nodes as Record<string, unknown>[])
+    .map((n) => (typeof n.text === 'string' ? n.text.trim() : ''))
+    .filter(Boolean)
+    .map((key) => ({ key, label: key, type: 'string' as const, nullable: true }));
+
+const columnToRow = (col: TableColumn, i: number): { id: string; values: Record<string, unknown> } => ({
+  id: String(i),
+  values: {
+    key: col.key,
+    label: col.label ?? '',
+    type: col.type,
+    nullable: col.nullable ?? false,
+    hidden: col.hidden ?? false,
+  },
+});
+
+const VALID_COLUMN_TYPES = ['string', 'int', 'boolean', 'date', 'select'] as const;
+type ValidColumnType = (typeof VALID_COLUMN_TYPES)[number];
+
+const rowsToColumns = (draft: TableData): TableColumn[] => {
+  const cols: TableColumn[] = [];
+  for (const row of draft.rows) {
+    const key = typeof row.values.key === 'string' ? row.values.key.trim() : '';
+    if (!key) continue;
+    const label = typeof row.values.label === 'string' && row.values.label.trim() ? row.values.label : key;
+    const rawType = typeof row.values.type === 'string' ? row.values.type.trim() : '';
+    const type: ValidColumnType = (VALID_COLUMN_TYPES as readonly string[]).includes(rawType)
+      ? (rawType as ValidColumnType)
+      : 'string';
+    const nullable = typeof row.values.nullable === 'boolean' ? row.values.nullable : true;
+    const hidden = typeof row.values.hidden === 'boolean' ? row.values.hidden : undefined;
+    if (type === 'select') {
+      cols.push({ key, label, type: 'select', source: { kind: 'inline', options: [] }, nullable, ...(hidden !== undefined ? { hidden } : {}) });
+    } else {
+      cols.push({ key, label, type, nullable, ...(hidden !== undefined ? { hidden } : {}) } as TableColumn);
+    }
+  }
+  return cols;
+};
+
+const listEntriesToColumns = (entries: unknown[]): TableColumn[] =>
+  (entries as Record<string, unknown>[]).flatMap((e) => {
+    const key = typeof e.value === 'string' ? e.value.trim() : '';
+    if (!key) return [];
+    const label = typeof e.label === 'string' && e.label ? e.label : key;
+    return [{ key, label, type: 'string' as const, nullable: true }];
+  });
+
+const loadStoredListColumns = async (
   backend: LayoutBackend,
   kind: string,
-): Promise<ListEntry[]> => {
+): Promise<TableColumn[] | null> => {
+  // list/ storage takes priority (list-editor writes here)
+  const listStored = await backend.getText(`${kind}-columns.json`);
+  if (listStored) {
+    try {
+      const entries = JSON.parse(listStored) as unknown;
+      if (Array.isArray(entries) && entries.length > 0) {
+        if (entries.every(isTableColumn)) return entries as TableColumn[];
+        return listEntriesToColumns(entries);
+      }
+    } catch {
+      // fall through
+    }
+  }
+  // trees/ storage fallback (tree-editor writes here)
+  const treeStored = await backend.getText(`trees/${kind}-columns.json`);
+  if (treeStored) {
+    try {
+      const treeData = JSON.parse(treeStored) as unknown;
+      const nodes = (treeData as Record<string, unknown>)?.nodes;
+      if (Array.isArray(nodes) && nodes.length > 0) return treeNodesToColumns(nodes);
+    } catch {
+      // fall through
+    }
+  }
+  return null;
+};
+
+const loadStoredListRawItems = async (
+  backend: LayoutBackend,
+  kind: string,
+): Promise<Record<string, unknown>[]> => {
   let stored = await backend.getText(getSchemaStoragePath(kind));
   if (!stored) stored = await backend.getText(getLegacySchemaStoragePath(kind));
   if (stored) {
     try {
       const parsed = JSON.parse(stored) as unknown;
-      if (Array.isArray(parsed) && parsed.every(isListEntrySpec)) return parsed;
+      if (Array.isArray(parsed)) {
+        return parsed.filter(
+          (i): i is Record<string, unknown> =>
+            typeof i === 'object' && i !== null && !Array.isArray(i),
+        );
+      }
     } catch {
-      // fall through to defaults
+      // fall through
     }
   }
-  if (kind === 'list/css-prop-keys') {
-    return CSS_PROP_KEYS.map((k) => ({ value: k }));
+  if (kind === 'list/css-prop-keys') return CSS_PROP_KEYS.map((k) => ({ value: k }));
+  // For -columns lists, fall back to trees/ storage (tree-editor writes there)
+  if (kind.startsWith('list/') && kind.endsWith('-columns')) {
+    const treeStored = await backend.getText(`trees/${kind}.json`);
+    if (treeStored) {
+      try {
+        const treeData = JSON.parse(treeStored) as unknown;
+        const nodes = (treeData as Record<string, unknown>)?.nodes;
+        if (Array.isArray(nodes)) {
+          return (nodes as Record<string, unknown>[])
+            .map((n) => ({ value: typeof n.text === 'string' ? n.text.trim() : '' }))
+            .filter((e) => Boolean(e.value));
+        }
+      } catch {
+        // fall through
+      }
+    }
   }
   return [];
+};
+
+const loadStoredListEntries = async (
+  backend: LayoutBackend,
+  kind: string,
+): Promise<ListEntry[]> => {
+  const items = await loadStoredListRawItems(backend, kind);
+  if (items.every(isListEntrySpec)) return items as ListEntry[];
+
+  const columns = await loadStoredListColumns(backend, kind);
+  if (columns && columns.length > 0) {
+    const primaryKey = columns[0].key;
+    return items.flatMap((item) => {
+      const v = typeof item[primaryKey] === 'string' ? (item[primaryKey] as string) : '';
+      if (!v) return [];
+      const entry: ListEntry = { value: v };
+      if (typeof item.label === 'string') entry.label = item.label;
+      if (typeof item.childList === 'string') entry.childList = item.childList;
+      return [entry];
+    });
+  }
+
+  return items.filter(isListEntrySpec);
 };
 
 const loadStoredStyleSpec = async (backend: LayoutBackend, kind: string): Promise<StyleEntrySpec[]> => {
@@ -389,12 +573,13 @@ export const handleComponentSchemasList = async (
   } else if (category === 'endpoint') {
     kinds = ['source/endpoint'];
   } else if (category === 'list') {
-    kinds = await listKindsFromBackend(backend);
+    const listKinds = await listKindsFromBackend(backend);
+    kinds = listKinds.flatMap((k) => (k.endsWith('-columns') ? [k] : [k, `${k}-columns`]));
   } else if (category === 'style') {
     kinds = CSS_PROP_SCHEMA_KINDS;
   } else {
     const listKinds = await listKindsFromBackend(backend);
-    kinds = [...SCHEMA_EDITABLE_KINDS, ...listKinds, ...CSS_PROP_SCHEMA_KINDS];
+    kinds = [...SCHEMA_EDITABLE_KINDS, ...listKinds.flatMap((k) => (k.endsWith('-columns') ? [k] : [k, `${k}-columns`])), ...CSS_PROP_SCHEMA_KINDS];
   }
   const labelForKind = (kind: string): string => {
     if (kind.startsWith('list/')) return kind.slice('list/'.length);
@@ -419,7 +604,14 @@ export const handleComponentSchemasTree = async (backend: LayoutBackend): Promis
         children = childEntries.map((e) => ({ value: e.value, label: e.label ?? e.value }));
       } else {
         const kinds = await listKindsFromBackend(backend);
-        children = kinds.map((k) => ({ value: k, label: k.startsWith('list/') ? k.slice('list/'.length) : k }));
+        children = kinds.flatMap((k) => {
+          const label = k.startsWith('list/') ? k.slice('list/'.length) : k;
+          if (k.endsWith('-columns')) return [{ value: k, label }];
+          return [
+            { value: k, label },
+            { value: `${k}-columns`, label: `${label}-columns` },
+          ];
+        });
       }
       return { value: entry.value, label: entry.label ?? entry.value, children };
     }),
@@ -460,10 +652,49 @@ export const handleComponentSchemaGet = async (
       { headers: { 'Content-Type': 'application/json' } },
     );
   }
-  if (isListKind(kind)) {
-    const spec = await loadStoredListEntries(backend, kind);
+  if (isColumnsKind(kind)) {
+    let cols: TableColumn[] = [];
+    // list/ storage: TableColumn[] saved by list-editor
+    const stored = await backend.getText(getSchemaStoragePath(kind));
+    if (stored) {
+      try {
+        const parsed = JSON.parse(stored) as unknown;
+        if (Array.isArray(parsed) && parsed.every(isTableColumn)) cols = parsed as TableColumn[];
+      } catch { /* fall through */ }
+    }
+    // trees/ storage fallback: tree-editor nodes
+    if (cols.length === 0) {
+      const treeStored = await backend.getText(`trees/${kind}.json`);
+      if (treeStored) {
+        try {
+          const treeData = JSON.parse(treeStored) as unknown;
+          const nodes = (treeData as Record<string, unknown>)?.nodes;
+          if (Array.isArray(nodes)) cols = treeNodesToColumns(nodes);
+        } catch { /* fall through */ }
+      }
+    }
+    const rows = cols.map(columnToRow);
     return new Response(
-      JSON.stringify({ kind: 'table', schema: LIST_TABLE_SCHEMA, data: { rows: spec.map(listEntryToRow) } }),
+      JSON.stringify({ kind: 'table', schema: LIST_COLUMNS_TABLE_SCHEMA, data: { rows } }),
+      { headers: { 'Content-Type': 'application/json' } },
+    );
+  }
+  if (isListKind(kind)) {
+    const [items, columns] = await Promise.all([
+      loadStoredListRawItems(backend, kind),
+      loadStoredListColumns(backend, kind),
+    ]);
+    if (columns) {
+      const schema = buildListTableSchema(columns);
+      const rows = items.map((item, i) => listGenericEntryToRow(item, columns, i));
+      return new Response(
+        JSON.stringify({ kind: 'table', schema, data: { rows } }),
+        { headers: { 'Content-Type': 'application/json' } },
+      );
+    }
+    const rows = items.filter(isListEntrySpec).map(listEntryToRow);
+    return new Response(
+      JSON.stringify({ kind: 'table', schema: LIST_TABLE_SCHEMA, data: { rows } }),
       { headers: { 'Content-Type': 'application/json' } },
     );
   }
@@ -509,7 +740,40 @@ export const handleComponentSchemaPut = async (
     });
   }
 
+  if (isColumnsKind(kind)) {
+    if (!isTableDataLike(rawData)) return new Response('Bad Request', { status: 400 });
+    const keys = new Set<string>();
+    for (const row of rawData.rows) {
+      const key = typeof row.values.key === 'string' ? row.values.key.trim() : '';
+      if (!key) return new Response(`Column key is required: ${row.id}`, { status: 400 });
+      if (keys.has(key)) return new Response(`Duplicate column key: ${key}`, { status: 400 });
+      keys.add(key);
+    }
+    const cols = rowsToColumns(rawData);
+    await backend.putText(getSchemaStoragePath(kind), JSON.stringify(cols));
+    return new Response(JSON.stringify({ ok: true }), { headers: { 'Content-Type': 'application/json' } });
+  }
+
   if (kind.startsWith('list/')) {
+    const columns = await loadStoredListColumns(backend, kind);
+
+    if (columns) {
+      if (!isTableDataLike(rawData)) return new Response('Bad Request', { status: 400 });
+      const primaryKey = columns[0].key;
+      const seen = new Set<string>();
+      for (const row of rawData.rows) {
+        const v = typeof row.values[primaryKey] === 'string' ? String(row.values[primaryKey]).trim() : '';
+        if (!v) return new Response(`Primary key "${primaryKey}" is required: ${row.id}`, { status: 400 });
+        if (seen.has(v)) return new Response(`Duplicate primary key "${primaryKey}": ${v}`, { status: 400 });
+        seen.add(v);
+      }
+      const items = listGenericRowsToEntries(rawData, columns);
+      await backend.putText(getSchemaStoragePath(kind), JSON.stringify(items));
+      return new Response(JSON.stringify({ ok: true }), {
+        headers: { 'Content-Type': 'application/json' },
+      });
+    }
+
     if (isTableDataLike(rawData)) {
       const message = validateListEntriesTableDraft(rawData);
       if (message) return new Response(message, { status: 400 });
@@ -549,3 +813,4 @@ export const handleComponentSchemaPut = async (
     headers: { 'Content-Type': 'application/json' },
   });
 };
+

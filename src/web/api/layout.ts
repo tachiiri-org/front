@@ -109,19 +109,19 @@ export const handleApiRequest = async (request: Request, env: Env): Promise<Resp
     return new Response('Method Not Allowed', { status: 405 });
   }
 
-  const componentSchemaMatch = url.pathname.match(/^\/api\/component-schemas\/(.+)$/);
-  if (componentSchemaMatch) {
-    const kind = decodeURIComponent(componentSchemaMatch[1]);
-    if (request.method === 'GET') return handleComponentSchemaGet(backend, kind);
-    if (request.method === 'PUT') return handleComponentSchemaPut(request, backend, kind);
-    return new Response('Method Not Allowed', { status: 405 });
-  }
-
   const componentSchemaDefinitionMatch =
     url.pathname.match(/^\/api\/component-schemas\/(.+)\/definition$/);
   if (componentSchemaDefinitionMatch) {
     const kind = decodeURIComponent(componentSchemaDefinitionMatch[1]);
     if (request.method === 'GET') return handleComponentSchemaDefinitionGet(backend, kind);
+    return new Response('Method Not Allowed', { status: 405 });
+  }
+
+  const componentSchemaMatch = url.pathname.match(/^\/api\/component-schemas\/(.+)$/);
+  if (componentSchemaMatch) {
+    const kind = decodeURIComponent(componentSchemaMatch[1]);
+    if (request.method === 'GET') return handleComponentSchemaGet(backend, kind);
+    if (request.method === 'PUT') return handleComponentSchemaPut(request, backend, kind);
     return new Response('Method Not Allowed', { status: 405 });
   }
 
