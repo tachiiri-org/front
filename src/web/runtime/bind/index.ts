@@ -337,19 +337,38 @@ const hydrateSelectTableBindings = async (
         lineHeight: '1',
       });
 
+      const deleteBtn = document.createElement('button');
+      deleteBtn.type = 'button';
+      deleteBtn.textContent = '削除';
+      Object.assign(deleteBtn.style, {
+        display: 'none',
+        border: 'none',
+        background: 'transparent',
+        cursor: 'pointer',
+        fontSize: '11px',
+        padding: '0',
+        color: 'rgba(180,0,0,0.5)',
+        flexShrink: '0',
+        lineHeight: '1',
+      });
+
       li.appendChild(labelEl);
       li.appendChild(editBtn);
+      li.appendChild(deleteBtn);
 
       li.addEventListener('mouseenter', () => {
         if (li !== activeItem) li.style.backgroundColor = 'rgba(0,0,0,0.05)';
         editBtn.style.display = '';
+        deleteBtn.style.display = '';
       });
       li.addEventListener('mouseleave', () => {
         if (li !== activeItem) li.style.backgroundColor = '';
         editBtn.style.display = 'none';
+        deleteBtn.style.display = 'none';
       });
       li.addEventListener('click', (e) => {
-        if ((e.target as HTMLElement).closest('button') === editBtn) return;
+        const btn = (e.target as HTMLElement).closest('button');
+        if (btn === editBtn || btn === deleteBtn) return;
         if (activeItem) { activeItem.style.backgroundColor = ''; activeItem.style.fontWeight = ''; }
         li.style.backgroundColor = 'rgba(0,0,0,0.1)';
         li.style.fontWeight = 'bold';
@@ -422,6 +441,18 @@ const hydrateSelectTableBindings = async (
         input.addEventListener('keydown', (ke: KeyboardEvent) => {
           if (ke.key === 'Enter') { ke.preventDefault(); doRename(); }
           if (ke.key === 'Escape') restore();
+        });
+      });
+
+      deleteBtn.addEventListener('click', (e) => {
+        e.stopPropagation();
+        if (!window.confirm(`「${label}」を削除しますか？`)) return;
+        const namePart = value.startsWith('list/') ? value.slice('list/'.length) : value;
+        void fetch(`/api/list/${encodeURIComponent(namePart)}`, {
+          method: 'DELETE',
+        }).then(async (res) => {
+          if (!res.ok) { window.alert(`削除失敗: ${await res.text()}`); return; }
+          await populateNavList(currentFilter);
         });
       });
 
