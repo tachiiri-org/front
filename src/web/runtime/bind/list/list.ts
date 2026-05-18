@@ -34,6 +34,7 @@ const buildItemRow = (
   currentSelection: string | null,
   onItemSelect: (itemId: string) => Promise<void>,
   onReload: () => void,
+  onRename?: (itemId: string, newName: string) => Promise<void>,
 ): HTMLLIElement => {
   const item = document.createElement('li');
   item.style.display = 'flex';
@@ -56,6 +57,23 @@ const buildItemRow = (
   const label = document.createElement('span');
   label.textContent = itemId;
   label.style.flex = '1';
+
+  const renameBtn = document.createElement('button');
+  renameBtn.type = 'button';
+  renameBtn.textContent = '編集';
+  Object.assign(renameBtn.style, actionStyle);
+  renameBtn.addEventListener('click', (e) => {
+    e.stopPropagation();
+    const newName = window.prompt('Rename', itemId)?.trim();
+    if (!newName || newName === itemId) return;
+    void (async () => {
+      try {
+        await onRename?.(itemId, newName);
+      } catch (error) {
+        showMutationError(error);
+      }
+    })();
+  });
 
   const deleteBtn = document.createElement('button');
   deleteBtn.type = 'button';
@@ -96,6 +114,7 @@ const buildItemRow = (
     gap: '8px',
     flexShrink: '0',
   });
+  actions.appendChild(renameBtn);
   actions.appendChild(deleteBtn);
   actions.appendChild(openLink);
 
@@ -156,8 +175,26 @@ export const hydrateList = async (
   header.appendChild(addBtn);
   listEl.appendChild(header);
 
+  const onRename = async (id: string, newName: string): Promise<void> => {
+    const res = await fetch(
+      `${resource.itemBaseUrl}/${encodeURIComponent(id)}/rename`,
+      {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ to: newName }),
+      },
+    );
+    if (!res.ok) {
+      const msg = await res.text().catch(() => String(res.status));
+      throw new Error(msg);
+    }
+    setFrameSelection(listFrame.id, newName);
+    await hydrateList(listFrame, onItemSelect, onReload, isBlocked);
+    void onItemSelect(newName);
+  };
+
   for (const itemId of items) {
-    listEl.appendChild(buildItemRow(listEl, listFrame, itemId, currentSelection, onItemSelect, onReload));
+    listEl.appendChild(buildItemRow(listEl, listFrame, itemId, currentSelection, onItemSelect, onReload, onRename));
   }
 
   listInteractionController?.abort();

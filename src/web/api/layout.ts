@@ -1,12 +1,15 @@
 import { createLayoutsBackend, type LayoutsEnv, type LayoutBackend } from '../storage/layouts/r2';
-import { normalizeScreen } from '../storage/layouts/normalize';
 import { isScreen, isCanvasFrame } from '../schema/screen/screen';
 import { getEntityDisplayName } from '../schema/component/name';
 import {
   handleComponentGet,
   handleJsonFilesGet,
+  handleScreenGet,
+  handleScreenPut,
   handleScreenDelete,
   handleScreenRename,
+  handleScreensListGet,
+  resolveScreenStorageId,
   handleComponentPut,
   handleComponentDelete,
   handleResourceListGet,
@@ -38,6 +41,7 @@ type Env = {
 type ResourceConfig = {
   name: string;
   storagePrefix: string;
+  handleList?: (backend: LayoutBackend) => Promise<Response>;
   handleGet?: (backend: LayoutBackend, id: string) => Promise<Response>;
   handlePut?: (request: Request, backend: LayoutBackend, id: string) => Promise<Response>;
   handleDelete?: (backend: LayoutBackend, id: string) => Promise<Response>;
@@ -50,14 +54,16 @@ const RESOURCE_CONFIGS: ResourceConfig[] = [
   {
     name: 'layouts',
     storagePrefix: '',
-    normalizeGet: async (_backend, _id, value) => normalizeScreen(value),
-    normalizePut: async (_backend, _id, value) => normalizeScreen(value),
+    handleList: handleScreensListGet,
+    handleGet: handleScreenGet,
+    handlePut: handleScreenPut,
     handleDelete: handleScreenDelete,
     handleRename: handleScreenRename,
   },
   {
     name: 'list',
     storagePrefix: 'list/',
+    handleList: handleListResourceListGet,
     handleGet: handleListResourceGet,
     handlePut: handleListResourcePut,
     handleDelete: handleListResourceDelete,
@@ -113,8 +119,9 @@ export const handleApiRequest = async (request: Request, env: Env): Promise<Resp
 
   const canvasOptionsMatch = url.pathname.match(/^\/api\/layouts\/([^/]+)\/canvases$/);
   if (canvasOptionsMatch) {
-    const screenId = decodeURIComponent(canvasOptionsMatch[1]);
-    if (request.method === 'GET') return handleCanvasOptionsGet(backend, screenId);
+    const screenName = decodeURIComponent(canvasOptionsMatch[1]);
+    const storageId = (await resolveScreenStorageId(backend, screenName)) ?? screenName;
+    if (request.method === 'GET') return handleCanvasOptionsGet(backend, storageId);
     return new Response('Method Not Allowed', { status: 405 });
   }
 
@@ -136,20 +143,22 @@ export const handleApiRequest = async (request: Request, env: Env): Promise<Resp
 
   const componentMatch = url.pathname.match(/^\/api\/layouts\/([^/]+)\/components\/(.+)$/);
   if (componentMatch) {
-    const screenId = decodeURIComponent(componentMatch[1]);
+    const screenName = decodeURIComponent(componentMatch[1]);
     const componentId = decodeURIComponent(componentMatch[2]);
-    if (request.method === 'GET') return handleComponentGet(backend, screenId, componentId);
-    if (request.method === 'PUT') return handleComponentPut(request, backend, screenId, componentId);
-    if (request.method === 'DELETE') return handleComponentDelete(backend, screenId, componentId);
+    const storageId = (await resolveScreenStorageId(backend, screenName)) ?? screenName;
+    if (request.method === 'GET') return handleComponentGet(backend, storageId, componentId);
+    if (request.method === 'PUT') return handleComponentPut(request, backend, storageId, componentId);
+    if (request.method === 'DELETE') return handleComponentDelete(backend, storageId, componentId);
     return new Response('Method Not Allowed', { status: 405 });
   }
 
   const jsonFilesSubMatch = url.pathname.match(/^\/api\/layouts\/([^/]+)\/json-files$/);
   if (jsonFilesSubMatch) {
-    const screenId = decodeURIComponent(jsonFilesSubMatch[1]);
+    const screenName = decodeURIComponent(jsonFilesSubMatch[1]);
+    const storageId = (await resolveScreenStorageId(backend, screenName)) ?? screenName;
     if (request.method === 'GET') {
       const prefix = url.searchParams.get('prefix') ?? 'components/';
-      return handleJsonFilesGet(backend, screenId, prefix);
+      return handleJsonFilesGet(backend, storageId, prefix);
     }
     return new Response('Method Not Allowed', { status: 405 });
   }
@@ -160,8 +169,9 @@ export const handleApiRequest = async (request: Request, env: Env): Promise<Resp
     const config = RESOURCE_CONFIGS.find((c) => c.name === resourceName);
     if (!config) return new Response('Not Found', { status: 404 });
     if (request.method === 'GET') {
-      if (resourceName === 'list') return handleListResourceListGet(backend);
-      return handleResourceListGet(backend, config.storagePrefix);
+      return config.handleList
+        ? config.handleList(backend)
+        : handleResourceListGet(backend, config.storagePrefix);
     }
     return new Response('Method Not Allowed', { status: 405 });
   }
