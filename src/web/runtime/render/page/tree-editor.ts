@@ -48,19 +48,65 @@ export const renderEditableTree = (
   component: TreeEditorComponent,
   treeId?: string,
 ): HTMLElement => {
-  const wrapper = document.createElement('div');
-  wrapper.dataset.frameId = id;
-  wrapper.style.overflow = 'auto';
-  wrapper.style.boxSizing = 'border-box';
-  wrapper.style.padding = '8px 12px';
-  wrapper.style.fontFamily = 'monospace';
-  wrapper.style.fontSize = '13px';
-  applyCssProps(wrapper, component as unknown as Record<string, unknown>);
+  const outer = document.createElement('div');
+  outer.dataset.frameId = id;
+  outer.style.display = 'flex';
+  outer.style.overflow = 'hidden';
+  outer.style.boxSizing = 'border-box';
+  applyCssProps(outer, component as unknown as Record<string, unknown>);
+
+  const treePanel = document.createElement('div');
+  treePanel.style.flex = '0 0 40%';
+  treePanel.style.overflow = 'auto';
+  treePanel.style.boxSizing = 'border-box';
+  treePanel.style.padding = '8px 12px';
+  treePanel.style.fontFamily = 'monospace';
+  treePanel.style.fontSize = '13px';
+  treePanel.style.borderRight = '1px solid rgba(0,0,0,0.12)';
+
+  const docPanel = document.createElement('div');
+  docPanel.style.flex = '1';
+  docPanel.style.display = 'flex';
+  docPanel.style.flexDirection = 'column';
+  docPanel.style.overflow = 'hidden';
+  docPanel.style.boxSizing = 'border-box';
+  docPanel.style.padding = '8px 12px';
+
+  const docHeader = document.createElement('div');
+  Object.assign(docHeader.style, {
+    fontSize: '11px',
+    color: 'rgba(0,0,0,0.4)',
+    marginBottom: '4px',
+    userSelect: 'none',
+    flexShrink: '0',
+  });
+
+  const docTextarea = document.createElement('textarea');
+  Object.assign(docTextarea.style, {
+    flex: '1',
+    width: '100%',
+    border: 'none',
+    outline: 'none',
+    background: 'transparent',
+    fontFamily: 'monospace',
+    fontSize: '13px',
+    resize: 'none',
+    boxSizing: 'border-box',
+    color: 'inherit',
+    padding: '0',
+  });
+
+  docPanel.appendChild(docHeader);
+  docPanel.appendChild(docTextarea);
+  outer.appendChild(treePanel);
+  outer.appendChild(docPanel);
 
   let nodes: TreeNode[] = cloneNodes(component.data.nodes);
   let pendingFocusId: string | null = null;
+  let focusedNodeId: string | null = null;
 
   let saveTimer: ReturnType<typeof setTimeout> | null = null;
+  let docSaveTimer: ReturnType<typeof setTimeout> | null = null;
 
   const scheduleSave = (): void => {
     if (!treeId) return;
@@ -74,11 +120,39 @@ export const renderEditableTree = (
     }, 500);
   };
 
+  const scheduleDocSave = (nodeId: string, content: string): void => {
+    if (docSaveTimer) clearTimeout(docSaveTimer);
+    docSaveTimer = setTimeout(() => {
+      void fetch(`/api/docs/${encodeURIComponent(nodeId)}`, {
+        method: 'PUT',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ content }),
+      });
+    }, 500);
+  };
+
+  const loadDoc = (nodeId: string, nodeText: string): void => {
+    docHeader.textContent = nodeText || '(no title)';
+    docTextarea.value = '';
+    void fetch(`/api/docs/${encodeURIComponent(nodeId)}`)
+      .then((res) => (res.ok ? res.json() : null))
+      .then((data) => {
+        if (focusedNodeId !== nodeId) return;
+        const content = (data as Record<string, unknown> | null)?.content;
+        docTextarea.value = typeof content === 'string' ? content : '';
+      })
+      .catch(() => undefined);
+  };
+
+  docTextarea.addEventListener('input', () => {
+    if (focusedNodeId) scheduleDocSave(focusedNodeId, docTextarea.value);
+  });
+
   const focusPending = (): void => {
     if (!pendingFocusId) return;
     const fid = pendingFocusId;
     pendingFocusId = null;
-    const el = wrapper.querySelector<HTMLInputElement>(`[data-node-id="${CSS.escape(fid)}"]`);
+    const el = treePanel.querySelector<HTMLInputElement>(`[data-node-id="${CSS.escape(fid)}"]`);
     el?.focus();
   };
 
@@ -120,10 +194,18 @@ export const renderEditableTree = (
         color: 'inherit',
       });
 
+      input.addEventListener('focus', () => {
+        if (focusedNodeId !== node.id) {
+          focusedNodeId = node.id;
+          loadDoc(node.id, node.text);
+        }
+      });
+
       input.addEventListener('input', () => {
         const loc = findNode(nodes, node.id);
         if (loc) {
           loc.parent[loc.index].text = input.value;
+          if (focusedNodeId === node.id) docHeader.textContent = input.value || '(no title)';
           scheduleSave();
         }
       });
@@ -174,8 +256,6 @@ export const renderEditableTree = (
 
         if (e.key === 'Tab' && e.shiftKey) {
           e.preventDefault();
-          // dedent: move node up one level as sibling of parent
-          // find parent of parent to insert after
           const allLoc = findDedentTarget(nodes, node.id);
           if (allLoc) {
             const loc = findNode(nodes, node.id);
@@ -194,7 +274,7 @@ export const renderEditableTree = (
           const idx = allIds.indexOf(node.id);
           const prevId = idx > 0 ? allIds[idx - 1] : null;
           if (prevId) {
-            wrapper.querySelector<HTMLInputElement>(`[data-node-id="${CSS.escape(prevId)}"]`)?.focus();
+            treePanel.querySelector<HTMLInputElement>(`[data-node-id="${CSS.escape(prevId)}"]`)?.focus();
           }
           return;
         }
@@ -205,7 +285,7 @@ export const renderEditableTree = (
           const idx = allIds.indexOf(node.id);
           const nextId = idx < allIds.length - 1 ? allIds[idx + 1] : null;
           if (nextId) {
-            wrapper.querySelector<HTMLInputElement>(`[data-node-id="${CSS.escape(nextId)}"]`)?.focus();
+            treePanel.querySelector<HTMLInputElement>(`[data-node-id="${CSS.escape(nextId)}"]`)?.focus();
           }
           return;
         }
@@ -261,15 +341,15 @@ export const renderEditableTree = (
       hint.addEventListener('keydown', (e: KeyboardEvent) => {
         if (e.key === 'Enter') hint.click();
       });
-      wrapper.replaceChildren(hint);
+      treePanel.replaceChildren(hint);
       return;
     }
 
     const ul = buildUl(nodes, 0);
-    wrapper.replaceChildren(ul);
+    treePanel.replaceChildren(ul);
     focusPending();
   };
 
   render();
-  return wrapper;
+  return outer;
 };
