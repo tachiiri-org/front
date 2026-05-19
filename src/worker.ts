@@ -73,12 +73,27 @@ export default {
     }
 
     if (pathname.startsWith('/api/')) {
-      return handleLayoutApiRequest(request, env);
+      try {
+        return await handleLayoutApiRequest(request, env);
+      } catch (e) {
+        const msg = e instanceof Error ? e.message : String(e);
+        return new Response(msg, { status: 500 });
+      }
     }
 
-    const response = await env.ASSETS.fetch(request);
-    if (response.status !== 404 || !isNavigationRequest(request)) {
-      return response;
+    let assetsResponse: Response | null = null;
+    try {
+      assetsResponse = await env.ASSETS.fetch(request);
+    } catch {
+      // ASSETS binding threw (Miniflare/Wrangler edge case); fall through to navigation response
+    }
+
+    if (assetsResponse !== null && (assetsResponse.status !== 404 || !isNavigationRequest(request))) {
+      return assetsResponse;
+    }
+
+    if (!isNavigationRequest(request)) {
+      return new Response('Not Found', { status: 404 });
     }
 
     return new Response('<!doctype html><script type="module" src="/assets/index.js"></script>', {

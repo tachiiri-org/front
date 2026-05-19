@@ -60,7 +60,6 @@ export const renderEditableTree = (
   treePanel.style.overflow = 'auto';
   treePanel.style.boxSizing = 'border-box';
   treePanel.style.padding = '8px 12px';
-  treePanel.style.fontFamily = 'monospace';
   treePanel.style.fontSize = '13px';
   treePanel.style.borderRight = '1px solid rgba(0,0,0,0.12)';
 
@@ -88,8 +87,9 @@ export const renderEditableTree = (
     border: 'none',
     outline: 'none',
     background: 'transparent',
-    fontFamily: 'monospace',
-    fontSize: '13px',
+    fontFamily: 'inherit',
+    fontSize: 'inherit',
+    lineHeight: 'inherit',
     resize: 'none',
     boxSizing: 'border-box',
     color: 'inherit',
@@ -164,7 +164,6 @@ export const renderEditableTree = (
 
     for (const node of list) {
       const li = document.createElement('li');
-      li.style.margin = '1px 0';
 
       const row = document.createElement('div');
       row.style.display = 'flex';
@@ -190,7 +189,8 @@ export const renderEditableTree = (
         background: 'transparent',
         fontFamily: 'inherit',
         fontSize: 'inherit',
-        padding: '1px 0',
+        lineHeight: 'inherit',
+        padding: '2px 0',
         color: 'inherit',
       });
 
