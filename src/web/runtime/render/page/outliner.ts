@@ -102,6 +102,7 @@ const renderSourceDrivenOutliner = (
   outer.style.boxSizing = 'border-box';
   outer.style.padding = '8px 12px';
   outer.style.fontSize = '13px';
+  outer.style.lineHeight = '2';
   applyCssProps(outer, component as unknown as Record<string, unknown>);
 
   let focusedNodeId: string | null = null;
@@ -509,6 +510,7 @@ export const renderOutliner = (
   outer.style.boxSizing = 'border-box';
   outer.style.padding = '8px 12px';
   outer.style.fontSize = '13px';
+  outer.style.lineHeight = '2';
   applyCssProps(outer, component as unknown as Record<string, unknown>);
 
   let nodes: TreeNode[] = cloneNodes(component.data.nodes);

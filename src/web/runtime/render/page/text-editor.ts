@@ -19,6 +19,8 @@ export const renderTextEditor = (id: string, component: TextEditorComponent): HT
   outer.style.overflow = 'hidden';
   outer.style.boxSizing = 'border-box';
   outer.style.padding = '8px 12px';
+  outer.style.fontSize = '13px';
+  outer.style.lineHeight = '2';
   applyCssProps(outer, component as unknown as Record<string, unknown>);
 
   const docHeader = document.createElement('div');
