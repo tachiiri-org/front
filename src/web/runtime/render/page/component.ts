@@ -4,10 +4,14 @@ import {
   isTextareaComponent,
   isTableComponent,
   isTreeEditorComponent,
+  isOutlinerComponent,
+  isTextEditorComponent,
   ALL_CSS_PROP_KEYS,
   applyDefaults,
   type TableComponent,
   type TreeEditorComponent,
+  type OutlinerComponent,
+  type TextEditorComponent,
   type Component,
 } from '../../../schema/component';
 import { type Frame, type FrameRef, isFrameRef } from '../../../schema/screen/screen';
@@ -16,6 +20,8 @@ import type { FrameState } from '../../../state';
 import { renderList, renderCanvas, renderEditor, renderTable } from './frame';
 import { renderEditableTable } from './table-editor';
 import { renderEditableTree } from './tree-editor';
+import { renderOutliner } from './outliner';
+import { renderTextEditor } from './text-editor';
 
 const applyCssProps = (el: HTMLElement, c: Record<string, unknown>): void => {
   for (const propKey of ALL_CSS_PROP_KEYS) {
@@ -231,6 +237,15 @@ export const renderComponent = (
       ? (frame as Record<string, unknown>).treeId as string
       : undefined;
     return renderEditableTree(id, frame as TreeEditorComponent, treeId);
+  }
+  if (isOutlinerComponent(frame)) {
+    const treeId = typeof (frame as Record<string, unknown>).treeId === 'string'
+      ? (frame as Record<string, unknown>).treeId as string
+      : undefined;
+    return renderOutliner(id, frame as OutlinerComponent, treeId);
+  }
+  if (isTextEditorComponent(frame)) {
+    return renderTextEditor(id, frame as TextEditorComponent);
   }
   if (isTableComponent(frame) && options?.screenId) {
     return renderEditableTable(
