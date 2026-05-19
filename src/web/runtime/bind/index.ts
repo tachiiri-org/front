@@ -62,17 +62,15 @@ const loadDataIntoTree = async (
   const tf = treeFrame as Record<string, unknown>;
   tf.treeId = treeId;
 
-  if (!treeId.startsWith('list/')) {
-    const res = await fetch(`/api/trees/${encodeURIComponent(treeId)}`);
-    if (res.ok) {
-      const payload = (await res.json()) as unknown;
-      if (typeof payload === 'object' && payload !== null) {
-        const nodes = (payload as Record<string, unknown>).nodes;
-        if (Array.isArray(nodes) && nodes.length > 0) {
-          tf.data = payload;
-          onFrameRerender?.(treeFrame.id);
-          return;
-        }
+  const res = await fetch(`/api/trees/${encodeURIComponent(treeId)}`);
+  if (res.ok) {
+    const payload = (await res.json()) as unknown;
+    if (typeof payload === 'object' && payload !== null) {
+      const nodes = (payload as Record<string, unknown>).nodes;
+      if (Array.isArray(nodes) && nodes.length > 0) {
+        tf.data = payload;
+        onFrameRerender?.(treeFrame.id);
+        return;
       }
     }
   }

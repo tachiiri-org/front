@@ -225,14 +225,14 @@ export const renderEditableTree = (
     return ul;
   };
 
-  // find the parent-level list of a node's parent so we can dedent
-  const findDedentTarget = (list: TreeNode[], id: string, grandparent: TreeNode[] | null = null, parentIndex = -1): NodeLocation | null => {
+  const findDedentTarget = (list: TreeNode[], id: string, parentList: TreeNode[] | null = null, parentItemIndex = -1): NodeLocation | null => {
     for (let i = 0; i < list.length; i++) {
+      if (list[i].id === id) {
+        if (parentList !== null) return { parent: parentList, index: parentItemIndex };
+        return null;
+      }
       const children = list[i].children;
       if (children) {
-        for (const child of children) {
-          if (child.id === id && grandparent !== null) return { parent: grandparent, index: parentIndex };
-        }
         const found = findDedentTarget(children, id, list, i);
         if (found) return found;
       }
