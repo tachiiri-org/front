@@ -12,10 +12,16 @@ export type TreeEditorData = {
   nodes: TreeNode[];
 };
 
+export type TreeEditorSource = {
+  url: string;
+  itemsPath?: string;
+};
+
 export type TreeEditorComponent = {
   kind: 'tree-editor';
   name?: string;
   data: TreeEditorData;
+  source?: TreeEditorSource;
 } & CssStyleProps;
 
 const isTreeNode = (value: unknown): value is TreeNode => {
@@ -46,5 +52,11 @@ export const isTreeEditorComponent = (value: unknown): value is TreeEditorCompon
   if (typeof c.data !== 'object' || c.data === null || Array.isArray(c.data)) return false;
   const data = c.data as Record<string, unknown>;
   if (!Array.isArray(data.nodes) || !(data.nodes as unknown[]).every(isTreeNode)) return false;
+  if (c.source !== undefined) {
+    if (typeof c.source !== 'object' || c.source === null || Array.isArray(c.source)) return false;
+    const src = c.source as Record<string, unknown>;
+    if (typeof src.url !== 'string') return false;
+    if (src.itemsPath !== undefined && typeof src.itemsPath !== 'string') return false;
+  }
   return ALL_CSS_PROP_KEYS.every((k) => c[k] === undefined || typeof c[k] === 'string');
 };
