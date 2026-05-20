@@ -116,7 +116,6 @@ export const renderOutliner = (
   let activeIdx: number | null = null;
   const collapsedIds = new Set<string>();
   let resolvedTreeId = treeId;
-
   const scheduleSave = (): void => {
     if (!resolvedTreeId) return;
     if (saveTimer) clearTimeout(saveTimer);
@@ -151,10 +150,12 @@ export const renderOutliner = (
       row.style.alignItems = 'center';
       row.style.gap = '6px';
 
+      const isProposed = node.status === 'proposed';
+
       const bullet = document.createElement('span');
       bullet.textContent = !node.children?.length ? '•' : collapsedIds.has(node.id) ? '▸' : '▾';
       bullet.style.userSelect = 'none';
-      bullet.style.color = 'rgba(0,0,0,0.35)';
+      bullet.style.color = isProposed ? 'rgba(200, 120, 0, 0.7)' : 'rgba(0,0,0,0.35)';
       bullet.style.flexShrink = '0';
       bullet.style.width = '10px';
       bullet.style.fontSize = '10px';
@@ -180,12 +181,14 @@ export const renderOutliner = (
         flex: '1',
         border: 'none',
         outline: 'none',
-        background: 'transparent',
+        background: isProposed ? 'rgba(255, 160, 0, 0.07)' : 'transparent',
         fontFamily: 'inherit',
         fontSize: 'inherit',
         lineHeight: 'inherit',
-        padding: '2px 0',
-        color: 'inherit',
+        padding: '2px 4px',
+        color: isProposed ? 'rgba(160, 80, 0, 0.85)' : 'inherit',
+        fontStyle: isProposed ? 'italic' : 'normal',
+        borderRadius: isProposed ? '3px' : '0',
       });
 
       input.addEventListener('focus', () => {
@@ -212,6 +215,21 @@ export const renderOutliner = (
       });
 
       input.addEventListener('keydown', (e: KeyboardEvent) => {
+        if (e.key === 'Enter' && e.ctrlKey && isProposed) {
+          e.preventDefault();
+          const loc = findNode(nodes, node.id);
+          if (loc) {
+            const n = loc.parent[loc.index];
+            n.status = 'accepted';
+            delete n.proposedAt;
+            delete n.proposedBy;
+          }
+          pendingFocusId = node.id;
+          scheduleSave();
+          render();
+          return;
+        }
+
         if (e.key === 'Enter') {
           e.preventDefault();
           anchorIdx = null; activeIdx = null;

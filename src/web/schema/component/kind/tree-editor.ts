@@ -6,6 +6,9 @@ export type TreeNode = {
   id: string;
   text: string;
   children?: TreeNode[];
+  status?: 'accepted' | 'proposed';
+  proposedAt?: string;
+  proposedBy?: string;
 };
 
 export type TreeEditorData = {
