@@ -258,31 +258,85 @@ export const renderOutliner = (
 
         if (e.key === 'Tab' && !e.shiftKey) {
           e.preventDefault();
-          anchorIdx = null; activeIdx = null;
-          const loc = findNode(nodes, node.id);
-          if (loc && loc.index > 0) {
-            const prev = loc.parent[loc.index - 1];
-            loc.parent.splice(loc.index, 1);
-            if (!prev.children) prev.children = [];
-            prev.children.push(node);
+          if (anchorIdx !== null && activeIdx !== null) {
+            const allIds = flatIds(nodes);
+            const lo = Math.min(anchorIdx, activeIdx);
+            const hi = Math.max(anchorIdx, activeIdx);
+            const selIds = allIds.slice(lo, hi + 1);
+            for (const sid of selIds) {
+              const sloc = findNode(nodes, sid);
+              if (sloc && sloc.index > 0) {
+                const snode = sloc.parent[sloc.index];
+                const prev = sloc.parent[sloc.index - 1];
+                sloc.parent.splice(sloc.index, 1);
+                if (!prev.children) prev.children = [];
+                prev.children.push(snode);
+              }
+            }
             pendingFocusId = node.id;
             scheduleSave();
             render();
+            const newAllIds = flatIds(nodes);
+            const newLo = newAllIds.indexOf(selIds[0]);
+            const newHi = newAllIds.indexOf(selIds[selIds.length - 1]);
+            const wasAsc = anchorIdx <= activeIdx;
+            anchorIdx = wasAsc ? newLo : newHi;
+            activeIdx = wasAsc ? newHi : newLo;
+            updateNodeSelectionVisuals(outer, newAllIds, anchorIdx, activeIdx);
+          } else {
+            anchorIdx = null; activeIdx = null;
+            const loc = findNode(nodes, node.id);
+            if (loc && loc.index > 0) {
+              const prev = loc.parent[loc.index - 1];
+              loc.parent.splice(loc.index, 1);
+              if (!prev.children) prev.children = [];
+              prev.children.push(node);
+              pendingFocusId = node.id;
+              scheduleSave();
+              render();
+            }
           }
           return;
         }
 
         if (e.key === 'Tab' && e.shiftKey) {
           e.preventDefault();
-          anchorIdx = null; activeIdx = null;
-          const allLoc = findDedentTarget(nodes, node.id);
-          if (allLoc) {
-            const loc = findNode(nodes, node.id);
-            if (loc) loc.parent.splice(loc.index, 1);
-            allLoc.parent.splice(allLoc.index + 1, 0, node);
+          if (anchorIdx !== null && activeIdx !== null) {
+            const allIds = flatIds(nodes);
+            const lo = Math.min(anchorIdx, activeIdx);
+            const hi = Math.max(anchorIdx, activeIdx);
+            const selIds = allIds.slice(lo, hi + 1);
+            for (const sid of [...selIds].reverse()) {
+              const allLoc = findDedentTarget(nodes, sid);
+              if (allLoc) {
+                const sloc = findNode(nodes, sid);
+                if (sloc) {
+                  const snode = sloc.parent.splice(sloc.index, 1)[0];
+                  allLoc.parent.splice(allLoc.index + 1, 0, snode);
+                }
+              }
+            }
             pendingFocusId = node.id;
             scheduleSave();
             render();
+            const newAllIds = flatIds(nodes);
+            const newLo = newAllIds.indexOf(selIds[0]);
+            const newHi = newAllIds.indexOf(selIds[selIds.length - 1]);
+            const wasAsc = anchorIdx <= activeIdx;
+            anchorIdx = wasAsc ? newLo : newHi;
+            activeIdx = wasAsc ? newHi : newLo;
+            updateNodeSelectionVisuals(outer, newAllIds, anchorIdx, activeIdx);
+          } else {
+            anchorIdx = null; activeIdx = null;
+            const allLoc = findDedentTarget(nodes, node.id);
+            if (allLoc) {
+              const loc = findNode(nodes, node.id);
+              if (loc) loc.parent.splice(loc.index, 1);
+              allLoc.parent.splice(allLoc.index + 1, 0, node);
+              pendingFocusId = node.id;
+              scheduleSave();
+              render();
+            }
           }
           return;
         }
@@ -402,6 +456,36 @@ export const renderOutliner = (
           activeIdx = newActiveIdx;
           updateNodeSelectionVisuals(outer, allIds, anchorIdx, activeIdx);
           outer.querySelector<HTMLInputElement>(`[data-node-id="${CSS.escape(allIds[newActiveIdx])}"]`)?.focus();
+          return;
+        }
+
+        if (e.key === 'ArrowRight' && input.selectionStart === input.value.length && input.selectionEnd === input.value.length) {
+          e.preventDefault();
+          if (anchorIdx !== null) {
+            anchorIdx = null; activeIdx = null;
+            updateNodeSelectionVisuals(outer, [], null, null);
+          }
+          const navInputs = Array.from(outer.querySelectorAll<HTMLInputElement>('[data-nav-input]'))
+            .filter(inp => inp.offsetParent !== null);
+          const idx = navInputs.indexOf(input);
+          if (idx < navInputs.length - 1) navInputs[idx + 1].focus();
+          return;
+        }
+
+        if (e.key === 'ArrowLeft' && input.selectionStart === 0 && input.selectionEnd === 0) {
+          e.preventDefault();
+          if (anchorIdx !== null) {
+            anchorIdx = null; activeIdx = null;
+            updateNodeSelectionVisuals(outer, [], null, null);
+          }
+          const navInputs = Array.from(outer.querySelectorAll<HTMLInputElement>('[data-nav-input]'))
+            .filter(inp => inp.offsetParent !== null);
+          const idx = navInputs.indexOf(input);
+          if (idx > 0) {
+            const prev = navInputs[idx - 1];
+            prev.focus();
+            prev.setSelectionRange(prev.value.length, prev.value.length);
+          }
           return;
         }
 
