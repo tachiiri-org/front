@@ -12,6 +12,9 @@ type ItemState = {
   nodes: TreeNode[];
   expanded: boolean;
   saveTimer: ReturnType<typeof setTimeout> | null;
+  anchorIdx: number | null;
+  activeIdx: number | null;
+  collapsedIds: Set<string>;
 };
 
 const getByPath = (obj: unknown, path: string): unknown => {
@@ -91,6 +94,21 @@ const dispatchNodeTextChange = (outlinerFrameId: string, nodeId: string, nodeTex
   }));
 };
 
+const updateNodeSelectionVisuals = (
+  container: HTMLElement,
+  allIds: string[],
+  anchorIdx: number | null,
+  activeIdx: number | null,
+): void => {
+  const lo = anchorIdx !== null && activeIdx !== null ? Math.min(anchorIdx, activeIdx) : -1;
+  const hi = anchorIdx !== null && activeIdx !== null ? Math.max(anchorIdx, activeIdx) : -1;
+  const inputs = container.querySelectorAll<HTMLInputElement>('[data-node-id]');
+  for (const input of inputs) {
+    const idx = allIds.indexOf(input.dataset.nodeId ?? '');
+    input.style.background = lo >= 0 && idx >= lo && idx <= hi ? 'rgba(0, 120, 255, 0.12)' : 'transparent';
+  }
+};
+
 const renderSourceDrivenOutliner = (
   id: string,
   component: OutlinerComponent,
@@ -102,12 +120,16 @@ const renderSourceDrivenOutliner = (
   outer.style.boxSizing = 'border-box';
   outer.style.padding = '8px 12px';
   outer.style.fontSize = '13px';
-  outer.style.lineHeight = '2';
+  outer.style.lineHeight = '1.5';
   applyCssProps(outer, component as unknown as Record<string, unknown>);
 
   let focusedNodeId: string | null = null;
 
   const stateMap = new Map<string, ItemState>();
+
+  const getAllNavInputs = (): HTMLInputElement[] =>
+    Array.from(outer.querySelectorAll<HTMLInputElement>('[data-nav-input]'))
+      .filter(inp => inp.offsetParent !== null);
 
   const buildNodeUl = (
     list: TreeNode[],
@@ -128,18 +150,33 @@ const renderSourceDrivenOutliner = (
       row.style.alignItems = 'center';
       row.style.gap = '6px';
 
+      const isCollapsed = !!(node.children?.length && stateMap.get(itemValue)?.collapsedIds.has(node.id));
       const bullet = document.createElement('span');
-      bullet.textContent = node.children?.length ? '▸' : '•';
+      bullet.textContent = !node.children?.length ? '•' : isCollapsed ? '▸' : '▾';
       bullet.style.userSelect = 'none';
       bullet.style.color = 'rgba(0,0,0,0.35)';
       bullet.style.flexShrink = '0';
       bullet.style.width = '10px';
       bullet.style.fontSize = '10px';
+      if (node.children?.length) {
+        bullet.style.cursor = 'pointer';
+        bullet.addEventListener('click', () => {
+          const itemState = stateMap.get(itemValue);
+          if (!itemState) return;
+          if (itemState.collapsedIds.has(node.id)) {
+            itemState.collapsedIds.delete(node.id);
+          } else {
+            itemState.collapsedIds.add(node.id);
+          }
+          renderItemNodes(itemValue, itemState, node.id);
+        });
+      }
 
       const input = document.createElement('input');
       input.type = 'text';
       input.value = node.text;
       input.dataset.nodeId = node.id;
+      input.dataset.navInput = 'node';
       Object.assign(input.style, {
         flex: '1',
         border: 'none',
@@ -170,12 +207,22 @@ const renderSourceDrivenOutliner = (
         }
       });
 
+      input.addEventListener('mousedown', () => {
+        const itemState = stateMap.get(itemValue);
+        if (!itemState || itemState.anchorIdx === null) return;
+        itemState.anchorIdx = null;
+        itemState.activeIdx = null;
+        const c = outer.querySelector<HTMLElement>(`[data-item-container="${CSS.escape(itemValue)}"]`);
+        if (c) updateNodeSelectionVisuals(c, [], null, null);
+      });
+
       input.addEventListener('keydown', (e: KeyboardEvent) => {
         const itemState = stateMap.get(itemValue);
         if (!itemState) return;
 
         if (e.key === 'Enter') {
           e.preventDefault();
+          itemState.anchorIdx = null; itemState.activeIdx = null;
           const newNode: TreeNode = { id: randomId(), text: '' };
           const loc = findNode(topLevelNodes, node.id);
           if (loc) {
@@ -188,8 +235,22 @@ const renderSourceDrivenOutliner = (
           return;
         }
 
+        if (e.key === 'Backspace' && e.ctrlKey && e.shiftKey) {
+          e.preventDefault();
+          itemState.anchorIdx = null; itemState.activeIdx = null;
+          const allIds = flatIds(topLevelNodes);
+          const idx = allIds.indexOf(node.id);
+          const prevId = idx > 0 ? allIds[idx - 1] : null;
+          const loc = findNode(topLevelNodes, node.id);
+          if (loc) loc.parent.splice(loc.index, 1);
+          scheduleItemSave(itemValue, itemState);
+          renderItemNodes(itemValue, itemState, prevId);
+          return;
+        }
+
         if (e.key === 'Backspace' && input.value === '') {
           e.preventDefault();
+          itemState.anchorIdx = null; itemState.activeIdx = null;
           const allIds = flatIds(topLevelNodes);
           const idx = allIds.indexOf(node.id);
           const prevId = idx > 0 ? allIds[idx - 1] : null;
@@ -202,6 +263,7 @@ const renderSourceDrivenOutliner = (
 
         if (e.key === 'Tab' && !e.shiftKey) {
           e.preventDefault();
+          itemState.anchorIdx = null; itemState.activeIdx = null;
           const loc = findNode(topLevelNodes, node.id);
           if (loc && loc.index > 0) {
             const prev = loc.parent[loc.index - 1];
@@ -216,6 +278,7 @@ const renderSourceDrivenOutliner = (
 
         if (e.key === 'Tab' && e.shiftKey) {
           e.preventDefault();
+          itemState.anchorIdx = null; itemState.activeIdx = null;
           const allLoc = findDedentTarget(topLevelNodes, node.id);
           if (allLoc) {
             const loc = findNode(topLevelNodes, node.id);
@@ -227,25 +290,149 @@ const renderSourceDrivenOutliner = (
           return;
         }
 
-        if (e.key === 'ArrowUp') {
+        if (e.key === 'ArrowDown' && e.ctrlKey) {
           e.preventDefault();
-          const allIds = flatIds(topLevelNodes);
-          const idx = allIds.indexOf(node.id);
-          const prevId = idx > 0 ? allIds[idx - 1] : null;
-          if (prevId) {
-            outer.querySelector<HTMLInputElement>(`[data-node-id="${CSS.escape(prevId)}"]`)?.focus();
+          if (node.children?.length && itemState.collapsedIds.has(node.id)) {
+            itemState.collapsedIds.delete(node.id);
+            renderItemNodes(itemValue, itemState, node.id);
           }
           return;
         }
 
-        if (e.key === 'ArrowDown') {
+        if (e.key === 'ArrowUp' && e.ctrlKey) {
+          e.preventDefault();
+          if (node.children?.length && !itemState.collapsedIds.has(node.id)) {
+            itemState.collapsedIds.add(node.id);
+            renderItemNodes(itemValue, itemState, node.id);
+          }
+          return;
+        }
+
+        if (e.key === 'ArrowUp' && e.shiftKey && e.altKey) {
+          e.preventDefault();
+          if (itemState.anchorIdx !== null && itemState.activeIdx !== null) {
+            const allIds = flatIds(topLevelNodes);
+            const lo = Math.min(itemState.anchorIdx, itemState.activeIdx);
+            const hi = Math.max(itemState.anchorIdx, itemState.activeIdx);
+            const selIds = allIds.slice(lo, hi + 1);
+            const firstLoc = findNode(topLevelNodes, selIds[0]);
+            if (firstLoc && firstLoc.index > 0 && selIds.every((sid, i) => firstLoc.parent[firstLoc.index + i]?.id === sid)) {
+              const block = firstLoc.parent.splice(firstLoc.index, selIds.length);
+              firstLoc.parent.splice(firstLoc.index - 1, 0, ...block);
+              scheduleItemSave(itemValue, itemState);
+              renderItemNodes(itemValue, itemState, selIds[0]);
+              const newAllIds = flatIds(topLevelNodes);
+              const newLo = newAllIds.indexOf(selIds[0]);
+              const newHi = newAllIds.indexOf(selIds[selIds.length - 1]);
+              const wasAsc = itemState.anchorIdx <= itemState.activeIdx;
+              itemState.anchorIdx = wasAsc ? newLo : newHi;
+              itemState.activeIdx = wasAsc ? newHi : newLo;
+              const c = outer.querySelector<HTMLElement>(`[data-item-container="${CSS.escape(itemValue)}"]`);
+              if (c) updateNodeSelectionVisuals(c, newAllIds, itemState.anchorIdx, itemState.activeIdx);
+            }
+          } else {
+            itemState.anchorIdx = null; itemState.activeIdx = null;
+            const loc = findNode(topLevelNodes, node.id);
+            if (loc && loc.index > 0) {
+              const tmp = loc.parent[loc.index - 1];
+              loc.parent[loc.index - 1] = loc.parent[loc.index];
+              loc.parent[loc.index] = tmp;
+              scheduleItemSave(itemValue, itemState);
+              renderItemNodes(itemValue, itemState, node.id);
+            }
+          }
+          return;
+        }
+
+        if (e.key === 'ArrowDown' && e.shiftKey && e.altKey) {
+          e.preventDefault();
+          if (itemState.anchorIdx !== null && itemState.activeIdx !== null) {
+            const allIds = flatIds(topLevelNodes);
+            const lo = Math.min(itemState.anchorIdx, itemState.activeIdx);
+            const hi = Math.max(itemState.anchorIdx, itemState.activeIdx);
+            const selIds = allIds.slice(lo, hi + 1);
+            const firstLoc = findNode(topLevelNodes, selIds[0]);
+            if (firstLoc && firstLoc.index + selIds.length < firstLoc.parent.length && selIds.every((sid, i) => firstLoc.parent[firstLoc.index + i]?.id === sid)) {
+              const block = firstLoc.parent.splice(firstLoc.index, selIds.length);
+              firstLoc.parent.splice(firstLoc.index + 1, 0, ...block);
+              scheduleItemSave(itemValue, itemState);
+              renderItemNodes(itemValue, itemState, selIds[0]);
+              const newAllIds = flatIds(topLevelNodes);
+              const newLo = newAllIds.indexOf(selIds[0]);
+              const newHi = newAllIds.indexOf(selIds[selIds.length - 1]);
+              const wasAsc = itemState.anchorIdx <= itemState.activeIdx;
+              itemState.anchorIdx = wasAsc ? newLo : newHi;
+              itemState.activeIdx = wasAsc ? newHi : newLo;
+              const c = outer.querySelector<HTMLElement>(`[data-item-container="${CSS.escape(itemValue)}"]`);
+              if (c) updateNodeSelectionVisuals(c, newAllIds, itemState.anchorIdx, itemState.activeIdx);
+            }
+          } else {
+            itemState.anchorIdx = null; itemState.activeIdx = null;
+            const loc = findNode(topLevelNodes, node.id);
+            if (loc && loc.index < loc.parent.length - 1) {
+              const tmp = loc.parent[loc.index + 1];
+              loc.parent[loc.index + 1] = loc.parent[loc.index];
+              loc.parent[loc.index] = tmp;
+              scheduleItemSave(itemValue, itemState);
+              renderItemNodes(itemValue, itemState, node.id);
+            }
+          }
+          return;
+        }
+
+        if (e.key === 'ArrowUp' && e.shiftKey) {
           e.preventDefault();
           const allIds = flatIds(topLevelNodes);
           const idx = allIds.indexOf(node.id);
-          const nextId = idx < allIds.length - 1 ? allIds[idx + 1] : null;
-          if (nextId) {
-            outer.querySelector<HTMLInputElement>(`[data-node-id="${CSS.escape(nextId)}"]`)?.focus();
+          if (idx < 0) return;
+          if (itemState.anchorIdx === null) itemState.anchorIdx = idx;
+          const newActiveIdx = Math.max(0, (itemState.activeIdx ?? idx) - 1);
+          itemState.activeIdx = newActiveIdx;
+          const c = outer.querySelector<HTMLElement>(`[data-item-container="${CSS.escape(itemValue)}"]`);
+          if (c) updateNodeSelectionVisuals(c, allIds, itemState.anchorIdx, itemState.activeIdx);
+          const targetId = allIds[newActiveIdx];
+          outer.querySelector<HTMLInputElement>(`[data-node-id="${CSS.escape(targetId)}"]`)?.focus();
+          return;
+        }
+
+        if (e.key === 'ArrowDown' && e.shiftKey) {
+          e.preventDefault();
+          const allIds = flatIds(topLevelNodes);
+          const idx = allIds.indexOf(node.id);
+          if (idx < 0) return;
+          if (itemState.anchorIdx === null) itemState.anchorIdx = idx;
+          const newActiveIdx = Math.min(allIds.length - 1, (itemState.activeIdx ?? idx) + 1);
+          itemState.activeIdx = newActiveIdx;
+          const c = outer.querySelector<HTMLElement>(`[data-item-container="${CSS.escape(itemValue)}"]`);
+          if (c) updateNodeSelectionVisuals(c, allIds, itemState.anchorIdx, itemState.activeIdx);
+          const targetId = allIds[newActiveIdx];
+          outer.querySelector<HTMLInputElement>(`[data-node-id="${CSS.escape(targetId)}"]`)?.focus();
+          return;
+        }
+
+        if (e.key === 'ArrowUp' && !e.ctrlKey) {
+          e.preventDefault();
+          if (itemState.anchorIdx !== null) {
+            itemState.anchorIdx = null; itemState.activeIdx = null;
+            const c = outer.querySelector<HTMLElement>(`[data-item-container="${CSS.escape(itemValue)}"]`);
+            if (c) updateNodeSelectionVisuals(c, [], null, null);
           }
+          const navInputs = getAllNavInputs();
+          const idx = navInputs.indexOf(input);
+          if (idx > 0) navInputs[idx - 1].focus();
+          return;
+        }
+
+        if (e.key === 'ArrowDown' && !e.ctrlKey) {
+          e.preventDefault();
+          if (itemState.anchorIdx !== null) {
+            itemState.anchorIdx = null; itemState.activeIdx = null;
+            const c = outer.querySelector<HTMLElement>(`[data-item-container="${CSS.escape(itemValue)}"]`);
+            if (c) updateNodeSelectionVisuals(c, [], null, null);
+          }
+          const navInputs = getAllNavInputs();
+          const idx = navInputs.indexOf(input);
+          if (idx < navInputs.length - 1) navInputs[idx + 1].focus();
           return;
         }
       });
@@ -254,7 +441,7 @@ const renderSourceDrivenOutliner = (
       row.appendChild(input);
       li.appendChild(row);
 
-      if (node.children?.length) {
+      if (node.children?.length && !stateMap.get(itemValue)?.collapsedIds.has(node.id)) {
         li.appendChild(buildNodeUl(node.children, topLevelNodes, depth + 1, itemValue));
       }
 
@@ -338,7 +525,7 @@ const renderSourceDrivenOutliner = (
     const li = document.createElement('li');
 
     if (!stateMap.has(leaf.value)) {
-      stateMap.set(leaf.value, { nodes: [], expanded: false, saveTimer: null });
+      stateMap.set(leaf.value, { nodes: [], expanded: false, saveTimer: null, anchorIdx: null, activeIdx: null, collapsedIds: new Set() });
     }
 
     const row = document.createElement('div');
@@ -360,6 +547,7 @@ const renderSourceDrivenOutliner = (
     const input = document.createElement('input');
     input.type = 'text';
     input.value = leaf.label;
+    input.dataset.navInput = 'leaf';
     Object.assign(input.style, {
       flex: '1',
       border: 'none',
@@ -376,6 +564,41 @@ const renderSourceDrivenOutliner = (
       if (focusedNodeId !== leaf.value) {
         focusedNodeId = leaf.value;
         dispatchNodeFocus(id, leaf.value, leaf.label);
+      }
+    });
+
+    input.addEventListener('keydown', (e: KeyboardEvent) => {
+      if (e.key === 'ArrowDown' && e.ctrlKey) {
+        e.preventDefault();
+        const itemState = stateMap.get(leaf.value);
+        if (itemState && !itemState.expanded) {
+          arrow.textContent = '▾';
+          toggleLeafItem(leaf.value, itemContainer);
+        }
+        return;
+      }
+      if (e.key === 'ArrowUp' && e.ctrlKey) {
+        e.preventDefault();
+        const itemState = stateMap.get(leaf.value);
+        if (itemState && itemState.expanded) {
+          arrow.textContent = '▸';
+          toggleLeafItem(leaf.value, itemContainer);
+        }
+        return;
+      }
+      if (e.key === 'ArrowUp') {
+        e.preventDefault();
+        const navInputs = getAllNavInputs();
+        const idx = navInputs.indexOf(input);
+        if (idx > 0) navInputs[idx - 1].focus();
+        return;
+      }
+      if (e.key === 'ArrowDown') {
+        e.preventDefault();
+        const navInputs = getAllNavInputs();
+        const idx = navInputs.indexOf(input);
+        if (idx < navInputs.length - 1) navInputs[idx + 1].focus();
+        return;
       }
     });
 
@@ -510,13 +733,16 @@ export const renderOutliner = (
   outer.style.boxSizing = 'border-box';
   outer.style.padding = '8px 12px';
   outer.style.fontSize = '13px';
-  outer.style.lineHeight = '2';
+  outer.style.lineHeight = '1.5';
   applyCssProps(outer, component as unknown as Record<string, unknown>);
 
   let nodes: TreeNode[] = cloneNodes(component.data.nodes);
   let pendingFocusId: string | null = null;
   let focusedNodeId: string | null = null;
   let saveTimer: ReturnType<typeof setTimeout> | null = null;
+  let anchorIdx: number | null = null;
+  let activeIdx: number | null = null;
+  const collapsedIds = new Set<string>();
 
   const scheduleSave = (): void => {
     if (!treeId) return;
@@ -553,17 +779,30 @@ export const renderOutliner = (
       row.style.gap = '6px';
 
       const bullet = document.createElement('span');
-      bullet.textContent = node.children?.length ? '▸' : '•';
+      bullet.textContent = !node.children?.length ? '•' : collapsedIds.has(node.id) ? '▸' : '▾';
       bullet.style.userSelect = 'none';
       bullet.style.color = 'rgba(0,0,0,0.35)';
       bullet.style.flexShrink = '0';
       bullet.style.width = '10px';
       bullet.style.fontSize = '10px';
+      if (node.children?.length) {
+        bullet.style.cursor = 'pointer';
+        bullet.addEventListener('click', () => {
+          if (collapsedIds.has(node.id)) {
+            collapsedIds.delete(node.id);
+          } else {
+            collapsedIds.add(node.id);
+          }
+          pendingFocusId = node.id;
+          render();
+        });
+      }
 
       const input = document.createElement('input');
       input.type = 'text';
       input.value = node.text;
       input.dataset.nodeId = node.id;
+      input.dataset.navInput = 'node';
       Object.assign(input.style, {
         flex: '1',
         border: 'none',
@@ -592,9 +831,17 @@ export const renderOutliner = (
         }
       });
 
+      input.addEventListener('mousedown', () => {
+        if (anchorIdx === null) return;
+        anchorIdx = null;
+        activeIdx = null;
+        outer.querySelectorAll<HTMLInputElement>('[data-node-id]').forEach(inp => { inp.style.background = 'transparent'; });
+      });
+
       input.addEventListener('keydown', (e: KeyboardEvent) => {
         if (e.key === 'Enter') {
           e.preventDefault();
+          anchorIdx = null; activeIdx = null;
           const newNode: TreeNode = { id: randomId(), text: '' };
           const loc = findNode(nodes, node.id);
           if (loc) {
@@ -608,8 +855,23 @@ export const renderOutliner = (
           return;
         }
 
+        if (e.key === 'Backspace' && e.ctrlKey && e.shiftKey) {
+          e.preventDefault();
+          anchorIdx = null; activeIdx = null;
+          const allIds = flatIds(nodes);
+          const idx = allIds.indexOf(node.id);
+          const prevId = idx > 0 ? allIds[idx - 1] : null;
+          const loc = findNode(nodes, node.id);
+          if (loc) loc.parent.splice(loc.index, 1);
+          pendingFocusId = prevId;
+          scheduleSave();
+          render();
+          return;
+        }
+
         if (e.key === 'Backspace' && input.value === '') {
           e.preventDefault();
+          anchorIdx = null; activeIdx = null;
           const allIds = flatIds(nodes);
           const idx = allIds.indexOf(node.id);
           const prevId = idx > 0 ? allIds[idx - 1] : null;
@@ -623,6 +885,7 @@ export const renderOutliner = (
 
         if (e.key === 'Tab' && !e.shiftKey) {
           e.preventDefault();
+          anchorIdx = null; activeIdx = null;
           const loc = findNode(nodes, node.id);
           if (loc && loc.index > 0) {
             const prev = loc.parent[loc.index - 1];
@@ -638,6 +901,7 @@ export const renderOutliner = (
 
         if (e.key === 'Tab' && e.shiftKey) {
           e.preventDefault();
+          anchorIdx = null; activeIdx = null;
           const allLoc = findDedentTarget(nodes, node.id);
           if (allLoc) {
             const loc = findNode(nodes, node.id);
@@ -650,25 +914,147 @@ export const renderOutliner = (
           return;
         }
 
-        if (e.key === 'ArrowUp') {
+        if (e.key === 'ArrowDown' && e.ctrlKey) {
           e.preventDefault();
-          const allIds = flatIds(nodes);
-          const idx = allIds.indexOf(node.id);
-          const prevId = idx > 0 ? allIds[idx - 1] : null;
-          if (prevId) {
-            outer.querySelector<HTMLInputElement>(`[data-node-id="${CSS.escape(prevId)}"]`)?.focus();
+          if (node.children?.length && collapsedIds.has(node.id)) {
+            collapsedIds.delete(node.id);
+            pendingFocusId = node.id;
+            render();
           }
           return;
         }
 
-        if (e.key === 'ArrowDown') {
+        if (e.key === 'ArrowUp' && e.ctrlKey) {
+          e.preventDefault();
+          if (node.children?.length && !collapsedIds.has(node.id)) {
+            collapsedIds.add(node.id);
+            pendingFocusId = node.id;
+            render();
+          }
+          return;
+        }
+
+        if (e.key === 'ArrowUp' && e.shiftKey && e.altKey) {
+          e.preventDefault();
+          if (anchorIdx !== null && activeIdx !== null) {
+            const allIds = flatIds(nodes);
+            const lo = Math.min(anchorIdx, activeIdx);
+            const hi = Math.max(anchorIdx, activeIdx);
+            const selIds = allIds.slice(lo, hi + 1);
+            const firstLoc = findNode(nodes, selIds[0]);
+            if (firstLoc && firstLoc.index > 0 && selIds.every((sid, i) => firstLoc.parent[firstLoc.index + i]?.id === sid)) {
+              const block = firstLoc.parent.splice(firstLoc.index, selIds.length);
+              firstLoc.parent.splice(firstLoc.index - 1, 0, ...block);
+              scheduleSave();
+              const wasAsc = anchorIdx <= activeIdx;
+              render();
+              const newAllIds = flatIds(nodes);
+              const newLo = newAllIds.indexOf(selIds[0]);
+              const newHi = newAllIds.indexOf(selIds[selIds.length - 1]);
+              anchorIdx = wasAsc ? newLo : newHi;
+              activeIdx = wasAsc ? newHi : newLo;
+              updateNodeSelectionVisuals(outer, newAllIds, anchorIdx, activeIdx);
+            }
+          } else {
+            anchorIdx = null; activeIdx = null;
+            const loc = findNode(nodes, node.id);
+            if (loc && loc.index > 0) {
+              const tmp = loc.parent[loc.index - 1];
+              loc.parent[loc.index - 1] = loc.parent[loc.index];
+              loc.parent[loc.index] = tmp;
+              pendingFocusId = node.id;
+              scheduleSave();
+              render();
+            }
+          }
+          return;
+        }
+
+        if (e.key === 'ArrowDown' && e.shiftKey && e.altKey) {
+          e.preventDefault();
+          if (anchorIdx !== null && activeIdx !== null) {
+            const allIds = flatIds(nodes);
+            const lo = Math.min(anchorIdx, activeIdx);
+            const hi = Math.max(anchorIdx, activeIdx);
+            const selIds = allIds.slice(lo, hi + 1);
+            const firstLoc = findNode(nodes, selIds[0]);
+            if (firstLoc && firstLoc.index + selIds.length < firstLoc.parent.length && selIds.every((sid, i) => firstLoc.parent[firstLoc.index + i]?.id === sid)) {
+              const block = firstLoc.parent.splice(firstLoc.index, selIds.length);
+              firstLoc.parent.splice(firstLoc.index + 1, 0, ...block);
+              scheduleSave();
+              const wasAsc = anchorIdx <= activeIdx;
+              render();
+              const newAllIds = flatIds(nodes);
+              const newLo = newAllIds.indexOf(selIds[0]);
+              const newHi = newAllIds.indexOf(selIds[selIds.length - 1]);
+              anchorIdx = wasAsc ? newLo : newHi;
+              activeIdx = wasAsc ? newHi : newLo;
+              updateNodeSelectionVisuals(outer, newAllIds, anchorIdx, activeIdx);
+            }
+          } else {
+            anchorIdx = null; activeIdx = null;
+            const loc = findNode(nodes, node.id);
+            if (loc && loc.index < loc.parent.length - 1) {
+              const tmp = loc.parent[loc.index + 1];
+              loc.parent[loc.index + 1] = loc.parent[loc.index];
+              loc.parent[loc.index] = tmp;
+              pendingFocusId = node.id;
+              scheduleSave();
+              render();
+            }
+          }
+          return;
+        }
+
+        if (e.key === 'ArrowUp' && e.shiftKey) {
           e.preventDefault();
           const allIds = flatIds(nodes);
           const idx = allIds.indexOf(node.id);
-          const nextId = idx < allIds.length - 1 ? allIds[idx + 1] : null;
-          if (nextId) {
-            outer.querySelector<HTMLInputElement>(`[data-node-id="${CSS.escape(nextId)}"]`)?.focus();
+          if (idx < 0) return;
+          if (anchorIdx === null) anchorIdx = idx;
+          const newActiveIdx = Math.max(0, (activeIdx ?? idx) - 1);
+          activeIdx = newActiveIdx;
+          updateNodeSelectionVisuals(outer, allIds, anchorIdx, activeIdx);
+          outer.querySelector<HTMLInputElement>(`[data-node-id="${CSS.escape(allIds[newActiveIdx])}"]`)?.focus();
+          return;
+        }
+
+        if (e.key === 'ArrowDown' && e.shiftKey) {
+          e.preventDefault();
+          const allIds = flatIds(nodes);
+          const idx = allIds.indexOf(node.id);
+          if (idx < 0) return;
+          if (anchorIdx === null) anchorIdx = idx;
+          const newActiveIdx = Math.min(allIds.length - 1, (activeIdx ?? idx) + 1);
+          activeIdx = newActiveIdx;
+          updateNodeSelectionVisuals(outer, allIds, anchorIdx, activeIdx);
+          outer.querySelector<HTMLInputElement>(`[data-node-id="${CSS.escape(allIds[newActiveIdx])}"]`)?.focus();
+          return;
+        }
+
+        if (e.key === 'ArrowUp' && !e.ctrlKey) {
+          e.preventDefault();
+          if (anchorIdx !== null) {
+            anchorIdx = null; activeIdx = null;
+            updateNodeSelectionVisuals(outer, [], null, null);
           }
+          const navInputs = Array.from(outer.querySelectorAll<HTMLInputElement>('[data-nav-input]'))
+            .filter(inp => inp.offsetParent !== null);
+          const idx = navInputs.indexOf(input);
+          if (idx > 0) navInputs[idx - 1].focus();
+          return;
+        }
+
+        if (e.key === 'ArrowDown' && !e.ctrlKey) {
+          e.preventDefault();
+          if (anchorIdx !== null) {
+            anchorIdx = null; activeIdx = null;
+            updateNodeSelectionVisuals(outer, [], null, null);
+          }
+          const navInputs = Array.from(outer.querySelectorAll<HTMLInputElement>('[data-nav-input]'))
+            .filter(inp => inp.offsetParent !== null);
+          const idx = navInputs.indexOf(input);
+          if (idx < navInputs.length - 1) navInputs[idx + 1].focus();
           return;
         }
       });
@@ -677,7 +1063,7 @@ export const renderOutliner = (
       row.appendChild(input);
       li.appendChild(row);
 
-      if (node.children?.length) {
+      if (node.children?.length && !collapsedIds.has(node.id)) {
         li.appendChild(buildUl(node.children, depth + 1));
       }
 
