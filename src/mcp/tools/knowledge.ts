@@ -1,6 +1,7 @@
 import { authorizeFetch, type AuthorizeEnv } from "../../auth";
 
 const treeKey = (treeId: string) => `trees/${treeId}.json`;
+const docKey = (nodeId: string) => `docs/${nodeId}.json`;
 
 type KnowledgeNode = {
   id: string;
@@ -14,6 +15,8 @@ type KnowledgeNode = {
 type KnowledgeTree = {
   nodes: KnowledgeNode[];
 };
+
+type Doc = { content: string };
 
 const fromBase64 = (value: string): string => {
   const normalized = value.replace(/-/g, "+").replace(/_/g, "/");
@@ -47,6 +50,31 @@ async function writeTree(env: AuthorizeEnv, treeId: string, tree: KnowledgeTree)
     }),
   });
   if (!response.ok) throw new Error(`knowledge_write_failed:${response.status}`);
+}
+
+async function readDoc(env: AuthorizeEnv, nodeId: string): Promise<Doc> {
+  const response = await authorizeFetch(env, {
+    path: "/api/v1/cloudflare-r2-adapter/s3/r2_file_get",
+    method: "POST",
+    body: JSON.stringify({ bucket_id: getBucketId(env), key: docKey(nodeId) }),
+  });
+  if (response.status === 404) return { content: "" };
+  if (!response.ok) throw new Error(`doc_read_failed:${response.status}`);
+  const payload = (await response.json()) as { content_base64: string };
+  return JSON.parse(fromBase64(payload.content_base64)) as Doc;
+}
+
+async function writeDoc(env: AuthorizeEnv, nodeId: string, doc: Doc): Promise<void> {
+  const response = await authorizeFetch(env, {
+    path: "/api/v1/cloudflare-r2-adapter/s3/r2_file_save",
+    method: "POST",
+    body: JSON.stringify({
+      bucket_id: getBucketId(env),
+      key: docKey(nodeId),
+      content: JSON.stringify(doc),
+    }),
+  });
+  if (!response.ok) throw new Error(`doc_write_failed:${response.status}`);
 }
 
 function findNode(nodes: KnowledgeNode[], id: string): KnowledgeNode | null {
@@ -100,6 +128,30 @@ export const KNOWLEDGE_TOOLS = [
         node_id: { type: "string", description: "Node ID to accept" },
       },
       required: ["tree_id", "node_id"],
+    },
+  },
+  {
+    name: "doc_read",
+    description: "Read the doc content for a specific node.",
+    inputSchema: {
+      type: "object",
+      properties: {
+        node_id: { type: "string", description: "Node ID" },
+      },
+      required: ["node_id"],
+    },
+  },
+  {
+    name: "doc_write",
+    description: "Write doc content for a node. Sets the node's status to 'proposed' to indicate AI-generated content awaiting review.",
+    inputSchema: {
+      type: "object",
+      properties: {
+        tree_id: { type: "string", description: "Tree ID" },
+        node_id: { type: "string", description: "Node ID" },
+        content: { type: "string", description: "Doc content to write" },
+      },
+      required: ["tree_id", "node_id", "content"],
     },
   },
 ];
@@ -170,6 +222,29 @@ export async function callKnowledgeTool(
       delete node.proposedBy;
       await writeTree(env, treeId, tree);
       return { content: [{ type: "text", text: `Accepted node "${node.text}" (id: ${nodeId})` }] };
+    }
+
+    if (name === "doc_read") {
+      const nodeId = String(args.node_id);
+      const doc = await readDoc(env, nodeId);
+      return { content: [{ type: "text", text: JSON.stringify(doc, null, 2) }] };
+    }
+
+    if (name === "doc_write") {
+      const treeId = String(args.tree_id);
+      const nodeId = String(args.node_id);
+      const content = String(args.content);
+      const tree = await readTree(env, treeId);
+      const node = findNode(tree.nodes, nodeId);
+      if (!node) {
+        return { content: [{ type: "text", text: `Node not found: ${nodeId}` }], isError: true };
+      }
+      node.status = "proposed";
+      node.proposedAt = new Date().toISOString();
+      node.proposedBy = "claude";
+      await writeDoc(env, nodeId, { content });
+      await writeTree(env, treeId, tree);
+      return { content: [{ type: "text", text: `Wrote doc for node "${node.text}" (id: ${nodeId})` }] };
     }
 
     return { content: [{ type: "text", text: `Unknown knowledge tool: ${name}` }], isError: true };

@@ -35,7 +35,7 @@ export async function handleMcp(request: Request, env: AuthorizeEnv): Promise<Re
       name: string;
       arguments: Record<string, unknown>;
     };
-    result = name.startsWith("knowledge_")
+    result = name.startsWith("knowledge_") || name.startsWith("doc_")
       ? await callKnowledgeTool(name, args, env)
       : await callTool(name, args, env);
   } else {
