@@ -320,138 +320,20 @@ const hydrateSelectTableBindings = async (
       labelEl.style.textOverflow = 'ellipsis';
       labelEl.style.whiteSpace = 'nowrap';
 
-      const editBtn = document.createElement('button');
-      editBtn.type = 'button';
-      editBtn.textContent = '編集';
-      Object.assign(editBtn.style, {
-        display: 'none',
-        border: 'none',
-        background: 'transparent',
-        cursor: 'pointer',
-        fontSize: '11px',
-        padding: '0',
-        color: 'rgba(0,0,0,0.4)',
-        flexShrink: '0',
-        lineHeight: '1',
-      });
-
-      const deleteBtn = document.createElement('button');
-      deleteBtn.type = 'button';
-      deleteBtn.textContent = '削除';
-      Object.assign(deleteBtn.style, {
-        display: 'none',
-        border: 'none',
-        background: 'transparent',
-        cursor: 'pointer',
-        fontSize: '11px',
-        padding: '0',
-        color: 'rgba(180,0,0,0.5)',
-        flexShrink: '0',
-        lineHeight: '1',
-      });
-
       li.appendChild(labelEl);
-      li.appendChild(editBtn);
-      li.appendChild(deleteBtn);
 
       li.addEventListener('mouseenter', () => {
         if (li !== activeItem) li.style.backgroundColor = 'rgba(0,0,0,0.05)';
-        editBtn.style.display = '';
-        deleteBtn.style.display = '';
       });
       li.addEventListener('mouseleave', () => {
         if (li !== activeItem) li.style.backgroundColor = '';
-        editBtn.style.display = 'none';
-        deleteBtn.style.display = 'none';
       });
-      li.addEventListener('click', (e) => {
-        const btn = (e.target as HTMLElement).closest('button');
-        if (btn === editBtn || btn === deleteBtn) return;
+      li.addEventListener('click', () => {
         if (activeItem) { activeItem.style.backgroundColor = ''; activeItem.style.fontWeight = ''; }
         li.style.backgroundColor = 'rgba(0,0,0,0.1)';
         li.style.fontWeight = 'bold';
         activeItem = li;
         loadIntoTarget(value);
-      });
-
-      editBtn.addEventListener('click', (e) => {
-        e.stopPropagation();
-        li.replaceChildren();
-        Object.assign(li.style, { padding: '3px 10px', cursor: 'default' });
-
-        const input = document.createElement('input');
-        input.type = 'text';
-        input.value = label;
-        Object.assign(input.style, {
-          flex: '1',
-          fontSize: '12px',
-          border: '1px solid rgba(0,0,0,0.25)',
-          borderRadius: '2px',
-          padding: '1px 4px',
-          outline: 'none',
-          minWidth: '0',
-          fontFamily: 'inherit',
-        });
-
-        const saveBtn = document.createElement('button');
-        saveBtn.type = 'button';
-        saveBtn.textContent = '✓';
-        Object.assign(saveBtn.style, {
-          border: 'none', background: 'transparent', cursor: 'pointer',
-          padding: '0 2px', color: 'rgba(0,0,0,0.6)', flexShrink: '0', fontSize: '12px',
-        });
-
-        const cancelBtn = document.createElement('button');
-        cancelBtn.type = 'button';
-        cancelBtn.textContent = '✕';
-        Object.assign(cancelBtn.style, {
-          border: 'none', background: 'transparent', cursor: 'pointer',
-          padding: '0 2px', color: 'rgba(0,0,0,0.4)', flexShrink: '0', fontSize: '10px',
-        });
-
-        li.appendChild(input);
-        li.appendChild(saveBtn);
-        li.appendChild(cancelBtn);
-        input.focus();
-        input.select();
-
-        const restore = (): void => {
-          li.replaceChildren(labelEl, editBtn);
-          Object.assign(li.style, { padding: '5px 10px', cursor: 'pointer' });
-        };
-
-        const doRename = (): void => {
-          const newName = input.value.trim();
-          if (!newName || newName === label) { restore(); return; }
-          const namePart = value.startsWith('list/') ? value.slice('list/'.length) : value;
-          void fetch(`/api/list/${encodeURIComponent(namePart)}/rename`, {
-            method: 'POST',
-            headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify({ to: newName }),
-          }).then(async (res) => {
-            if (!res.ok) { window.alert(`リネーム失敗: ${await res.text()}`); restore(); return; }
-            await populateNavList(currentFilter);
-          });
-        };
-
-        saveBtn.addEventListener('click', doRename);
-        cancelBtn.addEventListener('click', restore);
-        input.addEventListener('keydown', (ke: KeyboardEvent) => {
-          if (ke.key === 'Enter') { ke.preventDefault(); doRename(); }
-          if (ke.key === 'Escape') restore();
-        });
-      });
-
-      deleteBtn.addEventListener('click', (e) => {
-        e.stopPropagation();
-        if (!window.confirm(`「${label}」を削除しますか？`)) return;
-        const namePart = value.startsWith('list/') ? value.slice('list/'.length) : value;
-        void fetch(`/api/list/${encodeURIComponent(namePart)}`, {
-          method: 'DELETE',
-        }).then(async (res) => {
-          if (!res.ok) { window.alert(`削除失敗: ${await res.text()}`); return; }
-          await populateNavList(currentFilter);
-        });
       });
 
       return li;

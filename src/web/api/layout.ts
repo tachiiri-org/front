@@ -24,11 +24,6 @@ import {
   handleComponentSchemaDefinitionGet,
   handleComponentSchemaGet,
   handleComponentSchemaPut,
-  handleListResourceListGet,
-  handleListResourceGet,
-  handleListResourcePut,
-  handleListResourceDelete,
-  handleListResourceRename,
 } from './component-schemas';
 import { type AuthorizeEnv } from '../../auth';
 
@@ -60,16 +55,114 @@ const RESOURCE_CONFIGS: ResourceConfig[] = [
     handleDelete: handleScreenDelete,
     handleRename: handleScreenRename,
   },
-  {
-    name: 'list',
-    storagePrefix: 'list/',
-    handleList: handleListResourceListGet,
-    handleGet: handleListResourceGet,
-    handlePut: handleListResourcePut,
-    handleDelete: handleListResourceDelete,
-    handleRename: handleListResourceRename,
-  },
 ];
+
+// --- Migration helpers ---
+
+type TreeNode = { id: string; text: string; children?: TreeNode[] };
+type ListRegistryEntry = { id: string; name: string };
+
+const isRegistryEntry = (v: unknown): v is ListRegistryEntry => {
+  if (typeof v !== 'object' || v === null || Array.isArray(v)) return false;
+  const c = v as Record<string, unknown>;
+  return typeof c.id === 'string' && typeof c.name === 'string';
+};
+
+const handleMigrateListsToTree = async (backend: LayoutBackend): Promise<Response> => {
+  // 1. Load list registry
+  const registryText = await backend.getText('list/_registry.json');
+  if (!registryText) {
+    return new Response(JSON.stringify({ treeId: null, nodeCount: 0, message: 'Nothing to migrate' }), {
+      headers: { 'Content-Type': 'application/json' },
+    });
+  }
+  let registry: ListRegistryEntry[] = [];
+  try {
+    const parsed = JSON.parse(registryText) as unknown;
+    if (Array.isArray(parsed)) registry = parsed.filter(isRegistryEntry);
+  } catch { /* fall through */ }
+
+  if (registry.length === 0) {
+    return new Response(JSON.stringify({ treeId: null, nodeCount: 0, message: 'Nothing to migrate' }), {
+      headers: { 'Content-Type': 'application/json' },
+    });
+  }
+
+  // 2. For each registry entry, load tree nodes from trees/${name}.json
+  const mergedNodes: TreeNode[] = [];
+  for (const entry of registry) {
+    const treeText = await backend.getText(`trees/list/${entry.name}.json`);
+    let treeNodes: TreeNode[] | undefined;
+    if (treeText) {
+      try {
+        const parsed = JSON.parse(treeText) as unknown;
+        const nodes = (parsed as Record<string, unknown>).nodes;
+        if (Array.isArray(nodes)) treeNodes = nodes as TreeNode[];
+      } catch { /* fall through */ }
+    }
+    mergedNodes.push({
+      id: crypto.randomUUID(),
+      text: entry.name,
+      children: treeNodes && treeNodes.length > 0 ? treeNodes : undefined,
+    });
+  }
+
+  // 3. Save merged tree to trees/${newUUID}.json
+  const newTreeId = crypto.randomUUID();
+  await backend.putText(`trees/${newTreeId}.json`, JSON.stringify({ nodes: mergedNodes }));
+
+  // 4. Update screens that reference api/list
+  const screenRegistryText = await backend.getText('_registry.json');
+  if (screenRegistryText) {
+    try {
+      const parsed = JSON.parse(screenRegistryText) as unknown;
+      if (Array.isArray(parsed)) {
+        const screenEntries = parsed.filter(isRegistryEntry);
+        for (const screen of screenEntries) {
+          const screenText = await backend.getText(`${screen.id}.json`);
+          if (!screenText) continue;
+          try {
+            const screenData = JSON.parse(screenText) as Record<string, unknown>;
+            const frames = screenData.frames;
+            if (!Array.isArray(frames)) continue;
+            let changed = false;
+            for (const frame of frames as Record<string, unknown>[]) {
+              if (frame.kind !== 'outliner') continue;
+              const src = frame.source as Record<string, unknown> | undefined;
+              if (!src || typeof src.url !== 'string') continue;
+              if (!src.url.includes('api/list') && !src.url.includes('component-schemas')) continue;
+              frame.source = { url: `/api/trees/${newTreeId}`, itemsPath: 'nodes' };
+              changed = true;
+            }
+            if (changed) {
+              await backend.putText(`${screen.id}.json`, JSON.stringify(screenData));
+            }
+          } catch { /* fall through */ }
+        }
+      }
+    } catch { /* fall through */ }
+  }
+
+  // 5. Delete all files under list/ prefix
+  let cursor: string | undefined;
+  do {
+    const result = await backend.list('list/', cursor);
+    for (const object of result.objects) {
+      await backend.deleteKey(object.key);
+    }
+    cursor = result.truncated ? result.cursor : undefined;
+  } while (cursor);
+
+  // 6. Delete old per-list tree files
+  for (const entry of registry) {
+    await backend.deleteKey(`trees/list/${entry.name}.json`);
+  }
+
+  // 7. Return result
+  return new Response(JSON.stringify({ treeId: newTreeId, nodeCount: mergedNodes.length }), {
+    headers: { 'Content-Type': 'application/json' },
+  });
+};
 
 const isNavigationRequest = (request: Request): boolean => {
   if (request.method !== 'GET' && request.method !== 'HEAD') return false;
@@ -106,6 +199,11 @@ export const handleApiRequest = async (request: Request, env: Env): Promise<Resp
       if (url.searchParams.get('format') === 'tree') return handleComponentSchemasTree(backend);
       return handleComponentSchemasList(backend, url.searchParams);
     }
+    return new Response('Method Not Allowed', { status: 405 });
+  }
+
+  if (url.pathname === '/api/migrate/lists-to-tree') {
+    if (request.method === 'POST') return handleMigrateListsToTree(backend);
     return new Response('Method Not Allowed', { status: 405 });
   }
 

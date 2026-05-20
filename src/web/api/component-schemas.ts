@@ -16,46 +16,6 @@ import {
 } from '../schema/component/schema-editor';
 import type { LayoutBackend } from '../storage/layouts/r2';
 
-// --- List registry ---
-
-const REGISTRY_KEY = 'list/_registry.json';
-
-type ListRegistryEntry = { id: string; name: string };
-
-const isRegistryEntry = (v: unknown): v is ListRegistryEntry => {
-  if (typeof v !== 'object' || v === null || Array.isArray(v)) return false;
-  const c = v as Record<string, unknown>;
-  return typeof c.id === 'string' && typeof c.name === 'string';
-};
-
-const loadRegistry = async (backend: LayoutBackend): Promise<ListRegistryEntry[]> => {
-  const stored = await backend.getText(REGISTRY_KEY);
-  if (!stored) return [];
-  try {
-    const parsed = JSON.parse(stored) as unknown;
-    if (Array.isArray(parsed)) return parsed.filter(isRegistryEntry);
-  } catch { /* fall through */ }
-  return [];
-};
-
-const saveRegistry = async (backend: LayoutBackend, registry: ListRegistryEntry[]): Promise<void> => {
-  await backend.putText(REGISTRY_KEY, JSON.stringify(registry));
-};
-
-export const resolveListStoragePath = async (backend: LayoutBackend, nameOrId: string): Promise<string> => {
-  const registry = await loadRegistry(backend);
-  const entry = registry.find((e) => e.name === nameOrId || e.id === nameOrId);
-  if (entry) return `list/${entry.id}.json`;
-  return `list/${nameOrId}.json`;
-};
-
-export const listKindsFromRegistry = async (backend: LayoutBackend): Promise<string[]> => {
-  const registry = await loadRegistry(backend);
-  if (registry.length > 0) return registry.map((e) => `list/${e.name}`).sort();
-  return [];
-};
-
-// --- End registry ---
 
 const COMPONENT_SCHEMA_KINDS = [...COMPONENT_KINDS, 'component-editor', 'screen'];
 const SOURCE_SCHEMA_KINDS = ['source/endpoint', 'source/list'];
@@ -344,13 +304,7 @@ const loadStoredListRawItems = async (
   backend: LayoutBackend,
   kind: string,
 ): Promise<Record<string, unknown>[]> => {
-  const resolvedPath = kind.startsWith('list/')
-    ? await resolveListStoragePath(backend, kind.slice('list/'.length))
-    : getSchemaStoragePath(kind);
-  let stored = await backend.getText(resolvedPath);
-  if (!stored && resolvedPath !== getSchemaStoragePath(kind)) {
-    stored = await backend.getText(getSchemaStoragePath(kind));
-  }
+  let stored = await backend.getText(getSchemaStoragePath(kind));
   if (!stored) stored = await backend.getText(getLegacySchemaStoragePath(kind));
   if (stored) {
     try {
@@ -412,9 +366,7 @@ export const SCHEMA_TABLE_SCHEMA: TableSchema = {
 };
 
 const listKindsFromBackend = async (backend: LayoutBackend): Promise<string[]> => {
-  const fromRegistry = await listKindsFromRegistry(backend);
-  if (fromRegistry.length > 0) return fromRegistry;
-  // fallback: scan R2 directly (pre-migration)
+  // Scan R2 directly
   const seen = new Set<string>();
   let cursor: string | undefined;
   do {
@@ -569,9 +521,6 @@ export const handleComponentSchemaPut = async (
   }
 
   if (kind.startsWith('list/')) {
-    const nameOrId = kind.slice('list/'.length);
-    const storagePath = await resolveListStoragePath(backend, nameOrId);
-
     if (isTableDataLike(rawData)) {
       const message = validateListEntriesTableDraft(rawData);
       if (message) return new Response(message, { status: 400 });
@@ -586,7 +535,7 @@ export const handleComponentSchemaPut = async (
 
     if (!spec) return new Response('Bad Request', { status: 400 });
 
-    await backend.putText(storagePath, JSON.stringify(spec));
+    await backend.putText(getSchemaStoragePath(kind), JSON.stringify(spec));
     return new Response(JSON.stringify({ ok: true }), {
       headers: { 'Content-Type': 'application/json' },
     });
@@ -612,100 +561,4 @@ export const handleComponentSchemaPut = async (
   });
 };
 
-// --- List resource handlers (registry-aware) ---
-
-export const handleListResourceListGet = async (backend: LayoutBackend): Promise<Response> => {
-  const registry = await loadRegistry(backend);
-  if (registry.length > 0) {
-    const items = registry.map((e) => ({ value: e.name, label: e.name }));
-    return new Response(JSON.stringify({ items }), { headers: { 'Content-Type': 'application/json' } });
-  }
-  // Pre-migration fallback: scan R2
-  const seen = new Map<string, { value: string; label: string }>();
-  let cursor: string | undefined;
-  do {
-    const result = await backend.list('list/', cursor);
-    for (const object of result.objects) {
-      if (!object.key.endsWith('.json')) continue;
-      const relative = object.key.slice('list/'.length);
-      if (relative === '_registry.json') continue;
-      if (relative.includes('/')) continue;
-      const val = relative.slice(0, -'.json'.length);
-      if (!seen.has(val)) seen.set(val, { value: val, label: val });
-    }
-    cursor = result.truncated ? result.cursor : undefined;
-  } while (cursor);
-  const items = [...seen.values()].sort((a, b) => a.label.localeCompare(b.label));
-  return new Response(JSON.stringify({ items }), { headers: { 'Content-Type': 'application/json' } });
-};
-
-export const handleListResourceGet = async (backend: LayoutBackend, name: string): Promise<Response> => {
-  const storagePath = await resolveListStoragePath(backend, name);
-  const body = await backend.getText(storagePath);
-  if (body === null) return new Response('Not Found', { status: 404 });
-  return new Response(body, { headers: { 'Content-Type': 'application/json' } });
-};
-
-export const handleListResourcePut = async (
-  request: Request,
-  backend: LayoutBackend,
-  name: string,
-): Promise<Response> => {
-  const body = await request.text();
-  try { JSON.parse(body); } catch { return new Response('Invalid JSON', { status: 400 }); }
-
-  const registry = await loadRegistry(backend);
-  const existing = registry.find((e) => e.name === name);
-  if (existing) {
-    await backend.putText(`list/${existing.id}.json`, body);
-  } else {
-    const id = crypto.randomUUID();
-    await backend.putText(`list/${id}.json`, body);
-    registry.push({ id, name });
-    await saveRegistry(backend, registry);
-  }
-  return new Response(null, { status: 204 });
-};
-
-export const handleListResourceDelete = async (backend: LayoutBackend, name: string): Promise<Response> => {
-  const registry = await loadRegistry(backend);
-  const idx = registry.findIndex((e) => e.name === name);
-  if (idx === -1) {
-    // Pre-migration fallback
-    await backend.deleteKey(`list/${name}.json`);
-    return new Response(null, { status: 204 });
-  }
-  const [entry] = registry.splice(idx, 1);
-  await backend.deleteKey(`list/${entry.id}.json`);
-  await saveRegistry(backend, registry);
-  return new Response(null, { status: 204 });
-};
-
-export const handleListResourceRename = async (
-  request: Request,
-  backend: LayoutBackend,
-  name: string,
-): Promise<Response> => {
-  const bodyText = await request.text();
-  let to: string;
-  try {
-    const parsed = JSON.parse(bodyText) as unknown;
-    if (typeof parsed !== 'object' || parsed === null || typeof (parsed as Record<string, unknown>).to !== 'string') {
-      return new Response('Invalid body', { status: 400 });
-    }
-    to = ((parsed as Record<string, unknown>).to as string).trim();
-  } catch {
-    return new Response('Invalid JSON', { status: 400 });
-  }
-  if (!to || to === name || to.includes('/')) return new Response('Invalid target name', { status: 400 });
-
-  const registry = await loadRegistry(backend);
-  const idx = registry.findIndex((e) => e.name === name);
-  if (idx === -1) return new Response('Not Found', { status: 404 });
-  if (registry.some((e) => e.name === to)) return new Response('Conflict', { status: 409 });
-
-  registry[idx] = { ...registry[idx], name: to };
-  await saveRegistry(backend, registry);
-  return new Response(null, { status: 204 });
-};
 
