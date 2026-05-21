@@ -2,6 +2,8 @@ import type { OutlinerComponent } from '../../../schema/component/kind/outliner'
 import type { TreeNode } from '../../../schema/component/kind/tree-editor';
 import { ALL_CSS_PROP_KEYS } from '../../../schema/component';
 
+type NodeFocusDetail = { outlinerFrameId: string; nodeId: string; nodeText: string };
+
 const getByPath = (obj: unknown, path: string): unknown => {
   if (!path) return obj;
   return path.split('.').reduce((acc, key) => {
@@ -116,11 +118,60 @@ export const renderOutliner = (
   let activeIdx: number | null = null;
   const collapsedIds = new Set<string>();
   let resolvedTreeId = treeId;
+  let docNodeId: string | null = null;
+  let renderTarget: HTMLElement = outer;
+
+  if (component.sourceComponentId) {
+    outer.style.overflow = 'hidden';
+    outer.style.display = 'flex';
+    outer.style.flexDirection = 'column';
+
+    const header = document.createElement('div');
+    Object.assign(header.style, {
+      fontSize: '11px',
+      color: 'rgba(0,0,0,0.4)',
+      padding: '0 0 4px 0',
+      userSelect: 'none',
+      flexShrink: '0',
+    });
+    header.textContent = '—';
+    outer.appendChild(header);
+
+    const contentEl = document.createElement('div');
+    contentEl.style.flex = '1';
+    contentEl.style.overflow = 'auto';
+    outer.appendChild(contentEl);
+    renderTarget = contentEl;
+
+    document.addEventListener('outliner:node-focus', (e: Event) => {
+      const detail = (e as CustomEvent<NodeFocusDetail>).detail;
+      if (detail.outlinerFrameId !== component.sourceComponentId) return;
+      docNodeId = detail.nodeId;
+      header.textContent = detail.nodeText || '(no title)';
+      nodes = [];
+      render();
+      void fetch(`/api/docs/${encodeURIComponent(detail.nodeId)}`)
+        .then((res) => (res.ok ? (res.json() as Promise<unknown>) : Promise.resolve(null)))
+        .then((data) => {
+          if (docNodeId !== detail.nodeId) return;
+          const raw = (data as Record<string, unknown> | null)?.nodes;
+          nodes = Array.isArray(raw) ? (raw as TreeNode[]) : [];
+          render();
+        })
+        .catch(() => render());
+    });
+  }
+
   const scheduleSave = (): void => {
-    if (!resolvedTreeId) return;
+    const saveUrl = docNodeId !== null
+      ? `/api/docs/${encodeURIComponent(docNodeId)}`
+      : resolvedTreeId
+      ? `/api/trees/${encodeURIComponent(resolvedTreeId)}`
+      : null;
+    if (!saveUrl) return;
     if (saveTimer) clearTimeout(saveTimer);
     saveTimer = setTimeout(() => {
-      void fetch(`/api/trees/${encodeURIComponent(resolvedTreeId!)}`, {
+      void fetch(saveUrl, {
         method: 'PUT',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ nodes }),
@@ -569,12 +620,12 @@ export const renderOutliner = (
       hint.addEventListener('keydown', (e: KeyboardEvent) => {
         if (e.key === 'Enter') hint.click();
       });
-      outer.replaceChildren(hint);
+      renderTarget.replaceChildren(hint);
       return;
     }
 
     const ul = buildUl(nodes, 0);
-    outer.replaceChildren(ul);
+    renderTarget.replaceChildren(ul);
     focusPending();
   };
 

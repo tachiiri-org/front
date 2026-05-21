@@ -9,6 +9,7 @@ export type OutlinerComponent = {
   data: TreeEditorData;
   source?: TreeEditorSource;
   targetComponentId?: string;
+  sourceComponentId?: string;
 } & CssStyleProps;
 
 export const outlinerDefaults: OutlinerComponent = {
@@ -47,5 +48,6 @@ export const isOutlinerComponent = (value: unknown): value is OutlinerComponent 
     if (src.itemsPath !== undefined && typeof src.itemsPath !== 'string') return false;
   }
   if (c.targetComponentId !== undefined && typeof c.targetComponentId !== 'string') return false;
+  if (c.sourceComponentId !== undefined && typeof c.sourceComponentId !== 'string') return false;
   return ALL_CSS_PROP_KEYS.every((k) => c[k] === undefined || typeof c[k] === 'string');
 };

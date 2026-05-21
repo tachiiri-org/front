@@ -220,7 +220,7 @@ export const handleApiRequest = async (request: Request, env: Env): Promise<Resp
     const docId = decodeURIComponent(docsMatch[1]);
     if (request.method === 'GET') {
       const body = await backend.getText(`docs/${docId}.json`);
-      const responseBody = body ?? JSON.stringify({ content: '' });
+      const responseBody = body ?? JSON.stringify({ nodes: [] });
       return new Response(responseBody, { headers: { 'Content-Type': 'application/json' } });
     }
     if (request.method === 'PUT') return handleResourcePut(request, backend, 'docs/', docId);
