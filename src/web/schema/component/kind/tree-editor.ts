@@ -7,6 +7,7 @@ export type TreeNode = {
   text: string;
   children?: TreeNode[];
   status?: 'accepted' | 'proposed';
+  type?: 'knowledge' | 'issue';
   proposedAt?: string;
   proposedBy?: string;
 };

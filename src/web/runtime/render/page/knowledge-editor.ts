@@ -229,11 +229,12 @@ export const renderKnowledgeEditor = (
       row.style.gap = '6px';
 
       const isProposed = node.status === 'proposed';
+      const isIssue = node.type === 'issue';
 
       const bullet = document.createElement('span');
       bullet.textContent = !node.children?.length ? '•' : collapsedIds.has(node.id) ? '▸' : '▾';
       bullet.style.userSelect = 'none';
-      bullet.style.color = isProposed ? 'rgba(200, 120, 0, 0.7)' : 'rgba(0,0,0,0.35)';
+      bullet.style.color = isIssue ? 'rgba(0, 140, 60, 0.7)' : isProposed ? 'rgba(200, 120, 0, 0.7)' : 'rgba(0,0,0,0.35)';
       bullet.style.flexShrink = '0';
       bullet.style.width = '10px';
       bullet.style.fontSize = '10px';
@@ -259,14 +260,14 @@ export const renderKnowledgeEditor = (
         flex: '1',
         border: 'none',
         outline: 'none',
-        background: isProposed ? 'rgba(255, 160, 0, 0.07)' : 'transparent',
+        background: isIssue ? 'rgba(0, 160, 80, 0.07)' : isProposed ? 'rgba(255, 160, 0, 0.07)' : 'transparent',
         fontFamily: 'inherit',
         fontSize: 'inherit',
         lineHeight: 'inherit',
         padding: '2px 4px',
-        color: isProposed ? 'rgba(160, 80, 0, 0.85)' : 'inherit',
+        color: isIssue ? 'rgba(0, 100, 50, 0.85)' : isProposed ? 'rgba(160, 80, 0, 0.85)' : 'inherit',
         fontStyle: isProposed ? 'italic' : 'normal',
-        borderRadius: isProposed ? '3px' : '0',
+        borderRadius: isIssue || isProposed ? '3px' : '0',
       });
 
       input.addEventListener('focus', () => {
@@ -277,6 +278,17 @@ export const renderKnowledgeEditor = (
       });
 
       input.addEventListener('input', () => {
+        if (input.value === '?') {
+          const loc = findNode(nodes, node.id);
+          if (loc) {
+            loc.parent[loc.index].type = 'issue';
+            loc.parent[loc.index].text = '';
+            pendingFocusId = node.id;
+            scheduleSave();
+            render();
+          }
+          return;
+        }
         const loc = findNode(nodes, node.id);
         if (loc) {
           loc.parent[loc.index].text = input.value;

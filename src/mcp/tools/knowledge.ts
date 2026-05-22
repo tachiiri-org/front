@@ -8,6 +8,7 @@ type KnowledgeNode = {
   text: string;
   children: KnowledgeNode[];
   status: "accepted" | "proposed";
+  type?: "knowledge" | "issue";
   proposedAt?: string;
   proposedBy?: string;
 };
@@ -112,22 +113,11 @@ export const KNOWLEDGE_TOOLS = [
       properties: {
         tree_id: { type: "string", description: "Tree ID" },
         text: { type: "string", description: "Node text content" },
+        type: { type: "string", enum: ["knowledge", "issue"], description: "Node type. Use 'issue' for discussion points or detected gaps. Defaults to 'knowledge'." },
         parent_id: { type: "string", description: "Parent node ID. Omit to add at root level." },
         node_id: { type: "string", description: "Existing node ID to update. Omit to create a new node." },
       },
       required: ["tree_id", "text"],
-    },
-  },
-  {
-    name: "knowledge_accept",
-    description: "Accept a proposed node in the list editor tree, marking it as accepted.",
-    inputSchema: {
-      type: "object",
-      properties: {
-        tree_id: { type: "string", description: "Tree ID" },
-        node_id: { type: "string", description: "Node ID to accept" },
-      },
-      required: ["tree_id", "node_id"],
     },
   },
   {
@@ -173,6 +163,8 @@ export async function callKnowledgeTool(
       const text = String(args.text);
       const tree = await readTree(env, treeId);
 
+      const nodeType = args.type === "issue" ? "issue" : "knowledge";
+
       if (args.node_id) {
         const node = findNode(tree.nodes, String(args.node_id));
         if (!node) {
@@ -180,6 +172,7 @@ export async function callKnowledgeTool(
         }
         node.text = text;
         node.status = "proposed";
+        node.type = nodeType;
         node.proposedAt = new Date().toISOString();
         node.proposedBy = "claude";
         await writeTree(env, treeId, tree);
@@ -191,6 +184,7 @@ export async function callKnowledgeTool(
         text,
         children: [],
         status: "proposed",
+        type: nodeType,
         proposedAt: new Date().toISOString(),
         proposedBy: "claude",
       };
