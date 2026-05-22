@@ -107,10 +107,14 @@ const updateNodeSelectionVisuals = (
 ): void => {
   const lo = anchorIdx !== null && activeIdx !== null ? Math.min(anchorIdx, activeIdx) : -1;
   const hi = anchorIdx !== null && activeIdx !== null ? Math.max(anchorIdx, activeIdx) : -1;
-  const inputs = container.querySelectorAll<HTMLInputElement>('[data-node-id]');
-  for (const input of inputs) {
-    const idx = allIds.indexOf(input.dataset.nodeId ?? '');
-    input.style.background = lo >= 0 && idx >= lo && idx <= hi ? 'rgba(0, 120, 255, 0.12)' : 'transparent';
+  const rows = container.querySelectorAll<HTMLElement>('[data-node-row]');
+  for (const row of rows) {
+    const idx = allIds.indexOf(row.dataset.nodeRow ?? '');
+    if (lo >= 0 && idx >= lo && idx <= hi) {
+      row.style.background = 'rgba(0, 120, 255, 0.12)';
+    } else {
+      row.style.background = row.dataset.inPath === 'true' ? 'rgba(0, 120, 255, 0.08)' : 'transparent';
+    }
   }
 };
 
@@ -121,9 +125,10 @@ export const renderKnowledgeEditor = (
 ): HTMLElement => {
   const outer = document.createElement('div');
   outer.dataset.frameId = id;
-  outer.style.overflow = 'auto';
+  outer.style.overflow = 'hidden';
+  outer.style.display = 'flex';
+  outer.style.flexDirection = 'column';
   outer.style.boxSizing = 'border-box';
-  outer.style.padding = '8px 12px';
   outer.style.fontSize = '13px';
   outer.style.lineHeight = '1.5';
   applyCssProps(outer, component as unknown as Record<string, unknown>);
@@ -135,7 +140,6 @@ export const renderKnowledgeEditor = (
   let pollTimer: ReturnType<typeof setInterval> | null = null;
   let anchorIdx: number | null = null;
   let activeIdx: number | null = null;
-  const collapsedIds = new Set<string>();
   let resolvedTreeId = treeId;
   let docNodeId: string | null = null;
   let renderTarget: HTMLElement = outer;
@@ -143,10 +147,6 @@ export const renderKnowledgeEditor = (
   const history: TreeNode[][] = [];
 
   if (component.sourceComponentId) {
-    outer.style.overflow = 'hidden';
-    outer.style.display = 'flex';
-    outer.style.flexDirection = 'column';
-
     const header = document.createElement('div');
     Object.assign(header.style, {
       fontSize: '11px',
@@ -210,56 +210,51 @@ export const renderKnowledgeEditor = (
     if (!pendingFocusId) return;
     const fid = pendingFocusId;
     pendingFocusId = null;
-    const el = outer.querySelector<HTMLInputElement>(`[data-node-id="${CSS.escape(fid)}"]`);
+    const el = outer.querySelector<HTMLTextAreaElement>(`[data-node-id="${CSS.escape(fid)}"]`);
     el?.focus();
   };
 
-  const buildUl = (list: TreeNode[], depth: number): HTMLUListElement => {
-    const ul = document.createElement('ul');
-    ul.style.listStyle = 'none';
-    ul.style.padding = depth === 0 ? '0' : '0 0 0 20px';
-    ul.style.margin = '0';
+  const buildColumn = (list: TreeNode[], fullPath: string[], columnIndex: number): HTMLElement => {
+    const col = document.createElement('div');
+    col.style.width = 'max-content';
+    col.style.maxWidth = '40vw';
+    col.style.minWidth = '180px';
+    col.style.borderRight = '1px solid rgba(0,0,0,0.2)';
+    col.style.overflowY = 'auto';
+    col.style.overflowX = 'hidden';
+    col.style.flexShrink = '0';
+    col.style.boxSizing = 'border-box';
+    col.style.padding = '4px 0';
 
     for (const node of list) {
-      const li = document.createElement('li');
-
-      const row = document.createElement('div');
-      row.style.display = 'flex';
-      row.style.alignItems = 'center';
-      row.style.gap = '6px';
-
+      const isSelectedInPath = fullPath[columnIndex] === node.id;
       const isProposed = node.status === 'proposed';
       const isIssue = node.type === 'issue';
 
-      const bullet = document.createElement('span');
-      bullet.textContent = !node.children?.length ? '•' : collapsedIds.has(node.id) ? '▸' : '▾';
-      bullet.style.userSelect = 'none';
-      bullet.style.color = isIssue ? 'rgba(0, 140, 60, 0.7)' : isProposed ? 'rgba(200, 120, 0, 0.7)' : 'rgba(0,0,0,0.35)';
-      bullet.style.flexShrink = '0';
-      bullet.style.width = '10px';
-      bullet.style.fontSize = '10px';
-      if (node.children?.length) {
-        bullet.style.cursor = 'pointer';
-        bullet.addEventListener('click', () => {
-          if (collapsedIds.has(node.id)) {
-            collapsedIds.delete(node.id);
-          } else {
-            collapsedIds.add(node.id);
-          }
-          pendingFocusId = node.id;
-          render();
-        });
-      }
+      const row = document.createElement('div');
+      row.dataset.nodeRow = node.id;
+      row.dataset.inPath = isSelectedInPath ? 'true' : 'false';
+      row.style.display = 'flex';
+      row.style.alignItems = 'flex-start';
+      row.style.gap = '4px';
+      row.style.padding = '1px 8px 1px 12px';
+      row.style.background = isSelectedInPath ? 'rgba(0, 120, 255, 0.08)' : 'transparent';
 
-      const input = document.createElement('input');
-      input.type = 'text';
+      const input = document.createElement('textarea');
       input.value = node.text;
+      input.rows = 1;
       input.dataset.nodeId = node.id;
       input.dataset.navInput = 'node';
+      input.dataset.columnIndex = String(columnIndex);
       Object.assign(input.style, {
-        flex: '1',
+        display: 'block',
+        width: '100%',
         border: 'none',
         outline: 'none',
+        resize: 'none',
+        overflow: 'hidden',
+        whiteSpace: 'pre-wrap',
+        wordBreak: 'break-word',
         background: isIssue ? 'rgba(0, 160, 80, 0.07)' : isProposed ? 'rgba(255, 160, 0, 0.07)' : 'transparent',
         fontFamily: 'inherit',
         fontSize: 'inherit',
@@ -268,16 +263,22 @@ export const renderKnowledgeEditor = (
         color: isIssue ? 'rgba(0, 100, 50, 0.85)' : isProposed ? 'rgba(160, 80, 0, 0.85)' : 'inherit',
         fontStyle: isProposed ? 'italic' : 'normal',
         borderRadius: isIssue || isProposed ? '3px' : '0',
+        boxSizing: 'border-box',
       });
+      (input.style as unknown as Record<string, string>)['field-sizing'] = 'content';
 
       input.addEventListener('focus', () => {
         if (focusedNodeId !== node.id) {
           focusedNodeId = node.id;
           dispatchNodeFocus(id, node.id, node.text);
+          pendingFocusId = node.id;
+          render();
         }
       });
 
       input.addEventListener('input', () => {
+        input.style.height = 'auto';
+        input.style.height = `${input.scrollHeight}px`;
         if (input.value === '?') {
           const loc = findNode(nodes, node.id);
           if (loc) {
@@ -310,7 +311,7 @@ export const renderKnowledgeEditor = (
         if (anchorIdx === null) return;
         anchorIdx = null;
         activeIdx = null;
-        outer.querySelectorAll<HTMLInputElement>('[data-node-id]').forEach(inp => { inp.style.background = 'transparent'; });
+        updateNodeSelectionVisuals(outer, [], null, null);
       });
 
       input.addEventListener('keydown', (e: KeyboardEvent) => {
@@ -361,6 +362,7 @@ export const renderKnowledgeEditor = (
           const prevId = idx > 0 ? allIds[idx - 1] : null;
           const loc = findNode(nodes, node.id);
           if (loc) loc.parent.splice(loc.index, 1);
+          focusedNodeId = prevId;
           pendingFocusId = prevId;
           scheduleSave();
           render();
@@ -376,6 +378,7 @@ export const renderKnowledgeEditor = (
           const prevId = idx > 0 ? allIds[idx - 1] : null;
           const loc = findNode(nodes, node.id);
           if (loc) loc.parent.splice(loc.index, 1);
+          focusedNodeId = prevId;
           pendingFocusId = prevId;
           scheduleSave();
           render();
@@ -469,26 +472,6 @@ export const renderKnowledgeEditor = (
           return;
         }
 
-        if (e.key === 'ArrowDown' && e.ctrlKey) {
-          e.preventDefault();
-          if (node.children?.length && collapsedIds.has(node.id)) {
-            collapsedIds.delete(node.id);
-            pendingFocusId = node.id;
-            render();
-          }
-          return;
-        }
-
-        if (e.key === 'ArrowUp' && e.ctrlKey) {
-          e.preventDefault();
-          if (node.children?.length && !collapsedIds.has(node.id)) {
-            collapsedIds.add(node.id);
-            pendingFocusId = node.id;
-            render();
-          }
-          return;
-        }
-
         if (e.key === 'ArrowUp' && e.shiftKey && e.altKey) {
           e.preventDefault();
           if (anchorIdx !== null && activeIdx !== null) {
@@ -571,10 +554,16 @@ export const renderKnowledgeEditor = (
           const idx = allIds.indexOf(node.id);
           if (idx < 0) return;
           if (anchorIdx === null) anchorIdx = idx;
-          const newActiveIdx = Math.max(0, (activeIdx ?? idx) - 1);
+          const colIdx = parseInt(input.dataset.columnIndex ?? '0', 10);
+          const colInputs = Array.from(outer.querySelectorAll<HTMLTextAreaElement>(`[data-nav-input][data-column-index="${colIdx}"]`))
+            .filter(inp => inp.offsetParent !== null);
+          const colPos = colInputs.indexOf(input);
+          if (colPos <= 0) return;
+          const prevInput = colInputs[colPos - 1];
+          const newActiveIdx = allIds.indexOf(prevInput.dataset.nodeId ?? '');
           activeIdx = newActiveIdx;
+          prevInput.focus();
           updateNodeSelectionVisuals(outer, allIds, anchorIdx, activeIdx);
-          outer.querySelector<HTMLInputElement>(`[data-node-id="${CSS.escape(allIds[newActiveIdx])}"]`)?.focus();
           return;
         }
 
@@ -584,10 +573,16 @@ export const renderKnowledgeEditor = (
           const idx = allIds.indexOf(node.id);
           if (idx < 0) return;
           if (anchorIdx === null) anchorIdx = idx;
-          const newActiveIdx = Math.min(allIds.length - 1, (activeIdx ?? idx) + 1);
+          const colIdx = parseInt(input.dataset.columnIndex ?? '0', 10);
+          const colInputs = Array.from(outer.querySelectorAll<HTMLTextAreaElement>(`[data-nav-input][data-column-index="${colIdx}"]`))
+            .filter(inp => inp.offsetParent !== null);
+          const colPos = colInputs.indexOf(input);
+          if (colPos >= colInputs.length - 1) return;
+          const nextInput = colInputs[colPos + 1];
+          const newActiveIdx = allIds.indexOf(nextInput.dataset.nodeId ?? '');
           activeIdx = newActiveIdx;
+          nextInput.focus();
           updateNodeSelectionVisuals(outer, allIds, anchorIdx, activeIdx);
-          outer.querySelector<HTMLInputElement>(`[data-node-id="${CSS.escape(allIds[newActiveIdx])}"]`)?.focus();
           return;
         }
 
@@ -661,73 +656,96 @@ export const renderKnowledgeEditor = (
 
         if (e.key === 'ArrowRight' && input.selectionStart === input.value.length && input.selectionEnd === input.value.length) {
           e.preventDefault();
-          if (anchorIdx !== null) {
-            anchorIdx = null; activeIdx = null;
-            updateNodeSelectionVisuals(outer, [], null, null);
+          if (anchorIdx !== null) { anchorIdx = null; activeIdx = null; updateNodeSelectionVisuals(outer, [], null, null); }
+          if (node.children?.length) {
+            pendingFocusId = node.children[0].id;
+            render();
           }
-          const navInputs = Array.from(outer.querySelectorAll<HTMLInputElement>('[data-nav-input]'))
-            .filter(inp => inp.offsetParent !== null);
-          const idx = navInputs.indexOf(input);
-          if (idx < navInputs.length - 1) navInputs[idx + 1].focus();
           return;
         }
 
         if (e.key === 'ArrowLeft' && input.selectionStart === 0 && input.selectionEnd === 0) {
           e.preventDefault();
-          if (anchorIdx !== null) {
-            anchorIdx = null; activeIdx = null;
-            updateNodeSelectionVisuals(outer, [], null, null);
-          }
-          const navInputs = Array.from(outer.querySelectorAll<HTMLInputElement>('[data-nav-input]'))
-            .filter(inp => inp.offsetParent !== null);
-          const idx = navInputs.indexOf(input);
-          if (idx > 0) {
-            const prev = navInputs[idx - 1];
-            prev.focus();
-            prev.setSelectionRange(prev.value.length, prev.value.length);
+          if (anchorIdx !== null) { anchorIdx = null; activeIdx = null; updateNodeSelectionVisuals(outer, [], null, null); }
+          const ancestors = getAncestors(node.id, nodes);
+          if (ancestors && ancestors.length > 0) {
+            pendingFocusId = ancestors[ancestors.length - 1];
+            render();
           }
           return;
         }
 
         if (e.key === 'ArrowUp' && !e.ctrlKey) {
+          const onFirstLine = !(input.value.slice(0, input.selectionStart ?? 0).includes('\n'));
+          if (!onFirstLine) return;
           e.preventDefault();
-          if (anchorIdx !== null) {
-            anchorIdx = null; activeIdx = null;
-            updateNodeSelectionVisuals(outer, [], null, null);
-          }
-          const navInputs = Array.from(outer.querySelectorAll<HTMLInputElement>('[data-nav-input]'))
+          if (anchorIdx !== null) { anchorIdx = null; activeIdx = null; updateNodeSelectionVisuals(outer, [], null, null); }
+          const colIdx = parseInt(input.dataset.columnIndex ?? '0', 10);
+          const colInputs = Array.from(outer.querySelectorAll<HTMLTextAreaElement>(`[data-nav-input][data-column-index="${colIdx}"]`))
             .filter(inp => inp.offsetParent !== null);
-          const idx = navInputs.indexOf(input);
-          if (idx > 0) navInputs[idx - 1].focus();
+          const pos = colInputs.indexOf(input);
+          if (pos > 0) colInputs[pos - 1].focus();
           return;
         }
 
         if (e.key === 'ArrowDown' && !e.ctrlKey) {
+          const onLastLine = !(input.value.slice(input.selectionStart ?? input.value.length).includes('\n'));
+          if (!onLastLine) return;
           e.preventDefault();
-          if (anchorIdx !== null) {
-            anchorIdx = null; activeIdx = null;
-            updateNodeSelectionVisuals(outer, [], null, null);
-          }
-          const navInputs = Array.from(outer.querySelectorAll<HTMLInputElement>('[data-nav-input]'))
+          if (anchorIdx !== null) { anchorIdx = null; activeIdx = null; updateNodeSelectionVisuals(outer, [], null, null); }
+          const colIdx = parseInt(input.dataset.columnIndex ?? '0', 10);
+          const colInputs = Array.from(outer.querySelectorAll<HTMLTextAreaElement>(`[data-nav-input][data-column-index="${colIdx}"]`))
             .filter(inp => inp.offsetParent !== null);
-          const idx = navInputs.indexOf(input);
-          if (idx < navInputs.length - 1) navInputs[idx + 1].focus();
+          const pos = colInputs.indexOf(input);
+          if (pos < colInputs.length - 1) colInputs[pos + 1].focus();
           return;
         }
       });
 
-      row.appendChild(bullet);
       row.appendChild(input);
-      li.appendChild(row);
 
-      if (node.children?.length && !collapsedIds.has(node.id)) {
-        li.appendChild(buildUl(node.children, depth + 1));
+      if (node.children?.length) {
+        const arrow = document.createElement('span');
+        arrow.textContent = '›';
+        Object.assign(arrow.style, {
+          userSelect: 'none',
+          color: isIssue ? 'rgba(0, 100, 50, 0.5)' : isProposed ? 'rgba(160, 80, 0, 0.5)' : 'rgba(0,0,0,0.25)',
+          fontSize: '14px',
+          flexShrink: '0',
+          paddingRight: '2px',
+        });
+        row.appendChild(arrow);
       }
 
-      ul.appendChild(li);
+      col.appendChild(row);
     }
 
-    return ul;
+    return col;
+  };
+
+  const buildColumns = (): HTMLElement => {
+    const fullPath: string[] = focusedNodeId
+      ? [...(getAncestors(focusedNodeId, nodes) ?? []), focusedNodeId]
+      : [];
+
+    const wrapper = document.createElement('div');
+    wrapper.style.display = 'flex';
+    wrapper.style.flex = '1';
+    wrapper.style.minHeight = '0';
+    wrapper.style.overflowX = 'auto';
+
+    wrapper.appendChild(buildColumn(nodes, fullPath, 0));
+
+    for (let i = 0; i < fullPath.length; i++) {
+      const loc = findNode(nodes, fullPath[i]);
+      if (!loc) break;
+      const selected = loc.parent[loc.index];
+      if (selected.children?.length) {
+        wrapper.appendChild(buildColumn(selected.children, fullPath, i + 1));
+      }
+    }
+
+    return wrapper;
   };
 
   const render = (): void => {
@@ -736,7 +754,7 @@ export const renderKnowledgeEditor = (
       Object.assign(hint.style, {
         color: 'rgba(0,0,0,0.3)',
         fontSize: '12px',
-        padding: '4px 0',
+        padding: '8px 12px',
         cursor: 'pointer',
         userSelect: 'none',
       });
@@ -755,8 +773,11 @@ export const renderKnowledgeEditor = (
       return;
     }
 
-    const ul = buildUl(nodes, 0);
-    renderTarget.replaceChildren(ul);
+    renderTarget.replaceChildren(buildColumns());
+    for (const ta of renderTarget.querySelectorAll<HTMLTextAreaElement>('textarea[data-node-id]')) {
+      ta.style.height = 'auto';
+      ta.style.height = `${ta.scrollHeight}px`;
+    }
     focusPending();
   };
 
@@ -791,7 +812,6 @@ export const renderKnowledgeEditor = (
           : (data as Record<string, unknown>).nodes ?? data;
         nodes = Array.isArray(raw) ? (raw as TreeNode[]) : [];
         render();
-        startPolling(component.source!.url, component.source!.itemsPath);
       })
       .catch(() => render());
   } else {
