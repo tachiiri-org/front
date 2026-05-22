@@ -69,6 +69,24 @@ const findDedentTarget = (list: TreeNode[], id: string, parentList: TreeNode[] |
   return null;
 };
 
+const getAncestors = (id: string, list: TreeNode[], ancestors: string[] = []): string[] | null => {
+  for (const n of list) {
+    if (n.id === id) return ancestors;
+    if (n.children) {
+      const found = getAncestors(id, n.children, [...ancestors, n.id]);
+      if (found !== null) return found;
+    }
+  }
+  return null;
+};
+
+const reassignIds = (nodeList: TreeNode[]): TreeNode[] =>
+  nodeList.map(n => ({
+    ...n,
+    id: randomId(),
+    children: n.children?.length ? reassignIds(n.children) : n.children,
+  }));
+
 const dispatchNodeFocus = (knowledgeEditorFrameId: string, nodeId: string, nodeText: string): void => {
   document.dispatchEvent(new CustomEvent('knowledge-editor:node-focus', {
     detail: { knowledgeEditorFrameId, nodeId, nodeText },
@@ -121,6 +139,8 @@ export const renderKnowledgeEditor = (
   let resolvedTreeId = treeId;
   let docNodeId: string | null = null;
   let renderTarget: HTMLElement = outer;
+  let clipboard: TreeNode[] | null = null;
+  const history: TreeNode[][] = [];
 
   if (component.sourceComponentId) {
     outer.style.overflow = 'hidden';
@@ -179,6 +199,11 @@ export const renderKnowledgeEditor = (
         body: JSON.stringify({ nodes }),
       });
     }, 500);
+  };
+
+  const pushHistory = (): void => {
+    history.push(cloneNodes(nodes));
+    if (history.length > 50) history.shift();
   };
 
   const focusPending = (): void => {
@@ -260,7 +285,16 @@ export const renderKnowledgeEditor = (
         }
       });
 
-      input.addEventListener('mousedown', () => {
+      input.addEventListener('mousedown', (e: MouseEvent) => {
+        if (e.shiftKey) {
+          e.preventDefault();
+          const allIds = flatIds(nodes);
+          const idx = allIds.indexOf(node.id);
+          if (anchorIdx === null) anchorIdx = idx;
+          activeIdx = idx;
+          updateNodeSelectionVisuals(outer, allIds, anchorIdx, activeIdx);
+          return;
+        }
         if (anchorIdx === null) return;
         anchorIdx = null;
         activeIdx = null;
@@ -270,6 +304,7 @@ export const renderKnowledgeEditor = (
       input.addEventListener('keydown', (e: KeyboardEvent) => {
         if (e.key === 'Enter' && e.ctrlKey && isProposed) {
           e.preventDefault();
+          pushHistory();
           const loc = findNode(nodes, node.id);
           if (loc) {
             const n = loc.parent[loc.index];
@@ -287,10 +322,14 @@ export const renderKnowledgeEditor = (
 
         if (e.key === 'Enter') {
           e.preventDefault();
+          pushHistory();
           anchorIdx = null; activeIdx = null;
-          const newNode: TreeNode = { id: randomId(), text: '' };
+          const cursor = input.selectionStart ?? input.value.length;
+          const tail = input.value.slice(cursor);
+          const newNode: TreeNode = { id: randomId(), text: tail };
           const loc = findNode(nodes, node.id);
           if (loc) {
+            loc.parent[loc.index].text = input.value.slice(0, cursor);
             loc.parent.splice(loc.index + 1, 0, newNode);
           } else {
             nodes.push(newNode);
@@ -303,6 +342,7 @@ export const renderKnowledgeEditor = (
 
         if (e.key === 'Backspace' && e.ctrlKey && e.shiftKey) {
           e.preventDefault();
+          pushHistory();
           anchorIdx = null; activeIdx = null;
           const allIds = flatIds(nodes);
           const idx = allIds.indexOf(node.id);
@@ -317,6 +357,7 @@ export const renderKnowledgeEditor = (
 
         if (e.key === 'Backspace' && input.value === '') {
           e.preventDefault();
+          pushHistory();
           anchorIdx = null; activeIdx = null;
           const allIds = flatIds(nodes);
           const idx = allIds.indexOf(node.id);
@@ -331,6 +372,7 @@ export const renderKnowledgeEditor = (
 
         if (e.key === 'Tab' && !e.shiftKey) {
           e.preventDefault();
+          pushHistory();
           if (anchorIdx !== null && activeIdx !== null) {
             const allIds = flatIds(nodes);
             const lo = Math.min(anchorIdx, activeIdx);
@@ -374,6 +416,7 @@ export const renderKnowledgeEditor = (
 
         if (e.key === 'Tab' && e.shiftKey) {
           e.preventDefault();
+          pushHistory();
           if (anchorIdx !== null && activeIdx !== null) {
             const allIds = flatIds(nodes);
             const lo = Math.min(anchorIdx, activeIdx);
@@ -443,6 +486,7 @@ export const renderKnowledgeEditor = (
             const selIds = allIds.slice(lo, hi + 1);
             const firstLoc = findNode(nodes, selIds[0]);
             if (firstLoc && firstLoc.index > 0 && selIds.every((sid, i) => firstLoc.parent[firstLoc.index + i]?.id === sid)) {
+              pushHistory();
               const block = firstLoc.parent.splice(firstLoc.index, selIds.length);
               firstLoc.parent.splice(firstLoc.index - 1, 0, ...block);
               scheduleSave();
@@ -459,6 +503,7 @@ export const renderKnowledgeEditor = (
             anchorIdx = null; activeIdx = null;
             const loc = findNode(nodes, node.id);
             if (loc && loc.index > 0) {
+              pushHistory();
               const tmp = loc.parent[loc.index - 1];
               loc.parent[loc.index - 1] = loc.parent[loc.index];
               loc.parent[loc.index] = tmp;
@@ -479,6 +524,7 @@ export const renderKnowledgeEditor = (
             const selIds = allIds.slice(lo, hi + 1);
             const firstLoc = findNode(nodes, selIds[0]);
             if (firstLoc && firstLoc.index + selIds.length < firstLoc.parent.length && selIds.every((sid, i) => firstLoc.parent[firstLoc.index + i]?.id === sid)) {
+              pushHistory();
               const block = firstLoc.parent.splice(firstLoc.index, selIds.length);
               firstLoc.parent.splice(firstLoc.index + 1, 0, ...block);
               scheduleSave();
@@ -495,6 +541,7 @@ export const renderKnowledgeEditor = (
             anchorIdx = null; activeIdx = null;
             const loc = findNode(nodes, node.id);
             if (loc && loc.index < loc.parent.length - 1) {
+              pushHistory();
               const tmp = loc.parent[loc.index + 1];
               loc.parent[loc.index + 1] = loc.parent[loc.index];
               loc.parent[loc.index] = tmp;
@@ -529,6 +576,74 @@ export const renderKnowledgeEditor = (
           activeIdx = newActiveIdx;
           updateNodeSelectionVisuals(outer, allIds, anchorIdx, activeIdx);
           outer.querySelector<HTMLInputElement>(`[data-node-id="${CSS.escape(allIds[newActiveIdx])}"]`)?.focus();
+          return;
+        }
+
+        if (e.key === 'z' && e.ctrlKey && !e.shiftKey && !e.altKey) {
+          e.preventDefault();
+          if (history.length > 0) {
+            nodes = history.pop()!;
+            anchorIdx = null; activeIdx = null;
+            scheduleSave();
+            render();
+          }
+          return;
+        }
+
+        if ((e.key === 'c' || e.key === 'x') && e.ctrlKey && !e.shiftKey && !e.altKey) {
+          e.preventDefault();
+          const allIds = flatIds(nodes);
+          let selIds: string[];
+          if (anchorIdx !== null && activeIdx !== null) {
+            const lo = Math.min(anchorIdx, activeIdx);
+            const hi = Math.max(anchorIdx, activeIdx);
+            selIds = allIds.slice(lo, hi + 1);
+          } else {
+            selIds = [node.id];
+          }
+          const idSet = new Set(selIds);
+          const topLevelSelIds = selIds.filter(sid => {
+            const ancestors = getAncestors(sid, nodes);
+            return ancestors !== null && !ancestors.some(a => idSet.has(a));
+          });
+          clipboard = topLevelSelIds.map(sid => {
+            const loc = findNode(nodes, sid);
+            return loc ? cloneNodes([loc.parent[loc.index]])[0] : null;
+          }).filter((n): n is TreeNode => n !== null);
+          if (e.key === 'x' && clipboard.length > 0) {
+            pushHistory();
+            const firstFlatIdx = allIds.indexOf(selIds[0]);
+            for (const sid of [...topLevelSelIds].reverse()) {
+              const loc = findNode(nodes, sid);
+              if (loc) loc.parent.splice(loc.index, 1);
+            }
+            anchorIdx = null; activeIdx = null;
+            const newAllIds = flatIds(nodes);
+            const focusTarget = firstFlatIdx > 0
+              ? newAllIds[Math.min(firstFlatIdx - 1, newAllIds.length - 1)]
+              : newAllIds[0];
+            pendingFocusId = focusTarget ?? null;
+            scheduleSave();
+            render();
+          }
+          return;
+        }
+
+        if (e.key === 'v' && e.ctrlKey && !e.shiftKey && !e.altKey) {
+          e.preventDefault();
+          if (!clipboard || clipboard.length === 0) return;
+          pushHistory();
+          const pasted = reassignIds(clipboard);
+          const loc = findNode(nodes, node.id);
+          if (loc) {
+            loc.parent.splice(loc.index + 1, 0, ...pasted);
+          } else {
+            nodes.push(...pasted);
+          }
+          anchorIdx = null; activeIdx = null;
+          pendingFocusId = pasted[0].id;
+          scheduleSave();
+          render();
           return;
         }
 
