@@ -114,6 +114,7 @@ export const renderKnowledgeEditor = (
   let pendingFocusId: string | null = null;
   let focusedNodeId: string | null = null;
   let saveTimer: ReturnType<typeof setTimeout> | null = null;
+  let pollTimer: ReturnType<typeof setInterval> | null = null;
   let anchorIdx: number | null = null;
   let activeIdx: number | null = null;
   const collapsedIds = new Set<string>();
@@ -171,6 +172,7 @@ export const renderKnowledgeEditor = (
     if (!saveUrl) return;
     if (saveTimer) clearTimeout(saveTimer);
     saveTimer = setTimeout(() => {
+      saveTimer = null;
       void fetch(saveUrl, {
         method: 'PUT',
         headers: { 'Content-Type': 'application/json' },
@@ -275,7 +277,9 @@ export const renderKnowledgeEditor = (
             delete n.proposedAt;
             delete n.proposedBy;
           }
-          pendingFocusId = node.id;
+          const allIds = flatIds(nodes);
+          const idx = allIds.indexOf(node.id);
+          pendingFocusId = idx < allIds.length - 1 ? allIds[idx + 1] : node.id;
           scheduleSave();
           render();
           return;
@@ -629,6 +633,26 @@ export const renderKnowledgeEditor = (
     focusPending();
   };
 
+  const startPolling = (fetchUrl: string, itemsPath?: string): void => {
+    if (pollTimer) clearInterval(pollTimer);
+    pollTimer = setInterval(() => {
+      if (saveTimer !== null) return;
+      void fetch(fetchUrl)
+        .then((res) => (res.ok ? (res.json() as Promise<unknown>) : null))
+        .then((data) => {
+          if (saveTimer !== null || data === null) return;
+          const raw = itemsPath
+            ? getByPath(data, itemsPath)
+            : (data as Record<string, unknown>).nodes ?? data;
+          if (!Array.isArray(raw)) return;
+          if (JSON.stringify(raw) === JSON.stringify(nodes)) return;
+          nodes = raw as TreeNode[];
+          render();
+        })
+        .catch(() => undefined);
+    }, 3000);
+  };
+
   if (component.source) {
     const treeMatch = component.source.url.match(/^\/api\/trees\/(.+)$/);
     if (treeMatch) resolvedTreeId = decodeURIComponent(treeMatch[1]);
@@ -640,6 +664,7 @@ export const renderKnowledgeEditor = (
           : (data as Record<string, unknown>).nodes ?? data;
         nodes = Array.isArray(raw) ? (raw as TreeNode[]) : [];
         render();
+        startPolling(component.source!.url, component.source!.itemsPath);
       })
       .catch(() => render());
   } else {

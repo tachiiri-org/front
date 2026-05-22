@@ -80,7 +80,7 @@ async function writeDoc(env: AuthorizeEnv, nodeId: string, doc: Doc): Promise<vo
 function findNode(nodes: KnowledgeNode[], id: string): KnowledgeNode | null {
   for (const node of nodes) {
     if (node.id === id) return node;
-    const found = findNode(node.children, id);
+    const found = findNode(node.children ?? [], id);
     if (found) return found;
   }
   return null;
