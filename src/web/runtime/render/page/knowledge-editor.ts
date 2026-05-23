@@ -151,6 +151,7 @@ export const renderKnowledgeEditor = (
   let focusedNodeId: string | null = null;
   let saveTimer: ReturnType<typeof setTimeout> | null = null;
   let pollTimer: ReturnType<typeof setInterval> | null = null;
+  let rafId: number | null = null;
   let anchorIdx: number | null = null;
   let activeIdx: number | null = null;
   let mousedownNodeId: string | null = null;
@@ -160,6 +161,482 @@ export const renderKnowledgeEditor = (
   let renderTarget: HTMLElement = outer;
   let clipboard: TreeNode[] | null = null;
   const history: TreeNode[][] = [];
+  const docCache = new Map<string, TreeNode[]>();
+  const inputCache = new Map<string, HTMLTextAreaElement>();
+
+  const scheduleRender = (): void => {
+    if (rafId !== null) return;
+    rafId = requestAnimationFrame(() => {
+      rafId = null;
+      render();
+    });
+  };
+
+  const createInput = (node: TreeNode): HTMLTextAreaElement => {
+    const input = document.createElement('textarea');
+    input.rows = 1;
+    input.dataset.nodeId = node.id;
+    input.dataset.navInput = 'node';
+    Object.assign(input.style, {
+      display: 'block',
+      width: '100%',
+      border: 'none',
+      outline: 'none',
+      resize: 'none',
+      overflow: 'hidden',
+      whiteSpace: 'pre-wrap',
+      wordBreak: 'break-word',
+      fontFamily: 'inherit',
+      fontSize: 'inherit',
+      lineHeight: 'inherit',
+      padding: '2px 4px',
+      boxSizing: 'border-box',
+    });
+    (input.style as unknown as Record<string, string>)['field-sizing'] = 'content';
+
+    input.addEventListener('focus', () => {
+      if (focusedNodeId !== node.id) {
+        const fromMouse = mousedownNodeId === node.id;
+        mousedownNodeId = null;
+        focusedNodeId = node.id;
+        dispatchNodeFocus(id, node.id, input.value);
+        pendingFocusId = node.id;
+        if (fromMouse) {
+          pendingSelectionStart = input.selectionStart;
+          render();
+        } else {
+          scheduleRender();
+        }
+      }
+    });
+
+    input.addEventListener('input', () => {
+      input.style.height = 'auto';
+      input.style.height = `${input.scrollHeight}px`;
+      if (input.value === '?') {
+        const loc = findNode(nodes, node.id);
+        if (loc) {
+          loc.parent[loc.index].type = 'issue';
+          loc.parent[loc.index].text = '';
+          input.value = '';
+          inputCache.delete(node.id);
+          pendingFocusId = node.id;
+          scheduleSave();
+          render();
+        }
+        return;
+      }
+      const loc = findNode(nodes, node.id);
+      if (loc) {
+        loc.parent[loc.index].text = input.value;
+        if (focusedNodeId === node.id) dispatchNodeTextChange(id, node.id, input.value);
+        scheduleSave();
+      }
+    });
+
+    input.addEventListener('mousedown', (e: MouseEvent) => {
+      mousedownNodeId = node.id;
+      if (e.shiftKey) {
+        e.preventDefault();
+        const allIds = flatIds(nodes);
+        const idx = allIds.indexOf(node.id);
+        if (anchorIdx === null) anchorIdx = idx;
+        activeIdx = idx;
+        updateNodeSelectionVisuals(outer, allIds, anchorIdx, activeIdx);
+        return;
+      }
+      if (anchorIdx === null) return;
+      anchorIdx = null;
+      activeIdx = null;
+      updateNodeSelectionVisuals(outer, [], null, null);
+    });
+
+    input.addEventListener('keydown', (e: KeyboardEvent) => {
+      const currentLoc = findNode(nodes, node.id);
+      const currentNode = currentLoc ? currentLoc.parent[currentLoc.index] : null;
+      const currentIsProposed = currentNode?.status === 'proposed';
+
+      if (e.key === 'Enter' && e.ctrlKey && currentIsProposed) {
+        e.preventDefault();
+        pushHistory();
+        if (currentNode) {
+          currentNode.status = 'accepted';
+          delete currentNode.proposedAt;
+          delete currentNode.proposedBy;
+        }
+        const allIds = flatIds(nodes);
+        const idx = allIds.indexOf(node.id);
+        pendingFocusId = idx < allIds.length - 1 ? allIds[idx + 1] : node.id;
+        scheduleSave();
+        render();
+        return;
+      }
+
+      if (e.key === 'Enter') {
+        e.preventDefault();
+        pushHistory();
+        anchorIdx = null; activeIdx = null;
+        const cursor = input.selectionStart ?? input.value.length;
+        const tail = input.value.slice(cursor);
+        const newNode: TreeNode = { id: randomId(), text: tail };
+        if (currentLoc) {
+          currentLoc.parent[currentLoc.index].text = input.value.slice(0, cursor);
+          input.value = input.value.slice(0, cursor);
+          currentLoc.parent.splice(currentLoc.index + 1, 0, newNode);
+        } else {
+          nodes.push(newNode);
+        }
+        pendingFocusId = newNode.id;
+        scheduleSave();
+        render();
+        return;
+      }
+
+      if (e.key === 'Backspace' && e.ctrlKey && e.shiftKey) {
+        e.preventDefault();
+        pushHistory();
+        anchorIdx = null; activeIdx = null;
+        const allIds = flatIds(nodes);
+        const idx = allIds.indexOf(node.id);
+        const prevId = idx > 0 ? allIds[idx - 1] : null;
+        if (currentLoc) currentLoc.parent.splice(currentLoc.index, 1);
+        focusedNodeId = prevId;
+        pendingFocusId = prevId;
+        scheduleSave();
+        render();
+        return;
+      }
+
+      if (e.key === 'Backspace' && input.value === '') {
+        e.preventDefault();
+        pushHistory();
+        anchorIdx = null; activeIdx = null;
+        const allIds = flatIds(nodes);
+        const idx = allIds.indexOf(node.id);
+        const prevId = idx > 0 ? allIds[idx - 1] : null;
+        if (currentLoc) currentLoc.parent.splice(currentLoc.index, 1);
+        focusedNodeId = prevId;
+        pendingFocusId = prevId;
+        scheduleSave();
+        render();
+        return;
+      }
+
+      if (e.key === 'Tab' && !e.shiftKey) {
+        e.preventDefault();
+        pushHistory();
+        if (anchorIdx !== null && activeIdx !== null) {
+          const allIds = flatIds(nodes);
+          const lo = Math.min(anchorIdx, activeIdx);
+          const hi = Math.max(anchorIdx, activeIdx);
+          const selIds = allIds.slice(lo, hi + 1);
+          for (const sid of selIds) {
+            const sloc = findNode(nodes, sid);
+            if (sloc && sloc.index > 0) {
+              const snode = sloc.parent.splice(sloc.index, 1)[0];
+              const prev = sloc.parent[sloc.index - 1];
+              if (!prev.children) prev.children = [];
+              prev.children.push(snode);
+            }
+          }
+          pendingFocusId = node.id;
+          scheduleSave();
+          render();
+          const newAllIds = flatIds(nodes);
+          const newLo = newAllIds.indexOf(selIds[0]);
+          const newHi = newAllIds.indexOf(selIds[selIds.length - 1]);
+          const wasAsc = anchorIdx <= activeIdx;
+          anchorIdx = wasAsc ? newLo : newHi;
+          activeIdx = wasAsc ? newHi : newLo;
+          updateNodeSelectionVisuals(outer, newAllIds, anchorIdx, activeIdx);
+        } else {
+          anchorIdx = null; activeIdx = null;
+          if (currentLoc && currentLoc.index > 0) {
+            const snode = currentLoc.parent.splice(currentLoc.index, 1)[0];
+            const prev = currentLoc.parent[currentLoc.index - 1];
+            if (!prev.children) prev.children = [];
+            prev.children.push(snode);
+            pendingFocusId = node.id;
+            scheduleSave();
+            render();
+          }
+        }
+        return;
+      }
+
+      if (e.key === 'Tab' && e.shiftKey) {
+        e.preventDefault();
+        pushHistory();
+        if (anchorIdx !== null && activeIdx !== null) {
+          const allIds = flatIds(nodes);
+          const lo = Math.min(anchorIdx, activeIdx);
+          const hi = Math.max(anchorIdx, activeIdx);
+          const selIds = allIds.slice(lo, hi + 1);
+          for (const sid of [...selIds].reverse()) {
+            const allLoc = findDedentTarget(nodes, sid);
+            if (allLoc) {
+              const sloc = findNode(nodes, sid);
+              if (sloc) {
+                const snode = sloc.parent.splice(sloc.index, 1)[0];
+                allLoc.parent.splice(allLoc.index + 1, 0, snode);
+              }
+            }
+          }
+          pendingFocusId = node.id;
+          scheduleSave();
+          render();
+          const newAllIds = flatIds(nodes);
+          const newLo = newAllIds.indexOf(selIds[0]);
+          const newHi = newAllIds.indexOf(selIds[selIds.length - 1]);
+          const wasAsc = anchorIdx <= activeIdx;
+          anchorIdx = wasAsc ? newLo : newHi;
+          activeIdx = wasAsc ? newHi : newLo;
+          updateNodeSelectionVisuals(outer, newAllIds, anchorIdx, activeIdx);
+        } else {
+          anchorIdx = null; activeIdx = null;
+          const allLoc = findDedentTarget(nodes, node.id);
+          if (allLoc && currentLoc) {
+            const snode = currentLoc.parent.splice(currentLoc.index, 1)[0];
+            allLoc.parent.splice(allLoc.index + 1, 0, snode);
+            pendingFocusId = node.id;
+            scheduleSave();
+            render();
+          }
+        }
+        return;
+      }
+
+      if (e.key === 'ArrowUp' && e.shiftKey && e.altKey) {
+        e.preventDefault();
+        if (anchorIdx !== null && activeIdx !== null) {
+          const allIds = flatIds(nodes);
+          const lo = Math.min(anchorIdx, activeIdx);
+          const hi = Math.max(anchorIdx, activeIdx);
+          const selIds = allIds.slice(lo, hi + 1);
+          const firstLoc = findNode(nodes, selIds[0]);
+          if (firstLoc && firstLoc.index > 0 && selIds.every((sid, i) => firstLoc.parent[firstLoc.index + i]?.id === sid)) {
+            pushHistory();
+            const block = firstLoc.parent.splice(firstLoc.index, selIds.length);
+            firstLoc.parent.splice(firstLoc.index - 1, 0, ...block);
+            scheduleSave();
+            const wasAsc = anchorIdx <= activeIdx;
+            render();
+            const newAllIds = flatIds(nodes);
+            const newLo = newAllIds.indexOf(selIds[0]);
+            const newHi = newAllIds.indexOf(selIds[selIds.length - 1]);
+            anchorIdx = wasAsc ? newLo : newHi;
+            activeIdx = wasAsc ? newHi : newLo;
+            updateNodeSelectionVisuals(outer, newAllIds, anchorIdx, activeIdx);
+          }
+        } else {
+          anchorIdx = null; activeIdx = null;
+          if (currentLoc && currentLoc.index > 0) {
+            pushHistory();
+            const tmp = currentLoc.parent[currentLoc.index - 1];
+            currentLoc.parent[currentLoc.index - 1] = currentLoc.parent[currentLoc.index];
+            currentLoc.parent[currentLoc.index] = tmp;
+            pendingFocusId = node.id;
+            scheduleSave();
+            render();
+          }
+        }
+        return;
+      }
+
+      if (e.key === 'ArrowDown' && e.shiftKey && e.altKey) {
+        e.preventDefault();
+        if (anchorIdx !== null && activeIdx !== null) {
+          const allIds = flatIds(nodes);
+          const lo = Math.min(anchorIdx, activeIdx);
+          const hi = Math.max(anchorIdx, activeIdx);
+          const selIds = allIds.slice(lo, hi + 1);
+          const firstLoc = findNode(nodes, selIds[0]);
+          if (firstLoc && firstLoc.index + selIds.length < firstLoc.parent.length && selIds.every((sid, i) => firstLoc.parent[firstLoc.index + i]?.id === sid)) {
+            pushHistory();
+            const block = firstLoc.parent.splice(firstLoc.index, selIds.length);
+            firstLoc.parent.splice(firstLoc.index + 1, 0, ...block);
+            scheduleSave();
+            const wasAsc = anchorIdx <= activeIdx;
+            render();
+            const newAllIds = flatIds(nodes);
+            const newLo = newAllIds.indexOf(selIds[0]);
+            const newHi = newAllIds.indexOf(selIds[selIds.length - 1]);
+            anchorIdx = wasAsc ? newLo : newHi;
+            activeIdx = wasAsc ? newHi : newLo;
+            updateNodeSelectionVisuals(outer, newAllIds, anchorIdx, activeIdx);
+          }
+        } else {
+          anchorIdx = null; activeIdx = null;
+          if (currentLoc && currentLoc.index < currentLoc.parent.length - 1) {
+            pushHistory();
+            const tmp = currentLoc.parent[currentLoc.index + 1];
+            currentLoc.parent[currentLoc.index + 1] = currentLoc.parent[currentLoc.index];
+            currentLoc.parent[currentLoc.index] = tmp;
+            pendingFocusId = node.id;
+            scheduleSave();
+            render();
+          }
+        }
+        return;
+      }
+
+      if (e.key === 'ArrowUp' && e.shiftKey) {
+        e.preventDefault();
+        const allIds = flatIds(nodes);
+        const idx = allIds.indexOf(node.id);
+        if (idx < 0) return;
+        if (anchorIdx === null) anchorIdx = idx;
+        const colIdx = parseInt(input.dataset.columnIndex ?? '0', 10);
+        const colInputs = Array.from(outer.querySelectorAll<HTMLTextAreaElement>(`[data-nav-input][data-column-index="${colIdx}"]`))
+          .filter(inp => inp.offsetParent !== null);
+        const colPos = colInputs.indexOf(input);
+        if (colPos <= 0) return;
+        const prevInput = colInputs[colPos - 1];
+        const newActiveIdx = allIds.indexOf(prevInput.dataset.nodeId ?? '');
+        activeIdx = newActiveIdx;
+        prevInput.focus();
+        updateNodeSelectionVisuals(outer, allIds, anchorIdx, activeIdx);
+        return;
+      }
+
+      if (e.key === 'ArrowDown' && e.shiftKey) {
+        e.preventDefault();
+        const allIds = flatIds(nodes);
+        const idx = allIds.indexOf(node.id);
+        if (idx < 0) return;
+        if (anchorIdx === null) anchorIdx = idx;
+        const colIdx = parseInt(input.dataset.columnIndex ?? '0', 10);
+        const colInputs = Array.from(outer.querySelectorAll<HTMLTextAreaElement>(`[data-nav-input][data-column-index="${colIdx}"]`))
+          .filter(inp => inp.offsetParent !== null);
+        const colPos = colInputs.indexOf(input);
+        if (colPos >= colInputs.length - 1) return;
+        const nextInput = colInputs[colPos + 1];
+        const newActiveIdx = allIds.indexOf(nextInput.dataset.nodeId ?? '');
+        activeIdx = newActiveIdx;
+        nextInput.focus();
+        updateNodeSelectionVisuals(outer, allIds, anchorIdx, activeIdx);
+        return;
+      }
+
+      if (e.key === 'z' && e.ctrlKey && !e.shiftKey && !e.altKey) {
+        e.preventDefault();
+        if (history.length > 0) {
+          nodes = history.pop()!;
+          anchorIdx = null; activeIdx = null;
+          scheduleSave();
+          render();
+        }
+        return;
+      }
+
+      if ((e.key === 'c' || e.key === 'x') && e.ctrlKey && !e.shiftKey && !e.altKey) {
+        e.preventDefault();
+        const allIds = flatIds(nodes);
+        let selIds: string[];
+        if (anchorIdx !== null && activeIdx !== null) {
+          const lo = Math.min(anchorIdx, activeIdx);
+          const hi = Math.max(anchorIdx, activeIdx);
+          selIds = allIds.slice(lo, hi + 1);
+        } else {
+          selIds = [node.id];
+        }
+        const idSet = new Set(selIds);
+        const topLevelSelIds = selIds.filter(sid => {
+          const ancestors = getAncestors(sid, nodes);
+          return ancestors !== null && !ancestors.some(a => idSet.has(a));
+        });
+        clipboard = topLevelSelIds.map(sid => {
+          const loc = findNode(nodes, sid);
+          return loc ? cloneNodes([loc.parent[loc.index]])[0] : null;
+        }).filter((n): n is TreeNode => n !== null);
+        if (e.key === 'x' && clipboard.length > 0) {
+          pushHistory();
+          const firstFlatIdx = allIds.indexOf(selIds[0]);
+          for (const sid of [...topLevelSelIds].reverse()) {
+            const loc = findNode(nodes, sid);
+            if (loc) loc.parent.splice(loc.index, 1);
+          }
+          anchorIdx = null; activeIdx = null;
+          const newAllIds = flatIds(nodes);
+          const focusTarget = firstFlatIdx > 0
+            ? newAllIds[Math.min(firstFlatIdx - 1, newAllIds.length - 1)]
+            : newAllIds[0];
+          pendingFocusId = focusTarget ?? null;
+          scheduleSave();
+          render();
+        }
+        return;
+      }
+
+      if (e.key === 'v' && e.ctrlKey && !e.shiftKey && !e.altKey) {
+        e.preventDefault();
+        if (!clipboard || clipboard.length === 0) return;
+        pushHistory();
+        const pasted = reassignIds(clipboard);
+        if (currentLoc) {
+          currentLoc.parent.splice(currentLoc.index + 1, 0, ...pasted);
+        } else {
+          nodes.push(...pasted);
+        }
+        anchorIdx = null; activeIdx = null;
+        pendingFocusId = pasted[0].id;
+        scheduleSave();
+        render();
+        return;
+      }
+
+      if (e.key === 'ArrowRight' && input.selectionStart === input.value.length && input.selectionEnd === input.value.length) {
+        e.preventDefault();
+        if (anchorIdx !== null) { anchorIdx = null; activeIdx = null; updateNodeSelectionVisuals(outer, [], null, null); }
+        if (currentNode?.children?.length) {
+          focusedNodeId = currentNode.children[0].id;
+          pendingFocusId = currentNode.children[0].id;
+          render();
+        }
+        return;
+      }
+
+      if (e.key === 'ArrowLeft' && input.selectionStart === 0 && input.selectionEnd === 0) {
+        e.preventDefault();
+        if (anchorIdx !== null) { anchorIdx = null; activeIdx = null; updateNodeSelectionVisuals(outer, [], null, null); }
+        const ancestors = getAncestors(node.id, nodes);
+        if (ancestors && ancestors.length > 0) {
+          focusedNodeId = ancestors[ancestors.length - 1];
+          pendingFocusId = ancestors[ancestors.length - 1];
+          render();
+        }
+        return;
+      }
+
+      if (e.key === 'ArrowUp' && !e.ctrlKey) {
+        const onFirstLine = !(input.value.slice(0, input.selectionStart ?? 0).includes('\n'));
+        if (!onFirstLine) return;
+        e.preventDefault();
+        if (anchorIdx !== null) { anchorIdx = null; activeIdx = null; updateNodeSelectionVisuals(outer, [], null, null); }
+        const colIdx = parseInt(input.dataset.columnIndex ?? '0', 10);
+        const colInputs = Array.from(outer.querySelectorAll<HTMLTextAreaElement>(`[data-nav-input][data-column-index="${colIdx}"]`))
+          .filter(inp => inp.offsetParent !== null);
+        const pos = colInputs.indexOf(input);
+        if (pos > 0) colInputs[pos - 1].focus();
+        return;
+      }
+
+      if (e.key === 'ArrowDown' && !e.ctrlKey) {
+        const onLastLine = !(input.value.slice(input.selectionStart ?? input.value.length).includes('\n'));
+        if (!onLastLine) return;
+        e.preventDefault();
+        if (anchorIdx !== null) { anchorIdx = null; activeIdx = null; updateNodeSelectionVisuals(outer, [], null, null); }
+        const colIdx = parseInt(input.dataset.columnIndex ?? '0', 10);
+        const colInputs = Array.from(outer.querySelectorAll<HTMLTextAreaElement>(`[data-nav-input][data-column-index="${colIdx}"]`))
+          .filter(inp => inp.offsetParent !== null);
+        const pos = colInputs.indexOf(input);
+        if (pos < colInputs.length - 1) colInputs[pos + 1].focus();
+        return;
+      }
+    });
+
+    return input;
+  };
 
   if (component.sourceComponentId) {
     const header = document.createElement('div');
@@ -184,6 +661,12 @@ export const renderKnowledgeEditor = (
       if (detail.knowledgeEditorFrameId !== component.sourceComponentId) return;
       docNodeId = detail.nodeId;
       header.textContent = detail.nodeText || '(no title)';
+      const cached = docCache.get(detail.nodeId);
+      if (cached !== undefined) {
+        nodes = cached;
+        render();
+        return;
+      }
       nodes = [];
       render();
       void fetch(`/api/docs/${encodeURIComponent(detail.nodeId)}`)
@@ -191,7 +674,9 @@ export const renderKnowledgeEditor = (
         .then((data) => {
           if (docNodeId !== detail.nodeId) return;
           const raw = (data as Record<string, unknown> | null)?.nodes;
-          nodes = Array.isArray(raw) ? (raw as TreeNode[]) : [];
+          const fetched = Array.isArray(raw) ? (raw as TreeNode[]) : [];
+          docCache.set(detail.nodeId, fetched);
+          nodes = fetched;
           render();
         })
         .catch(() => render());
@@ -208,6 +693,7 @@ export const renderKnowledgeEditor = (
     if (saveTimer) clearTimeout(saveTimer);
     saveTimer = setTimeout(() => {
       saveTimer = null;
+      if (docNodeId !== null) docCache.set(docNodeId, cloneNodes(nodes));
       void fetch(saveUrl, {
         method: 'PUT',
         headers: { 'Content-Type': 'application/json' },
@@ -261,471 +747,17 @@ export const renderKnowledgeEditor = (
       row.style.padding = '1px 8px 1px 12px';
       row.style.background = isSelectedInPath ? 'rgba(0, 120, 255, 0.08)' : 'transparent';
 
-      const input = document.createElement('textarea');
-      input.value = node.text;
-      input.rows = 1;
-      input.dataset.nodeId = node.id;
-      input.dataset.navInput = 'node';
+      let input = inputCache.get(node.id);
+      if (!input) {
+        input = createInput(node);
+        inputCache.set(node.id, input);
+      }
+      if (input.value !== node.text) input.value = node.text;
       input.dataset.columnIndex = String(columnIndex);
-      Object.assign(input.style, {
-        display: 'block',
-        width: '100%',
-        border: 'none',
-        outline: 'none',
-        resize: 'none',
-        overflow: 'hidden',
-        whiteSpace: 'pre-wrap',
-        wordBreak: 'break-word',
-        background: isIssue ? 'rgba(255, 160, 0, 0.07)' : isProposed ? 'rgba(0, 160, 80, 0.07)' : 'transparent',
-        fontFamily: 'inherit',
-        fontSize: 'inherit',
-        lineHeight: 'inherit',
-        padding: '2px 4px',
-        color: isIssue ? 'rgba(160, 80, 0, 0.85)' : isProposed ? 'rgba(0, 100, 50, 0.85)' : 'inherit',
-        fontStyle: isProposed ? 'italic' : 'normal',
-        borderRadius: isIssue || isProposed ? '3px' : '0',
-        boxSizing: 'border-box',
-      });
-      (input.style as unknown as Record<string, string>)['field-sizing'] = 'content';
-
-      input.addEventListener('focus', () => {
-        if (focusedNodeId !== node.id) {
-          const fromMouse = mousedownNodeId === node.id;
-          mousedownNodeId = null;
-          focusedNodeId = node.id;
-          dispatchNodeFocus(id, node.id, node.text);
-          pendingFocusId = node.id;
-          if (fromMouse) pendingSelectionStart = input.selectionStart;
-          render();
-        }
-      });
-
-      input.addEventListener('input', () => {
-        input.style.height = 'auto';
-        input.style.height = `${input.scrollHeight}px`;
-        if (input.value === '?') {
-          const loc = findNode(nodes, node.id);
-          if (loc) {
-            loc.parent[loc.index].type = 'issue';
-            loc.parent[loc.index].text = '';
-            pendingFocusId = node.id;
-            scheduleSave();
-            render();
-          }
-          return;
-        }
-        const loc = findNode(nodes, node.id);
-        if (loc) {
-          loc.parent[loc.index].text = input.value;
-          if (focusedNodeId === node.id) dispatchNodeTextChange(id, node.id, input.value);
-          scheduleSave();
-        }
-      });
-
-      input.addEventListener('mousedown', (e: MouseEvent) => {
-        mousedownNodeId = node.id;
-        if (e.shiftKey) {
-          e.preventDefault();
-          const allIds = flatIds(nodes);
-          const idx = allIds.indexOf(node.id);
-          if (anchorIdx === null) anchorIdx = idx;
-          activeIdx = idx;
-          updateNodeSelectionVisuals(outer, allIds, anchorIdx, activeIdx);
-          return;
-        }
-        if (anchorIdx === null) return;
-        anchorIdx = null;
-        activeIdx = null;
-        updateNodeSelectionVisuals(outer, [], null, null);
-      });
-
-      input.addEventListener('keydown', (e: KeyboardEvent) => {
-        if (e.key === 'Enter' && e.ctrlKey && isProposed) {
-          e.preventDefault();
-          pushHistory();
-          const loc = findNode(nodes, node.id);
-          if (loc) {
-            const n = loc.parent[loc.index];
-            n.status = 'accepted';
-            delete n.proposedAt;
-            delete n.proposedBy;
-          }
-          const allIds = flatIds(nodes);
-          const idx = allIds.indexOf(node.id);
-          pendingFocusId = idx < allIds.length - 1 ? allIds[idx + 1] : node.id;
-          scheduleSave();
-          render();
-          return;
-        }
-
-        if (e.key === 'Enter') {
-          e.preventDefault();
-          pushHistory();
-          anchorIdx = null; activeIdx = null;
-          const cursor = input.selectionStart ?? input.value.length;
-          const tail = input.value.slice(cursor);
-          const newNode: TreeNode = { id: randomId(), text: tail };
-          const loc = findNode(nodes, node.id);
-          if (loc) {
-            loc.parent[loc.index].text = input.value.slice(0, cursor);
-            loc.parent.splice(loc.index + 1, 0, newNode);
-          } else {
-            nodes.push(newNode);
-          }
-          pendingFocusId = newNode.id;
-          scheduleSave();
-          render();
-          return;
-        }
-
-        if (e.key === 'Backspace' && e.ctrlKey && e.shiftKey) {
-          e.preventDefault();
-          pushHistory();
-          anchorIdx = null; activeIdx = null;
-          const allIds = flatIds(nodes);
-          const idx = allIds.indexOf(node.id);
-          const prevId = idx > 0 ? allIds[idx - 1] : null;
-          const loc = findNode(nodes, node.id);
-          if (loc) loc.parent.splice(loc.index, 1);
-          focusedNodeId = prevId;
-          pendingFocusId = prevId;
-          scheduleSave();
-          render();
-          return;
-        }
-
-        if (e.key === 'Backspace' && input.value === '') {
-          e.preventDefault();
-          pushHistory();
-          anchorIdx = null; activeIdx = null;
-          const allIds = flatIds(nodes);
-          const idx = allIds.indexOf(node.id);
-          const prevId = idx > 0 ? allIds[idx - 1] : null;
-          const loc = findNode(nodes, node.id);
-          if (loc) loc.parent.splice(loc.index, 1);
-          focusedNodeId = prevId;
-          pendingFocusId = prevId;
-          scheduleSave();
-          render();
-          return;
-        }
-
-        if (e.key === 'Tab' && !e.shiftKey) {
-          e.preventDefault();
-          pushHistory();
-          if (anchorIdx !== null && activeIdx !== null) {
-            const allIds = flatIds(nodes);
-            const lo = Math.min(anchorIdx, activeIdx);
-            const hi = Math.max(anchorIdx, activeIdx);
-            const selIds = allIds.slice(lo, hi + 1);
-            for (const sid of selIds) {
-              const sloc = findNode(nodes, sid);
-              if (sloc && sloc.index > 0) {
-                const snode = sloc.parent[sloc.index];
-                const prev = sloc.parent[sloc.index - 1];
-                sloc.parent.splice(sloc.index, 1);
-                if (!prev.children) prev.children = [];
-                prev.children.push(snode);
-              }
-            }
-            pendingFocusId = node.id;
-            scheduleSave();
-            render();
-            const newAllIds = flatIds(nodes);
-            const newLo = newAllIds.indexOf(selIds[0]);
-            const newHi = newAllIds.indexOf(selIds[selIds.length - 1]);
-            const wasAsc = anchorIdx <= activeIdx;
-            anchorIdx = wasAsc ? newLo : newHi;
-            activeIdx = wasAsc ? newHi : newLo;
-            updateNodeSelectionVisuals(outer, newAllIds, anchorIdx, activeIdx);
-          } else {
-            anchorIdx = null; activeIdx = null;
-            const loc = findNode(nodes, node.id);
-            if (loc && loc.index > 0) {
-              const prev = loc.parent[loc.index - 1];
-              loc.parent.splice(loc.index, 1);
-              if (!prev.children) prev.children = [];
-              prev.children.push(node);
-              pendingFocusId = node.id;
-              scheduleSave();
-              render();
-            }
-          }
-          return;
-        }
-
-        if (e.key === 'Tab' && e.shiftKey) {
-          e.preventDefault();
-          pushHistory();
-          if (anchorIdx !== null && activeIdx !== null) {
-            const allIds = flatIds(nodes);
-            const lo = Math.min(anchorIdx, activeIdx);
-            const hi = Math.max(anchorIdx, activeIdx);
-            const selIds = allIds.slice(lo, hi + 1);
-            for (const sid of [...selIds].reverse()) {
-              const allLoc = findDedentTarget(nodes, sid);
-              if (allLoc) {
-                const sloc = findNode(nodes, sid);
-                if (sloc) {
-                  const snode = sloc.parent.splice(sloc.index, 1)[0];
-                  allLoc.parent.splice(allLoc.index + 1, 0, snode);
-                }
-              }
-            }
-            pendingFocusId = node.id;
-            scheduleSave();
-            render();
-            const newAllIds = flatIds(nodes);
-            const newLo = newAllIds.indexOf(selIds[0]);
-            const newHi = newAllIds.indexOf(selIds[selIds.length - 1]);
-            const wasAsc = anchorIdx <= activeIdx;
-            anchorIdx = wasAsc ? newLo : newHi;
-            activeIdx = wasAsc ? newHi : newLo;
-            updateNodeSelectionVisuals(outer, newAllIds, anchorIdx, activeIdx);
-          } else {
-            anchorIdx = null; activeIdx = null;
-            const allLoc = findDedentTarget(nodes, node.id);
-            if (allLoc) {
-              const loc = findNode(nodes, node.id);
-              if (loc) loc.parent.splice(loc.index, 1);
-              allLoc.parent.splice(allLoc.index + 1, 0, node);
-              pendingFocusId = node.id;
-              scheduleSave();
-              render();
-            }
-          }
-          return;
-        }
-
-        if (e.key === 'ArrowUp' && e.shiftKey && e.altKey) {
-          e.preventDefault();
-          if (anchorIdx !== null && activeIdx !== null) {
-            const allIds = flatIds(nodes);
-            const lo = Math.min(anchorIdx, activeIdx);
-            const hi = Math.max(anchorIdx, activeIdx);
-            const selIds = allIds.slice(lo, hi + 1);
-            const firstLoc = findNode(nodes, selIds[0]);
-            if (firstLoc && firstLoc.index > 0 && selIds.every((sid, i) => firstLoc.parent[firstLoc.index + i]?.id === sid)) {
-              pushHistory();
-              const block = firstLoc.parent.splice(firstLoc.index, selIds.length);
-              firstLoc.parent.splice(firstLoc.index - 1, 0, ...block);
-              scheduleSave();
-              const wasAsc = anchorIdx <= activeIdx;
-              render();
-              const newAllIds = flatIds(nodes);
-              const newLo = newAllIds.indexOf(selIds[0]);
-              const newHi = newAllIds.indexOf(selIds[selIds.length - 1]);
-              anchorIdx = wasAsc ? newLo : newHi;
-              activeIdx = wasAsc ? newHi : newLo;
-              updateNodeSelectionVisuals(outer, newAllIds, anchorIdx, activeIdx);
-            }
-          } else {
-            anchorIdx = null; activeIdx = null;
-            const loc = findNode(nodes, node.id);
-            if (loc && loc.index > 0) {
-              pushHistory();
-              const tmp = loc.parent[loc.index - 1];
-              loc.parent[loc.index - 1] = loc.parent[loc.index];
-              loc.parent[loc.index] = tmp;
-              pendingFocusId = node.id;
-              scheduleSave();
-              render();
-            }
-          }
-          return;
-        }
-
-        if (e.key === 'ArrowDown' && e.shiftKey && e.altKey) {
-          e.preventDefault();
-          if (anchorIdx !== null && activeIdx !== null) {
-            const allIds = flatIds(nodes);
-            const lo = Math.min(anchorIdx, activeIdx);
-            const hi = Math.max(anchorIdx, activeIdx);
-            const selIds = allIds.slice(lo, hi + 1);
-            const firstLoc = findNode(nodes, selIds[0]);
-            if (firstLoc && firstLoc.index + selIds.length < firstLoc.parent.length && selIds.every((sid, i) => firstLoc.parent[firstLoc.index + i]?.id === sid)) {
-              pushHistory();
-              const block = firstLoc.parent.splice(firstLoc.index, selIds.length);
-              firstLoc.parent.splice(firstLoc.index + 1, 0, ...block);
-              scheduleSave();
-              const wasAsc = anchorIdx <= activeIdx;
-              render();
-              const newAllIds = flatIds(nodes);
-              const newLo = newAllIds.indexOf(selIds[0]);
-              const newHi = newAllIds.indexOf(selIds[selIds.length - 1]);
-              anchorIdx = wasAsc ? newLo : newHi;
-              activeIdx = wasAsc ? newHi : newLo;
-              updateNodeSelectionVisuals(outer, newAllIds, anchorIdx, activeIdx);
-            }
-          } else {
-            anchorIdx = null; activeIdx = null;
-            const loc = findNode(nodes, node.id);
-            if (loc && loc.index < loc.parent.length - 1) {
-              pushHistory();
-              const tmp = loc.parent[loc.index + 1];
-              loc.parent[loc.index + 1] = loc.parent[loc.index];
-              loc.parent[loc.index] = tmp;
-              pendingFocusId = node.id;
-              scheduleSave();
-              render();
-            }
-          }
-          return;
-        }
-
-        if (e.key === 'ArrowUp' && e.shiftKey) {
-          e.preventDefault();
-          const allIds = flatIds(nodes);
-          const idx = allIds.indexOf(node.id);
-          if (idx < 0) return;
-          if (anchorIdx === null) anchorIdx = idx;
-          const colIdx = parseInt(input.dataset.columnIndex ?? '0', 10);
-          const colInputs = Array.from(outer.querySelectorAll<HTMLTextAreaElement>(`[data-nav-input][data-column-index="${colIdx}"]`))
-            .filter(inp => inp.offsetParent !== null);
-          const colPos = colInputs.indexOf(input);
-          if (colPos <= 0) return;
-          const prevInput = colInputs[colPos - 1];
-          const newActiveIdx = allIds.indexOf(prevInput.dataset.nodeId ?? '');
-          activeIdx = newActiveIdx;
-          prevInput.focus();
-          updateNodeSelectionVisuals(outer, allIds, anchorIdx, activeIdx);
-          return;
-        }
-
-        if (e.key === 'ArrowDown' && e.shiftKey) {
-          e.preventDefault();
-          const allIds = flatIds(nodes);
-          const idx = allIds.indexOf(node.id);
-          if (idx < 0) return;
-          if (anchorIdx === null) anchorIdx = idx;
-          const colIdx = parseInt(input.dataset.columnIndex ?? '0', 10);
-          const colInputs = Array.from(outer.querySelectorAll<HTMLTextAreaElement>(`[data-nav-input][data-column-index="${colIdx}"]`))
-            .filter(inp => inp.offsetParent !== null);
-          const colPos = colInputs.indexOf(input);
-          if (colPos >= colInputs.length - 1) return;
-          const nextInput = colInputs[colPos + 1];
-          const newActiveIdx = allIds.indexOf(nextInput.dataset.nodeId ?? '');
-          activeIdx = newActiveIdx;
-          nextInput.focus();
-          updateNodeSelectionVisuals(outer, allIds, anchorIdx, activeIdx);
-          return;
-        }
-
-        if (e.key === 'z' && e.ctrlKey && !e.shiftKey && !e.altKey) {
-          e.preventDefault();
-          if (history.length > 0) {
-            nodes = history.pop()!;
-            anchorIdx = null; activeIdx = null;
-            scheduleSave();
-            render();
-          }
-          return;
-        }
-
-        if ((e.key === 'c' || e.key === 'x') && e.ctrlKey && !e.shiftKey && !e.altKey) {
-          e.preventDefault();
-          const allIds = flatIds(nodes);
-          let selIds: string[];
-          if (anchorIdx !== null && activeIdx !== null) {
-            const lo = Math.min(anchorIdx, activeIdx);
-            const hi = Math.max(anchorIdx, activeIdx);
-            selIds = allIds.slice(lo, hi + 1);
-          } else {
-            selIds = [node.id];
-          }
-          const idSet = new Set(selIds);
-          const topLevelSelIds = selIds.filter(sid => {
-            const ancestors = getAncestors(sid, nodes);
-            return ancestors !== null && !ancestors.some(a => idSet.has(a));
-          });
-          clipboard = topLevelSelIds.map(sid => {
-            const loc = findNode(nodes, sid);
-            return loc ? cloneNodes([loc.parent[loc.index]])[0] : null;
-          }).filter((n): n is TreeNode => n !== null);
-          if (e.key === 'x' && clipboard.length > 0) {
-            pushHistory();
-            const firstFlatIdx = allIds.indexOf(selIds[0]);
-            for (const sid of [...topLevelSelIds].reverse()) {
-              const loc = findNode(nodes, sid);
-              if (loc) loc.parent.splice(loc.index, 1);
-            }
-            anchorIdx = null; activeIdx = null;
-            const newAllIds = flatIds(nodes);
-            const focusTarget = firstFlatIdx > 0
-              ? newAllIds[Math.min(firstFlatIdx - 1, newAllIds.length - 1)]
-              : newAllIds[0];
-            pendingFocusId = focusTarget ?? null;
-            scheduleSave();
-            render();
-          }
-          return;
-        }
-
-        if (e.key === 'v' && e.ctrlKey && !e.shiftKey && !e.altKey) {
-          e.preventDefault();
-          if (!clipboard || clipboard.length === 0) return;
-          pushHistory();
-          const pasted = reassignIds(clipboard);
-          const loc = findNode(nodes, node.id);
-          if (loc) {
-            loc.parent.splice(loc.index + 1, 0, ...pasted);
-          } else {
-            nodes.push(...pasted);
-          }
-          anchorIdx = null; activeIdx = null;
-          pendingFocusId = pasted[0].id;
-          scheduleSave();
-          render();
-          return;
-        }
-
-        if (e.key === 'ArrowRight' && input.selectionStart === input.value.length && input.selectionEnd === input.value.length) {
-          e.preventDefault();
-          if (anchorIdx !== null) { anchorIdx = null; activeIdx = null; updateNodeSelectionVisuals(outer, [], null, null); }
-          if (node.children?.length) {
-            pendingFocusId = node.children[0].id;
-            render();
-          }
-          return;
-        }
-
-        if (e.key === 'ArrowLeft' && input.selectionStart === 0 && input.selectionEnd === 0) {
-          e.preventDefault();
-          if (anchorIdx !== null) { anchorIdx = null; activeIdx = null; updateNodeSelectionVisuals(outer, [], null, null); }
-          const ancestors = getAncestors(node.id, nodes);
-          if (ancestors && ancestors.length > 0) {
-            pendingFocusId = ancestors[ancestors.length - 1];
-            render();
-          }
-          return;
-        }
-
-        if (e.key === 'ArrowUp' && !e.ctrlKey) {
-          const onFirstLine = !(input.value.slice(0, input.selectionStart ?? 0).includes('\n'));
-          if (!onFirstLine) return;
-          e.preventDefault();
-          if (anchorIdx !== null) { anchorIdx = null; activeIdx = null; updateNodeSelectionVisuals(outer, [], null, null); }
-          const colIdx = parseInt(input.dataset.columnIndex ?? '0', 10);
-          const colInputs = Array.from(outer.querySelectorAll<HTMLTextAreaElement>(`[data-nav-input][data-column-index="${colIdx}"]`))
-            .filter(inp => inp.offsetParent !== null);
-          const pos = colInputs.indexOf(input);
-          if (pos > 0) colInputs[pos - 1].focus();
-          return;
-        }
-
-        if (e.key === 'ArrowDown' && !e.ctrlKey) {
-          const onLastLine = !(input.value.slice(input.selectionStart ?? input.value.length).includes('\n'));
-          if (!onLastLine) return;
-          e.preventDefault();
-          if (anchorIdx !== null) { anchorIdx = null; activeIdx = null; updateNodeSelectionVisuals(outer, [], null, null); }
-          const colIdx = parseInt(input.dataset.columnIndex ?? '0', 10);
-          const colInputs = Array.from(outer.querySelectorAll<HTMLTextAreaElement>(`[data-nav-input][data-column-index="${colIdx}"]`))
-            .filter(inp => inp.offsetParent !== null);
-          const pos = colInputs.indexOf(input);
-          if (pos < colInputs.length - 1) colInputs[pos + 1].focus();
-          return;
-        }
-      });
+      input.style.background = isIssue ? 'rgba(255, 160, 0, 0.07)' : isProposed ? 'rgba(0, 160, 80, 0.07)' : 'transparent';
+      input.style.color = isIssue ? 'rgba(160, 80, 0, 0.85)' : isProposed ? 'rgba(0, 100, 50, 0.85)' : 'inherit';
+      input.style.fontStyle = isProposed ? 'italic' : 'normal';
+      input.style.borderRadius = isIssue || isProposed ? '3px' : '0';
 
       const marker = document.createElement('span');
       Object.assign(marker.style, {
