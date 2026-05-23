@@ -78,6 +78,22 @@ async function writeDoc(env: AuthorizeEnv, nodeId: string, doc: Doc): Promise<vo
   if (!response.ok) throw new Error(`doc_write_failed:${response.status}`);
 }
 
+function toOutline(nodes: KnowledgeNode[], depth = 0): string {
+  const indent = "  ".repeat(depth);
+  return nodes
+    .flatMap((node) => {
+      if (!node.text.trim()) return [];
+      const isProposed = node.status === "proposed";
+      const isIssue = node.type === "issue";
+      const text = node.text.replace(/^\?\s*/, "");
+      const prefix = isProposed ? (isIssue ? "? " : "~ ") : "";
+      const line = `${indent}${prefix}${text}`;
+      const childLines = node.children?.length ? toOutline(node.children, depth + 1) : "";
+      return childLines ? [line, childLines] : [line];
+    })
+    .join("\n");
+}
+
 function findNode(nodes: KnowledgeNode[], id: string): KnowledgeNode | null {
   for (const node of nodes) {
     if (node.id === id) return node;
@@ -155,7 +171,8 @@ export async function callKnowledgeTool(
     if (name === "knowledge_read") {
       const treeId = String(args.tree_id);
       const tree = await readTree(env, treeId);
-      return { content: [{ type: "text", text: JSON.stringify(tree, null, 2) }] };
+      const legend = "# ~ proposed knowledge  ? proposed issue\n";
+      return { content: [{ type: "text", text: legend + toOutline(tree.nodes) }] };
     }
 
     if (name === "knowledge_propose") {
