@@ -87,6 +87,19 @@ const reassignIds = (nodeList: TreeNode[]): TreeNode[] =>
     children: n.children?.length ? reassignIds(n.children) : n.children,
   }));
 
+const hasDescendants = (node: TreeNode): { issue: boolean; proposed: boolean } => {
+  let issue = false, proposed = false;
+  const check = (list: TreeNode[]) => {
+    for (const n of list) {
+      if (n.type === 'issue' || n.text.startsWith('?')) issue = true;
+      else if (n.status === 'proposed') proposed = true;
+      if (n.children?.length) check(n.children);
+    }
+  };
+  check(node.children ?? []);
+  return { issue, proposed };
+};
+
 const dispatchNodeFocus = (knowledgeEditorFrameId: string, nodeId: string, nodeText: string): void => {
   document.dispatchEvent(new CustomEvent('knowledge-editor:node-focus', {
     detail: { knowledgeEditorFrameId, nodeId, nodeText },
@@ -140,6 +153,8 @@ export const renderKnowledgeEditor = (
   let pollTimer: ReturnType<typeof setInterval> | null = null;
   let anchorIdx: number | null = null;
   let activeIdx: number | null = null;
+  let mousedownNodeId: string | null = null;
+  let pendingSelectionStart: number | null = null;
   let resolvedTreeId = treeId;
   let docNodeId: string | null = null;
   let renderTarget: HTMLElement = outer;
@@ -211,7 +226,12 @@ export const renderKnowledgeEditor = (
     const fid = pendingFocusId;
     pendingFocusId = null;
     const el = outer.querySelector<HTMLTextAreaElement>(`[data-node-id="${CSS.escape(fid)}"]`);
-    el?.focus();
+    if (!el) return;
+    el.focus();
+    if (pendingSelectionStart !== null) {
+      el.setSelectionRange(pendingSelectionStart, pendingSelectionStart);
+      pendingSelectionStart = null;
+    }
   };
 
   const buildColumn = (list: TreeNode[], fullPath: string[], columnIndex: number): HTMLElement => {
@@ -229,7 +249,8 @@ export const renderKnowledgeEditor = (
     for (const node of list) {
       const isSelectedInPath = fullPath[columnIndex] === node.id;
       const isProposed = node.status === 'proposed';
-      const isIssue = node.type === 'issue';
+      const isIssue = node.type === 'issue' || node.text.startsWith('?');
+      const desc = hasDescendants(node);
 
       const row = document.createElement('div');
       row.dataset.nodeRow = node.id;
@@ -255,12 +276,12 @@ export const renderKnowledgeEditor = (
         overflow: 'hidden',
         whiteSpace: 'pre-wrap',
         wordBreak: 'break-word',
-        background: isIssue ? 'rgba(0, 160, 80, 0.07)' : isProposed ? 'rgba(255, 160, 0, 0.07)' : 'transparent',
+        background: isIssue ? 'rgba(255, 160, 0, 0.07)' : isProposed ? 'rgba(0, 160, 80, 0.07)' : 'transparent',
         fontFamily: 'inherit',
         fontSize: 'inherit',
         lineHeight: 'inherit',
         padding: '2px 4px',
-        color: isIssue ? 'rgba(0, 100, 50, 0.85)' : isProposed ? 'rgba(160, 80, 0, 0.85)' : 'inherit',
+        color: isIssue ? 'rgba(160, 80, 0, 0.85)' : isProposed ? 'rgba(0, 100, 50, 0.85)' : 'inherit',
         fontStyle: isProposed ? 'italic' : 'normal',
         borderRadius: isIssue || isProposed ? '3px' : '0',
         boxSizing: 'border-box',
@@ -269,9 +290,12 @@ export const renderKnowledgeEditor = (
 
       input.addEventListener('focus', () => {
         if (focusedNodeId !== node.id) {
+          const fromMouse = mousedownNodeId === node.id;
+          mousedownNodeId = null;
           focusedNodeId = node.id;
           dispatchNodeFocus(id, node.id, node.text);
           pendingFocusId = node.id;
+          if (fromMouse) pendingSelectionStart = input.selectionStart;
           render();
         }
       });
@@ -299,6 +323,7 @@ export const renderKnowledgeEditor = (
       });
 
       input.addEventListener('mousedown', (e: MouseEvent) => {
+        mousedownNodeId = node.id;
         if (e.shiftKey) {
           e.preventDefault();
           const allIds = flatIds(nodes);
@@ -702,6 +727,22 @@ export const renderKnowledgeEditor = (
         }
       });
 
+      const marker = document.createElement('span');
+      Object.assign(marker.style, {
+        width: '6px',
+        height: '6px',
+        flexShrink: '0',
+        alignSelf: 'center',
+        borderRadius: '1px',
+        background: desc.issue
+          ? 'rgba(255, 160, 0, 0.65)'
+          : desc.proposed
+          ? 'rgba(0, 160, 80, 0.65)'
+          : !isIssue && !isProposed
+          ? 'rgba(0, 0, 0, 0.15)'
+          : 'transparent',
+      });
+      row.appendChild(marker);
       row.appendChild(input);
 
       if (node.children?.length) {
@@ -709,7 +750,7 @@ export const renderKnowledgeEditor = (
         arrow.textContent = '›';
         Object.assign(arrow.style, {
           userSelect: 'none',
-          color: isIssue ? 'rgba(0, 100, 50, 0.5)' : isProposed ? 'rgba(160, 80, 0, 0.5)' : 'rgba(0,0,0,0.25)',
+          color: isIssue ? 'rgba(160, 80, 0, 0.5)' : isProposed ? 'rgba(0, 100, 50, 0.5)' : 'rgba(0,0,0,0.25)',
           fontSize: '14px',
           flexShrink: '0',
           paddingRight: '2px',
