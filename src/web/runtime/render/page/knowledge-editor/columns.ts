@@ -1,6 +1,6 @@
 import type { TreeNode } from '../../../../schema/component/kind/tree-editor';
 import type { KnowledgeEditorContext } from './types';
-import { randomId, findNode, getAncestors, hasDescendants } from './ops';
+import { randomId, findNode, flatIds, getAncestors, hasDescendants } from './ops';
 import { createInput } from './input';
 
 export const buildColumn = (
@@ -9,6 +9,7 @@ export const buildColumn = (
   columnIndex: number,
   onAdd: (text: string) => void,
   ctx: KnowledgeEditorContext,
+  selectedIdSet: Set<string> = new Set(),
 ): HTMLElement => {
   const { state } = ctx;
   const col = document.createElement('div');
@@ -102,12 +103,17 @@ export const buildColumn = (
 
     const row = document.createElement('div');
     row.dataset.nodeRow = node.id;
+    const isMultiSelected = selectedIdSet.has(node.id);
     row.dataset.inPath = isSelectedInPath ? 'true' : 'false';
     row.style.display = 'flex';
     row.style.alignItems = 'flex-start';
     row.style.gap = '4px';
     row.style.padding = '1px 8px 1px 12px';
-    row.style.background = isSelectedInPath ? 'rgba(0, 120, 255, 0.08)' : 'transparent';
+    row.style.background = isMultiSelected
+      ? 'rgba(0, 120, 255, 0.12)'
+      : isSelectedInPath
+      ? 'rgba(0, 120, 255, 0.08)'
+      : 'transparent';
 
     let input = state.inputCache.get(node.id);
     if (!input) {
@@ -194,6 +200,11 @@ export const buildColumns = (ctx: KnowledgeEditorContext): HTMLElement => {
     ? [...(getAncestors(state.focusedNodeId, state.nodes) ?? []), state.focusedNodeId]
     : [];
 
+  const allIds = flatIds(state.nodes);
+  const lo = state.anchorIdx !== null && state.activeIdx !== null ? Math.min(state.anchorIdx, state.activeIdx) : -1;
+  const hi = state.anchorIdx !== null && state.activeIdx !== null ? Math.max(state.anchorIdx, state.activeIdx) : -1;
+  const selectedIdSet = lo >= 0 ? new Set(allIds.slice(lo, hi + 1)) : new Set<string>();
+
   const colEls: HTMLElement[] = [];
 
   const wrapper = document.createElement('div');
@@ -210,7 +221,7 @@ export const buildColumns = (ctx: KnowledgeEditorContext): HTMLElement => {
     state.pendingFocusId = newNode.id;
     ctx.scheduleSave();
     ctx.render();
-  }, ctx);
+  }, ctx, selectedIdSet);
   colEls.push(rootCol);
   wrapper.appendChild(rootCol);
 
@@ -227,7 +238,7 @@ export const buildColumns = (ctx: KnowledgeEditorContext): HTMLElement => {
         state.pendingFocusId = newNode.id;
         ctx.scheduleSave();
         ctx.render();
-      }, ctx);
+      }, ctx, selectedIdSet);
       colEls.push(col);
       wrapper.appendChild(col);
     }
