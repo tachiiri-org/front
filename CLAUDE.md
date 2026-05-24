@@ -1,2 +1,3 @@
 - 作業前に `README.md` を読む
-- 作業前に `mcp__front-local__knowledge_read` で tree_id `knowledge-1` を読み、プロジェクトの知識ベースを把握する
+- 作業前に `mcp__front-local__knowledge_read` で tree_id `knowledge-1` を読み、ノード一覧を把握する
+- タスクに関連するノードを判断し、`mcp__front-local__doc_read` で該当ノードのドキュメントを取得してから作業を始める

@@ -107,7 +107,7 @@ function toOutline(nodes: KnowledgeNode[], depth = 0): string {
       const isIssue = node.type === "issue";
       const text = node.text.replace(/^\?\s*/, "");
       const prefix = isProposed ? (isIssue ? "? " : "~ ") : "";
-      const line = `${indent}${prefix}${text}`;
+      const line = `${indent}${prefix}${text} [${node.id}]`;
       const childLines = node.children?.length ? toOutline(node.children, depth + 1) : "";
       return childLines ? [line, childLines] : [line];
     })
@@ -121,6 +121,14 @@ function findNode(nodes: KnowledgeNode[], id: string): KnowledgeNode | null {
     if (found) return found;
   }
   return null;
+}
+
+function findNodesByPath(nodes: KnowledgeNode[], segments: string[]): KnowledgeNode[] {
+  if (segments.length === 0) return [];
+  const [head, ...rest] = segments;
+  const matches = nodes.filter((n) => n.text.trim() === head.trim());
+  if (rest.length === 0) return matches;
+  return matches.flatMap((n) => findNodesByPath(n.children ?? [], rest));
 }
 
 type ToolResult = {
@@ -159,13 +167,14 @@ export const KNOWLEDGE_TOOLS = [
   },
   {
     name: "doc_read",
-    description: "Read the doc content for a specific node.",
+    description: "Read doc content for nodes specified by path (e.g. '事業/テンプリ'). Returns [{path, content}] in input order. If sibling names are duplicated, all matching nodes are included.",
     inputSchema: {
       type: "object",
       properties: {
-        node_id: { type: "string", description: "Node ID" },
+        tree_id: { type: "string", description: "Tree ID" },
+        paths: { type: "array", items: { type: "string" }, description: "Node paths separated by '/'. e.g. ['目標', '事業/テンプリ']" },
       },
-      required: ["node_id"],
+      required: ["tree_id", "paths"],
     },
   },
   {
@@ -281,9 +290,20 @@ export async function callKnowledgeTool(
     }
 
     if (name === "doc_read") {
-      const nodeId = String(args.node_id);
-      const doc = await readDoc(env, nodeId);
-      return { content: [{ type: "text", text: JSON.stringify(doc, null, 2) }] };
+      const treeId = String(args.tree_id);
+      const rawPaths = args.paths;
+      const paths = (Array.isArray(rawPaths) ? rawPaths : (() => { try { return JSON.parse(String(rawPaths)) as unknown[]; } catch { return [rawPaths]; } })()).map(String);
+      const tree = await readTree(env, treeId);
+      const results: Array<{ path: string; content: string }> = [];
+      for (const path of paths) {
+        const segments = path.split("/").map((s) => s.trim()).filter(Boolean);
+        const nodes = findNodesByPath(tree.nodes, segments);
+        for (const node of nodes) {
+          const doc = await readDoc(env, node.id);
+          results.push({ path, content: doc.content });
+        }
+      }
+      return { content: [{ type: "text", text: JSON.stringify(results, null, 2) }] };
     }
 
     if (name === "doc_write") {
