@@ -59,6 +59,22 @@ const RESOURCE_CONFIGS: ResourceConfig[] = [
 
 // --- Doc helpers ---
 
+type DocTreeNode = { id: string; status?: string; type?: string; text?: string; children?: DocTreeNode[] };
+
+const getDocStatus = (nodes: DocTreeNode[]): string => {
+  let hasProposed = false;
+  for (const node of nodes) {
+    if (node.type === 'issue' || node.text?.startsWith('?')) return 'issue';
+    if (node.status === 'proposed') hasProposed = true;
+    if (node.children?.length) {
+      const childStatus = getDocStatus(node.children);
+      if (childStatus === 'issue') return 'issue';
+      if (childStatus === 'proposed') hasProposed = true;
+    }
+  }
+  return hasProposed ? 'proposed' : '1';
+};
+
 const handleTreeWithDocsGet = async (backend: LayoutBackend, treeId: string): Promise<Response> => {
   const treeBody = await backend.getText(`trees/${treeId}.json`);
   if (!treeBody) return new Response('Not Found', { status: 404 });
@@ -88,7 +104,9 @@ const handleTreeWithDocsGet = async (backend: LayoutBackend, treeId: string): Pr
         if (!body) return null;
         const parsed = JSON.parse(body) as unknown;
         const nodes = (parsed as Record<string, unknown>)?.nodes;
-        return Array.isArray(nodes) && nodes.length > 0 ? ([id, '1'] as [string, string]) : null;
+        return Array.isArray(nodes) && nodes.length > 0
+          ? ([id, getDocStatus(nodes as DocTreeNode[])] as [string, string])
+          : null;
       } catch {
         return null;
       }

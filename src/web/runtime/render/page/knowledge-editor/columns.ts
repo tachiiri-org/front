@@ -129,9 +129,14 @@ export const buildColumn = (
 
     const marker = document.createElement('span');
     const isDocOpen = state.activeDocNodeId === node.id;
-    const hasDoc = state.docContentCache.has(node.id) && state.docContentCache.get(node.id) !== '';
+    const docStatus = state.docContentCache.get(node.id) ?? '';
+    const hasDoc = docStatus !== '';
     const baseColor = isDocOpen
       ? 'rgba(0, 120, 255, 0.7)'
+      : docStatus === 'issue'
+      ? 'rgba(255, 160, 0, 0.65)'
+      : docStatus === 'proposed'
+      ? 'rgba(0, 160, 80, 0.65)'
       : desc.issue
       ? 'rgba(255, 160, 0, 0.65)'
       : desc.proposed

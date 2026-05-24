@@ -129,12 +129,26 @@ export const renderKnowledgeEditor = (
     });
   };
 
+  const getDocStatus = (nodes: TreeNode[]): string => {
+    let hasProposed = false;
+    for (const node of nodes) {
+      if (node.type === 'issue' || node.text?.startsWith('?')) return 'issue';
+      if (node.status === 'proposed') hasProposed = true;
+      if (node.children?.length) {
+        const childStatus = getDocStatus(node.children);
+        if (childStatus === 'issue') return 'issue';
+        if (childStatus === 'proposed') hasProposed = true;
+      }
+    }
+    return hasProposed ? 'proposed' : '1';
+  };
+
   const fetchDocContent = (nodeId: string): void => {
     void fetch(`/api/trees/${encodeURIComponent(nodeId)}`)
       .then((res) => (res.ok ? (res.json() as Promise<unknown>) : null))
       .then((data) => {
         const nodes = (data as Record<string, unknown> | null)?.nodes;
-        state.docContentCache.set(nodeId, Array.isArray(nodes) && nodes.length > 0 ? '1' : '');
+        state.docContentCache.set(nodeId, Array.isArray(nodes) && nodes.length > 0 ? getDocStatus(nodes as TreeNode[]) : '');
         render();
       })
       .catch(() => {
