@@ -167,6 +167,7 @@ export const renderDocumentEditor = (
 
   if (component.sourceComponentId) {
     outer.style.display = 'none';
+    outer.dataset.sourceComponentId = component.sourceComponentId;
     Object.assign(outer.style, {
       background: 'white',
       borderLeft: '1px solid rgba(0,0,0,0.12)',

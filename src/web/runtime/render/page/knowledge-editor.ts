@@ -162,6 +162,28 @@ export const renderKnowledgeEditor = (
   let activeDocNodeId: string | null = null;
   const docContentCache = new Map<string, string>();
 
+  const syncOuterWidth = (): void => {
+    if (activeDocNodeId !== null) {
+      requestAnimationFrame(() => {
+        const docEl = document.querySelector<HTMLElement>(
+          `[data-source-component-id="${CSS.escape(id)}"]`,
+        );
+        if (docEl) {
+          const docRect = docEl.getBoundingClientRect();
+          const outerRect = outer.getBoundingClientRect();
+          if (docRect.width > 0) {
+            outer.style.width = `${docRect.left - outerRect.left}px`;
+            scrollColumnsToEnd();
+            return;
+          }
+        }
+        outer.style.width = '';
+      });
+    } else {
+      outer.style.width = '';
+    }
+  };
+
   const scheduleRender = (): void => {
     if (rafId !== null) return;
     rafId = requestAnimationFrame(() => {
@@ -771,7 +793,7 @@ export const renderKnowledgeEditor = (
   const buildColumn = (list: TreeNode[], fullPath: string[], columnIndex: number, onAdd: (text: string) => void): HTMLElement => {
     const col = document.createElement('div');
     col.style.width = 'max-content';
-    col.style.maxWidth = '40vw';
+    col.style.maxWidth = '30vw';
     col.style.minWidth = '180px';
     col.style.borderRight = '1px solid rgba(0,0,0,0.2)';
     col.style.overflowY = 'auto';
@@ -922,6 +944,7 @@ export const renderKnowledgeEditor = (
           }));
         }
         render();
+        syncOuterWidth();
       });
       row.appendChild(marker);
       row.appendChild(input);
@@ -950,19 +973,24 @@ export const renderKnowledgeEditor = (
       ? [...(getAncestors(focusedNodeId, nodes) ?? []), focusedNodeId]
       : [];
 
+    const colEls: HTMLElement[] = [];
+
     const wrapper = document.createElement('div');
+    wrapper.dataset.columnsWrapper = 'true';
     wrapper.style.display = 'flex';
     wrapper.style.flex = '1';
     wrapper.style.minHeight = '0';
     wrapper.style.overflowX = 'auto';
 
-    wrapper.appendChild(buildColumn(nodes, fullPath, 0, (text) => {
+    const rootCol = buildColumn(nodes, fullPath, 0, (text) => {
       const newNode: TreeNode = { id: randomId(), text };
       nodes.unshift(newNode);
       pendingFocusId = newNode.id;
       scheduleSave();
       render();
-    }));
+    });
+    colEls.push(rootCol);
+    wrapper.appendChild(rootCol);
 
     for (let i = 0; i < fullPath.length; i++) {
       const loc = findNode(nodes, fullPath[i]);
@@ -970,18 +998,70 @@ export const renderKnowledgeEditor = (
       const selected = loc.parent[loc.index];
       const isLastInPath = i === fullPath.length - 1;
       if (selected.children?.length || isLastInPath) {
-        wrapper.appendChild(buildColumn(selected.children ?? [], fullPath, i + 1, (text) => {
+        const col = buildColumn(selected.children ?? [], fullPath, i + 1, (text) => {
           const newNode: TreeNode = { id: randomId(), text };
           if (!selected.children) selected.children = [];
           selected.children.unshift(newNode);
           pendingFocusId = newNode.id;
           scheduleSave();
           render();
-        }));
+        });
+        colEls.push(col);
+        wrapper.appendChild(col);
       }
     }
 
-    return wrapper;
+    const makeBreadcrumbItem = (label: string, colIdx: number, isCurrent: boolean): HTMLElement => {
+      const item = document.createElement('span');
+      item.textContent = label.length > 24 ? `${label.slice(0, 24)}…` : label;
+      item.style.cursor = 'pointer';
+      item.style.color = isCurrent ? 'rgba(0,0,0,0.75)' : 'rgba(0,0,0,0.4)';
+      item.style.padding = '1px 2px';
+      item.style.borderRadius = '2px';
+      item.style.flexShrink = '0';
+      item.addEventListener('click', () => {
+        const col = colEls[colIdx];
+        if (col) wrapper.scrollTo({ left: col.offsetLeft, behavior: 'smooth' });
+      });
+      return item;
+    };
+
+    const breadcrumb = document.createElement('div');
+    Object.assign(breadcrumb.style, {
+      display: 'flex',
+      alignItems: 'center',
+      flexShrink: '0',
+      overflowX: 'auto',
+      padding: '2px 8px',
+      fontSize: '11px',
+      borderBottom: '1px solid rgba(0,0,0,0.08)',
+      gap: '2px',
+      userSelect: 'none',
+      whiteSpace: 'nowrap',
+    });
+
+    breadcrumb.appendChild(makeBreadcrumbItem('≡', 0, fullPath.length === 0));
+
+    for (let i = 0; i < fullPath.length; i++) {
+      const loc = findNode(nodes, fullPath[i]);
+      if (!loc) break;
+      const sep = document.createElement('span');
+      sep.textContent = '›';
+      sep.style.color = 'rgba(0,0,0,0.25)';
+      sep.style.flexShrink = '0';
+      breadcrumb.appendChild(sep);
+      breadcrumb.appendChild(makeBreadcrumbItem(loc.parent[loc.index].text, i + 1, i === fullPath.length - 1));
+    }
+
+    const container = document.createElement('div');
+    container.style.display = 'flex';
+    container.style.flexDirection = 'column';
+    container.style.flex = '1';
+    container.style.minHeight = '0';
+    container.appendChild(breadcrumb);
+    container.appendChild(wrapper);
+
+    return container;
   };
 
   document.addEventListener('document-editor:closed', (e: Event) => {
@@ -989,6 +1069,7 @@ export const renderKnowledgeEditor = (
     if (detail.sourceFrameId !== id) return;
     activeDocNodeId = null;
     render();
+    syncOuterWidth();
   });
 
   document.addEventListener('document-editor:move-to-knowledge', (e: Event) => {
@@ -1008,6 +1089,17 @@ export const renderKnowledgeEditor = (
     render();
   });
 
+  const scrollColumnsToEnd = (): void => {
+    const columnsWrapper = outer.querySelector<HTMLElement>('[data-columns-wrapper]');
+    if (!columnsWrapper) return;
+    const lastCol = columnsWrapper.lastElementChild as HTMLElement | null;
+    if (!lastCol) return;
+    columnsWrapper.scrollLeft = Math.max(
+      0,
+      lastCol.offsetLeft + lastCol.offsetWidth - columnsWrapper.clientWidth,
+    );
+  };
+
   const render = (): void => {
     renderTarget.replaceChildren(buildColumns());
 
@@ -1016,6 +1108,7 @@ export const renderKnowledgeEditor = (
       ta.style.height = `${ta.scrollHeight}px`;
     }
     focusPending();
+    if (activeDocNodeId !== null) scrollColumnsToEnd();
   };
 
   const startPolling = (fetchUrl: string, itemsPath?: string): void => {
