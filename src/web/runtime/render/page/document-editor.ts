@@ -105,7 +105,7 @@ const updateNodeSelectionVisuals = (
 ): void => {
   const lo = anchorIdx !== null && activeIdx !== null ? Math.min(anchorIdx, activeIdx) : -1;
   const hi = anchorIdx !== null && activeIdx !== null ? Math.max(anchorIdx, activeIdx) : -1;
-  const inputs = container.querySelectorAll<HTMLInputElement>('[data-node-id]');
+  const inputs = container.querySelectorAll<HTMLTextAreaElement>('[data-node-id]');
   for (const input of inputs) {
     const idx = allIds.indexOf(input.dataset.nodeId ?? '');
     input.style.background = lo >= 0 && idx >= lo && idx <= hi ? 'rgba(0, 120, 255, 0.12)' : 'transparent';
@@ -161,7 +161,7 @@ export const renderDocumentEditor = (
     if (!pendingFocusId) return;
     const fid = pendingFocusId;
     pendingFocusId = null;
-    const el = outer.querySelector<HTMLInputElement>(`[data-node-id="${CSS.escape(fid)}"]`);
+    const el = outer.querySelector<HTMLTextAreaElement>(`[data-node-id="${CSS.escape(fid)}"]`);
     el?.focus();
   };
 
@@ -232,6 +232,22 @@ export const renderDocumentEditor = (
     closeBtn.addEventListener('click', closePanel);
 
     const listenFrameId = component.sourceComponentId;
+    document.addEventListener('knowledge-editor:insert-to-doc', (e: Event) => {
+      const detail = (e as CustomEvent<{ knowledgeEditorFrameId: string; nodes: TreeNode[] }>).detail;
+      if (detail.knowledgeEditorFrameId !== listenFrameId) return;
+      if (outer.style.display === 'none') return;
+      pushHistory();
+      const newNodes: TreeNode[] = detail.nodes.map(n => ({
+        id: randomId(),
+        text: n.text,
+        ...(n.type ? { type: n.type } : {}),
+        ...(n.status ? { status: n.status } : {}),
+      }));
+      nodes.push(...newNodes);
+      pendingFocusId = newNodes[newNodes.length - 1].id;
+      scheduleSave();
+      render();
+    });
     document.addEventListener('knowledge-editor:doc-toggle', (e: Event) => {
       const detail = (e as CustomEvent<{ knowledgeEditorFrameId: string; nodeId: string | null; nodeText: string | null }>).detail;
       if (detail.knowledgeEditorFrameId !== listenFrameId) return;
@@ -264,20 +280,24 @@ export const renderDocumentEditor = (
     ul.style.margin = '0';
 
     for (const node of list) {
+      const isProposed = node.status === 'proposed';
+      const isIssue = node.type === 'issue' || node.text.startsWith('?');
+
       const li = document.createElement('li');
 
       const row = document.createElement('div');
       row.style.display = 'flex';
-      row.style.alignItems = 'center';
+      row.style.alignItems = 'flex-start';
       row.style.gap = '6px';
 
       const bullet = document.createElement('span');
       bullet.textContent = !node.children?.length ? '•' : collapsedIds.has(node.id) ? '▸' : '▾';
       bullet.style.userSelect = 'none';
-      bullet.style.color = 'rgba(0,0,0,0.35)';
+      bullet.style.color = isIssue ? 'rgba(160, 80, 0, 0.5)' : isProposed ? 'rgba(0, 100, 50, 0.5)' : 'rgba(0,0,0,0.35)';
       bullet.style.flexShrink = '0';
       bullet.style.width = '10px';
       bullet.style.fontSize = '10px';
+      bullet.style.marginTop = '4px';
       if (node.children?.length) {
         bullet.style.cursor = 'pointer';
         bullet.addEventListener('click', () => {
@@ -291,8 +311,8 @@ export const renderDocumentEditor = (
         });
       }
 
-      const input = document.createElement('input');
-      input.type = 'text';
+      const input = document.createElement('textarea');
+      input.rows = 1;
       input.value = node.text;
       input.dataset.nodeId = node.id;
       input.dataset.navInput = 'node';
@@ -300,12 +320,21 @@ export const renderDocumentEditor = (
         flex: '1',
         border: 'none',
         outline: 'none',
-        background: 'transparent',
+        resize: 'none',
+        overflow: 'hidden',
+        whiteSpace: 'pre-wrap',
+        wordBreak: 'break-word',
+        background: isIssue ? 'rgba(255, 160, 0, 0.07)' : isProposed ? 'rgba(0, 160, 80, 0.07)' : 'transparent',
+        color: isIssue ? 'rgba(160, 80, 0, 0.85)' : isProposed ? 'rgba(0, 100, 50, 0.85)' : 'inherit',
+        fontStyle: isProposed ? 'italic' : 'normal',
+        borderRadius: isIssue || isProposed ? '3px' : '0',
         fontFamily: 'inherit',
         fontSize: 'inherit',
         lineHeight: 'inherit',
         padding: '2px 4px',
+        boxSizing: 'border-box',
       });
+      (input.style as unknown as Record<string, string>)['field-sizing'] = 'content';
 
       input.addEventListener('focus', () => {
         if (focusedNodeId !== node.id) {
@@ -315,6 +344,20 @@ export const renderDocumentEditor = (
       });
 
       input.addEventListener('input', () => {
+        input.style.height = 'auto';
+        input.style.height = `${input.scrollHeight}px`;
+        if (input.value === '?') {
+          const loc = findNode(nodes, node.id);
+          if (loc) {
+            loc.parent[loc.index].type = 'issue';
+            loc.parent[loc.index].text = '';
+            input.value = '';
+            pendingFocusId = node.id;
+            scheduleSave();
+            render();
+          }
+          return;
+        }
         const loc = findNode(nodes, node.id);
         if (loc) {
           loc.parent[loc.index].text = input.value;
@@ -327,7 +370,7 @@ export const renderDocumentEditor = (
         if (anchorIdx === null) return;
         anchorIdx = null;
         activeIdx = null;
-        outer.querySelectorAll<HTMLInputElement>('[data-node-id]').forEach(inp => { inp.style.background = 'transparent'; });
+        outer.querySelectorAll<HTMLTextAreaElement>('[data-node-id]').forEach(inp => { inp.style.background = 'transparent'; });
       });
 
       input.addEventListener('keydown', (e: KeyboardEvent) => {
@@ -419,6 +462,46 @@ export const renderDocumentEditor = (
 
         if (e.key === 'Tab' && e.shiftKey) {
           e.preventDefault();
+          if (component.sourceComponentId) {
+            const allIds = flatIds(nodes);
+            let selIds: string[];
+            if (anchorIdx !== null && activeIdx !== null) {
+              const lo = Math.min(anchorIdx, activeIdx);
+              const hi = Math.max(anchorIdx, activeIdx);
+              selIds = allIds.slice(lo, hi + 1);
+            } else {
+              selIds = [node.id];
+            }
+            const idSet = new Set(selIds);
+            const topLevelSelIds = selIds.filter(sid => {
+              const ancestors = getAncestors(sid, nodes);
+              return ancestors !== null && !ancestors.some(a => idSet.has(a));
+            });
+            const moveNodes = topLevelSelIds.map(sid => {
+              const loc = findNode(nodes, sid);
+              return loc ? cloneNodes([loc.parent[loc.index]])[0] : null;
+            }).filter((n): n is TreeNode => n !== null);
+            if (moveNodes.length > 0) {
+              pushHistory();
+              const firstFlatIdx = allIds.indexOf(selIds[0]);
+              for (const sid of [...topLevelSelIds].reverse()) {
+                const loc = findNode(nodes, sid);
+                if (loc) loc.parent.splice(loc.index, 1);
+              }
+              anchorIdx = null; activeIdx = null;
+              const newAllIds = flatIds(nodes);
+              const focusTarget = firstFlatIdx > 0
+                ? newAllIds[Math.min(firstFlatIdx - 1, newAllIds.length - 1)]
+                : newAllIds[0];
+              pendingFocusId = focusTarget ?? null;
+              scheduleSave();
+              render();
+              document.dispatchEvent(new CustomEvent('document-editor:move-to-knowledge', {
+                detail: { sourceFrameId: component.sourceComponentId, nodes: moveNodes },
+              }));
+            }
+            return;
+          }
           pushHistory();
           if (anchorIdx !== null && activeIdx !== null) {
             const allIds = flatIds(nodes);
@@ -562,7 +645,7 @@ export const renderDocumentEditor = (
           const newActiveIdx = Math.max(0, (activeIdx ?? idx) - 1);
           activeIdx = newActiveIdx;
           updateNodeSelectionVisuals(outer, allIds, anchorIdx, activeIdx);
-          outer.querySelector<HTMLInputElement>(`[data-node-id="${CSS.escape(allIds[newActiveIdx])}"]`)?.focus();
+          outer.querySelector<HTMLTextAreaElement>(`[data-node-id="${CSS.escape(allIds[newActiveIdx])}"]`)?.focus();
           return;
         }
 
@@ -575,7 +658,7 @@ export const renderDocumentEditor = (
           const newActiveIdx = Math.min(allIds.length - 1, (activeIdx ?? idx) + 1);
           activeIdx = newActiveIdx;
           updateNodeSelectionVisuals(outer, allIds, anchorIdx, activeIdx);
-          outer.querySelector<HTMLInputElement>(`[data-node-id="${CSS.escape(allIds[newActiveIdx])}"]`)?.focus();
+          outer.querySelector<HTMLTextAreaElement>(`[data-node-id="${CSS.escape(allIds[newActiveIdx])}"]`)?.focus();
           return;
         }
 
@@ -630,8 +713,8 @@ export const renderDocumentEditor = (
         }
 
         if (e.key === 'v' && e.ctrlKey && !e.shiftKey && !e.altKey) {
-          e.preventDefault();
           if (!clipboard || clipboard.length === 0) return;
+          e.preventDefault();
           pushHistory();
           const pasted = reassignIds(clipboard);
           if (currentLoc) {
@@ -648,11 +731,8 @@ export const renderDocumentEditor = (
 
         if (e.key === 'ArrowRight' && input.selectionStart === input.value.length && input.selectionEnd === input.value.length) {
           e.preventDefault();
-          if (anchorIdx !== null) {
-            anchorIdx = null; activeIdx = null;
-            updateNodeSelectionVisuals(outer, [], null, null);
-          }
-          const navInputs = Array.from(outer.querySelectorAll<HTMLInputElement>('[data-nav-input]'))
+          if (anchorIdx !== null) { anchorIdx = null; activeIdx = null; updateNodeSelectionVisuals(outer, [], null, null); }
+          const navInputs = Array.from(outer.querySelectorAll<HTMLTextAreaElement>('[data-nav-input]'))
             .filter(inp => inp.offsetParent !== null);
           const idx = navInputs.indexOf(input);
           if (idx < navInputs.length - 1) navInputs[idx + 1].focus();
@@ -661,11 +741,8 @@ export const renderDocumentEditor = (
 
         if (e.key === 'ArrowLeft' && input.selectionStart === 0 && input.selectionEnd === 0) {
           e.preventDefault();
-          if (anchorIdx !== null) {
-            anchorIdx = null; activeIdx = null;
-            updateNodeSelectionVisuals(outer, [], null, null);
-          }
-          const navInputs = Array.from(outer.querySelectorAll<HTMLInputElement>('[data-nav-input]'))
+          if (anchorIdx !== null) { anchorIdx = null; activeIdx = null; updateNodeSelectionVisuals(outer, [], null, null); }
+          const navInputs = Array.from(outer.querySelectorAll<HTMLTextAreaElement>('[data-nav-input]'))
             .filter(inp => inp.offsetParent !== null);
           const idx = navInputs.indexOf(input);
           if (idx > 0) {
@@ -677,12 +754,11 @@ export const renderDocumentEditor = (
         }
 
         if (e.key === 'ArrowUp' && !e.ctrlKey) {
+          const onFirstLine = !(input.value.slice(0, input.selectionStart ?? 0).includes('\n'));
+          if (!onFirstLine) return;
           e.preventDefault();
-          if (anchorIdx !== null) {
-            anchorIdx = null; activeIdx = null;
-            updateNodeSelectionVisuals(outer, [], null, null);
-          }
-          const navInputs = Array.from(outer.querySelectorAll<HTMLInputElement>('[data-nav-input]'))
+          if (anchorIdx !== null) { anchorIdx = null; activeIdx = null; updateNodeSelectionVisuals(outer, [], null, null); }
+          const navInputs = Array.from(outer.querySelectorAll<HTMLTextAreaElement>('[data-nav-input]'))
             .filter(inp => inp.offsetParent !== null);
           const idx = navInputs.indexOf(input);
           if (idx > 0) navInputs[idx - 1].focus();
@@ -690,12 +766,11 @@ export const renderDocumentEditor = (
         }
 
         if (e.key === 'ArrowDown' && !e.ctrlKey) {
+          const onLastLine = !(input.value.slice(input.selectionStart ?? input.value.length).includes('\n'));
+          if (!onLastLine) return;
           e.preventDefault();
-          if (anchorIdx !== null) {
-            anchorIdx = null; activeIdx = null;
-            updateNodeSelectionVisuals(outer, [], null, null);
-          }
-          const navInputs = Array.from(outer.querySelectorAll<HTMLInputElement>('[data-nav-input]'))
+          if (anchorIdx !== null) { anchorIdx = null; activeIdx = null; updateNodeSelectionVisuals(outer, [], null, null); }
+          const navInputs = Array.from(outer.querySelectorAll<HTMLTextAreaElement>('[data-nav-input]'))
             .filter(inp => inp.offsetParent !== null);
           const idx = navInputs.indexOf(input);
           if (idx < navInputs.length - 1) navInputs[idx + 1].focus();
@@ -744,6 +819,10 @@ export const renderDocumentEditor = (
 
     const ul = buildUl(nodes, 0);
     renderTarget.replaceChildren(ul);
+    for (const ta of renderTarget.querySelectorAll<HTMLTextAreaElement>('textarea[data-nav-input]')) {
+      ta.style.height = 'auto';
+      ta.style.height = `${ta.scrollHeight}px`;
+    }
     focusPending();
   };
 

@@ -272,6 +272,27 @@ export const renderKnowledgeEditor = (
 
       if (e.key === 'Enter') {
         e.preventDefault();
+        if (e.shiftKey && !e.ctrlKey && !e.altKey) {
+          const allIds = flatIds(nodes);
+          let selIds: string[];
+          if (anchorIdx !== null && activeIdx !== null) {
+            const lo = Math.min(anchorIdx, activeIdx);
+            const hi = Math.max(anchorIdx, activeIdx);
+            selIds = allIds.slice(lo, hi + 1);
+          } else {
+            selIds = [node.id];
+          }
+          const insertNodes = selIds.map(sid => {
+            const loc = findNode(nodes, sid);
+            return loc ? loc.parent[loc.index] : null;
+          }).filter((n): n is TreeNode => n !== null);
+          if (insertNodes.length > 0) {
+            document.dispatchEvent(new CustomEvent('knowledge-editor:insert-to-doc', {
+              detail: { knowledgeEditorFrameId: id, nodes: insertNodes },
+            }));
+          }
+          return;
+        }
         pushHistory();
         anchorIdx = null; activeIdx = null;
         const cursor = input.selectionStart ?? input.value.length;
@@ -318,6 +339,51 @@ export const renderKnowledgeEditor = (
         scheduleSave();
         render();
         return;
+      }
+
+      if (e.key === 'Tab') {
+        e.preventDefault();
+        if (activeDocNodeId !== null) {
+          const allIds = flatIds(nodes);
+          let selIds: string[];
+          if (anchorIdx !== null && activeIdx !== null) {
+            const lo = Math.min(anchorIdx, activeIdx);
+            const hi = Math.max(anchorIdx, activeIdx);
+            selIds = allIds.slice(lo, hi + 1);
+          } else {
+            selIds = [node.id];
+          }
+          const idSet = new Set(selIds);
+          const topLevelSelIds = selIds.filter(sid => {
+            const ancestors = getAncestors(sid, nodes);
+            return ancestors !== null && !ancestors.some(a => idSet.has(a));
+          });
+          const moveNodes = topLevelSelIds.map(sid => {
+            const loc = findNode(nodes, sid);
+            return loc ? cloneNodes([loc.parent[loc.index]])[0] : null;
+          }).filter((n): n is TreeNode => n !== null);
+          if (moveNodes.length > 0) {
+            document.dispatchEvent(new CustomEvent('knowledge-editor:insert-to-doc', {
+              detail: { knowledgeEditorFrameId: id, nodes: moveNodes },
+            }));
+            pushHistory();
+            const firstFlatIdx = allIds.indexOf(selIds[0]);
+            for (const sid of [...topLevelSelIds].reverse()) {
+              const loc = findNode(nodes, sid);
+              if (loc) loc.parent.splice(loc.index, 1);
+            }
+            anchorIdx = null; activeIdx = null;
+            const newAllIds = flatIds(nodes);
+            const focusTarget = firstFlatIdx > 0
+              ? newAllIds[Math.min(firstFlatIdx - 1, newAllIds.length - 1)]
+              : newAllIds[0];
+            focusedNodeId = focusTarget ?? null;
+            pendingFocusId = focusTarget ?? null;
+            scheduleSave();
+            render();
+          }
+          return;
+        }
       }
 
       if (e.key === 'Tab' && !e.shiftKey) {
@@ -547,18 +613,36 @@ export const renderKnowledgeEditor = (
           const loc = findNode(nodes, sid);
           return loc ? cloneNodes([loc.parent[loc.index]])[0] : null;
         }).filter((n): n is TreeNode => n !== null);
+        if (clipboard.length > 0) {
+          const toText = (list: TreeNode[], depth: number): string =>
+            list.map(n => {
+              const line = '  '.repeat(depth) + n.text;
+              return n.children?.length ? line + '\n' + toText(n.children, depth + 1) : line;
+            }).join('\n');
+          void navigator.clipboard.writeText(toText(clipboard, 0)).catch(() => undefined);
+        }
         if (e.key === 'x' && clipboard.length > 0) {
           pushHistory();
           const firstFlatIdx = allIds.indexOf(selIds[0]);
+          const parentLoc = (() => {
+            for (const sid of topLevelSelIds) {
+              const ancestors = getAncestors(sid, nodes);
+              if (ancestors && ancestors.length > 0) return ancestors[ancestors.length - 1];
+            }
+            return null;
+          })();
           for (const sid of [...topLevelSelIds].reverse()) {
             const loc = findNode(nodes, sid);
             if (loc) loc.parent.splice(loc.index, 1);
           }
           anchorIdx = null; activeIdx = null;
           const newAllIds = flatIds(nodes);
-          const focusTarget = firstFlatIdx > 0
+          const focusTarget = parentLoc && newAllIds.includes(parentLoc)
+            ? parentLoc
+            : firstFlatIdx > 0
             ? newAllIds[Math.min(firstFlatIdx - 1, newAllIds.length - 1)]
             : newAllIds[0];
+          focusedNodeId = focusTarget ?? null;
           pendingFocusId = focusTarget ?? null;
           scheduleSave();
           render();
@@ -904,6 +988,23 @@ export const renderKnowledgeEditor = (
     const detail = (e as CustomEvent<{ sourceFrameId: string }>).detail;
     if (detail.sourceFrameId !== id) return;
     activeDocNodeId = null;
+    render();
+  });
+
+  document.addEventListener('document-editor:move-to-knowledge', (e: Event) => {
+    const detail = (e as CustomEvent<{ sourceFrameId: string; nodes: TreeNode[] }>).detail;
+    if (detail.sourceFrameId !== id) return;
+    pushHistory();
+    const newNodes = reassignIds(detail.nodes);
+    const loc = focusedNodeId ? findNode(nodes, focusedNodeId) : null;
+    if (loc) {
+      loc.parent.splice(loc.index + 1, 0, ...newNodes);
+    } else {
+      nodes.push(...newNodes);
+    }
+    anchorIdx = null; activeIdx = null;
+    pendingFocusId = newNodes[0].id;
+    scheduleSave();
     render();
   });
 
