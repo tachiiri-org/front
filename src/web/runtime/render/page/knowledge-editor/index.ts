@@ -130,14 +130,11 @@ export const renderKnowledgeEditor = (
   };
 
   const fetchDocContent = (nodeId: string): void => {
-    void fetch(`/api/docs/${encodeURIComponent(nodeId)}`)
-      .then((res) => (res.ok ? (res.json() as Promise<unknown>) : Promise.resolve(null)))
+    void fetch(`/api/trees/${encodeURIComponent(nodeId)}`)
+      .then((res) => (res.ok ? (res.json() as Promise<unknown>) : null))
       .then((data) => {
-        const content =
-          typeof (data as Record<string, unknown> | null)?.content === 'string'
-            ? ((data as Record<string, unknown>).content as string)
-            : '';
-        state.docContentCache.set(nodeId, content);
+        const nodes = (data as Record<string, unknown> | null)?.nodes;
+        state.docContentCache.set(nodeId, Array.isArray(nodes) && nodes.length > 0 ? '1' : '');
         render();
       })
       .catch(() => {
@@ -151,9 +148,11 @@ export const renderKnowledgeEditor = (
   document.addEventListener('document-editor:closed', (e: Event) => {
     const detail = (e as CustomEvent<{ sourceFrameId: string }>).detail;
     if (detail.sourceFrameId !== id) return;
+    const prevActiveId = state.activeDocNodeId;
     state.activeDocNodeId = null;
     render();
     syncOuterWidth();
+    if (prevActiveId) fetchDocContent(prevActiveId);
   });
 
   document.addEventListener('document-editor:move-to-knowledge', (e: Event) => {

@@ -62,7 +62,7 @@ export async function authorizeFetch(
     );
   }
 
-  return env.AUTHORIZE.fetch(
+  return env.AUTHORIZE!.fetch(
     new Request(new URL(input.path, "https://authorize.local").toString(), {
       method: input.method,
       headers,

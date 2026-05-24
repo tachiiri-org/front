@@ -1,7 +1,6 @@
 import { authorizeFetch, type AuthorizeEnv } from "../../auth";
 
 const treeKey = (treeId: string) => `trees/${treeId}.json`;
-const docKey = (nodeId: string) => `docs/${nodeId}.json`;
 
 type KnowledgeNode = {
   id: string;
@@ -18,6 +17,25 @@ type KnowledgeTree = {
 };
 
 type Doc = { content: string };
+type DocNode = { id: string; text: string; children?: DocNode[] };
+
+const docNodeId = (): string => Math.random().toString(36).slice(2, 10);
+
+function nodesToText(nodes: DocNode[], depth = 0): string {
+  const indent = '  '.repeat(depth);
+  return nodes
+    .filter(n => n.text.trim())
+    .flatMap(n => {
+      const line = `${indent}${n.text}`;
+      const childText = n.children?.length ? nodesToText(n.children, depth + 1) : '';
+      return childText ? [line, childText] : [line];
+    })
+    .join('\n');
+}
+
+function textToNodes(content: string): DocNode[] {
+  return content.split('\n').filter(line => line.trim()).map(line => ({ id: docNodeId(), text: line.trimStart() }));
+}
 
 const fromBase64 = (value: string): string => {
   const normalized = value.replace(/-/g, "+").replace(/_/g, "/");
@@ -57,22 +75,24 @@ async function readDoc(env: AuthorizeEnv, nodeId: string): Promise<Doc> {
   const response = await authorizeFetch(env, {
     path: "/api/v1/cloudflare-r2-adapter/s3/r2_file_get",
     method: "POST",
-    body: JSON.stringify({ bucket_id: getBucketId(env), key: docKey(nodeId) }),
+    body: JSON.stringify({ bucket_id: getBucketId(env), key: treeKey(nodeId) }),
   });
   if (response.status === 404) return { content: "" };
   if (!response.ok) throw new Error(`doc_read_failed:${response.status}`);
   const payload = (await response.json()) as { content_base64: string };
-  return JSON.parse(fromBase64(payload.content_base64)) as Doc;
+  const tree = JSON.parse(fromBase64(payload.content_base64)) as { nodes?: DocNode[] };
+  return { content: nodesToText(tree.nodes ?? []) };
 }
 
 async function writeDoc(env: AuthorizeEnv, nodeId: string, doc: Doc): Promise<void> {
+  const tree = { nodes: textToNodes(doc.content) };
   const response = await authorizeFetch(env, {
     path: "/api/v1/cloudflare-r2-adapter/s3/r2_file_save",
     method: "POST",
     body: JSON.stringify({
       bucket_id: getBucketId(env),
-      key: docKey(nodeId),
-      content: JSON.stringify(doc),
+      key: treeKey(nodeId),
+      content: JSON.stringify(tree, null, 2),
     }),
   });
   if (!response.ok) throw new Error(`doc_write_failed:${response.status}`);

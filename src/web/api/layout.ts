@@ -84,14 +84,11 @@ const handleTreeWithDocsGet = async (backend: LayoutBackend, treeId: string): Pr
   const docEntries = await Promise.all(
     allIds.map(async (id) => {
       try {
-        const body = await backend.getText(`docs/${id}.json`);
+        const body = await backend.getText(`trees/${id}.json`);
         if (!body) return null;
         const parsed = JSON.parse(body) as unknown;
-        const content =
-          typeof (parsed as Record<string, unknown>)?.content === 'string'
-            ? ((parsed as Record<string, unknown>).content as string)
-            : '';
-        return content ? ([id, content] as const) : null;
+        const nodes = (parsed as Record<string, unknown>)?.nodes;
+        return Array.isArray(nodes) && nodes.length > 0 ? ([id, '1'] as [string, string]) : null;
       } catch {
         return null;
       }
@@ -260,26 +257,6 @@ export const handleApiRequest = async (request: Request, env: Env): Promise<Resp
       return handleResourceGet(backend, 'trees/', treeId);
     }
     if (request.method === 'PUT') return handleResourcePut(request, backend, 'trees/', treeId);
-    return new Response('Method Not Allowed', { status: 405 });
-  }
-
-  const docsMatch = url.pathname.match(/^\/api\/docs\/(.+)$/);
-  if (docsMatch) {
-    const docId = decodeURIComponent(docsMatch[1]);
-    if (request.method === 'GET') {
-      const body = await backend.getText(`docs/${docId}.json`);
-      if (!body) {
-        return new Response(JSON.stringify({ content: '' }), { headers: { 'Content-Type': 'application/json' } });
-      }
-      try {
-        const parsed = JSON.parse(body) as unknown;
-        if (typeof parsed === 'object' && parsed !== null && 'content' in parsed) {
-          return new Response(body, { headers: { 'Content-Type': 'application/json' } });
-        }
-      } catch { /* fall through */ }
-      return new Response(JSON.stringify({ content: '' }), { headers: { 'Content-Type': 'application/json' } });
-    }
-    if (request.method === 'PUT') return handleResourcePut(request, backend, 'docs/', docId);
     return new Response('Method Not Allowed', { status: 405 });
   }
 
