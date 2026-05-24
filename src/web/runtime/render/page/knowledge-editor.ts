@@ -580,7 +580,7 @@ export const renderKnowledgeEditor = (
         const prevInput = colInputs[colPos - 1];
         const newActiveIdx = allIds.indexOf(prevInput.dataset.nodeId ?? '');
         activeIdx = newActiveIdx;
-        prevInput.focus();
+        prevInput.focus({ preventScroll: true });
         updateNodeSelectionVisuals(outer, allIds, anchorIdx, activeIdx);
         return;
       }
@@ -599,7 +599,7 @@ export const renderKnowledgeEditor = (
         const nextInput = colInputs[colPos + 1];
         const newActiveIdx = allIds.indexOf(nextInput.dataset.nodeId ?? '');
         activeIdx = newActiveIdx;
-        nextInput.focus();
+        nextInput.focus({ preventScroll: true });
         updateNodeSelectionVisuals(outer, allIds, anchorIdx, activeIdx);
         return;
       }
@@ -721,7 +721,7 @@ export const renderKnowledgeEditor = (
         const colInputs = Array.from(outer.querySelectorAll<HTMLTextAreaElement>(`[data-nav-input][data-column-index="${colIdx}"]`))
           .filter(inp => inp.offsetParent !== null);
         const pos = colInputs.indexOf(input);
-        if (pos > 0) colInputs[pos - 1].focus();
+        if (pos > 0) colInputs[pos - 1].focus({ preventScroll: true });
         return;
       }
 
@@ -734,7 +734,7 @@ export const renderKnowledgeEditor = (
         const colInputs = Array.from(outer.querySelectorAll<HTMLTextAreaElement>(`[data-nav-input][data-column-index="${colIdx}"]`))
           .filter(inp => inp.offsetParent !== null);
         const pos = colInputs.indexOf(input);
-        if (pos < colInputs.length - 1) colInputs[pos + 1].focus();
+        if (pos < colInputs.length - 1) colInputs[pos + 1].focus({ preventScroll: true });
         return;
       }
     });
@@ -783,7 +783,7 @@ export const renderKnowledgeEditor = (
     pendingFocusId = null;
     const el = outer.querySelector<HTMLTextAreaElement>(`[data-node-id="${CSS.escape(fid)}"]`);
     if (!el) return;
-    el.focus();
+    el.focus({ preventScroll: true });
     if (pendingSelectionStart !== null) {
       el.setSelectionRange(pendingSelectionStart, pendingSelectionStart);
       pendingSelectionStart = null;
@@ -866,7 +866,7 @@ export const renderKnowledgeEditor = (
         const colInputs = Array.from(outer.querySelectorAll<HTMLTextAreaElement>(`[data-nav-input][data-column-index="${columnIndex}"]`))
           .filter(inp => inp.offsetParent !== null);
         const pos = colInputs.indexOf(draftInput);
-        if (pos < colInputs.length - 1) colInputs[pos + 1].focus();
+        if (pos < colInputs.length - 1) colInputs[pos + 1].focus({ preventScroll: true });
       }
     });
 
@@ -1120,11 +1120,12 @@ export const renderKnowledgeEditor = (
       ta.style.height = `${ta.scrollHeight}px`;
     }
     focusPending();
-    if (activeDocNodeId !== null) scrollColumnsToEnd();
+    scrollColumnsToEnd();
     requestAnimationFrame(() => {
       const wrapperEl = outer.querySelector<HTMLElement>('[data-columns-wrapper]');
       const spacerEl = outer.querySelector<HTMLElement>('[data-columns-spacer]');
       if (wrapperEl && spacerEl) spacerEl.style.width = `${wrapperEl.clientWidth}px`;
+      scrollColumnsToEnd();
     });
   };
 
