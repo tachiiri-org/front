@@ -981,6 +981,7 @@ export const renderKnowledgeEditor = (
     wrapper.style.flex = '1';
     wrapper.style.minHeight = '0';
     wrapper.style.overflowX = 'auto';
+    wrapper.style.position = 'relative';
 
     const rootCol = buildColumn(nodes, fullPath, 0, (text) => {
       const newNode: TreeNode = { id: randomId(), text };
@@ -1011,6 +1012,12 @@ export const renderKnowledgeEditor = (
       }
     }
 
+    const spacer = document.createElement('div');
+    spacer.dataset.columnsSpacer = 'true';
+    spacer.style.flexShrink = '0';
+    spacer.style.width = '0';
+    wrapper.appendChild(spacer);
+
     const makeBreadcrumbItem = (label: string, colIdx: number, isCurrent: boolean): HTMLElement => {
       const item = document.createElement('span');
       item.textContent = label.length > 24 ? `${label.slice(0, 24)}…` : label;
@@ -1021,7 +1028,11 @@ export const renderKnowledgeEditor = (
       item.style.flexShrink = '0';
       item.addEventListener('click', () => {
         const col = colEls[colIdx];
-        if (col) wrapper.scrollTo({ left: col.offsetLeft, behavior: 'smooth' });
+        if (!col) return;
+        const wrapperRect = wrapper.getBoundingClientRect();
+        const colRect = col.getBoundingClientRect();
+        const targetScrollLeft = wrapper.scrollLeft + (colRect.left - wrapperRect.left);
+        wrapper.scrollTo({ left: Math.max(0, targetScrollLeft), behavior: 'smooth' });
       });
       return item;
     };
@@ -1050,7 +1061,7 @@ export const renderKnowledgeEditor = (
       sep.style.color = 'rgba(0,0,0,0.25)';
       sep.style.flexShrink = '0';
       breadcrumb.appendChild(sep);
-      breadcrumb.appendChild(makeBreadcrumbItem(loc.parent[loc.index].text, i + 1, i === fullPath.length - 1));
+      breadcrumb.appendChild(makeBreadcrumbItem(loc.parent[loc.index].text, i, i === fullPath.length - 1));
     }
 
     const container = document.createElement('div');
@@ -1092,7 +1103,8 @@ export const renderKnowledgeEditor = (
   const scrollColumnsToEnd = (): void => {
     const columnsWrapper = outer.querySelector<HTMLElement>('[data-columns-wrapper]');
     if (!columnsWrapper) return;
-    const lastCol = columnsWrapper.lastElementChild as HTMLElement | null;
+    let lastCol = columnsWrapper.lastElementChild as HTMLElement | null;
+    if (lastCol?.dataset.columnsSpacer) lastCol = lastCol.previousElementSibling as HTMLElement | null;
     if (!lastCol) return;
     columnsWrapper.scrollLeft = Math.max(
       0,
@@ -1109,6 +1121,11 @@ export const renderKnowledgeEditor = (
     }
     focusPending();
     if (activeDocNodeId !== null) scrollColumnsToEnd();
+    requestAnimationFrame(() => {
+      const wrapperEl = outer.querySelector<HTMLElement>('[data-columns-wrapper]');
+      const spacerEl = outer.querySelector<HTMLElement>('[data-columns-spacer]');
+      if (wrapperEl && spacerEl) spacerEl.style.width = `${wrapperEl.clientWidth}px`;
+    });
   };
 
   const startPolling = (fetchUrl: string, itemsPath?: string): void => {
