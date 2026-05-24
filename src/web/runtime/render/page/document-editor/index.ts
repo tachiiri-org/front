@@ -3,6 +3,7 @@ import type { TreeNode } from '../../../../schema/component/kind/tree-editor';
 import { applyCssProps, cloneNodes, getByPath, randomId } from './ops';
 import { buildUl } from './list';
 import type { DocumentEditorState, DocumentEditorContext } from './types';
+import { theme } from '../theme';
 
 export const renderDocumentEditor = (
   id: string,
@@ -17,6 +18,8 @@ export const renderDocumentEditor = (
   outer.style.boxSizing = 'border-box';
   outer.style.fontSize = '13px';
   outer.style.lineHeight = '1.5';
+  outer.style.background = theme.bg;
+  outer.style.color = theme.textHigh;
   applyCssProps(outer, component as unknown as Record<string, unknown>);
 
   const state: DocumentEditorState = {
@@ -72,7 +75,7 @@ export const renderDocumentEditor = (
     if (state.nodes.length === 0) {
       const hint = document.createElement('div');
       Object.assign(hint.style, {
-        color: 'rgba(0,0,0,0.3)',
+        color: theme.textDim,
         fontSize: '12px',
         padding: '4px 0',
         cursor: 'pointer',
@@ -113,11 +116,12 @@ export const renderDocumentEditor = (
   };
 
   if (component.sourceComponentId) {
-    outer.style.display = 'none';
     outer.dataset.sourceComponentId = component.sourceComponentId;
+    outer.style.display = 'flex';
+    outer.style.flexDirection = 'column';
     Object.assign(outer.style, {
-      background: 'white',
-      borderLeft: '1px solid rgba(0,0,0,0.12)',
+      background: theme.bg,
+      borderLeft: `1px solid ${theme.borderMid}`,
       zIndex: '10',
     });
 
@@ -127,11 +131,11 @@ export const renderDocumentEditor = (
       alignItems: 'center',
       justifyContent: 'space-between',
       fontSize: '11px',
-      color: 'rgba(0,0,0,0.4)',
+      color: theme.textLow,
       padding: '4px 8px',
       userSelect: 'none',
       flexShrink: '0',
-      borderBottom: '1px solid rgba(0,0,0,0.08)',
+      borderBottom: `1px solid ${theme.borderFaint}`,
       gap: '4px',
     });
     const titleEl = document.createElement('span');
@@ -148,7 +152,7 @@ export const renderDocumentEditor = (
       background: 'none',
       border: 'none',
       cursor: 'pointer',
-      color: 'rgba(0,0,0,0.35)',
+      color: theme.textDim,
       fontSize: '15px',
       padding: '0 2px',
       lineHeight: '1',

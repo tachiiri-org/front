@@ -1,5 +1,6 @@
 import type { TreeNode } from '../../../../schema/component/kind/tree-editor';
 import { ALL_CSS_PROP_KEYS } from '../../../../schema/component';
+import { theme } from '../theme';
 
 export const getByPath = (obj: unknown, path: string): unknown => {
   if (!path) return obj;
@@ -121,9 +122,9 @@ export const updateNodeSelectionVisuals = (
   for (const row of rows) {
     const idx = allIds.indexOf(row.dataset.nodeRow ?? '');
     if (lo >= 0 && idx >= lo && idx <= hi) {
-      row.style.background = 'rgba(0, 120, 255, 0.12)';
+      row.style.background = theme.selectStrong;
     } else {
-      row.style.background = row.dataset.inPath === 'true' ? 'rgba(0, 120, 255, 0.08)' : 'transparent';
+      row.style.background = row.dataset.inPath === 'true' ? theme.selectSubtle : 'transparent';
     }
   }
 };

@@ -3,6 +3,7 @@ import type { TreeNode } from '../../../../schema/component/kind/tree-editor';
 import { applyCssProps, cloneNodes, getByPath, findNode, flatIds, reassignIds } from './ops';
 import { buildColumns } from './columns';
 import type { KnowledgeEditorState, KnowledgeEditorContext } from './types';
+import { theme } from '../theme';
 
 export const renderKnowledgeEditor = (
   id: string,
@@ -17,6 +18,8 @@ export const renderKnowledgeEditor = (
   outer.style.boxSizing = 'border-box';
   outer.style.fontSize = '13px';
   outer.style.lineHeight = '1.5';
+  outer.style.background = theme.bg;
+  outer.style.color = theme.textHigh;
   applyCssProps(outer, component as unknown as Record<string, unknown>);
 
   const state: KnowledgeEditorState = {

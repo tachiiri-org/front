@@ -2,6 +2,7 @@ import type { TreeNode } from '../../../../schema/component/kind/tree-editor';
 import type { KnowledgeEditorContext } from './types';
 import { randomId, findNode, flatIds, getAncestors, hasDescendants } from './ops';
 import { createInput } from './input';
+import { theme } from '../theme';
 
 export const buildColumn = (
   list: TreeNode[],
@@ -16,7 +17,7 @@ export const buildColumn = (
   col.style.width = 'max-content';
   col.style.maxWidth = '30vw';
   col.style.minWidth = '180px';
-  col.style.borderRight = '1px solid rgba(0,0,0,0.2)';
+  col.style.borderRight = `1px solid ${theme.borderStrong}`;
   col.style.overflowY = 'auto';
   col.style.overflowX = 'hidden';
   col.style.flexShrink = '0';
@@ -38,7 +39,7 @@ export const buildColumn = (
     borderRadius: '1px',
     boxSizing: 'border-box',
     background: 'transparent',
-    border: '1.5px solid rgba(0,0,0,0.2)',
+    border: `1.5px solid ${theme.borderStrong}`,
   });
 
   const draftInput = document.createElement('textarea');
@@ -60,7 +61,7 @@ export const buildColumn = (
     padding: '2px 4px',
     boxSizing: 'border-box',
     background: 'transparent',
-    color: 'rgba(0,0,0,0.35)',
+    color: theme.textDim,
   });
   (draftInput.style as unknown as Record<string, string>)['field-sizing'] = 'content';
 
@@ -110,9 +111,9 @@ export const buildColumn = (
     row.style.gap = '4px';
     row.style.padding = '1px 8px 1px 12px';
     row.style.background = isMultiSelected
-      ? 'rgba(0, 120, 255, 0.12)'
+      ? theme.selectStrong
       : isSelectedInPath
-      ? 'rgba(0, 120, 255, 0.08)'
+      ? theme.selectSubtle
       : 'transparent';
 
     let input = state.inputCache.get(node.id);
@@ -122,8 +123,8 @@ export const buildColumn = (
     }
     if (input.value !== node.text) input.value = node.text;
     input.dataset.columnIndex = String(columnIndex);
-    input.style.background = isIssue ? 'rgba(255, 160, 0, 0.07)' : isProposed ? 'rgba(0, 160, 80, 0.07)' : 'transparent';
-    input.style.color = isIssue ? 'rgba(160, 80, 0, 0.85)' : isProposed ? 'rgba(0, 100, 50, 0.85)' : 'inherit';
+    input.style.background = isIssue ? theme.issueBg : isProposed ? theme.proposedBg : 'transparent';
+    input.style.color = isIssue ? theme.issueText : isProposed ? theme.proposedText : 'inherit';
     input.style.fontStyle = isProposed ? 'italic' : 'normal';
     input.style.borderRadius = isIssue || isProposed ? '3px' : '0';
 
@@ -132,20 +133,20 @@ export const buildColumn = (
     const docStatus = state.docContentCache.get(node.id) ?? '';
     const hasDoc = docStatus !== '';
     const baseColor = isDocOpen
-      ? 'rgba(0, 120, 255, 0.7)'
+      ? theme.selectMarker
       : docStatus === 'issue'
-      ? 'rgba(255, 160, 0, 0.65)'
+      ? theme.issueMarkerBright
       : docStatus === 'proposed'
-      ? 'rgba(0, 160, 80, 0.65)'
+      ? theme.proposedMarkerBright
       : desc.issue
-      ? 'rgba(255, 160, 0, 0.65)'
+      ? theme.issueMarkerBright
       : desc.proposed
-      ? 'rgba(0, 160, 80, 0.65)'
+      ? theme.proposedMarkerBright
       : isIssue
-      ? 'rgba(255, 160, 0, 0.4)'
+      ? theme.issueMarkerDim
       : isProposed
-      ? 'rgba(0, 160, 80, 0.4)'
-      : 'rgba(0, 0, 0, 0.55)';
+      ? theme.proposedMarkerDim
+      : theme.markerDefault;
     Object.assign(marker.style, {
       width: '6px',
       height: '6px',
@@ -156,7 +157,7 @@ export const buildColumn = (
       boxSizing: 'border-box',
       background: hasDoc ? baseColor : 'transparent',
       border: hasDoc ? 'none' : `1.5px solid ${baseColor}`,
-      outline: isDocOpen ? '2px solid rgba(0, 120, 255, 0.3)' : 'none',
+      outline: isDocOpen ? `2px solid ${theme.selectOutline}` : 'none',
       outlineOffset: '1px',
     });
     marker.addEventListener('click', (e: MouseEvent) => {
@@ -185,7 +186,7 @@ export const buildColumn = (
       arrow.textContent = '›';
       Object.assign(arrow.style, {
         userSelect: 'none',
-        color: isIssue ? 'rgba(160, 80, 0, 0.5)' : isProposed ? 'rgba(0, 100, 50, 0.5)' : 'rgba(0,0,0,0.25)',
+        color: isIssue ? theme.issueAccent : isProposed ? theme.proposedAccent : theme.textFaint,
         fontSize: '14px',
         flexShrink: '0',
         paddingRight: '2px',
@@ -259,7 +260,7 @@ export const buildColumns = (ctx: KnowledgeEditorContext): HTMLElement => {
     const item = document.createElement('span');
     item.textContent = label.length > 24 ? `${label.slice(0, 24)}…` : label;
     item.style.cursor = 'pointer';
-    item.style.color = isCurrent ? 'rgba(0,0,0,0.75)' : 'rgba(0,0,0,0.4)';
+    item.style.color = isCurrent ? theme.textHigh : theme.textLow;
     item.style.padding = '1px 2px';
     item.style.borderRadius = '2px';
     item.style.flexShrink = '0';
@@ -282,7 +283,7 @@ export const buildColumns = (ctx: KnowledgeEditorContext): HTMLElement => {
     overflowX: 'auto',
     padding: '2px 8px',
     fontSize: '11px',
-    borderBottom: '1px solid rgba(0,0,0,0.08)',
+    borderBottom: `1px solid ${theme.borderFaint}`,
     gap: '2px',
     userSelect: 'none',
     whiteSpace: 'nowrap',
@@ -295,7 +296,7 @@ export const buildColumns = (ctx: KnowledgeEditorContext): HTMLElement => {
     if (!loc) break;
     const sep = document.createElement('span');
     sep.textContent = '›';
-    sep.style.color = 'rgba(0,0,0,0.25)';
+    sep.style.color = theme.textFaint;
     sep.style.flexShrink = '0';
     breadcrumb.appendChild(sep);
     breadcrumb.appendChild(makeBreadcrumbItem(loc.parent[loc.index].text, i, i === fullPath.length - 1));

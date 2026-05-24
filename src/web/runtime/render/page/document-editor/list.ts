@@ -2,6 +2,7 @@ import type { TreeNode } from '../../../../schema/component/kind/tree-editor';
 import type { DocumentEditorContext } from './types';
 import { findNode, dispatchNodeFocus, dispatchNodeTextChange } from './ops';
 import { createKeydownHandler } from './keyboard';
+import { theme } from '../theme';
 
 const createInput = (node: TreeNode, ctx: DocumentEditorContext): HTMLTextAreaElement => {
   const { state } = ctx;
@@ -21,8 +22,8 @@ const createInput = (node: TreeNode, ctx: DocumentEditorContext): HTMLTextAreaEl
     overflow: 'hidden',
     whiteSpace: 'pre-wrap',
     wordBreak: 'break-word',
-    background: isIssue ? 'rgba(255, 160, 0, 0.07)' : isProposed ? 'rgba(0, 160, 80, 0.07)' : 'transparent',
-    color: isIssue ? 'rgba(160, 80, 0, 0.85)' : isProposed ? 'rgba(0, 100, 50, 0.85)' : 'inherit',
+    background: isIssue ? theme.issueBg : isProposed ? theme.proposedBg : 'transparent',
+    color: isIssue ? theme.issueText : isProposed ? theme.proposedText : 'inherit',
     fontStyle: isProposed ? 'italic' : 'normal',
     borderRadius: isIssue || isProposed ? '3px' : '0',
     fontFamily: 'inherit',
@@ -96,7 +97,7 @@ export const buildUl = (list: TreeNode[], depth: number, ctx: DocumentEditorCont
     const bullet = document.createElement('span');
     bullet.textContent = !node.children?.length ? '•' : state.collapsedIds.has(node.id) ? '▸' : '▾';
     bullet.style.userSelect = 'none';
-    bullet.style.color = isIssue ? 'rgba(160, 80, 0, 0.5)' : isProposed ? 'rgba(0, 100, 50, 0.5)' : 'rgba(0,0,0,0.35)';
+    bullet.style.color = isIssue ? theme.issueAccent : isProposed ? theme.proposedAccent : theme.textDim;
     bullet.style.flexShrink = '0';
     bullet.style.width = '10px';
     bullet.style.fontSize = '10px';
