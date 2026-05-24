@@ -129,6 +129,7 @@ export const renderDocumentEditor = (
 
   let nodes: TreeNode[] = cloneNodes(component.data.nodes);
   let pendingFocusId: string | null = null;
+  let pendingFocusCursorPos: number | null = null;
   let focusedNodeId: string | null = null;
   let saveTimer: ReturnType<typeof setTimeout> | null = null;
   let anchorIdx: number | null = null;
@@ -160,9 +161,14 @@ export const renderDocumentEditor = (
   const focusPending = (): void => {
     if (!pendingFocusId) return;
     const fid = pendingFocusId;
+    const pos = pendingFocusCursorPos;
     pendingFocusId = null;
+    pendingFocusCursorPos = null;
     const el = outer.querySelector<HTMLTextAreaElement>(`[data-node-id="${CSS.escape(fid)}"]`);
-    el?.focus();
+    if (el) {
+      el.focus();
+      if (pos !== null) el.setSelectionRange(pos, pos);
+    }
   };
 
   if (component.sourceComponentId) {
@@ -380,13 +386,18 @@ export const renderDocumentEditor = (
         if (e.key === 'Enter') {
           e.preventDefault();
           anchorIdx = null; activeIdx = null;
-          const newNode: TreeNode = { id: randomId(), text: '' };
+          const cursorPos = input.selectionStart ?? input.value.length;
+          const textBefore = input.value.slice(0, cursorPos);
+          const textAfter = input.value.slice(cursorPos);
+          const newNode: TreeNode = { id: randomId(), text: textAfter };
           if (currentLoc) {
+            currentLoc.parent[currentLoc.index].text = textBefore;
             currentLoc.parent.splice(currentLoc.index + 1, 0, newNode);
           } else {
             nodes.push(newNode);
           }
           pendingFocusId = newNode.id;
+          pendingFocusCursorPos = 0;
           scheduleSave();
           render();
           return;
@@ -400,6 +411,26 @@ export const renderDocumentEditor = (
           const prevId = idx > 0 ? allIds[idx - 1] : null;
           if (currentLoc) currentLoc.parent.splice(currentLoc.index, 1);
           pendingFocusId = prevId;
+          scheduleSave();
+          render();
+          return;
+        }
+
+        if (e.key === 'Backspace' && input.selectionStart === 0 && input.selectionEnd === 0 && input.value !== '') {
+          e.preventDefault();
+          anchorIdx = null; activeIdx = null;
+          const allIds = flatIds(nodes);
+          const idx = allIds.indexOf(node.id);
+          if (idx === 0) return;
+          const prevId = allIds[idx - 1];
+          const prevLoc = findNode(nodes, prevId);
+          if (!prevLoc) return;
+          const prevNode = prevLoc.parent[prevLoc.index];
+          const mergedCursorPos = prevNode.text.length;
+          prevNode.text = prevNode.text + node.text;
+          if (currentLoc) currentLoc.parent.splice(currentLoc.index, 1);
+          pendingFocusId = prevId;
+          pendingFocusCursorPos = mergedCursorPos;
           scheduleSave();
           render();
           return;
