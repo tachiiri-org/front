@@ -684,7 +684,7 @@ export const renderKnowledgeEditor = (
     }
   };
 
-  const buildColumn = (list: TreeNode[], fullPath: string[], columnIndex: number): HTMLElement => {
+  const buildColumn = (list: TreeNode[], fullPath: string[], columnIndex: number, onAdd: (text: string) => void): HTMLElement => {
     const col = document.createElement('div');
     col.style.width = 'max-content';
     col.style.maxWidth = '40vw';
@@ -695,6 +695,78 @@ export const renderKnowledgeEditor = (
     col.style.flexShrink = '0';
     col.style.boxSizing = 'border-box';
     col.style.padding = '4px 0';
+
+    const draftRow = document.createElement('div');
+    draftRow.style.display = 'flex';
+    draftRow.style.alignItems = 'flex-start';
+    draftRow.style.gap = '4px';
+    draftRow.style.padding = '1px 8px 1px 12px';
+
+    const draftMarker = document.createElement('span');
+    Object.assign(draftMarker.style, {
+      width: '6px',
+      height: '6px',
+      flexShrink: '0',
+      alignSelf: 'center',
+      borderRadius: '1px',
+      boxSizing: 'border-box',
+      background: 'transparent',
+      border: '1.5px solid rgba(0,0,0,0.2)',
+    });
+
+    const draftInput = document.createElement('textarea');
+    draftInput.rows = 1;
+    draftInput.dataset.navInput = 'draft';
+    draftInput.dataset.columnIndex = String(columnIndex);
+    Object.assign(draftInput.style, {
+      display: 'block',
+      width: '100%',
+      border: 'none',
+      outline: 'none',
+      resize: 'none',
+      overflow: 'hidden',
+      whiteSpace: 'pre-wrap',
+      wordBreak: 'break-word',
+      fontFamily: 'inherit',
+      fontSize: 'inherit',
+      lineHeight: 'inherit',
+      padding: '2px 4px',
+      boxSizing: 'border-box',
+      background: 'transparent',
+      color: 'rgba(0,0,0,0.35)',
+    });
+    (draftInput.style as unknown as Record<string, string>)['field-sizing'] = 'content';
+
+    draftInput.addEventListener('input', () => {
+      draftInput.style.height = 'auto';
+      draftInput.style.height = `${draftInput.scrollHeight}px`;
+    });
+
+    draftInput.addEventListener('keydown', (e: KeyboardEvent) => {
+      if (e.key === 'Enter') {
+        e.preventDefault();
+        const text = draftInput.value;
+        if (!text) return;
+        pushHistory();
+        onAdd(text);
+        draftInput.value = '';
+        draftInput.style.height = 'auto';
+        return;
+      }
+      if (e.key === 'ArrowDown') {
+        const onLastLine = !(draftInput.value.slice(draftInput.selectionStart ?? draftInput.value.length).includes('\n'));
+        if (!onLastLine) return;
+        e.preventDefault();
+        const colInputs = Array.from(outer.querySelectorAll<HTMLTextAreaElement>(`[data-nav-input][data-column-index="${columnIndex}"]`))
+          .filter(inp => inp.offsetParent !== null);
+        const pos = colInputs.indexOf(draftInput);
+        if (pos < colInputs.length - 1) colInputs[pos + 1].focus();
+      }
+    });
+
+    draftRow.appendChild(draftMarker);
+    draftRow.appendChild(draftInput);
+    col.appendChild(draftRow);
 
     for (const node of list) {
       const isSelectedInPath = fullPath[columnIndex] === node.id;
@@ -736,7 +808,7 @@ export const renderKnowledgeEditor = (
         ? 'rgba(255, 160, 0, 0.4)'
         : isProposed
         ? 'rgba(0, 160, 80, 0.4)'
-        : 'rgba(0, 0, 0, 0.15)';
+        : 'rgba(0, 0, 0, 0.55)';
       Object.assign(marker.style, {
         width: '6px',
         height: '6px',
@@ -800,14 +872,28 @@ export const renderKnowledgeEditor = (
     wrapper.style.minHeight = '0';
     wrapper.style.overflowX = 'auto';
 
-    wrapper.appendChild(buildColumn(nodes, fullPath, 0));
+    wrapper.appendChild(buildColumn(nodes, fullPath, 0, (text) => {
+      const newNode: TreeNode = { id: randomId(), text };
+      nodes.unshift(newNode);
+      pendingFocusId = newNode.id;
+      scheduleSave();
+      render();
+    }));
 
     for (let i = 0; i < fullPath.length; i++) {
       const loc = findNode(nodes, fullPath[i]);
       if (!loc) break;
       const selected = loc.parent[loc.index];
-      if (selected.children?.length) {
-        wrapper.appendChild(buildColumn(selected.children, fullPath, i + 1));
+      const isLastInPath = i === fullPath.length - 1;
+      if (selected.children?.length || isLastInPath) {
+        wrapper.appendChild(buildColumn(selected.children ?? [], fullPath, i + 1, (text) => {
+          const newNode: TreeNode = { id: randomId(), text };
+          if (!selected.children) selected.children = [];
+          selected.children.unshift(newNode);
+          pendingFocusId = newNode.id;
+          scheduleSave();
+          render();
+        }));
       }
     }
 
@@ -822,33 +908,9 @@ export const renderKnowledgeEditor = (
   });
 
   const render = (): void => {
-    if (nodes.length === 0) {
-      const hint = document.createElement('div');
-      Object.assign(hint.style, {
-        color: 'rgba(0,0,0,0.3)',
-        fontSize: '12px',
-        padding: '8px 12px',
-        cursor: 'pointer',
-        userSelect: 'none',
-      });
-      hint.textContent = '+ 追加 (クリック or Enter)';
-      hint.addEventListener('click', () => {
-        const newNode: TreeNode = { id: randomId(), text: '' };
-        nodes.push(newNode);
-        pendingFocusId = newNode.id;
-        scheduleSave();
-        render();
-      });
-      hint.addEventListener('keydown', (e: KeyboardEvent) => {
-        if (e.key === 'Enter') hint.click();
-      });
-      renderTarget.replaceChildren(hint);
-      return;
-    }
-
     renderTarget.replaceChildren(buildColumns());
 
-    for (const ta of renderTarget.querySelectorAll<HTMLTextAreaElement>('textarea[data-node-id]')) {
+    for (const ta of renderTarget.querySelectorAll<HTMLTextAreaElement>('textarea[data-nav-input]')) {
       ta.style.height = 'auto';
       ta.style.height = `${ta.scrollHeight}px`;
     }
