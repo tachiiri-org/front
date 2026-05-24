@@ -7,6 +7,7 @@ import {
   isOutlinerComponent,
   isTextEditorComponent,
   isKnowledgeEditorComponent,
+  isDocumentEditorComponent,
   ALL_CSS_PROP_KEYS,
   applyDefaults,
   type TableComponent,
@@ -14,6 +15,7 @@ import {
   type OutlinerComponent,
   type TextEditorComponent,
   type KnowledgeEditorComponent,
+  type DocumentEditorComponent,
   type Component,
 } from '../../../schema/component';
 import { type Frame, type FrameRef, isFrameRef } from '../../../schema/screen/screen';
@@ -25,6 +27,7 @@ import { renderEditableTree } from './tree-editor';
 import { renderOutliner } from './outliner';
 import { renderTextEditor } from './text-editor';
 import { renderKnowledgeEditor } from './knowledge-editor';
+import { renderDocumentEditor } from './document-editor';
 
 const applyCssProps = (el: HTMLElement, c: Record<string, unknown>): void => {
   for (const propKey of ALL_CSS_PROP_KEYS) {
@@ -255,6 +258,12 @@ export const renderComponent = (
       ? (frame as Record<string, unknown>).treeId as string
       : undefined;
     return renderKnowledgeEditor(id, frame as KnowledgeEditorComponent, treeId);
+  }
+  if (isDocumentEditorComponent(frame)) {
+    const treeId = typeof (frame as Record<string, unknown>).treeId === 'string'
+      ? (frame as Record<string, unknown>).treeId as string
+      : undefined;
+    return renderDocumentEditor(id, frame as DocumentEditorComponent, treeId);
   }
   if (isTableComponent(frame) && options?.screenId) {
     return renderEditableTable(

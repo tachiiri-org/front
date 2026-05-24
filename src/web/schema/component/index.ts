@@ -11,6 +11,7 @@ import type { TreeEditorComponent } from './kind/tree-editor';
 import type { OutlinerComponent } from './kind/outliner';
 import type { TextEditorComponent } from './kind/text-editor';
 import type { KnowledgeEditorComponent } from './kind/knowledge-editor';
+import type { DocumentEditorComponent } from './kind/document-editor';
 import { isElementComponent, elementDefaults, elementSchema } from './kind/element';
 import { isHeadingComponent, headingDefaults, headingSchema } from './kind/heading';
 import { isButtonComponent, buttonDefaults, buttonSchema } from './kind/button';
@@ -24,6 +25,7 @@ import { isTreeEditorComponent, treeEditorDefaults, treeEditorSchema } from './k
 import { isOutlinerComponent, outlinerDefaults, outlinerSchema } from './kind/outliner';
 import { isTextEditorComponent, textEditorDefaults, textEditorSchema } from './kind/text-editor';
 import { isKnowledgeEditorComponent, knowledgeEditorDefaults, knowledgeEditorSchema } from './kind/knowledge-editor';
+import { isDocumentEditorComponent, documentEditorDefaults, documentEditorSchema } from './kind/document-editor';
 import type { FormField, SchemaField } from './kind/form/field';
 
 export { type ElementComponent, isElementComponent, elementDefaults, elementSchema } from './kind/element';
@@ -72,6 +74,12 @@ export {
   knowledgeEditorSchema,
 } from './kind/knowledge-editor';
 export {
+  type DocumentEditorComponent,
+  isDocumentEditorComponent,
+  documentEditorDefaults,
+  documentEditorSchema,
+} from './kind/document-editor';
+export {
   type TableComponent,
   type TableSchema,
   type TableData,
@@ -104,7 +112,8 @@ export type Component =
   | TreeEditorComponent
   | OutlinerComponent
   | TextEditorComponent
-  | KnowledgeEditorComponent;
+  | KnowledgeEditorComponent
+  | DocumentEditorComponent;
 
 export const isComponent = (value: unknown): value is Component =>
   isElementComponent(value) ||
@@ -119,7 +128,8 @@ export const isComponent = (value: unknown): value is Component =>
   isTreeEditorComponent(value) ||
   isOutlinerComponent(value) ||
   isTextEditorComponent(value) ||
-  isKnowledgeEditorComponent(value);
+  isKnowledgeEditorComponent(value) ||
+  isDocumentEditorComponent(value);
 
 export const componentDefaults: Record<string, Record<string, unknown>> = {
   element: elementDefaults as Record<string, unknown>,
@@ -135,6 +145,7 @@ export const componentDefaults: Record<string, Record<string, unknown>> = {
   outliner: outlinerDefaults as Record<string, unknown>,
   'text-editor': textEditorDefaults as Record<string, unknown>,
   'knowledge-editor': knowledgeEditorDefaults as Record<string, unknown>,
+  'document-editor': documentEditorDefaults as Record<string, unknown>,
 };
 
 export const componentSchemas: Record<string, SchemaField[]> = {
@@ -151,6 +162,7 @@ export const componentSchemas: Record<string, SchemaField[]> = {
   outliner: outlinerSchema,
   'text-editor': textEditorSchema,
   'knowledge-editor': knowledgeEditorSchema,
+  'document-editor': documentEditorSchema,
 };
 
 export const COMPONENT_KINDS = Object.keys(componentDefaults);

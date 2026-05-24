@@ -57,6 +57,51 @@ const RESOURCE_CONFIGS: ResourceConfig[] = [
   },
 ];
 
+// --- Doc helpers ---
+
+const handleTreeWithDocsGet = async (backend: LayoutBackend, treeId: string): Promise<Response> => {
+  const treeBody = await backend.getText(`trees/${treeId}.json`);
+  if (!treeBody) return new Response('Not Found', { status: 404 });
+
+  type TreeNodeFull = { id: string; children?: TreeNodeFull[] };
+  const collectIds = (list: TreeNodeFull[]): string[] => {
+    const ids: string[] = [];
+    for (const n of list) {
+      ids.push(n.id);
+      if (n.children?.length) ids.push(...collectIds(n.children));
+    }
+    return ids;
+  };
+
+  let tree: { nodes: TreeNodeFull[] };
+  try {
+    tree = JSON.parse(treeBody) as { nodes: TreeNodeFull[] };
+  } catch {
+    return new Response('Invalid JSON', { status: 400 });
+  }
+
+  const allIds = collectIds(tree.nodes ?? []);
+  const docEntries = await Promise.all(
+    allIds.map(async (id) => {
+      try {
+        const body = await backend.getText(`docs/${id}.json`);
+        if (!body) return null;
+        const parsed = JSON.parse(body) as unknown;
+        const content =
+          typeof (parsed as Record<string, unknown>)?.content === 'string'
+            ? ((parsed as Record<string, unknown>).content as string)
+            : '';
+        return content ? ([id, content] as const) : null;
+      } catch {
+        return null;
+      }
+    }),
+  );
+
+  const docs = Object.fromEntries(docEntries.filter((e): e is [string, string] => e !== null));
+  return new Response(JSON.stringify({ ...tree, docs }), { headers: { 'Content-Type': 'application/json' } });
+};
+
 // --- Migration helpers ---
 
 type TreeNode = { id: string; text: string; children?: TreeNode[] };
@@ -210,7 +255,10 @@ export const handleApiRequest = async (request: Request, env: Env): Promise<Resp
   const treesMatch = url.pathname.match(/^\/api\/trees\/(.+)$/);
   if (treesMatch) {
     const treeId = decodeURIComponent(treesMatch[1]);
-    if (request.method === 'GET') return handleResourceGet(backend, 'trees/', treeId);
+    if (request.method === 'GET') {
+      if (url.searchParams.get('include_docs') === 'true') return handleTreeWithDocsGet(backend, treeId);
+      return handleResourceGet(backend, 'trees/', treeId);
+    }
     if (request.method === 'PUT') return handleResourcePut(request, backend, 'trees/', treeId);
     return new Response('Method Not Allowed', { status: 405 });
   }
@@ -220,8 +268,16 @@ export const handleApiRequest = async (request: Request, env: Env): Promise<Resp
     const docId = decodeURIComponent(docsMatch[1]);
     if (request.method === 'GET') {
       const body = await backend.getText(`docs/${docId}.json`);
-      const responseBody = body ?? JSON.stringify({ nodes: [] });
-      return new Response(responseBody, { headers: { 'Content-Type': 'application/json' } });
+      if (!body) {
+        return new Response(JSON.stringify({ content: '' }), { headers: { 'Content-Type': 'application/json' } });
+      }
+      try {
+        const parsed = JSON.parse(body) as unknown;
+        if (typeof parsed === 'object' && parsed !== null && 'content' in parsed) {
+          return new Response(body, { headers: { 'Content-Type': 'application/json' } });
+        }
+      } catch { /* fall through */ }
+      return new Response(JSON.stringify({ content: '' }), { headers: { 'Content-Type': 'application/json' } });
     }
     if (request.method === 'PUT') return handleResourcePut(request, backend, 'docs/', docId);
     return new Response('Method Not Allowed', { status: 405 });

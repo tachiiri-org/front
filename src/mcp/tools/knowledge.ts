@@ -116,6 +116,7 @@ export const KNOWLEDGE_TOOLS = [
       type: "object",
       properties: {
         tree_id: { type: "string", description: "Tree ID (the UUID in the list editor's source URL /api/trees/{tree_id})" },
+        include_docs: { type: "boolean", description: "Also return doc content for each node that has one." },
       },
       required: ["tree_id"],
     },
@@ -149,15 +150,14 @@ export const KNOWLEDGE_TOOLS = [
   },
   {
     name: "doc_write",
-    description: "Write doc content for a node. Sets the node's status to 'proposed' to indicate AI-generated content awaiting review.",
+    description: "Write doc content for a node.",
     inputSchema: {
       type: "object",
       properties: {
-        tree_id: { type: "string", description: "Tree ID" },
         node_id: { type: "string", description: "Node ID" },
         content: { type: "string", description: "Doc content to write" },
       },
-      required: ["tree_id", "node_id", "content"],
+      required: ["node_id", "content"],
     },
   },
 ];
@@ -172,7 +172,32 @@ export async function callKnowledgeTool(
       const treeId = String(args.tree_id);
       const tree = await readTree(env, treeId);
       const legend = "# ~ proposed knowledge  ? proposed issue\n";
-      return { content: [{ type: "text", text: legend + toOutline(tree.nodes) }] };
+      const outline = legend + toOutline(tree.nodes);
+
+      if (args.include_docs) {
+        const allIds: string[] = [];
+        const collectIds = (nodes: KnowledgeNode[]): void => {
+          for (const n of nodes) {
+            allIds.push(n.id);
+            if (n.children?.length) collectIds(n.children);
+          }
+        };
+        collectIds(tree.nodes);
+
+        const docEntries = await Promise.all(
+          allIds.map(async (id) => {
+            const doc = await readDoc(env, id);
+            if (!doc.content) return null;
+            const node = findNode(tree.nodes, id);
+            const label = node ? node.text : id;
+            return `\n\n### ${label}\n${doc.content}`;
+          }),
+        );
+        const docsSection = docEntries.filter(Boolean).join('');
+        return { content: [{ type: "text", text: outline + (docsSection ? `\n\n## Docs${docsSection}` : '') }] };
+      }
+
+      return { content: [{ type: "text", text: outline }] };
     }
 
     if (name === "knowledge_propose") {
@@ -242,20 +267,10 @@ export async function callKnowledgeTool(
     }
 
     if (name === "doc_write") {
-      const treeId = String(args.tree_id);
       const nodeId = String(args.node_id);
       const content = String(args.content);
-      const tree = await readTree(env, treeId);
-      const node = findNode(tree.nodes, nodeId);
-      if (!node) {
-        return { content: [{ type: "text", text: `Node not found: ${nodeId}` }], isError: true };
-      }
-      node.status = "proposed";
-      node.proposedAt = new Date().toISOString();
-      node.proposedBy = "claude";
       await writeDoc(env, nodeId, { content });
-      await writeTree(env, treeId, tree);
-      return { content: [{ type: "text", text: `Wrote doc for node "${node.text}" (id: ${nodeId})` }] };
+      return { content: [{ type: "text", text: `Wrote doc for node ${nodeId}` }] };
     }
 
     return { content: [{ type: "text", text: `Unknown knowledge tool: ${name}` }], isError: true };

@@ -1,6 +1,8 @@
-import type { KnowledgeEditorComponent } from '../../../schema/component/kind/knowledge-editor';
+import type { DocumentEditorComponent } from '../../../schema/component/kind/document-editor';
 import type { TreeNode } from '../../../schema/component/kind/tree-editor';
 import { ALL_CSS_PROP_KEYS } from '../../../schema/component';
+
+type NodeFocusDetail = { documentEditorFrameId: string; nodeId: string; nodeText: string };
 
 const getByPath = (obj: unknown, path: string): unknown => {
   if (!path) return obj;
@@ -98,15 +100,15 @@ const hasDescendants = (node: TreeNode): { issue: boolean; proposed: boolean } =
   return { issue, proposed };
 };
 
-const dispatchNodeFocus = (knowledgeEditorFrameId: string, nodeId: string, nodeText: string): void => {
-  document.dispatchEvent(new CustomEvent('knowledge-editor:node-focus', {
-    detail: { knowledgeEditorFrameId, nodeId, nodeText },
+const dispatchNodeFocus = (documentEditorFrameId: string, nodeId: string, nodeText: string): void => {
+  document.dispatchEvent(new CustomEvent('document-editor:node-focus', {
+    detail: { documentEditorFrameId, nodeId, nodeText },
   }));
 };
 
-const dispatchNodeTextChange = (knowledgeEditorFrameId: string, nodeId: string, nodeText: string): void => {
-  document.dispatchEvent(new CustomEvent('knowledge-editor:node-text-change', {
-    detail: { knowledgeEditorFrameId, nodeId, nodeText },
+const dispatchNodeTextChange = (documentEditorFrameId: string, nodeId: string, nodeText: string): void => {
+  document.dispatchEvent(new CustomEvent('document-editor:node-text-change', {
+    detail: { documentEditorFrameId, nodeId, nodeText },
   }));
 };
 
@@ -129,9 +131,9 @@ const updateNodeSelectionVisuals = (
   }
 };
 
-export const renderKnowledgeEditor = (
+export const renderDocumentEditor = (
   id: string,
-  component: KnowledgeEditorComponent,
+  component: DocumentEditorComponent,
   treeId?: string,
 ): HTMLElement => {
   const outer = document.createElement('div');
@@ -159,8 +161,9 @@ export const renderKnowledgeEditor = (
   let clipboard: TreeNode[] | null = null;
   const history: TreeNode[][] = [];
   const inputCache = new Map<string, HTMLTextAreaElement>();
-  let activeDocNodeId: string | null = null;
+  let docPanelNodeId: string | null = null;
   const docContentCache = new Map<string, string>();
+  let docSaveTimer: ReturnType<typeof setTimeout> | null = null;
 
   const scheduleRender = (): void => {
     if (rafId !== null) return;
@@ -636,6 +639,119 @@ export const renderKnowledgeEditor = (
     return input;
   };
 
+  if (component.sourceComponentId) {
+    outer.style.display = 'none';
+    Object.assign(outer.style, {
+      background: 'white',
+      borderLeft: '1px solid rgba(0,0,0,0.12)',
+      zIndex: '10',
+    });
+
+    const headerEl = document.createElement('div');
+    Object.assign(headerEl.style, {
+      display: 'flex',
+      alignItems: 'center',
+      justifyContent: 'space-between',
+      fontSize: '11px',
+      color: 'rgba(0,0,0,0.4)',
+      padding: '4px 8px',
+      userSelect: 'none',
+      flexShrink: '0',
+      borderBottom: '1px solid rgba(0,0,0,0.08)',
+      gap: '4px',
+    });
+    const titleEl = document.createElement('span');
+    titleEl.textContent = '—';
+    Object.assign(titleEl.style, {
+      overflow: 'hidden',
+      textOverflow: 'ellipsis',
+      whiteSpace: 'nowrap',
+      flex: '1',
+    });
+    const closeBtn = document.createElement('button');
+    closeBtn.textContent = '×';
+    Object.assign(closeBtn.style, {
+      background: 'none',
+      border: 'none',
+      cursor: 'pointer',
+      color: 'rgba(0,0,0,0.35)',
+      fontSize: '15px',
+      padding: '0 2px',
+      lineHeight: '1',
+      flexShrink: '0',
+    });
+    headerEl.appendChild(titleEl);
+    headerEl.appendChild(closeBtn);
+    outer.appendChild(headerEl);
+
+    const innerContainer = document.createElement('div');
+    Object.assign(innerContainer.style, {
+      flex: '1',
+      minHeight: '0',
+      overflow: 'hidden',
+      display: 'flex',
+      flexDirection: 'column',
+    });
+    outer.appendChild(innerContainer);
+    renderTarget = innerContainer;
+
+    const closePanel = (): void => {
+      outer.style.display = 'none';
+      nodes = [];
+      inputCache.clear();
+      while (history.length) history.pop();
+      document.dispatchEvent(new CustomEvent('document-editor:closed', {
+        detail: { sourceFrameId: component.sourceComponentId },
+      }));
+    };
+    closeBtn.addEventListener('click', closePanel);
+
+    const listenFrameId = component.sourceComponentId;
+    document.addEventListener('knowledge-editor:doc-toggle', (e: Event) => {
+      const detail = (e as CustomEvent<{ knowledgeEditorFrameId: string; nodeId: string | null; nodeText: string | null }>).detail;
+      if (detail.knowledgeEditorFrameId !== listenFrameId) return;
+      if (detail.nodeId === null) {
+        closePanel();
+        return;
+      }
+      titleEl.textContent = detail.nodeText || '(no title)';
+      resolvedTreeId = detail.nodeId;
+      nodes = [];
+      inputCache.clear();
+      docContentCache.clear();
+      while (history.length) history.pop();
+      outer.style.display = 'flex';
+      outer.style.flexDirection = 'column';
+      render();
+      void fetch(`/api/trees/${encodeURIComponent(detail.nodeId)}?include_docs=true`)
+        .then((res) => (res.ok ? (res.json() as Promise<unknown>) : Promise.resolve({ nodes: [] })))
+        .then((data) => {
+          const raw = (data as Record<string, unknown>).nodes ?? data;
+          nodes = Array.isArray(raw) ? (raw as TreeNode[]) : [];
+          const docs = (data as Record<string, unknown>).docs;
+          if (docs && typeof docs === 'object' && !Array.isArray(docs)) {
+            for (const [nodeId, content] of Object.entries(docs as Record<string, unknown>)) {
+              if (typeof content === 'string') docContentCache.set(nodeId, content);
+            }
+          }
+          render();
+        })
+        .catch(() => render());
+    });
+  }
+
+  const scheduleDocSave = (nodeId: string, content: string): void => {
+    if (docSaveTimer) clearTimeout(docSaveTimer);
+    docSaveTimer = setTimeout(() => {
+      docSaveTimer = null;
+      void fetch(`/api/docs/${encodeURIComponent(nodeId)}`, {
+        method: 'PUT',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ content }),
+      });
+    }, 500);
+  };
+
   const fetchDocContent = (nodeId: string): void => {
     void fetch(`/api/docs/${encodeURIComponent(nodeId)}`)
       .then((res) => (res.ok ? (res.json() as Promise<unknown>) : Promise.resolve(null)))
@@ -645,11 +761,11 @@ export const renderKnowledgeEditor = (
             ? ((data as Record<string, unknown>).content as string)
             : '';
         docContentCache.set(nodeId, content);
-        render();
+        if (docPanelNodeId === nodeId) render();
       })
       .catch(() => {
         docContentCache.set(nodeId, '');
-        render();
+        if (docPanelNodeId === nodeId) render();
       });
   };
 
@@ -724,7 +840,7 @@ export const renderKnowledgeEditor = (
       input.style.borderRadius = isIssue || isProposed ? '3px' : '0';
 
       const marker = document.createElement('span');
-      const isDocOpen = activeDocNodeId === node.id;
+      const isDocOpen = docPanelNodeId === node.id;
       const hasDoc = docContentCache.has(node.id) && docContentCache.get(node.id) !== '';
       const baseColor = isDocOpen
         ? 'rgba(0, 120, 255, 0.7)'
@@ -753,17 +869,11 @@ export const renderKnowledgeEditor = (
       marker.addEventListener('click', (e: MouseEvent) => {
         e.stopPropagation();
         e.preventDefault();
-        if (activeDocNodeId === node.id) {
-          activeDocNodeId = null;
-          document.dispatchEvent(new CustomEvent('knowledge-editor:doc-toggle', {
-            detail: { knowledgeEditorFrameId: id, nodeId: null, nodeText: null },
-          }));
+        if (docPanelNodeId === node.id) {
+          docPanelNodeId = null;
         } else {
-          activeDocNodeId = node.id;
+          docPanelNodeId = node.id;
           if (!docContentCache.has(node.id)) fetchDocContent(node.id);
-          document.dispatchEvent(new CustomEvent('knowledge-editor:doc-toggle', {
-            detail: { knowledgeEditorFrameId: id, nodeId: node.id, nodeText: node.text },
-          }));
         }
         render();
       });
@@ -814,15 +924,101 @@ export const renderKnowledgeEditor = (
     return wrapper;
   };
 
-  document.addEventListener('document-editor:closed', (e: Event) => {
-    const detail = (e as CustomEvent<{ sourceFrameId: string }>).detail;
-    if (detail.sourceFrameId !== id) return;
-    activeDocNodeId = null;
-    render();
-  });
+  const buildDocPanel = (): HTMLElement => {
+    const nodeId = docPanelNodeId!;
+    const nodeLoc = findNode(nodes, nodeId);
+    const nodeText = nodeLoc ? nodeLoc.parent[nodeLoc.index].text : '';
+
+    const panel = document.createElement('div');
+    Object.assign(panel.style, {
+      flex: '1',
+      display: 'flex',
+      flexDirection: 'column',
+      borderLeft: '1px solid rgba(0,0,0,0.12)',
+      minWidth: '200px',
+      overflow: 'hidden',
+    });
+
+    const header = document.createElement('div');
+    Object.assign(header.style, {
+      display: 'flex',
+      alignItems: 'center',
+      justifyContent: 'space-between',
+      padding: '2px 8px',
+      borderBottom: '1px solid rgba(0,0,0,0.08)',
+      fontSize: '11px',
+      color: 'rgba(0,0,0,0.4)',
+      flexShrink: '0',
+      userSelect: 'none',
+      gap: '4px',
+    });
+
+    const titleEl = document.createElement('span');
+    titleEl.textContent = nodeText || '(no title)';
+    Object.assign(titleEl.style, {
+      overflow: 'hidden',
+      textOverflow: 'ellipsis',
+      whiteSpace: 'nowrap',
+      flex: '1',
+    });
+
+    const closeBtn = document.createElement('button');
+    closeBtn.textContent = '×';
+    Object.assign(closeBtn.style, {
+      background: 'none',
+      border: 'none',
+      cursor: 'pointer',
+      color: 'rgba(0,0,0,0.35)',
+      fontSize: '15px',
+      padding: '0 2px',
+      lineHeight: '1',
+      flexShrink: '0',
+    });
+    closeBtn.addEventListener('click', () => {
+      docPanelNodeId = null;
+      render();
+    });
+
+    header.appendChild(titleEl);
+    header.appendChild(closeBtn);
+    panel.appendChild(header);
+
+    const cachedContent = docContentCache.get(nodeId);
+    if (cachedContent === undefined) {
+      const loading = document.createElement('div');
+      Object.assign(loading.style, { padding: '8px', color: 'rgba(0,0,0,0.3)', fontSize: '12px' });
+      loading.textContent = '...';
+      panel.appendChild(loading);
+    } else {
+      const textarea = document.createElement('textarea');
+      Object.assign(textarea.style, {
+        flex: '1',
+        border: 'none',
+        outline: 'none',
+        resize: 'none',
+        padding: '8px',
+        fontFamily: 'inherit',
+        fontSize: 'inherit',
+        lineHeight: 'inherit',
+        background: 'transparent',
+        boxSizing: 'border-box',
+        width: '100%',
+      });
+      textarea.value = cachedContent;
+      textarea.placeholder = '...';
+      textarea.addEventListener('input', () => {
+        docContentCache.set(nodeId, textarea.value);
+        scheduleDocSave(nodeId, textarea.value);
+      });
+      panel.appendChild(textarea);
+    }
+
+    return panel;
+  };
 
   const render = (): void => {
     if (nodes.length === 0) {
+      docPanelNodeId = null;
       const hint = document.createElement('div');
       Object.assign(hint.style, {
         color: 'rgba(0,0,0,0.3)',
@@ -846,7 +1042,18 @@ export const renderKnowledgeEditor = (
       return;
     }
 
-    renderTarget.replaceChildren(buildColumns());
+    if (docPanelNodeId !== null) {
+      const wrapper = document.createElement('div');
+      wrapper.style.cssText = 'display:flex;flex:1;min-height:0;overflow:hidden;';
+      const cols = buildColumns();
+      cols.style.flex = '0 0 auto';
+      cols.style.maxWidth = '60%';
+      wrapper.appendChild(cols);
+      wrapper.appendChild(buildDocPanel());
+      renderTarget.replaceChildren(wrapper);
+    } else {
+      renderTarget.replaceChildren(buildColumns());
+    }
 
     for (const ta of renderTarget.querySelectorAll<HTMLTextAreaElement>('textarea[data-node-id]')) {
       ta.style.height = 'auto';
@@ -900,5 +1107,7 @@ export const renderKnowledgeEditor = (
   } else {
     render();
   }
+
+  void startPolling;
   return outer;
 };
