@@ -80,7 +80,7 @@ export const createKeydownHandler = (
       return;
     }
 
-    if (e.key === 'Tab' && !e.shiftKey) {
+    if (e.key === 'Tab' && !e.shiftKey && !e.ctrlKey) {
       e.preventDefault();
       ctx.pushHistory();
       if (state.anchorIdx !== null && state.activeIdx !== null) {
@@ -123,7 +123,7 @@ export const createKeydownHandler = (
       return;
     }
 
-    if (e.key === 'Tab' && e.shiftKey) {
+    if (e.key === 'ArrowLeft' && e.altKey) {
       e.preventDefault();
       if (ctx.sourceComponentId) {
         const allIds = flatIds(state.nodes);
@@ -163,8 +163,12 @@ export const createKeydownHandler = (
             detail: { sourceFrameId: ctx.sourceComponentId, nodes: moveNodes },
           }));
         }
-        return;
       }
+      return;
+    }
+
+    if (e.key === 'Tab' && e.shiftKey && !e.ctrlKey) {
+      e.preventDefault();
       ctx.pushHistory();
       if (state.anchorIdx !== null && state.activeIdx !== null) {
         const allIds = flatIds(state.nodes);
@@ -392,7 +396,7 @@ export const createKeydownHandler = (
       return;
     }
 
-    if (e.key === 'ArrowRight' && input.selectionStart === input.value.length && input.selectionEnd === input.value.length) {
+    if (e.key === 'ArrowRight' && !e.altKey && input.selectionStart === input.value.length && input.selectionEnd === input.value.length) {
       e.preventDefault();
       if (state.anchorIdx !== null) { state.anchorIdx = null; state.activeIdx = null; updateNodeSelectionVisuals(ctx.outer, [], null, null); }
       const navInputs = Array.from(ctx.outer.querySelectorAll<HTMLTextAreaElement>('[data-nav-input]'))
@@ -402,7 +406,7 @@ export const createKeydownHandler = (
       return;
     }
 
-    if (e.key === 'ArrowLeft' && input.selectionStart === 0 && input.selectionEnd === 0) {
+    if (e.key === 'ArrowLeft' && !e.altKey && input.selectionStart === 0 && input.selectionEnd === 0) {
       e.preventDefault();
       if (state.anchorIdx !== null) { state.anchorIdx = null; state.activeIdx = null; updateNodeSelectionVisuals(ctx.outer, [], null, null); }
       const navInputs = Array.from(ctx.outer.querySelectorAll<HTMLTextAreaElement>('[data-nav-input]'))

@@ -103,7 +103,7 @@ export const createKeydownHandler = (
       return;
     }
 
-    if (e.key === 'Tab') {
+    if (e.key === 'ArrowRight' && e.altKey) {
       e.preventDefault();
       if (state.activeDocNodeId !== null) {
         const allIds = flatIds(state.nodes);
@@ -144,11 +144,11 @@ export const createKeydownHandler = (
           ctx.scheduleSave();
           ctx.render();
         }
-        return;
       }
+      return;
     }
 
-    if (e.key === 'Tab' && !e.shiftKey) {
+    if (e.key === 'Tab' && !e.shiftKey && !e.ctrlKey) {
       e.preventDefault();
       ctx.pushHistory();
       if (state.anchorIdx !== null && state.activeIdx !== null) {
@@ -190,7 +190,7 @@ export const createKeydownHandler = (
       return;
     }
 
-    if (e.key === 'Tab' && e.shiftKey) {
+    if (e.key === 'Tab' && e.shiftKey && !e.ctrlKey) {
       e.preventDefault();
       ctx.pushHistory();
       if (state.anchorIdx !== null && state.activeIdx !== null) {
@@ -429,7 +429,7 @@ export const createKeydownHandler = (
       return;
     }
 
-    if (e.key === 'ArrowRight' && input.selectionStart === input.value.length && input.selectionEnd === input.value.length) {
+    if (e.key === 'ArrowRight' && e.ctrlKey && !e.altKey) {
       e.preventDefault();
       if (state.anchorIdx !== null) { state.anchorIdx = null; state.activeIdx = null; updateNodeSelectionVisuals(ctx.outer, [], null, null); }
       if (currentNode?.children?.length) {
@@ -440,7 +440,30 @@ export const createKeydownHandler = (
       return;
     }
 
-    if (e.key === 'ArrowLeft' && input.selectionStart === 0 && input.selectionEnd === 0) {
+    if (e.key === 'ArrowLeft' && e.ctrlKey && !e.altKey) {
+      e.preventDefault();
+      if (state.anchorIdx !== null) { state.anchorIdx = null; state.activeIdx = null; updateNodeSelectionVisuals(ctx.outer, [], null, null); }
+      const ancestors = getAncestors(node.id, state.nodes);
+      if (ancestors && ancestors.length > 0) {
+        state.focusedNodeId = ancestors[ancestors.length - 1];
+        state.pendingFocusId = ancestors[ancestors.length - 1];
+        ctx.render();
+      }
+      return;
+    }
+
+    if (e.key === 'ArrowRight' && !e.altKey && !e.ctrlKey && input.selectionStart === input.value.length && input.selectionEnd === input.value.length) {
+      e.preventDefault();
+      if (state.anchorIdx !== null) { state.anchorIdx = null; state.activeIdx = null; updateNodeSelectionVisuals(ctx.outer, [], null, null); }
+      if (currentNode?.children?.length) {
+        state.focusedNodeId = currentNode.children[0].id;
+        state.pendingFocusId = currentNode.children[0].id;
+        ctx.render();
+      }
+      return;
+    }
+
+    if (e.key === 'ArrowLeft' && !e.altKey && !e.ctrlKey && input.selectionStart === 0 && input.selectionEnd === 0) {
       e.preventDefault();
       if (state.anchorIdx !== null) { state.anchorIdx = null; state.activeIdx = null; updateNodeSelectionVisuals(ctx.outer, [], null, null); }
       const ancestors = getAncestors(node.id, state.nodes);
