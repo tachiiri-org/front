@@ -1,3 +1,4 @@
 - 作業前に `README.md` を読む
 - 作業前に `mcp__front-local__knowledge_read` で tree_id `knowledge-1` を読み、ノード一覧を把握する
 - タスクに関連するノードを判断し、`mcp__front-local__doc_read` で該当ノードのドキュメントを取得してから作業を始める
+- 掘り下げセッション時は `mcp__front-local__doc_read` で `アジェンダ`（node: `2f0bc74e-925d-4d87-be90-fc2f4e876824`）を読み、議題・目標・制約・品質基準・タスクを把握してから議論を始める
