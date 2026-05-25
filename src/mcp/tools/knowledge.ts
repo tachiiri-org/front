@@ -179,14 +179,15 @@ export const KNOWLEDGE_TOOLS = [
   },
   {
     name: "doc_write",
-    description: "Write doc content for a node.",
+    description: "Write doc content for a node. Marks the node as 'proposed' for human review.",
     inputSchema: {
       type: "object",
       properties: {
+        tree_id: { type: "string", description: "Tree ID" },
         node_id: { type: "string", description: "Node ID" },
         content: { type: "string", description: "Doc content to write" },
       },
-      required: ["node_id", "content"],
+      required: ["tree_id", "node_id", "content"],
     },
   },
 ];
@@ -307,10 +308,19 @@ export async function callKnowledgeTool(
     }
 
     if (name === "doc_write") {
+      const treeId = String(args.tree_id);
       const nodeId = String(args.node_id);
       const content = String(args.content);
       await writeDoc(env, nodeId, { content });
-      return { content: [{ type: "text", text: `Wrote doc for node ${nodeId}` }] };
+      const tree = await readTree(env, treeId);
+      const node = findNode(tree.nodes, nodeId);
+      if (node) {
+        node.status = "proposed";
+        node.proposedAt = new Date().toISOString();
+        node.proposedBy = "claude";
+        await writeTree(env, treeId, tree);
+      }
+      return { content: [{ type: "text", text: `Wrote doc for node ${nodeId} (proposed)` }] };
     }
 
     return { content: [{ type: "text", text: `Unknown knowledge tool: ${name}` }], isError: true };
