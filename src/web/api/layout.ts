@@ -119,6 +119,87 @@ const handleTreeWithDocsGet = async (backend: LayoutBackend, treeId: string): Pr
 
 // --- Migration helpers ---
 
+type KnowledgeNode = {
+  id: string;
+  text: string;
+  children?: KnowledgeNode[];
+  status?: string;
+  type?: string;
+};
+
+type DocNode = { id: string; text: string; children?: DocNode[] };
+type GraphWord = { id: string; text: string; status?: string; type?: string };
+type GraphText = { id: string; text: string; wordIds: string[] };
+
+const flattenKnowledgeNodes = (nodes: KnowledgeNode[]): KnowledgeNode[] => {
+  const result: KnowledgeNode[] = [];
+  for (const n of nodes) {
+    result.push(n);
+    if (n.children?.length) result.push(...flattenKnowledgeNodes(n.children));
+  }
+  return result;
+};
+
+const flattenDocNodes = (nodes: DocNode[]): DocNode[] => {
+  const result: DocNode[] = [];
+  for (const n of nodes) {
+    if (n.text?.trim()) result.push(n);
+    if (n.children?.length) result.push(...flattenDocNodes(n.children));
+  }
+  return result;
+};
+
+const handleMigrateKnowledgeToWordGraph = async (
+  backend: LayoutBackend,
+  knowledgeTreeId: string,
+  wordGraphId: string,
+): Promise<Response> => {
+  const knowledgeBody = await backend.getText(`trees/${knowledgeTreeId}.json`);
+  if (!knowledgeBody) return new Response('Knowledge tree not found', { status: 404 });
+
+  let knowledgeTree: { nodes: KnowledgeNode[] };
+  try {
+    knowledgeTree = JSON.parse(knowledgeBody) as { nodes: KnowledgeNode[] };
+  } catch {
+    return new Response('Invalid JSON', { status: 400 });
+  }
+
+  const allKnowledgeNodes = flattenKnowledgeNodes(knowledgeTree.nodes ?? []);
+  const words: GraphWord[] = [];
+  const texts: GraphText[] = [];
+
+  for (const kNode of allKnowledgeNodes) {
+    if (!kNode.text?.trim()) continue;
+
+    const docBody = await backend.getText(`trees/${kNode.id}.json`);
+    if (!docBody) continue;
+
+    let doc: { nodes: DocNode[] };
+    try {
+      doc = JSON.parse(docBody) as { nodes: DocNode[] };
+    } catch {
+      continue;
+    }
+
+    if (!doc.nodes?.length) continue;
+
+    words.push({ id: kNode.id, text: kNode.text, status: kNode.status, type: kNode.type });
+
+    for (const dn of flattenDocNodes(doc.nodes)) {
+      texts.push({ id: crypto.randomUUID(), text: dn.text, wordIds: [kNode.id] });
+    }
+  }
+
+  await backend.putText(
+    `word-graphs/${wordGraphId}.json`,
+    JSON.stringify({ texts, words }),
+  );
+
+  return new Response(JSON.stringify({ words: words.length, texts: texts.length }), {
+    headers: { 'Content-Type': 'application/json' },
+  });
+};
+
 type TreeNode = { id: string; text: string; children?: TreeNode[] };
 type ListRegistryEntry = { id: string; name: string };
 
@@ -264,6 +345,23 @@ export const handleApiRequest = async (request: Request, env: Env): Promise<Resp
 
   if (url.pathname === '/api/migrate/lists-to-tree') {
     if (request.method === 'POST') return handleMigrateListsToTree(backend);
+    return new Response('Method Not Allowed', { status: 405 });
+  }
+
+  if (url.pathname === '/api/migrate/knowledge-to-word-graph') {
+    if (request.method === 'POST') {
+      const from = url.searchParams.get('from') ?? 'knowledge-1';
+      const to = url.searchParams.get('to') ?? 'word-graph-1';
+      return handleMigrateKnowledgeToWordGraph(backend, from, to);
+    }
+    return new Response('Method Not Allowed', { status: 405 });
+  }
+
+  const wordGraphsMatch = url.pathname.match(/^\/api\/word-graphs\/(.+)$/);
+  if (wordGraphsMatch) {
+    const graphId = decodeURIComponent(wordGraphsMatch[1]);
+    if (request.method === 'GET') return handleResourceGet(backend, 'word-graphs/', graphId);
+    if (request.method === 'PUT') return handleResourcePut(request, backend, 'word-graphs/', graphId);
     return new Response('Method Not Allowed', { status: 405 });
   }
 

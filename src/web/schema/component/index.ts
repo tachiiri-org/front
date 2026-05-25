@@ -14,6 +14,7 @@ import type { KnowledgeEditorComponent } from './kind/knowledge-editor';
 import type { DocumentEditorComponent } from './kind/document-editor';
 import type { WordEditorComponent } from './kind/word-editor';
 import type { DefinitionEditorComponent } from './kind/definition-editor';
+import type { WordGraphComponent } from './kind/word-graph';
 import { isElementComponent, elementDefaults, elementSchema } from './kind/element';
 import { isHeadingComponent, headingDefaults, headingSchema } from './kind/heading';
 import { isButtonComponent, buttonDefaults, buttonSchema } from './kind/button';
@@ -30,6 +31,7 @@ import { isKnowledgeEditorComponent, knowledgeEditorDefaults, knowledgeEditorSch
 import { isDocumentEditorComponent, documentEditorDefaults, documentEditorSchema } from './kind/document-editor';
 import { isWordEditorComponent, wordEditorDefaults, wordEditorSchema } from './kind/word-editor';
 import { isDefinitionEditorComponent, definitionEditorDefaults, definitionEditorSchema } from './kind/definition-editor';
+import { isWordGraphComponent, wordGraphDefaults, wordGraphSchema } from './kind/word-graph';
 import type { FormField, SchemaField } from './kind/form/field';
 
 export { type ElementComponent, isElementComponent, elementDefaults, elementSchema } from './kind/element';
@@ -96,6 +98,14 @@ export {
   definitionEditorSchema,
 } from './kind/definition-editor';
 export {
+  type WordGraphComponent,
+  type GraphText,
+  type GraphWord,
+  isWordGraphComponent,
+  wordGraphDefaults,
+  wordGraphSchema,
+} from './kind/word-graph';
+export {
   type TableComponent,
   type TableSchema,
   type TableData,
@@ -131,7 +141,8 @@ export type Component =
   | KnowledgeEditorComponent
   | DocumentEditorComponent
   | WordEditorComponent
-  | DefinitionEditorComponent;
+  | DefinitionEditorComponent
+  | WordGraphComponent;
 
 export const isComponent = (value: unknown): value is Component =>
   isElementComponent(value) ||
@@ -149,7 +160,8 @@ export const isComponent = (value: unknown): value is Component =>
   isKnowledgeEditorComponent(value) ||
   isDocumentEditorComponent(value) ||
   isWordEditorComponent(value) ||
-  isDefinitionEditorComponent(value);
+  isDefinitionEditorComponent(value) ||
+  isWordGraphComponent(value);
 
 export const componentDefaults: Record<string, Record<string, unknown>> = {
   element: elementDefaults as Record<string, unknown>,
@@ -168,6 +180,7 @@ export const componentDefaults: Record<string, Record<string, unknown>> = {
   'document-editor': documentEditorDefaults as Record<string, unknown>,
   'word-editor': wordEditorDefaults as Record<string, unknown>,
   'definition-editor': definitionEditorDefaults as Record<string, unknown>,
+  'word-graph': wordGraphDefaults as Record<string, unknown>,
 };
 
 export const componentSchemas: Record<string, SchemaField[]> = {
@@ -187,6 +200,7 @@ export const componentSchemas: Record<string, SchemaField[]> = {
   'document-editor': documentEditorSchema,
   'word-editor': wordEditorSchema,
   'definition-editor': definitionEditorSchema,
+  'word-graph': wordGraphSchema,
 };
 
 export const COMPONENT_KINDS = Object.keys(componentDefaults);
