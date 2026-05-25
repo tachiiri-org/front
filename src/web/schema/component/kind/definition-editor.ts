@@ -1,13 +1,22 @@
 import { ALL_CSS_PROP_KEYS } from '../style';
 import type { CssStyleProps } from '../style';
 import type { SchemaField } from './form/field';
-import type { TreeEditorData, TreeEditorSource } from './tree-editor';
+
+type DefinitionNode = {
+  id: string;
+  text: string;
+  children?: DefinitionNode[];
+  status?: 'accepted' | 'proposed';
+  type?: 'knowledge' | 'issue';
+  proposedAt?: string;
+  proposedBy?: string;
+};
 
 export type DefinitionEditorComponent = {
   kind: 'definition-editor';
   name?: string;
-  data: TreeEditorData;
-  source?: TreeEditorSource;
+  data: { nodes: DefinitionNode[] };
+  source?: { url: string; itemsPath?: string };
   targetComponentId?: string;
   sourceComponentId?: string;
 } & CssStyleProps;

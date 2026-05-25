@@ -1,5 +1,5 @@
 import type { DefinitionEditorComponent } from '../../../../schema/component/kind/definition-editor';
-import type { TreeNode } from '../../../../schema/component/kind/tree-editor';
+import type { TreeNode } from './ops';
 import { applyCssProps, cloneNodes, getByPath, randomId } from './ops';
 import { buildUl } from './list';
 import type { DefinitionEditorState, DefinitionEditorContext } from './types';

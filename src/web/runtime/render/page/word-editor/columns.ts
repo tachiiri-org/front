@@ -1,4 +1,4 @@
-import type { TreeNode } from '../../../../schema/component/kind/tree-editor';
+import type { TreeNode } from './ops';
 import type { WordEditorContext } from './types';
 import { randomId, findNode, flatIds, getAncestors, hasDescendants } from './ops';
 import { createInput } from './input';

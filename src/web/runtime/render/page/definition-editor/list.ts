@@ -1,4 +1,4 @@
-import type { TreeNode } from '../../../../schema/component/kind/tree-editor';
+import type { TreeNode } from './ops';
 import type { DefinitionEditorContext } from './types';
 import { findNode, dispatchNodeFocus, dispatchNodeTextChange } from './ops';
 import { createKeydownHandler } from './keyboard';

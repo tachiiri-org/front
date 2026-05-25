@@ -1,5 +1,5 @@
 import type { WordEditorComponent } from '../../../../schema/component/kind/word-editor';
-import type { TreeNode } from '../../../../schema/component/kind/tree-editor';
+import type { TreeNode } from './ops';
 import { applyCssProps, cloneNodes, getByPath, findNode, flatIds, reassignIds } from './ops';
 import { buildColumns } from './columns';
 import type { WordEditorState, WordEditorContext } from './types';

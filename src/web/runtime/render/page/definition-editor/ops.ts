@@ -1,5 +1,14 @@
-import type { TreeNode } from '../../../../schema/component/kind/tree-editor';
 import { ALL_CSS_PROP_KEYS } from '../../../../schema/component';
+
+export type TreeNode = {
+  id: string;
+  text: string;
+  children?: TreeNode[];
+  status?: 'accepted' | 'proposed';
+  type?: 'knowledge' | 'issue';
+  proposedAt?: string;
+  proposedBy?: string;
+};
 
 export const getByPath = (obj: unknown, path: string): unknown => {
   if (!path) return obj;
