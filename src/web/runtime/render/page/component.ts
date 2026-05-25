@@ -8,6 +8,8 @@ import {
   isTextEditorComponent,
   isKnowledgeEditorComponent,
   isDocumentEditorComponent,
+  isWordEditorComponent,
+  isDefinitionEditorComponent,
   ALL_CSS_PROP_KEYS,
   applyDefaults,
   type TableComponent,
@@ -16,6 +18,8 @@ import {
   type TextEditorComponent,
   type KnowledgeEditorComponent,
   type DocumentEditorComponent,
+  type WordEditorComponent,
+  type DefinitionEditorComponent,
   type Component,
 } from '../../../schema/component';
 import { type Frame, type FrameRef, isFrameRef } from '../../../schema/screen/screen';
@@ -28,6 +32,8 @@ import { renderOutliner } from './outliner';
 import { renderTextEditor } from './text-editor';
 import { renderKnowledgeEditor } from './knowledge-editor';
 import { renderDocumentEditor } from './document-editor';
+import { renderWordEditor } from './word-editor';
+import { renderDefinitionEditor } from './definition-editor';
 
 const applyCssProps = (el: HTMLElement, c: Record<string, unknown>): void => {
   for (const propKey of ALL_CSS_PROP_KEYS) {
@@ -264,6 +270,18 @@ export const renderComponent = (
       ? (frame as Record<string, unknown>).treeId as string
       : undefined;
     return renderDocumentEditor(id, frame as DocumentEditorComponent, treeId);
+  }
+  if (isWordEditorComponent(frame)) {
+    const treeId = typeof (frame as Record<string, unknown>).treeId === 'string'
+      ? (frame as Record<string, unknown>).treeId as string
+      : undefined;
+    return renderWordEditor(id, frame as WordEditorComponent, treeId);
+  }
+  if (isDefinitionEditorComponent(frame)) {
+    const treeId = typeof (frame as Record<string, unknown>).treeId === 'string'
+      ? (frame as Record<string, unknown>).treeId as string
+      : undefined;
+    return renderDefinitionEditor(id, frame as DefinitionEditorComponent, treeId);
   }
   if (isTableComponent(frame) && options?.screenId) {
     return renderEditableTable(
