@@ -46,8 +46,10 @@ export const createInput = (
   });
 
   input.addEventListener('input', () => {
-    input.style.height = 'auto';
-    input.style.height = `${input.scrollHeight}px`;
+    if (!CSS.supports('field-sizing', 'content')) {
+      input.style.height = 'auto';
+      input.style.height = `${input.scrollHeight}px`;
+    }
 
     if (isTextColumn(colIndex)) {
       const text = findText(state.texts, item.id);

@@ -114,6 +114,35 @@ export const createKeydownHandler = (
       return;
     }
 
+    // Backspace at start of text node: merge with previous node
+    if (e.key === 'Backspace' && isTextCol && !e.ctrlKey && !e.shiftKey &&
+        (input.selectionStart ?? 0) === 0 && (input.selectionEnd ?? 0) === 0) {
+      const colIds = getColumnItemIds(state.texts, state.words, state.path, colIndex);
+      const idx = colIds.indexOf(item.id);
+      if (idx > 0) {
+        e.preventDefault();
+        ctx.pushHistory();
+        const prevId = colIds[idx - 1];
+        const prevText = findText(state.texts, prevId);
+        const currText = findText(state.texts, item.id);
+        if (prevText && currText) {
+          const mergePos = prevText.text.length;
+          prevText.text = prevText.text + currText.text;
+          state.texts = state.texts.filter((t) => t.id !== item.id);
+          if (state.path[colIndex] === item.id) {
+            state.path = [...state.path.slice(0, colIndex), prevId];
+          }
+          state.pendingFocusId = prevId;
+          state.pendingFocusColumn = colIndex;
+          state.pendingFocusCursorPos = mergePos;
+          ctx.scheduleSave();
+          ctx.render();
+        }
+        return;
+      }
+      if (input.value !== '') return;
+    }
+
     // Backspace on empty input: delete / unlink (same as Ctrl+Shift+Backspace)
     if (e.key === 'Backspace' && input.value === '') {
       e.preventDefault();
@@ -188,7 +217,14 @@ export const createKeydownHandler = (
       ctx.pushHistory();
 
       if (isTextCol) {
-        const newText: GraphText = { id: randomId(), text: '', wordIds: [] };
+        const cursorPos = input.selectionStart ?? input.value.length;
+        const before = input.value.slice(0, cursorPos);
+        const after = input.value.slice(cursorPos);
+
+        const currentText = state.texts.find((t) => t.id === item.id);
+        if (currentText) currentText.text = before;
+
+        const newText: GraphText = { id: randomId(), text: after, wordIds: [] };
         if (colIndex > 0) {
           // Auto-link to context word so it appears in this column
           const contextWordId = state.path[colIndex - 1];

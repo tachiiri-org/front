@@ -298,7 +298,7 @@ export async function callGraphTool(
       } else {
         const newEntry: GraphText = { id: crypto.randomUUID(), text: textContent, wordIds, status: "proposed" };
         if (textType) newEntry.type = textType;
-        graph.texts.push(newEntry);
+        graph.texts.unshift(newEntry);
       }
 
       await writeWordGraph(env, graphId, graph);

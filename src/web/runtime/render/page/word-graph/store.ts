@@ -7,6 +7,7 @@ export interface GraphSharedState {
   path: string[];
   pendingFocusId: string | null;
   pendingFocusColumn: number | null;
+  pendingFocusCursorPos: number | null;
   focusedId: string | null;
   focusedColumn: number | null;
   saveTimer: ReturnType<typeof setTimeout> | null;
@@ -29,6 +30,7 @@ export const getOrCreateGraphState = (graphId: string): GraphSharedState => {
       path: [],
       pendingFocusId: null,
       pendingFocusColumn: null,
+      pendingFocusCursorPos: null,
       focusedId: null,
       focusedColumn: null,
       saveTimer: null,

@@ -4,6 +4,8 @@ import { buildColumns } from './columns';
 import type { WordGraphState, WordGraphContext } from './types';
 import { theme } from '../theme';
 
+const supportsFieldSizing = CSS.supports('field-sizing', 'content');
+
 export const renderWordGraph = (
   id: string,
   component: WordGraphComponent,
@@ -28,6 +30,7 @@ export const renderWordGraph = (
     path: [],
     pendingFocusId: null,
     pendingFocusColumn: null,
+    pendingFocusCursorPos: null,
     focusedId: null,
     focusedColumn: null,
     saveTimer: null,
@@ -77,8 +80,10 @@ export const renderWordGraph = (
     if (!state.pendingFocusId) return;
     const fid = state.pendingFocusId;
     const fcol = state.pendingFocusColumn;
+    const cursorPos = state.pendingFocusCursorPos;
     state.pendingFocusId = null;
     state.pendingFocusColumn = null;
+    state.pendingFocusCursorPos = null;
     const selector =
       fcol !== null
         ? `[data-node-id="${CSS.escape(fid)}"][data-column-index="${fcol}"]`
@@ -86,6 +91,10 @@ export const renderWordGraph = (
     const el = outer.querySelector<HTMLTextAreaElement>(selector);
     if (!el) return;
     el.focus({ preventScroll: true });
+    if (cursorPos !== null) {
+      el.selectionStart = cursorPos;
+      el.selectionEnd = cursorPos;
+    }
   };
 
   const render = (): void => {
@@ -96,9 +105,11 @@ export const renderWordGraph = (
 
     outer.replaceChildren(buildColumns(ctx));
 
-    for (const ta of outer.querySelectorAll<HTMLTextAreaElement>('textarea[data-nav-input]')) {
-      ta.style.height = 'auto';
-      ta.style.height = `${ta.scrollHeight}px`;
+    if (!supportsFieldSizing) {
+      const tas = Array.from(outer.querySelectorAll<HTMLTextAreaElement>('textarea[data-nav-input]'));
+      for (const ta of tas) ta.style.height = 'auto';
+      const heights = tas.map(ta => ta.scrollHeight);
+      for (let i = 0; i < tas.length; i++) tas[i].style.height = `${heights[i]}px`;
     }
 
     outer.querySelectorAll<HTMLElement>('[data-col-index]').forEach(col => {

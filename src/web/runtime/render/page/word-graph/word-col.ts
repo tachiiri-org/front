@@ -4,6 +4,8 @@ import { getOrCreateGraphState } from './store';
 import type { ColContext } from './types';
 import { createInput } from './input';
 import { theme } from '../theme';
+
+const supportsFieldSizing = CSS.supports('field-sizing', 'content');
 import type { GraphText, GraphWord } from '../../../../schema/component/kind/word-graph';
 
 const COL_INDEX = 1;
@@ -445,8 +447,10 @@ export const renderWordGraphWordCol = (
     if (!state.pendingFocusId) return;
     const fid = state.pendingFocusId;
     const fcol = state.pendingFocusColumn;
+    const cursorPos = state.pendingFocusCursorPos;
     state.pendingFocusId = null;
     state.pendingFocusColumn = null;
+    state.pendingFocusCursorPos = null;
     const graphId = component.graphId;
     const selector = fcol !== null
       ? `[data-graph-id="${CSS.escape(graphId)}"] [data-node-id="${CSS.escape(fid)}"][data-column-index="${fcol}"]`
@@ -454,6 +458,10 @@ export const renderWordGraphWordCol = (
     const el = document.querySelector<HTMLTextAreaElement>(selector);
     if (!el) return;
     el.focus({ preventScroll: true });
+    if (cursorPos !== null) {
+      el.selectionStart = cursorPos;
+      el.selectionEnd = cursorPos;
+    }
   };
 
   const render = (): void => {
@@ -491,9 +499,11 @@ export const renderWordGraphWordCol = (
 
     outer.replaceChildren(buildWordColContent(items, contextTextId, ctx, unlinkedItems));
 
-    for (const ta of outer.querySelectorAll<HTMLTextAreaElement>('textarea[data-nav-input]')) {
-      ta.style.height = 'auto';
-      ta.style.height = `${ta.scrollHeight}px`;
+    if (!supportsFieldSizing) {
+      const tas = Array.from(outer.querySelectorAll<HTMLTextAreaElement>('textarea[data-nav-input]'));
+      for (const ta of tas) ta.style.height = 'auto';
+      const heights = tas.map(ta => ta.scrollHeight);
+      for (let i = 0; i < tas.length; i++) tas[i].style.height = `${heights[i]}px`;
     }
 
     const newCol = outer.firstElementChild as HTMLElement | null;

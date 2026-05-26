@@ -10,6 +10,7 @@ export interface WordGraphState {
   path: string[];
   pendingFocusId: string | null;
   pendingFocusColumn: number | null;
+  pendingFocusCursorPos: number | null;
   focusedId: string | null;
   focusedColumn: number | null;
   saveTimer: ReturnType<typeof setTimeout> | null;
