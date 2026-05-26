@@ -6,7 +6,7 @@ export type GraphWord = {
   id: string;
   text: string;
   status?: 'accepted' | 'proposed';
-  type?: 'knowledge' | 'issue';
+  type?: 'knowledge' | 'issue' | 'task';
   proposedAt?: string;
   proposedBy?: string;
 };
@@ -16,7 +16,7 @@ export type GraphText = {
   text: string;
   wordIds: string[];
   status?: 'accepted' | 'proposed';
-  type?: 'knowledge' | 'issue';
+  type?: 'knowledge' | 'issue' | 'task';
   proposedAt?: string;
   proposedBy?: string;
 };

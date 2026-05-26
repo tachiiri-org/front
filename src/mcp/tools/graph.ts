@@ -2,19 +2,22 @@ import { authorizeFetch, type AuthorizeEnv } from "../../auth";
 
 const wordGraphKey = (graphId: string) => `word-graphs/${graphId}.json`;
 
+type TextStatus = "accepted" | "proposed";
+type TextType = "knowledge" | "issue" | "task";
+
 type GraphWord = {
   id: string;
   text: string;
-  status?: "accepted" | "proposed";
-  type?: "knowledge" | "issue";
+  status?: TextStatus;
+  type?: TextType;
 };
 
 type GraphText = {
   id: string;
   text: string;
   wordIds: string[];
-  status?: "accepted" | "proposed";
-  type?: "knowledge" | "issue";
+  status?: TextStatus;
+  type?: TextType;
 };
 
 type WordGraph = {
@@ -64,11 +67,30 @@ type ToolResult = {
 export const GRAPH_TOOLS = [
   {
     name: "graph_read_texts",
-    description: "Read all texts in the word graph.",
+    description: "Read texts in the word graph. Supports filtering by status/type and grouping.",
     inputSchema: {
       type: "object",
       properties: {
         graph_id: { type: "string", description: "Word graph ID (e.g. 'word-graph-1')" },
+        status: {
+          oneOf: [
+            { type: "string", enum: ["accepted", "proposed"] },
+            { type: "array", items: { type: "string", enum: ["accepted", "proposed"] } },
+          ],
+          description: "Filter by status. Omit to return all.",
+        },
+        type: {
+          oneOf: [
+            { type: "string", enum: ["knowledge", "issue", "task"] },
+            { type: "array", items: { type: "string", enum: ["knowledge", "issue", "task"] } },
+          ],
+          description: "Filter by type. Omit to return all.",
+        },
+        group_by: {
+          type: "string",
+          enum: ["status", "type"],
+          description: "Group output by status or type.",
+        },
       },
       required: ["graph_id"],
     },
@@ -120,8 +142,19 @@ export const GRAPH_TOOLS = [
     },
   },
   {
+    name: "graph_read_tasks",
+    description: "Read all texts marked as task type in the word graph.",
+    inputSchema: {
+      type: "object",
+      properties: {
+        graph_id: { type: "string", description: "Word graph ID (e.g. 'word-graph-1')" },
+      },
+      required: ["graph_id"],
+    },
+  },
+  {
     name: "graph_write_text",
-    description: "Create or update a text entry and set the words linked to it. Words that do not exist are created automatically.",
+    description: "Create or update a text entry and set the words linked to it. Words that do not exist are created automatically. Use type='issue' for contradictions/undefined items, type='task' for divergence between ideal and current state.",
     inputSchema: {
       type: "object",
       properties: {
@@ -132,8 +165,35 @@ export const GRAPH_TOOLS = [
           items: { type: "string" },
           description: "Word names to link to this text. Replaces existing links.",
         },
+        type: {
+          type: "string",
+          enum: ["issue", "task"],
+          description: "Optional type: 'issue' for contradictions or undefined items, 'task' for items where current state diverges from ideal.",
+        },
       },
       required: ["graph_id", "text", "words"],
+    },
+  },
+  {
+    name: "graph_update_text",
+    description: "Update the status or type of an existing text. Use to mark tasks as done, accept proposed texts, or reclassify entries.",
+    inputSchema: {
+      type: "object",
+      properties: {
+        graph_id: { type: "string", description: "Word graph ID (e.g. 'word-graph-1')" },
+        text: { type: "string", description: "Exact text content to find and update" },
+        status: {
+          type: "string",
+          enum: ["accepted", "proposed"],
+          description: "New status to set",
+        },
+        type: {
+          type: "string",
+          enum: ["knowledge", "issue", "task"],
+          description: "New type to set",
+        },
+      },
+      required: ["graph_id", "text"],
     },
   },
 ];
@@ -148,8 +208,39 @@ export async function callGraphTool(
     const graph = await readWordGraph(env, graphId);
 
     if (name === "graph_read_texts") {
-      const texts = graph.texts.map((t) => t.text).filter(Boolean);
-      return { content: [{ type: "text", text: texts.join("\n") || "(no texts)" }] };
+      const statusFilter = args.status
+        ? (Array.isArray(args.status) ? args.status : [args.status]) as TextStatus[]
+        : null;
+      const typeFilter = args.type
+        ? (Array.isArray(args.type) ? args.type : [args.type]) as TextType[]
+        : null;
+      const groupBy = args.group_by as "status" | "type" | undefined;
+
+      const filtered = graph.texts.filter((t) => {
+        if (statusFilter && !statusFilter.includes(t.status as TextStatus)) return false;
+        if (typeFilter && !typeFilter.includes(t.type as TextType)) return false;
+        return true;
+      });
+
+      if (!groupBy) {
+        const texts = filtered.map((t) => t.text).filter(Boolean);
+        return { content: [{ type: "text", text: texts.join("\n") || "(no texts)" }] };
+      }
+
+      const groups = new Map<string, string[]>();
+      for (const t of filtered) {
+        const key = (groupBy === "status" ? t.status : t.type) ?? "(none)";
+        if (!groups.has(key)) groups.set(key, []);
+        groups.get(key)!.push(t.text);
+      }
+
+      const lines: string[] = [];
+      for (const [key, texts] of groups) {
+        lines.push(`=== ${key} ===`);
+        lines.push(...texts.filter(Boolean));
+        lines.push("");
+      }
+      return { content: [{ type: "text", text: lines.join("\n").trim() || "(no texts)" }] };
     }
 
     if (name === "graph_read_words") {
@@ -179,9 +270,15 @@ export async function callGraphTool(
       return { content: [{ type: "text", text: issues.join("\n") || "(no issues)" }] };
     }
 
+    if (name === "graph_read_tasks") {
+      const tasks = graph.texts.filter((t) => t.type === "task").map((t) => t.text).filter(Boolean);
+      return { content: [{ type: "text", text: tasks.join("\n") || "(no tasks)" }] };
+    }
+
     if (name === "graph_write_text") {
       const textContent = String(args.text);
       const wordNames = (args.words as unknown[]).map(String);
+      const textType = args.type as "issue" | "task" | undefined;
 
       const wordIds: string[] = [];
       for (const wname of wordNames) {
@@ -197,12 +294,31 @@ export async function callGraphTool(
       if (entry) {
         entry.wordIds = wordIds;
         entry.status = "proposed";
+        if (textType) entry.type = textType;
       } else {
-        graph.texts.push({ id: crypto.randomUUID(), text: textContent, wordIds, status: "proposed" });
+        const newEntry: GraphText = { id: crypto.randomUUID(), text: textContent, wordIds, status: "proposed" };
+        if (textType) newEntry.type = textType;
+        graph.texts.push(newEntry);
       }
 
       await writeWordGraph(env, graphId, graph);
-      return { content: [{ type: "text", text: `Saved: "${textContent}" linked to [${wordNames.join(", ")}]` }] };
+      const typeLabel = textType ? ` [${textType}]` : "";
+      return { content: [{ type: "text", text: `Saved${typeLabel}: "${textContent}" linked to [${wordNames.join(", ")}]` }] };
+    }
+
+    if (name === "graph_update_text") {
+      const textContent = String(args.text);
+      const entry = graph.texts.find((t) => t.text === textContent);
+      if (!entry) return { content: [{ type: "text", text: `Text not found: ${textContent}` }], isError: true };
+
+      const updates: string[] = [];
+      if (args.status) { entry.status = args.status as TextStatus; updates.push(`status=${args.status}`); }
+      if (args.type) { entry.type = args.type as TextType; updates.push(`type=${args.type}`); }
+
+      if (updates.length === 0) return { content: [{ type: "text", text: "No updates specified" }], isError: true };
+
+      await writeWordGraph(env, graphId, graph);
+      return { content: [{ type: "text", text: `Updated "${textContent}": ${updates.join(", ")}` }] };
     }
 
     return { content: [{ type: "text", text: `Unknown graph tool: ${name}` }], isError: true };

@@ -142,6 +142,7 @@ const buildColumn = (
     const isProposed = (item as { status?: string }).status === 'proposed';
     const isIssue =
       (item as { type?: string }).type === 'issue' || item.text.startsWith('?');
+    const isTask = (item as { type?: string }).type === 'task';
 
     const row = document.createElement('div');
     row.dataset.nodeRow = item.id;
@@ -160,13 +161,15 @@ const buildColumn = (
     }
     if (inp.value !== item.text) inp.value = item.text;
     inp.dataset.columnIndex = String(colIndex);
-    inp.style.background = isIssue ? theme.issueBg : isProposed ? theme.proposedBg : 'transparent';
-    inp.style.color = isIssue ? theme.issueText : isProposed ? theme.proposedText : 'inherit';
+    inp.style.background = isIssue ? theme.issueBg : isTask ? theme.taskBg : isProposed ? theme.proposedBg : 'transparent';
+    inp.style.color = isIssue ? theme.issueText : isTask ? theme.taskText : isProposed ? theme.proposedText : 'inherit';
     inp.style.fontStyle = isProposed ? 'italic' : 'normal';
-    inp.style.borderRadius = isIssue || isProposed ? '3px' : '0';
+    inp.style.borderRadius = isIssue || isTask || isProposed ? '3px' : '0';
 
     const markerColor = isIssue
       ? theme.issueMarkerBright
+      : isTask
+      ? theme.taskMarkerBright
       : isProposed
       ? theme.proposedMarkerBright
       : theme.markerDefault;
@@ -197,6 +200,8 @@ const buildColumn = (
         userSelect: 'none',
         color: isIssue
           ? theme.issueAccent
+          : isTask
+          ? theme.taskAccent
           : isProposed
           ? theme.proposedAccent
           : theme.textFaint,

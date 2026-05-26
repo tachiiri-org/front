@@ -1,5 +1,11 @@
 - 作業前に `README.md` を読む
-- 作業前に `mcp__front-local__knowledge_read` で tree_id `knowledge-1` を読み、ノード一覧を把握する
-- 作業前に `mcp__front-local__word_read` で graph_id `word-graph-1` を読み、用語と関連テキストを把握する
-- タスクに関連するノードを判断し、`mcp__front-local__doc_read` で該当ノードのドキュメントを取得してから作業を始める
-- 掘り下げセッション時は `mcp__front-local__doc_read` で `アジェンダ`（node: `2f0bc74e-925d-4d87-be90-fc2f4e876824`）を読み、議題キューと直近セッションサマリを確認してから議論を始める
+- 作業前に `mcp__front-local__graph_read_words` で graph_id `word-graph-1` を読み、用語一覧を把握する
+- 作業前に `mcp__front-local__graph_read_texts` で graph_id `word-graph-1` を読み、全テキストを把握する
+- テキストが200件を超えたら `mcp__front-local__graph_read_texts_by_word` でタスク関連 word に絞って取得する
+
+## graph への書き込みルール
+- セッション中に新しいアイデア・方針・決定が出たら確認なしで即座に `mcp__front-local__graph_write_text` で記録する
+- テキストはどんどん追記する。既存テキストは修正せず新テキストとして追記する
+- 矛盾・未定義を発見したら `type: "issue"` で書き込む
+- 既存テキストと現状の乖離を発見したら `type: "task"` で書き込む
+- word は既存を優先し、明らかに新概念のときのみ新 word を作る（通知不要）
