@@ -3,12 +3,21 @@ import type { WordGraphContext } from './types';
 import { randomId, findText, isTextColumn, getColumnItemIds } from './ops';
 import { openWordLink } from './word-link-overlay';
 
-const getColInputs = (outer: HTMLElement, colIndex: number): HTMLTextAreaElement[] =>
-  Array.from(
+const getColInputs = (outer: HTMLElement, colIndex: number): HTMLTextAreaElement[] => {
+  const graphId = outer.dataset.graphId;
+  if (graphId) {
+    return Array.from(
+      document.querySelectorAll<HTMLTextAreaElement>(
+        `[data-graph-id="${CSS.escape(graphId)}"] [data-nav-input][data-column-index="${colIndex}"]`,
+      ),
+    ).filter((inp) => inp.offsetParent !== null);
+  }
+  return Array.from(
     outer.querySelectorAll<HTMLTextAreaElement>(
       `[data-nav-input][data-column-index="${colIndex}"]`,
     ),
   ).filter((inp) => inp.offsetParent !== null);
+};
 
 export const createKeydownHandler = (
   item: GraphText | GraphWord,

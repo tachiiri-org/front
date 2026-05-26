@@ -15,6 +15,7 @@ import type { DocumentEditorComponent } from './kind/document-editor';
 import type { WordEditorComponent } from './kind/word-editor';
 import type { DefinitionEditorComponent } from './kind/definition-editor';
 import type { WordGraphComponent } from './kind/word-graph';
+import type { WordGraphTextColComponent, WordGraphWordColComponent } from './kind/word-graph-col';
 import { isElementComponent, elementDefaults, elementSchema } from './kind/element';
 import { isHeadingComponent, headingDefaults, headingSchema } from './kind/heading';
 import { isButtonComponent, buttonDefaults, buttonSchema } from './kind/button';
@@ -32,6 +33,7 @@ import { isDocumentEditorComponent, documentEditorDefaults, documentEditorSchema
 import { isWordEditorComponent, wordEditorDefaults, wordEditorSchema } from './kind/word-editor';
 import { isDefinitionEditorComponent, definitionEditorDefaults, definitionEditorSchema } from './kind/definition-editor';
 import { isWordGraphComponent, wordGraphDefaults, wordGraphSchema } from './kind/word-graph';
+import { isWordGraphTextColComponent, isWordGraphWordColComponent, wordGraphTextColDefaults, wordGraphWordColDefaults, wordGraphTextColSchema, wordGraphWordColSchema } from './kind/word-graph-col';
 import type { FormField, SchemaField } from './kind/form/field';
 
 export { type ElementComponent, isElementComponent, elementDefaults, elementSchema } from './kind/element';
@@ -106,6 +108,16 @@ export {
   wordGraphSchema,
 } from './kind/word-graph';
 export {
+  type WordGraphTextColComponent,
+  type WordGraphWordColComponent,
+  isWordGraphTextColComponent,
+  isWordGraphWordColComponent,
+  wordGraphTextColDefaults,
+  wordGraphWordColDefaults,
+  wordGraphTextColSchema,
+  wordGraphWordColSchema,
+} from './kind/word-graph-col';
+export {
   type TableComponent,
   type TableSchema,
   type TableData,
@@ -142,7 +154,9 @@ export type Component =
   | DocumentEditorComponent
   | WordEditorComponent
   | DefinitionEditorComponent
-  | WordGraphComponent;
+  | WordGraphComponent
+  | WordGraphTextColComponent
+  | WordGraphWordColComponent;
 
 export const isComponent = (value: unknown): value is Component =>
   isElementComponent(value) ||
@@ -161,7 +175,9 @@ export const isComponent = (value: unknown): value is Component =>
   isDocumentEditorComponent(value) ||
   isWordEditorComponent(value) ||
   isDefinitionEditorComponent(value) ||
-  isWordGraphComponent(value);
+  isWordGraphComponent(value) ||
+  isWordGraphTextColComponent(value) ||
+  isWordGraphWordColComponent(value);
 
 export const componentDefaults: Record<string, Record<string, unknown>> = {
   element: elementDefaults as Record<string, unknown>,
@@ -181,6 +197,8 @@ export const componentDefaults: Record<string, Record<string, unknown>> = {
   'word-editor': wordEditorDefaults as Record<string, unknown>,
   'definition-editor': definitionEditorDefaults as Record<string, unknown>,
   'word-graph': wordGraphDefaults as Record<string, unknown>,
+  'word-graph-text-col': wordGraphTextColDefaults as Record<string, unknown>,
+  'word-graph-word-col': wordGraphWordColDefaults as Record<string, unknown>,
 };
 
 export const componentSchemas: Record<string, SchemaField[]> = {
@@ -201,6 +219,8 @@ export const componentSchemas: Record<string, SchemaField[]> = {
   'word-editor': wordEditorSchema,
   'definition-editor': definitionEditorSchema,
   'word-graph': wordGraphSchema,
+  'word-graph-text-col': wordGraphTextColSchema,
+  'word-graph-word-col': wordGraphWordColSchema,
 };
 
 export const COMPONENT_KINDS = Object.keys(componentDefaults);

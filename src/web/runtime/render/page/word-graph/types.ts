@@ -1,4 +1,7 @@
 import type { GraphText, GraphWord } from '../../../../schema/component/kind/word-graph';
+import type { GraphSharedState } from './store';
+
+export type { GraphSharedState };
 
 export interface WordGraphState {
   texts: GraphText[];
@@ -21,5 +24,18 @@ export interface WordGraphContext {
   scheduleSave: () => void;
   pushHistory: () => void;
   render: () => void;
+  scheduleRender: () => void;
+}
+
+// ColContext is structurally compatible with WordGraphContext
+// (GraphSharedState is a superset of WordGraphState)
+// so input.ts / keyboard.ts / word-link-overlay.ts work with both
+export interface ColContext {
+  id: string;
+  outer: HTMLElement;
+  state: GraphSharedState;
+  scheduleSave: () => void;
+  pushHistory: () => void;
+  render: () => void;        // notifies all subscribers
   scheduleRender: () => void;
 }

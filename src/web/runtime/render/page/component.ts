@@ -11,6 +11,8 @@ import {
   isWordEditorComponent,
   isDefinitionEditorComponent,
   isWordGraphComponent,
+  isWordGraphTextColComponent,
+  isWordGraphWordColComponent,
   ALL_CSS_PROP_KEYS,
   applyDefaults,
   type TableComponent,
@@ -22,6 +24,8 @@ import {
   type WordEditorComponent,
   type DefinitionEditorComponent,
   type WordGraphComponent,
+  type WordGraphTextColComponent,
+  type WordGraphWordColComponent,
   type Component,
 } from '../../../schema/component';
 import { type Frame, type FrameRef, isFrameRef } from '../../../schema/screen/screen';
@@ -37,6 +41,8 @@ import { renderDocumentEditor } from './document-editor';
 import { renderWordEditor } from './word-editor';
 import { renderDefinitionEditor } from './definition-editor';
 import { renderWordGraph } from './word-graph';
+import { renderWordGraphTextCol } from './word-graph/text-col';
+import { renderWordGraphWordCol } from './word-graph/word-col';
 
 const applyCssProps = (el: HTMLElement, c: Record<string, unknown>): void => {
   for (const propKey of ALL_CSS_PROP_KEYS) {
@@ -285,6 +291,12 @@ export const renderComponent = (
       ? (frame as Record<string, unknown>).treeId as string
       : undefined;
     return renderDefinitionEditor(id, frame as DefinitionEditorComponent, treeId);
+  }
+  if (isWordGraphTextColComponent(frame)) {
+    return renderWordGraphTextCol(id, frame as WordGraphTextColComponent);
+  }
+  if (isWordGraphWordColComponent(frame)) {
+    return renderWordGraphWordCol(id, frame as WordGraphWordColComponent);
   }
   if (isWordGraphComponent(frame)) {
     const graphId = typeof (frame as Record<string, unknown>).graphId === 'string'

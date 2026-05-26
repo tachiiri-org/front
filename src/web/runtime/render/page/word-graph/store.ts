@@ -1,0 +1,42 @@
+import type { GraphText, GraphWord } from '../../../../schema/component/kind/word-graph';
+
+export interface GraphSharedState {
+  graphId: string;
+  texts: GraphText[];
+  words: GraphWord[];
+  path: string[];
+  pendingFocusId: string | null;
+  pendingFocusColumn: number | null;
+  focusedId: string | null;
+  focusedColumn: number | null;
+  saveTimer: ReturnType<typeof setTimeout> | null;
+  history: { texts: GraphText[]; words: GraphWord[] }[];
+  inputCache: Map<string, HTMLTextAreaElement>;
+  loaded: boolean;
+  subscribers: Set<() => void>;
+}
+
+const registry = new Map<string, GraphSharedState>();
+
+export const clearGraphStore = (): void => registry.clear();
+
+export const getOrCreateGraphState = (graphId: string): GraphSharedState => {
+  if (!registry.has(graphId)) {
+    registry.set(graphId, {
+      graphId,
+      texts: [],
+      words: [],
+      path: [],
+      pendingFocusId: null,
+      pendingFocusColumn: null,
+      focusedId: null,
+      focusedColumn: null,
+      saveTimer: null,
+      history: [],
+      inputCache: new Map(),
+      loaded: false,
+      subscribers: new Set(),
+    });
+  }
+  return registry.get(graphId)!;
+};
