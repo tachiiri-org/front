@@ -60,12 +60,14 @@ export const createKeydownHandler = (
       e.preventDefault();
       ctx.pushHistory();
       state.anchorIdx = null; state.activeIdx = null;
-      const allIds = flatIds(state.nodes);
-      const idx = allIds.indexOf(node.id);
-      const prevId = idx > 0 ? allIds[idx - 1] : null;
-      if (currentLoc) currentLoc.parent.splice(currentLoc.index, 1);
-      state.focusedNodeId = prevId;
-      state.pendingFocusId = prevId;
+      if (currentLoc) {
+        const siblings = currentLoc.parent;
+        const idx = currentLoc.index;
+        const focusId = idx > 0 ? siblings[idx - 1].id : siblings.length > 1 ? siblings[idx + 1].id : null;
+        siblings.splice(idx, 1);
+        state.focusedNodeId = focusId;
+        state.pendingFocusId = focusId;
+      }
       ctx.scheduleSave();
       ctx.render();
       return;
@@ -149,10 +151,11 @@ export const createKeydownHandler = (
         }
         return;
       }
-      ctx.pushHistory();
       {
         state.anchorIdx = null; state.activeIdx = null;
-        if (currentLoc && currentLoc.index > 0) {
+        const depth = getAncestors(node.id, state.nodes)?.length ?? 0;
+        if (currentLoc && currentLoc.index > 0 && depth < 2) {
+          ctx.pushHistory();
           const snode = currentLoc.parent.splice(currentLoc.index, 1)[0];
           const prev = currentLoc.parent[currentLoc.index - 1];
           if (!prev.children) prev.children = [];

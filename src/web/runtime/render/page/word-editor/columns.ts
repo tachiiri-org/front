@@ -231,12 +231,11 @@ export const buildColumns = (ctx: WordEditorContext): HTMLElement => {
   colEls.push(rootCol);
   wrapper.appendChild(rootCol);
 
-  for (let i = 0; i < fullPath.length; i++) {
+  for (let i = 0; i < Math.min(fullPath.length, 2); i++) {
     const loc = findNode(state.nodes, fullPath[i]);
     if (!loc) break;
     const selected = loc.parent[loc.index];
-    const isLastInPath = i === fullPath.length - 1;
-    if (selected.children?.length || isLastInPath) {
+    if (selected.children?.length) {
       const col = buildColumn(selected.children ?? [], fullPath, i + 1, (text) => {
         const newNode: TreeNode = { id: randomId(), text };
         if (!selected.children) selected.children = [];
