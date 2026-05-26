@@ -12,6 +12,7 @@ const buildWordColContent = (
   items: GraphWord[],
   contextTextId: string | null,
   ctx: ColContext,
+  unlinkedItems?: GraphWord[],
 ): HTMLElement => {
   const { state } = ctx;
 
@@ -79,27 +80,138 @@ const buildWordColContent = (
   });
   (draftInput.style as unknown as Record<string, string>)['field-sizing'] = 'content';
 
+  // Suggestion list
+  let activeIndex = -1;
+  let suggestions: GraphWord[] = [];
+
+  const suggestionsEl = document.createElement('div');
+  Object.assign(suggestionsEl.style, {
+    display: 'none',
+    flexDirection: 'column',
+    maxHeight: '120px',
+    overflowY: 'auto',
+    flexShrink: '0',
+    borderTop: `1px solid ${theme.borderFaint}`,
+    borderBottom: `1px solid ${theme.borderFaint}`,
+    margin: '0 0 2px',
+  });
+
+  const commitWord = (word: GraphWord): void => {
+    ctx.pushHistory();
+    if (!state.words.find((w) => w.id === word.id)) state.words.push(word);
+    if (contextTextId) {
+      const contextText = findText(state.texts, contextTextId);
+      if (contextText && !contextText.wordIds.includes(word.id)) {
+        contextText.wordIds.push(word.id);
+      }
+    }
+    state.pendingFocusId = word.id;
+    state.pendingFocusColumn = COL_INDEX;
+    draftInput.value = '';
+    draftInput.style.height = 'auto';
+    suggestionsEl.style.display = 'none';
+    activeIndex = -1;
+    ctx.scheduleSave();
+    ctx.render();
+  };
+
+  const renderSuggestions = (): void => {
+    suggestionsEl.replaceChildren();
+    if (!suggestions.length) { suggestionsEl.style.display = 'none'; return; }
+    suggestionsEl.style.display = 'flex';
+    suggestions.forEach((word, i) => {
+      const item = document.createElement('div');
+      item.textContent = word.text;
+      const isActive = i === activeIndex;
+      Object.assign(item.style, {
+        padding: '2px 12px 2px 22px',
+        cursor: 'pointer',
+        flexShrink: '0',
+        background: isActive ? theme.selectSubtle : 'transparent',
+        color: isActive ? theme.textHigh : theme.textMid,
+        userSelect: 'none',
+      });
+      item.addEventListener('mousedown', (e) => { e.preventDefault(); commitWord(word); });
+      item.addEventListener('mouseenter', () => {
+        activeIndex = i;
+        renderSuggestions();
+      });
+      suggestionsEl.appendChild(item);
+    });
+  };
+
+  const updateSuggestions = (): void => {
+    const q = draftInput.value.trim().toLowerCase();
+    const alreadyLinked = contextTextId
+      ? new Set((findText(state.texts, contextTextId)?.wordIds ?? []))
+      : new Set<string>();
+    if (!q) {
+      suggestions = [];
+      activeIndex = -1;
+      suggestionsEl.style.display = 'none';
+      return;
+    }
+    suggestions = state.words.filter((w) => !alreadyLinked.has(w.id) && w.text.toLowerCase().includes(q));
+    activeIndex = -1;
+    renderSuggestions();
+  };
+
   draftInput.addEventListener('input', () => {
     draftInput.style.height = 'auto';
     draftInput.style.height = `${draftInput.scrollHeight}px`;
+    updateSuggestions();
+  });
+
+  draftInput.addEventListener('blur', () => {
+    setTimeout(() => { suggestionsEl.style.display = 'none'; activeIndex = -1; }, 150);
   });
 
   draftInput.addEventListener('keydown', (e: KeyboardEvent) => {
+    if (e.key === 'Escape') {
+      suggestions = [];
+      activeIndex = -1;
+      suggestionsEl.style.display = 'none';
+      return;
+    }
+    if (e.key === 'ArrowDown' && suggestionsEl.style.display !== 'none') {
+      e.preventDefault();
+      activeIndex = Math.min(activeIndex + 1, suggestions.length - 1);
+      renderSuggestions();
+      return;
+    }
+    if (e.key === 'ArrowUp' && suggestionsEl.style.display !== 'none') {
+      e.preventDefault();
+      activeIndex = Math.max(activeIndex - 1, -1);
+      renderSuggestions();
+      return;
+    }
     if (e.key === 'Enter') {
       e.preventDefault();
+      if (activeIndex >= 0 && suggestions[activeIndex]) {
+        commitWord(suggestions[activeIndex]);
+        return;
+      }
       const text = draftInput.value.trim();
       if (!text) return;
       ctx.pushHistory();
-      const newWord: GraphWord = { id: randomId(), text };
-      state.words.push(newWord);
+      const existing = state.words.find((w) => w.text === text);
+      const targetWord = existing ?? ((): GraphWord => {
+        const w: GraphWord = { id: randomId(), text };
+        state.words.push(w);
+        return w;
+      })();
       if (contextTextId) {
         const contextText = findText(state.texts, contextTextId);
-        if (contextText) contextText.wordIds.push(newWord.id);
+        if (contextText && !contextText.wordIds.includes(targetWord.id)) {
+          contextText.wordIds.push(targetWord.id);
+        }
       }
-      state.pendingFocusId = newWord.id;
+      state.pendingFocusId = targetWord.id;
       state.pendingFocusColumn = COL_INDEX;
       draftInput.value = '';
       draftInput.style.height = 'auto';
+      suggestionsEl.style.display = 'none';
+      activeIndex = -1;
       ctx.scheduleSave();
       ctx.render();
       return;
@@ -122,6 +234,7 @@ const buildWordColContent = (
   draftRow.appendChild(draftMarker);
   draftRow.appendChild(draftInput);
   col.appendChild(draftRow);
+  col.appendChild(suggestionsEl);
 
   // Item rows
   for (const item of items) {
@@ -151,6 +264,8 @@ const buildWordColContent = (
     inp.style.fontStyle = isProposed ? 'italic' : 'normal';
     inp.style.borderRadius = isIssue || isProposed ? '3px' : '0';
 
+    const linkedTextCount = state.texts.filter((t) => t.wordIds.includes(item.id)).length;
+    const hasLinks = linkedTextCount > 0;
     const markerColor = isIssue ? theme.issueMarkerBright : isProposed ? theme.proposedMarkerBright : theme.markerDefault;
     const marker = document.createElement('span');
     Object.assign(marker.style, {
@@ -160,15 +275,25 @@ const buildWordColContent = (
       alignSelf: 'center',
       borderRadius: '1px',
       boxSizing: 'border-box',
-      background: 'transparent',
-      border: `1.5px solid ${markerColor}`,
+      background: hasLinks ? markerColor : 'transparent',
+      border: hasLinks ? 'none' : `1.5px solid ${markerColor}`,
     });
 
     row.appendChild(marker);
     row.appendChild(inp);
 
-    const hasLinks = state.texts.some((t) => t.wordIds.includes(item.id));
     if (hasLinks) {
+      const countLabel = document.createElement('span');
+      countLabel.textContent = String(linkedTextCount);
+      Object.assign(countLabel.style, {
+        fontSize: '10px',
+        color: theme.textFaint,
+        userSelect: 'none',
+        flexShrink: '0',
+        alignSelf: 'center',
+      });
+      row.appendChild(countLabel);
+
       const arrow = document.createElement('span');
       arrow.textContent = '›';
       Object.assign(arrow.style, {
@@ -183,6 +308,90 @@ const buildWordColContent = (
     }
 
     col.appendChild(row);
+  }
+
+  if (unlinkedItems && unlinkedItems.length > 0) {
+    const separator = document.createElement('div');
+    Object.assign(separator.style, {
+      margin: '4px 12px',
+      height: '1px',
+      background: theme.borderFaint,
+      flexShrink: '0',
+    });
+    col.appendChild(separator);
+
+    for (const item of unlinkedItems) {
+      const isInPath = state.path[COL_INDEX] === item.id;
+      const isProposed = (item as { status?: string }).status === 'proposed';
+      const isIssue = (item as { type?: string }).type === 'issue' || item.text.startsWith('?');
+
+      const row = document.createElement('div');
+      row.dataset.nodeRow = item.id;
+      row.style.display = 'flex';
+      row.style.alignItems = 'flex-start';
+      row.style.gap = '4px';
+      row.style.padding = '1px 8px 1px 12px';
+      row.style.background = isInPath ? theme.selectSubtle : 'transparent';
+      row.style.flexShrink = '0';
+
+      const cacheKey = `${COL_INDEX}:${item.id}`;
+      let inp = state.inputCache.get(cacheKey);
+      if (!inp) {
+        inp = createInput(item, COL_INDEX, null, ctx as unknown as import('./types').WordGraphContext);
+        state.inputCache.set(cacheKey, inp);
+      }
+      if (inp.value !== item.text) inp.value = item.text;
+      inp.dataset.columnIndex = String(COL_INDEX);
+      inp.style.background = isIssue ? theme.issueBg : isProposed ? theme.proposedBg : 'transparent';
+      inp.style.color = isIssue ? theme.issueText : isProposed ? theme.proposedText : theme.textDim;
+      inp.style.fontStyle = isProposed ? 'italic' : 'normal';
+      inp.style.borderRadius = isIssue || isProposed ? '3px' : '0';
+
+      const linkedTextCount = state.texts.filter((t) => t.wordIds.includes(item.id)).length;
+      const hasLinks = linkedTextCount > 0;
+      const markerColor = isIssue ? theme.issueMarkerBright : isProposed ? theme.proposedMarkerBright : theme.textFaint;
+      const marker = document.createElement('span');
+      Object.assign(marker.style, {
+        width: '6px',
+        height: '6px',
+        flexShrink: '0',
+        alignSelf: 'center',
+        borderRadius: '1px',
+        boxSizing: 'border-box',
+        background: hasLinks ? markerColor : 'transparent',
+        border: hasLinks ? 'none' : `1.5px solid ${markerColor}`,
+      });
+
+      row.appendChild(marker);
+      row.appendChild(inp);
+
+      if (hasLinks) {
+        const countLabel = document.createElement('span');
+        countLabel.textContent = String(linkedTextCount);
+        Object.assign(countLabel.style, {
+          fontSize: '10px',
+          color: theme.textFaint,
+          userSelect: 'none',
+          flexShrink: '0',
+          alignSelf: 'center',
+        });
+        row.appendChild(countLabel);
+
+        const arrow = document.createElement('span');
+        arrow.textContent = '›';
+        Object.assign(arrow.style, {
+          userSelect: 'none',
+          color: isIssue ? theme.issueAccent : isProposed ? theme.proposedAccent : theme.textFaint,
+          fontSize: '14px',
+          flexShrink: '0',
+          paddingRight: '2px',
+          alignSelf: 'center',
+        });
+        row.appendChild(arrow);
+      }
+
+      col.appendChild(row);
+    }
   }
 
   return col;
@@ -255,12 +464,15 @@ export const renderWordGraphWordCol = (
 
     let items: GraphWord[];
     let contextTextId: string | null = null;
+    let unlinkedItems: GraphWord[] | undefined;
     if (col1TextId) {
       contextTextId = col1TextId;
       const text = findText(state.texts, col1TextId);
+      const linkedIds = new Set(text ? text.wordIds : []);
       items = text
         ? text.wordIds.map((wid) => findWord(state.words, wid)).filter((w): w is GraphWord => w !== undefined)
         : [];
+      unlinkedItems = state.words.filter((w) => !linkedIds.has(w.id));
     } else {
       items = [...state.words];
     }
@@ -275,7 +487,7 @@ export const renderWordGraphWordCol = (
       scheduleRender: () => requestAnimationFrame(notify),
     };
 
-    outer.replaceChildren(buildWordColContent(items, contextTextId, ctx));
+    outer.replaceChildren(buildWordColContent(items, contextTextId, ctx, unlinkedItems));
 
     for (const ta of outer.querySelectorAll<HTMLTextAreaElement>('textarea[data-nav-input]')) {
       ta.style.height = 'auto';

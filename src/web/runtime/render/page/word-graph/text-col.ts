@@ -152,6 +152,8 @@ const buildTextColContent = (
     inp.style.fontStyle = isProposed ? 'italic' : 'normal';
     inp.style.borderRadius = isIssue || isProposed ? '3px' : '0';
 
+    const wordCount = (item as GraphText).wordIds?.length ?? 0;
+    const hasLinks = wordCount > 0;
     const markerColor = isIssue ? theme.issueMarkerBright : isProposed ? theme.proposedMarkerBright : theme.markerDefault;
     const marker = document.createElement('span');
     Object.assign(marker.style, {
@@ -161,15 +163,25 @@ const buildTextColContent = (
       alignSelf: 'center',
       borderRadius: '1px',
       boxSizing: 'border-box',
-      background: 'transparent',
-      border: `1.5px solid ${markerColor}`,
+      background: hasLinks ? markerColor : 'transparent',
+      border: hasLinks ? 'none' : `1.5px solid ${markerColor}`,
     });
 
     row.appendChild(marker);
     row.appendChild(inp);
 
-    const hasLinks = (item as GraphText).wordIds?.length > 0;
     if (hasLinks) {
+      const countLabel = document.createElement('span');
+      countLabel.textContent = String(wordCount);
+      Object.assign(countLabel.style, {
+        fontSize: '10px',
+        color: theme.textFaint,
+        userSelect: 'none',
+        flexShrink: '0',
+        alignSelf: 'center',
+      });
+      row.appendChild(countLabel);
+
       const arrow = document.createElement('span');
       arrow.textContent = '›';
       Object.assign(arrow.style, {
