@@ -246,7 +246,8 @@ export const renderWordGraphWordCol = (
   };
 
   const render = (): void => {
-    const scrollTop = outer.scrollTop;
+    const prevCol = outer.firstElementChild as HTMLElement | null;
+    const scrollTop = prevCol ? prevCol.scrollTop : 0;
 
     const col1TextId = state.path.length >= 1 && findText(state.texts, state.path[0])
       ? state.path[0]
@@ -276,12 +277,13 @@ export const renderWordGraphWordCol = (
 
     outer.replaceChildren(buildWordColContent(items, contextTextId, ctx));
 
-    outer.scrollTop = scrollTop;
-
     for (const ta of outer.querySelectorAll<HTMLTextAreaElement>('textarea[data-nav-input]')) {
       ta.style.height = 'auto';
       ta.style.height = `${ta.scrollHeight}px`;
     }
+
+    const newCol = outer.firstElementChild as HTMLElement | null;
+    if (newCol) newCol.scrollTop = scrollTop;
 
     focusPending();
   };

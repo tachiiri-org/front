@@ -96,15 +96,16 @@ export const renderWordGraph = (
 
     outer.replaceChildren(buildColumns(ctx));
 
+    for (const ta of outer.querySelectorAll<HTMLTextAreaElement>('textarea[data-nav-input]')) {
+      ta.style.height = 'auto';
+      ta.style.height = `${ta.scrollHeight}px`;
+    }
+
     outer.querySelectorAll<HTMLElement>('[data-col-index]').forEach(col => {
       const saved = scrollTops.get(parseInt(col.dataset.colIndex ?? '0', 10));
       if (saved !== undefined) col.scrollTop = saved;
     });
 
-    for (const ta of outer.querySelectorAll<HTMLTextAreaElement>('textarea[data-nav-input]')) {
-      ta.style.height = 'auto';
-      ta.style.height = `${ta.scrollHeight}px`;
-    }
     focusPending();
     scrollToEnd();
     requestAnimationFrame(scrollToEnd);

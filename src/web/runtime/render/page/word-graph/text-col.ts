@@ -249,7 +249,8 @@ export const renderWordGraphTextCol = (
   };
 
   const render = (): void => {
-    const scrollTop = outer.scrollTop;
+    const prevCol = outer.firstElementChild as HTMLElement | null;
+    const scrollTop = prevCol ? prevCol.scrollTop : 0;
 
     let items: GraphText[];
     if (colIndex === 0) {
@@ -277,12 +278,13 @@ export const renderWordGraphTextCol = (
 
     outer.replaceChildren(buildTextColContent(items, colIndex, ctx));
 
-    outer.scrollTop = scrollTop;
-
     for (const ta of outer.querySelectorAll<HTMLTextAreaElement>('textarea[data-nav-input]')) {
       ta.style.height = 'auto';
       ta.style.height = `${ta.scrollHeight}px`;
     }
+
+    const newCol = outer.firstElementChild as HTMLElement | null;
+    if (newCol) newCol.scrollTop = scrollTop;
 
     focusPending();
   };
