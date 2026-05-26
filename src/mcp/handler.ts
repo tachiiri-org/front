@@ -1,7 +1,6 @@
 import type { AuthorizeEnv } from "../auth";
 import { TOOLS, callTool } from "./tools/authorize";
-import { KNOWLEDGE_TOOLS, callKnowledgeTool } from "./tools/knowledge";
-import { WORD_TOOLS, callWordTool } from "./tools/word";
+import { GRAPH_TOOLS, callGraphTool } from "./tools/graph";
 
 type JsonRpcRequest = {
   jsonrpc: "2.0";
@@ -30,16 +29,14 @@ export async function handleMcp(request: Request, env: AuthorizeEnv): Promise<Re
       serverInfo: { name: "front", version: "1.0.0" },
     };
   } else if (body.method === "tools/list") {
-    result = { tools: [...TOOLS, ...KNOWLEDGE_TOOLS, ...WORD_TOOLS] };
+    result = { tools: [...TOOLS, ...GRAPH_TOOLS] };
   } else if (body.method === "tools/call") {
     const { name, arguments: args } = body.params as {
       name: string;
       arguments: Record<string, unknown>;
     };
-    result = name.startsWith("knowledge_") || name.startsWith("doc_")
-      ? await callKnowledgeTool(name, args, env)
-      : name.startsWith("word_")
-      ? await callWordTool(name, args, env)
+    result = name.startsWith("graph_")
+      ? await callGraphTool(name, args, env)
       : await callTool(name, args, env);
   } else {
     return Response.json({

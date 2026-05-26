@@ -43,6 +43,39 @@ export const createKeydownHandler = (
       return;
     }
 
+    // Ctrl+Enter: accept (proposed → accepted)
+    if (e.key === 'Enter' && e.ctrlKey && !e.shiftKey && !e.altKey) {
+      e.preventDefault();
+      ctx.pushHistory();
+      const target = isTextCol
+        ? state.texts.find((t) => t.id === item.id)
+        : state.words.find((w) => w.id === item.id);
+      if (target) {
+        target.status = 'accepted';
+        if (target.type === 'issue') target.type = 'knowledge';
+        delete target.proposedAt;
+        delete target.proposedBy;
+        ctx.scheduleSave();
+        ctx.render();
+      }
+      return;
+    }
+
+    // Ctrl+?: toggle issue type
+    if (e.key === '?' && e.ctrlKey) {
+      e.preventDefault();
+      ctx.pushHistory();
+      const target = isTextCol
+        ? state.texts.find((t) => t.id === item.id)
+        : state.words.find((w) => w.id === item.id);
+      if (target) {
+        target.type = target.type === 'issue' ? 'knowledge' : 'issue';
+        ctx.scheduleSave();
+        ctx.render();
+      }
+      return;
+    }
+
     // Ctrl+Shift+Backspace: delete or unlink
     if (e.key === 'Backspace' && e.ctrlKey && e.shiftKey) {
       e.preventDefault();
