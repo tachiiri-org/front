@@ -89,7 +89,18 @@ export const renderWordGraph = (
   };
 
   const render = (): void => {
+    const scrollTops = new Map<number, number>();
+    outer.querySelectorAll<HTMLElement>('[data-col-index]').forEach(col => {
+      scrollTops.set(parseInt(col.dataset.colIndex ?? '0', 10), col.scrollTop);
+    });
+
     outer.replaceChildren(buildColumns(ctx));
+
+    outer.querySelectorAll<HTMLElement>('[data-col-index]').forEach(col => {
+      const saved = scrollTops.get(parseInt(col.dataset.colIndex ?? '0', 10));
+      if (saved !== undefined) col.scrollTop = saved;
+    });
+
     for (const ta of outer.querySelectorAll<HTMLTextAreaElement>('textarea[data-nav-input]')) {
       ta.style.height = 'auto';
       ta.style.height = `${ta.scrollHeight}px`;

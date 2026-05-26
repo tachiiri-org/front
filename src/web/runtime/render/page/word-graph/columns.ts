@@ -4,122 +4,6 @@ import { randomId, findText, findWord, isTextColumn, getColumnItems } from './op
 import { createInput } from './input';
 import { theme } from '../theme';
 
-const openWordSearch = (contextTextId: string, ctx: WordGraphContext): void => {
-  const { state } = ctx;
-
-  ctx.outer.querySelector('[data-word-search-overlay]')?.remove();
-
-  const overlay = document.createElement('div');
-  overlay.dataset.wordSearchOverlay = 'true';
-  Object.assign(overlay.style, {
-    position: 'absolute',
-    inset: '0',
-    background: 'rgba(0,0,0,0.35)',
-    zIndex: '100',
-    display: 'flex',
-    alignItems: 'flex-start',
-    justifyContent: 'center',
-    paddingTop: '48px',
-  });
-
-  const dialog = document.createElement('div');
-  Object.assign(dialog.style, {
-    background: theme.bg,
-    border: `1px solid ${theme.borderStrong}`,
-    borderRadius: '4px',
-    width: '240px',
-    maxHeight: '300px',
-    display: 'flex',
-    flexDirection: 'column',
-    overflow: 'hidden',
-    boxShadow: '0 4px 16px rgba(0,0,0,0.4)',
-  });
-
-  const searchInput = document.createElement('input');
-  searchInput.type = 'text';
-  searchInput.placeholder = '単語を検索...';
-  Object.assign(searchInput.style, {
-    border: 'none',
-    borderBottom: `1px solid ${theme.borderStrong}`,
-    outline: 'none',
-    padding: '8px 10px',
-    fontSize: 'inherit',
-    fontFamily: 'inherit',
-    background: 'transparent',
-    color: theme.textHigh,
-    flexShrink: '0',
-  });
-
-  const list = document.createElement('div');
-  list.style.overflowY = 'auto';
-  list.style.padding = '4px 0';
-
-  const contextText = findText(state.texts, contextTextId);
-  const linkedWordIds = new Set(contextText?.wordIds ?? []);
-
-  const update = (): void => {
-    const q = searchInput.value.toLowerCase();
-    const matches = state.words.filter(
-      (w) => !linkedWordIds.has(w.id) && (q === '' || w.text.toLowerCase().includes(q)),
-    );
-    list.replaceChildren(
-      ...matches.map((w) => {
-        const row = document.createElement('div');
-        row.textContent = w.text;
-        Object.assign(row.style, {
-          padding: '3px 10px',
-          cursor: 'pointer',
-          color: theme.textHigh,
-          fontSize: 'inherit',
-        });
-        row.addEventListener('mouseenter', () => {
-          row.style.background = theme.selectSubtle;
-        });
-        row.addEventListener('mouseleave', () => {
-          row.style.background = 'transparent';
-        });
-        row.addEventListener('click', () => {
-          const text = findText(state.texts, contextTextId);
-          if (text && !text.wordIds.includes(w.id)) {
-            ctx.pushHistory();
-            text.wordIds.push(w.id);
-            ctx.scheduleSave();
-            ctx.render();
-          }
-          overlay.remove();
-        });
-        return row;
-      }),
-    );
-  };
-
-  searchInput.addEventListener('input', update);
-
-  searchInput.addEventListener('keydown', (e: KeyboardEvent) => {
-    if (e.key === 'Escape') {
-      overlay.remove();
-      return;
-    }
-    if (e.key === 'Enter') {
-      const first = list.querySelector<HTMLElement>('div');
-      if (first) first.click();
-      return;
-    }
-  });
-
-  overlay.addEventListener('click', (e: MouseEvent) => {
-    if (e.target === overlay) overlay.remove();
-  });
-
-  dialog.appendChild(searchInput);
-  dialog.appendChild(list);
-  overlay.appendChild(dialog);
-  ctx.outer.style.position = 'relative';
-  ctx.outer.appendChild(overlay);
-
-  update();
-  setTimeout(() => searchInput.focus(), 0);
-};
 
 const buildColumn = (
   items: (GraphText | GraphWord)[],
@@ -131,13 +15,13 @@ const buildColumn = (
   const isTextCol = isTextColumn(colIndex);
 
   const col = document.createElement('div');
+  col.dataset.colIndex = String(colIndex);
   if (isTextCol) {
     col.style.width = '30vw';
     col.style.minWidth = '180px';
   } else {
-    col.style.width = 'max-content';
-    col.style.maxWidth = '30vw';
-    col.style.minWidth = '180px';
+    col.style.width = '15vw';
+    col.style.minWidth = '120px';
   }
   col.style.borderRight = `1px solid ${theme.borderStrong}`;
   col.style.overflowY = 'auto';
@@ -159,7 +43,7 @@ const buildColumn = (
   typeLabel.textContent = isTextCol ? 'texts' : 'words';
   col.appendChild(typeLabel);
 
-  // Draft input row
+  // Draft input row (text and word columns share same textarea UI)
   const draftRow = document.createElement('div');
   draftRow.style.display = 'flex';
   draftRow.style.alignItems = 'flex-start';
@@ -212,7 +96,6 @@ const buildColumn = (
       const text = draftInput.value.trim();
       if (!text) return;
       ctx.pushHistory();
-
       if (isTextCol) {
         const newText: GraphText = { id: randomId(), text, wordIds: [] };
         if (colIndex > 0) {
@@ -224,40 +107,26 @@ const buildColumn = (
         state.pendingFocusId = newText.id;
         state.pendingFocusColumn = colIndex;
       } else {
-        if (!contextTextId) return;
         const newWord: GraphWord = { id: randomId(), text };
         state.words.push(newWord);
-        const contextText = findText(state.texts, contextTextId);
-        if (contextText) contextText.wordIds.push(newWord.id);
+        if (contextTextId) {
+          const contextText = findText(state.texts, contextTextId);
+          if (contextText) contextText.wordIds.push(newWord.id);
+        }
         state.pendingFocusId = newWord.id;
         state.pendingFocusColumn = colIndex;
       }
-
       draftInput.value = '';
       draftInput.style.height = 'auto';
       ctx.scheduleSave();
       ctx.render();
       return;
     }
-
-    // / in word column draft: open word search overlay
-    if (e.key === '/' && !isTextCol && contextTextId) {
-      e.preventDefault();
-      openWordSearch(contextTextId, ctx);
-      return;
-    }
-
     if (e.key === 'ArrowDown') {
-      const onLastLine = !draftInput.value
-        .slice(draftInput.selectionStart ?? draftInput.value.length)
-        .includes('\n');
+      const onLastLine = !draftInput.value.slice(draftInput.selectionStart ?? draftInput.value.length).includes('\n');
       if (!onLastLine) return;
       e.preventDefault();
-      const colInputs = Array.from(
-        ctx.outer.querySelectorAll<HTMLTextAreaElement>(
-          `[data-nav-input][data-column-index="${colIndex}"]`,
-        ),
-      ).filter((inp) => inp.offsetParent !== null);
+      const colInputs = Array.from(ctx.outer.querySelectorAll<HTMLTextAreaElement>(`[data-nav-input][data-column-index="${colIndex}"]`)).filter(inp => inp.offsetParent !== null);
       const pos = colInputs.indexOf(draftInput);
       if (pos < colInputs.length - 1) colInputs[pos + 1].focus({ preventScroll: true });
     }
@@ -359,13 +228,31 @@ export const buildColumns = (ctx: WordGraphContext): HTMLElement => {
   // Column 0: all texts
   wrapper.appendChild(buildColumn(state.texts, 0, null, ctx));
 
-  // Additional columns driven by path
-  for (let i = 0; i < state.path.length; i++) {
+  // Column 1: words - always visible at 15vw
+  // path[0] is a text ID when a text is selected; otherwise show all words
+  const col1TextId = state.path.length >= 1 && findText(state.texts, state.path[0])
+    ? state.path[0]
+    : null;
+  const col1Items = col1TextId
+    ? getColumnItems(state.texts, state.words, state.path, 1)
+    : [...state.words];
+  wrapper.appendChild(buildColumn(col1Items, 1, col1TextId, ctx));
+
+  // Additional columns driven by path (skip i=0 since col 1 is always rendered above)
+  // Cap at colIndex=2 (3rd column) — no 4th column shown
+  for (let i = 1; i < state.path.length && i <= 1; i++) {
     const colIndex = i + 1;
     const isTextCol = isTextColumn(colIndex);
     const ctxTextId = !isTextCol ? state.path[i] : null;
     const items = getColumnItems(state.texts, state.words, state.path, colIndex);
     wrapper.appendChild(buildColumn(items, colIndex, ctxTextId, ctx));
+  }
+
+  // Special case: path[0] is a word (clicked from all-words view, no text context)
+  // show col 2 with texts that contain that word
+  if (!col1TextId && state.path.length >= 1 && findWord(state.words, state.path[0])) {
+    const col2Items = state.texts.filter(t => t.wordIds.includes(state.path[0]));
+    wrapper.appendChild(buildColumn(col2Items, 2, null, ctx));
   }
 
   const spacer = document.createElement('div');

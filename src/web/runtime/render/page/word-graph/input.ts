@@ -61,29 +61,5 @@ export const createInput = (
 
   input.addEventListener('keydown', createKeydownHandler(item, colIndex, contextTextId, input, ctx));
 
-  // Shift keyup with selection in text column: extract selected text as word
-  input.addEventListener('keyup', (e: KeyboardEvent) => {
-    if (e.key !== 'Shift' || e.ctrlKey || e.altKey || e.metaKey) return;
-    if (!isTextColumn(colIndex)) return;
-    const selStart = input.selectionStart ?? 0;
-    const selEnd = input.selectionEnd ?? 0;
-    if (selStart === selEnd) return;
-    const selectedText = input.value.slice(selStart, selEnd).trim();
-    if (!selectedText) return;
-
-    ctx.pushHistory();
-    const newWord: GraphWord = { id: randomId(), text: selectedText };
-    state.words.push(newWord);
-    const text = findText(state.texts, item.id);
-    if (text && !text.wordIds.includes(newWord.id)) {
-      text.wordIds.push(newWord.id);
-    }
-    state.path = [...state.path.slice(0, colIndex), item.id];
-    state.pendingFocusId = newWord.id;
-    state.pendingFocusColumn = colIndex + 1;
-    ctx.scheduleSave();
-    ctx.render();
-  });
-
   return input;
 };

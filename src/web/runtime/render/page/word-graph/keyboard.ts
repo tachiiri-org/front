@@ -1,6 +1,7 @@
 import type { GraphText, GraphWord } from '../../../../schema/component/kind/word-graph';
 import type { WordGraphContext } from './types';
 import { randomId, findText, isTextColumn, getColumnItemIds } from './ops';
+import { openWordLink } from './word-link-overlay';
 
 const getColInputs = (outer: HTMLElement, colIndex: number): HTMLTextAreaElement[] =>
   Array.from(
@@ -39,19 +40,20 @@ export const createKeydownHandler = (
       ctx.pushHistory();
       const colIds = getColumnItemIds(state.texts, state.words, state.path, colIndex);
       const idx = colIds.indexOf(item.id);
-      const prevId = idx > 0 ? colIds[idx - 1] : null;
+      const prevId = idx > 0 ? colIds[idx - 1] : (colIds.length > 1 ? colIds[1] : null);
 
       if (colIndex === 0) {
         // Delete text entirely
         state.texts = state.texts.filter((t) => t.id !== item.id);
         if (state.path[0] === item.id) state.path = [];
       } else if (!isTextCol) {
-        // Unlink word from context text
-        const text = contextTextId ? findText(state.texts, contextTextId) : null;
-        if (text) {
-          text.wordIds = text.wordIds.filter((id) => id !== item.id);
-          if (state.path[colIndex] === item.id) state.path = state.path.slice(0, colIndex);
+        // Delete word entirely from global words list and all texts
+        state.words = state.words.filter((w) => w.id !== item.id);
+        for (const t of state.texts) {
+          t.wordIds = t.wordIds.filter((id) => id !== item.id);
         }
+        const pathIdx = state.path.indexOf(item.id);
+        if (pathIdx >= 0) state.path = state.path.slice(0, pathIdx);
       } else {
         // Text column > 0: unlink context word from this text
         const contextWordId = state.path[colIndex - 1];
@@ -76,17 +78,18 @@ export const createKeydownHandler = (
       ctx.pushHistory();
       const colIds = getColumnItemIds(state.texts, state.words, state.path, colIndex);
       const idx = colIds.indexOf(item.id);
-      const prevId = idx > 0 ? colIds[idx - 1] : null;
+      const prevId = idx > 0 ? colIds[idx - 1] : (colIds.length > 1 ? colIds[1] : null);
 
       if (colIndex === 0) {
         state.texts = state.texts.filter((t) => t.id !== item.id);
         if (state.path[0] === item.id) state.path = [];
       } else if (!isTextCol) {
-        const text = contextTextId ? findText(state.texts, contextTextId) : null;
-        if (text) {
-          text.wordIds = text.wordIds.filter((id) => id !== item.id);
-          if (state.path[colIndex] === item.id) state.path = state.path.slice(0, colIndex);
+        state.words = state.words.filter((w) => w.id !== item.id);
+        for (const t of state.texts) {
+          t.wordIds = t.wordIds.filter((id) => id !== item.id);
         }
+        const pathIdx = state.path.indexOf(item.id);
+        if (pathIdx >= 0) state.path = state.path.slice(0, pathIdx);
       } else {
         const contextWordId = state.path[colIndex - 1];
         const text = findText(state.texts, item.id);
@@ -102,6 +105,39 @@ export const createKeydownHandler = (
       ctx.scheduleSave();
       ctx.render();
       return;
+    }
+
+    // @ in text column: open word link overlay
+    if (e.key === '@' && isTextCol) {
+      e.preventDefault();
+      openWordLink(item.id, ctx);
+      return;
+    }
+
+    // Tab in text column with selection: extract selected text as word
+    if (e.key === 'Tab' && !e.shiftKey && !e.ctrlKey && !e.altKey && isTextCol) {
+      const selStart = input.selectionStart ?? 0;
+      const selEnd = input.selectionEnd ?? 0;
+      if (selStart !== selEnd) {
+        e.preventDefault();
+        const selectedText = input.value.slice(selStart, selEnd).trim();
+        if (selectedText) {
+          ctx.pushHistory();
+          const existing = state.words.find(w => w.text === selectedText);
+          const newWord: GraphWord = existing ?? { id: randomId(), text: selectedText };
+          if (!existing) state.words.push(newWord);
+          const text = findText(state.texts, item.id);
+          if (text && !text.wordIds.includes(newWord.id)) {
+            text.wordIds.push(newWord.id);
+          }
+          state.path = [...state.path.slice(0, colIndex), item.id];
+          state.pendingFocusId = newWord.id;
+          state.pendingFocusColumn = colIndex + 1;
+          ctx.scheduleSave();
+          ctx.render();
+        }
+        return;
+      }
     }
 
     // Enter: create new item after current

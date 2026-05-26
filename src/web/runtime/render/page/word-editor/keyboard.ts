@@ -35,24 +35,7 @@ export const createKeydownHandler = (
     if (e.key === 'Enter') {
       e.preventDefault();
       if (e.shiftKey && !e.ctrlKey && !e.altKey) {
-        const allIds = flatIds(state.nodes);
-        let selIds: string[];
-        if (state.anchorIdx !== null && state.activeIdx !== null) {
-          const lo = Math.min(state.anchorIdx, state.activeIdx);
-          const hi = Math.max(state.anchorIdx, state.activeIdx);
-          selIds = allIds.slice(lo, hi + 1);
-        } else {
-          selIds = [node.id];
-        }
-        const insertNodes = selIds.map(sid => {
-          const loc = findNode(state.nodes, sid);
-          return loc ? loc.parent[loc.index] : null;
-        }).filter((n): n is TreeNode => n !== null);
-        if (insertNodes.length > 0) {
-          document.dispatchEvent(new CustomEvent('word-editor:insert-to-doc', {
-            detail: { wordEditorFrameId: ctx.id, nodes: insertNodes },
-          }));
-        }
+        // reserved for potential future use
         return;
       }
       ctx.pushHistory();
@@ -150,32 +133,24 @@ export const createKeydownHandler = (
 
     if (e.key === 'Tab' && !e.shiftKey && !e.ctrlKey) {
       e.preventDefault();
-      ctx.pushHistory();
       if (state.anchorIdx !== null && state.activeIdx !== null) {
         const allIds = flatIds(state.nodes);
         const lo = Math.min(state.anchorIdx, state.activeIdx);
         const hi = Math.max(state.anchorIdx, state.activeIdx);
         const selIds = allIds.slice(lo, hi + 1);
-        for (const sid of selIds) {
-          const sloc = findNode(state.nodes, sid);
-          if (sloc && sloc.index > 0) {
-            const snode = sloc.parent.splice(sloc.index, 1)[0];
-            const prev = sloc.parent[sloc.index - 1];
-            if (!prev.children) prev.children = [];
-            prev.children.push(snode);
-          }
+        const insertNodes = selIds.map(sid => {
+          const loc = findNode(state.nodes, sid);
+          return loc ? loc.parent[loc.index] : null;
+        }).filter((n): n is TreeNode => n !== null);
+        if (insertNodes.length > 0) {
+          document.dispatchEvent(new CustomEvent('word-editor:insert-to-doc', {
+            detail: { wordEditorFrameId: ctx.id, nodes: insertNodes },
+          }));
         }
-        state.pendingFocusId = node.id;
-        ctx.scheduleSave();
-        ctx.render();
-        const newAllIds = flatIds(state.nodes);
-        const newLo = newAllIds.indexOf(selIds[0]);
-        const newHi = newAllIds.indexOf(selIds[selIds.length - 1]);
-        const wasAsc = state.anchorIdx <= state.activeIdx;
-        state.anchorIdx = wasAsc ? newLo : newHi;
-        state.activeIdx = wasAsc ? newHi : newLo;
-        updateNodeSelectionVisuals(ctx.outer, newAllIds, state.anchorIdx, state.activeIdx);
-      } else {
+        return;
+      }
+      ctx.pushHistory();
+      {
         state.anchorIdx = null; state.activeIdx = null;
         if (currentLoc && currentLoc.index > 0) {
           const snode = currentLoc.parent.splice(currentLoc.index, 1)[0];
