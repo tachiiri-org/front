@@ -46,6 +46,11 @@ store_id = "4637b8eeef4d4774a131ba3cf7011234"
 secret_name = "FRONT_TO_AUTHORIZE_TOKEN_STAGE"
 
 [[env.stage.secrets_store_secrets]]
+binding = "FRONT_TO_BACKEND_TOKEN"
+store_id = "4637b8eeef4d4774a131ba3cf7011234"
+secret_name = "FRONT_TO_BACKEND_TOKEN_STAGE"
+
+[[env.stage.secrets_store_secrets]]
 binding = "INTERNAL_AUTH_SIGNING_KEY"
 store_id = "4637b8eeef4d4774a131ba3cf7011234"
 secret_name = "INTERNAL_AUTH_SIGNING_KEY_STAGE"
@@ -85,6 +90,11 @@ store_id = "4637b8eeef4d4774a131ba3cf7011234"
 secret_name = "FRONT_TO_AUTHORIZE_TOKEN_PROD"
 
 [[env.production.secrets_store_secrets]]
+binding = "FRONT_TO_BACKEND_TOKEN"
+store_id = "4637b8eeef4d4774a131ba3cf7011234"
+secret_name = "FRONT_TO_BACKEND_TOKEN_PROD"
+
+[[env.production.secrets_store_secrets]]
 binding = "INTERNAL_AUTH_SIGNING_KEY"
 store_id = "4637b8eeef4d4774a131ba3cf7011234"
 secret_name = "INTERNAL_AUTH_SIGNING_KEY_PROD"
@@ -98,6 +108,7 @@ FRONTEND_ORIGIN = "http://localhost:8787"
 IDENTIFY_ORIGIN = "https://identify-dev.tachiiri.workers.dev"
 AUTHORIZE_ORIGIN = "https://authorize-dev.tachiiri.workers.dev"
 BACKEND_ORIGIN = "https://backend-dev.tachiiri.workers.dev"
+FRONT_TO_BACKEND_TOKEN = "b109b22738647033f1ef4ad11426c8a8a05aae7c3ec3da9f88e0ad4dbd768781"
 FRONT_TO_IDENTIFY_TOKEN = "828298b87ee5fdb66350e2ae2892473b139abd3523e189e9c8781b77f94b06ed"
 GITHUB_OAUTH_CLIENT_ID = "Ov23litfbD8WRrXkM4iR"
 LAYOUTS_BUCKET_ID = "bucket-dev"

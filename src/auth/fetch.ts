@@ -27,21 +27,23 @@ export async function authorizeFetch(
     audience?: string;
   },
 ): Promise<Response> {
-  const hasBackend = Boolean(env.BACKEND || env.BACKEND_ORIGIN);
-  const hasAuthorize = Boolean(env.AUTHORIZE || env.AUTHORIZE_ORIGIN);
+  const hasBackend = Boolean((env.BACKEND || env.BACKEND_ORIGIN) && env.FRONT_TO_BACKEND_TOKEN);
+  const hasAuthorize = Boolean((env.AUTHORIZE || env.AUTHORIZE_ORIGIN) && env.FRONT_TO_AUTHORIZE_TOKEN);
 
-  if ((!hasBackend && !hasAuthorize) || !env.FRONT_TO_AUTHORIZE_TOKEN || !env.INTERNAL_AUTH_SIGNING_KEY) {
-    return Response.json({ error: "authorize_not_configured" }, { status: 500 });
-  }
-
-  const frontToAuthorizeToken = await resolveSecret(env.FRONT_TO_AUTHORIZE_TOKEN);
-  if (!frontToAuthorizeToken) {
+  if ((!hasBackend && !hasAuthorize) || !env.INTERNAL_AUTH_SIGNING_KEY) {
     return Response.json({ error: "authorize_not_configured" }, { status: 500 });
   }
 
   const audience = input.audience ?? (hasBackend ? "backend" : "authorize");
+  const internalToken = hasBackend
+    ? await resolveSecret(env.FRONT_TO_BACKEND_TOKEN)
+    : await resolveSecret(env.FRONT_TO_AUTHORIZE_TOKEN);
+  if (!internalToken) {
+    return Response.json({ error: "authorize_not_configured" }, { status: 500 });
+  }
+
   const headers = sanitizeHeaders(input.headers);
-  headers.set("x-internal-token", frontToAuthorizeToken);
+  headers.set("x-internal-token", internalToken);
   headers.set(
     "authorization",
     `Bearer ${await issueInternalToken(env, { audience })}`,
