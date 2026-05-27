@@ -1,6 +1,10 @@
 type SecretValue = string | { get(): Promise<string> };
 
 export type AuthorizeEnv = {
+  readonly BACKEND?: {
+    fetch(request: Request): Promise<Response>;
+  };
+  readonly BACKEND_ORIGIN?: string;
   readonly AUTHORIZE?: {
     fetch(request: Request): Promise<Response>;
   };
@@ -18,9 +22,13 @@ export type AuthorizeEnv = {
 };
 
 export function hasAuthorizeConfig(env: AuthorizeEnv): boolean {
-  return Boolean(
+  const hasBackend = Boolean(
+    (env.BACKEND || env.BACKEND_ORIGIN) && env.FRONT_TO_AUTHORIZE_TOKEN && env.INTERNAL_AUTH_SIGNING_KEY,
+  );
+  const hasAuthorize = Boolean(
     (env.AUTHORIZE || env.AUTHORIZE_ORIGIN) && env.FRONT_TO_AUTHORIZE_TOKEN && env.INTERNAL_AUTH_SIGNING_KEY,
   );
+  return hasBackend || hasAuthorize;
 }
 
 export { authorizeFetch } from "./fetch";

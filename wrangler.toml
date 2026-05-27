@@ -31,6 +31,10 @@ service = "identify-stage"
 binding = "AUTHORIZE"
 service = "authorize-stage"
 
+[[env.stage.services]]
+binding = "BACKEND"
+service = "backend-stage"
+
 [[env.stage.secrets_store_secrets]]
 binding = "FRONT_TO_IDENTIFY_TOKEN"
 store_id = "4637b8eeef4d4774a131ba3cf7011234"
@@ -66,6 +70,10 @@ service = "identify-prod"
 binding = "AUTHORIZE"
 service = "authorize-prod"
 
+[[env.production.services]]
+binding = "BACKEND"
+service = "backend-prod"
+
 [[env.production.secrets_store_secrets]]
 binding = "FRONT_TO_IDENTIFY_TOKEN"
 store_id = "4637b8eeef4d4774a131ba3cf7011234"
@@ -89,6 +97,7 @@ workers_dev = true
 FRONTEND_ORIGIN = "http://localhost:8787"
 IDENTIFY_ORIGIN = "https://identify-dev.tachiiri.workers.dev"
 AUTHORIZE_ORIGIN = "https://authorize-dev.tachiiri.workers.dev"
+BACKEND_ORIGIN = "https://backend-dev.tachiiri.workers.dev"
 FRONT_TO_IDENTIFY_TOKEN = "828298b87ee5fdb66350e2ae2892473b139abd3523e189e9c8781b77f94b06ed"
 GITHUB_OAUTH_CLIENT_ID = "Ov23litfbD8WRrXkM4iR"
 LAYOUTS_BUCKET_ID = "bucket-dev"
