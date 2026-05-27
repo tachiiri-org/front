@@ -193,10 +193,10 @@ export const createKeydownHandler = (
       const selEnd = input.selectionEnd ?? 0;
       if (selStart !== selEnd) {
         e.preventDefault();
-        const selectedText = input.value.slice(selStart, selEnd).trim();
+        const selectedText = input.value.slice(selStart, selEnd).trim().toLowerCase();
         if (selectedText) {
           ctx.pushHistory();
-          const existing = state.words.find(w => w.text === selectedText);
+          const existing = state.words.find(w => w.text.toLowerCase() === selectedText);
           const newWord: GraphWord = existing ?? { id: randomId(), text: selectedText };
           if (!existing) state.words.push(newWord);
           const text = findText(state.texts, item.id);

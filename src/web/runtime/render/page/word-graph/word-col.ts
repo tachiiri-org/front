@@ -272,10 +272,10 @@ const buildWordColContent = (
         commitWord(suggestions[activeIndex]);
         return;
       }
-      const text = draftInput.value.trim();
+      const text = draftInput.value.trim().toLowerCase();
       if (!text) return;
       ctx.pushHistory();
-      const existing = state.words.find((w) => w.text === text);
+      const existing = state.words.find((w) => w.text.toLowerCase() === text);
       const targetWord = existing ?? ((): GraphWord => {
         const w: GraphWord = { id: randomId(), text };
         state.words.push(w);
@@ -321,8 +321,10 @@ const buildWordColContent = (
   for (const item of items) {
     const isInPath = state.path[COL_INDEX] === item.id;
     const isLinked = linkedIds === null || linkedIds.has(item.id);
-    const wordColor = isLinked ? (item.color ?? null) : null;
-    const markerColor = isLinked ? (wordColor ?? theme.markerDefault) : theme.textFaint;
+    const rawColor = item.color ?? null;
+    const fadedItemColor = rawColor ? rawColor.replace(/,\s*([\d.]+)\)$/, ', 0.25)') : null;
+    const wordColor = isLinked ? rawColor : fadedItemColor;
+    const markerColor = isLinked ? (rawColor ?? theme.markerDefault) : (fadedItemColor ?? theme.textFaint);
 
     const row = document.createElement('div');
     row.dataset.nodeRow = item.id;
@@ -342,7 +344,7 @@ const buildWordColContent = (
     if (inp.value !== item.text) inp.value = item.text;
     inp.dataset.columnIndex = String(COL_INDEX);
     inp.style.background = 'transparent';
-    inp.style.color = isLinked ? (wordColor ?? 'inherit') : theme.textDim;
+    inp.style.color = wordColor ?? (isLinked ? 'inherit' : theme.textDim);
     inp.style.fontStyle = 'normal';
     inp.style.borderRadius = '0';
 
@@ -400,7 +402,7 @@ const buildWordColContent = (
       arrow.textContent = '›';
       Object.assign(arrow.style, {
         userSelect: 'none',
-        color: isLinked ? (wordColor ?? theme.textFaint) : theme.textFaint,
+        color: wordColor ?? theme.textFaint,
         fontSize: '14px',
         flexShrink: '0',
         paddingRight: '2px',
