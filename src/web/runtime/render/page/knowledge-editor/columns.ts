@@ -1,6 +1,6 @@
 import type { TreeNode } from '../../../../schema/component/kind/tree-editor';
 import type { KnowledgeEditorContext } from './types';
-import { randomId, findNode, flatIds, getAncestors, hasDescendants } from './ops';
+import { randomId, findNode, flatIds, getAncestors } from './ops';
 import { createInput } from './input';
 import { theme } from '../theme';
 
@@ -98,9 +98,6 @@ export const buildColumn = (
 
   for (const node of list) {
     const isSelectedInPath = fullPath[columnIndex] === node.id;
-    const isProposed = node.status === 'proposed';
-    const isIssue = node.type === 'issue' || node.text.startsWith('?');
-    const desc = hasDescendants(node);
 
     const row = document.createElement('div');
     row.dataset.nodeRow = node.id;
@@ -123,30 +120,15 @@ export const buildColumn = (
     }
     if (input.value !== node.text) input.value = node.text;
     input.dataset.columnIndex = String(columnIndex);
-    input.style.background = isIssue ? theme.issueBg : isProposed ? theme.proposedBg : 'transparent';
-    input.style.color = isIssue ? theme.issueText : isProposed ? theme.proposedText : 'inherit';
-    input.style.fontStyle = isProposed ? 'italic' : 'normal';
-    input.style.borderRadius = isIssue || isProposed ? '3px' : '0';
+    input.style.background = 'transparent';
+    input.style.color = 'inherit';
+    input.style.borderRadius = '0';
 
     const marker = document.createElement('span');
     const isDocOpen = state.activeDocNodeId === node.id;
     const docStatus = state.docContentCache.get(node.id) ?? '';
     const hasDoc = docStatus !== '';
-    const baseColor = isDocOpen
-      ? theme.selectMarker
-      : docStatus === 'issue'
-      ? theme.issueMarkerBright
-      : docStatus === 'proposed'
-      ? theme.proposedMarkerBright
-      : desc.issue
-      ? theme.issueMarkerBright
-      : desc.proposed
-      ? theme.proposedMarkerBright
-      : isIssue
-      ? theme.issueMarkerDim
-      : isProposed
-      ? theme.proposedMarkerDim
-      : theme.markerDefault;
+    const baseColor = isDocOpen ? theme.selectMarker : theme.markerDefault;
     Object.assign(marker.style, {
       width: '6px',
       height: '6px',
@@ -186,7 +168,7 @@ export const buildColumn = (
       arrow.textContent = '›';
       Object.assign(arrow.style, {
         userSelect: 'none',
-        color: isIssue ? theme.issueAccent : isProposed ? theme.proposedAccent : theme.textFaint,
+        color: theme.textFaint,
         fontSize: '14px',
         flexShrink: '0',
         paddingRight: '2px',

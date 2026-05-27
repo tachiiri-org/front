@@ -22,23 +22,14 @@ type WordGraph = {
 function migrateGraph(raw: Record<string, unknown>): WordGraph {
   const words: GraphWord[] = ((raw.words ?? []) as Array<Record<string, unknown>>).map((w) => ({
     id: String(w.id),
-    text: String(w.text),
+    text: String(w.text) === 'task' ? 'goal' : String(w.text),
     ...(typeof w.color === 'string' ? { color: w.color } : {}),
   }));
-
-  const ensureWord = (text: string): string => {
-    let w = words.find((x) => x.text === text);
-    if (!w) { w = { id: crypto.randomUUID(), text }; words.push(w); }
-    return w.id;
-  };
 
   const texts: GraphText[] = ((raw.texts ?? []) as Array<Record<string, unknown>>).map((t) => {
     const wordIds: string[] = Array.isArray(t.wordIds)
       ? (t.wordIds as unknown[]).filter((id): id is string => typeof id === 'string')
       : [];
-    if (t.type === "issue") { const id = ensureWord("issue"); if (!wordIds.includes(id)) wordIds.push(id); }
-    else if (t.type === "task") { const id = ensureWord("task"); if (!wordIds.includes(id)) wordIds.push(id); }
-    if (t.status === "proposed") { const id = ensureWord("proposed"); if (!wordIds.includes(id)) wordIds.push(id); }
     return { id: String(t.id), text: String(t.text), wordIds };
   });
 
@@ -109,7 +100,7 @@ export const GRAPH_TOOLS = [
   },
   {
     name: "graph_read_texts_by_word",
-    description: "Read all texts linked to a specific word. Use word='issue' to read issues, word='task' to read tasks, word='proposed' to read unaccepted texts.",
+    description: "Read all texts linked to a specific word. Use word='issue' to read issues, word='goal' to read goals, word='proposed' to read unaccepted texts.",
     inputSchema: {
       type: "object",
       properties: {
@@ -133,7 +124,7 @@ export const GRAPH_TOOLS = [
   },
   {
     name: "graph_write_text",
-    description: "Create or update a text entry and set the words linked to it. Words that do not exist are created automatically. Include 'issue' in words for contradictions/undefined items, 'task' for divergence between ideal and current state. All AI-written texts are automatically linked to 'proposed'.",
+    description: "Create or update a text entry and set the words linked to it. Words that do not exist are created automatically. Include 'issue' in words for contradictions/undefined items, 'goal' for divergence between ideal and current state. All AI-written texts are automatically linked to 'proposed'.",
     inputSchema: {
       type: "object",
       properties: {
@@ -142,7 +133,7 @@ export const GRAPH_TOOLS = [
         words: {
           type: "array",
           items: { type: "string" },
-          description: "Word names to link to this text. 'proposed' is added automatically. Include 'issue' for contradictions, 'task' for ideal/current divergence.",
+          description: "Word names to link to this text. 'proposed' is added automatically. Include 'issue' for contradictions, 'goal' for ideal/current divergence.",
         },
       },
       required: ["graph_id", "text", "words"],

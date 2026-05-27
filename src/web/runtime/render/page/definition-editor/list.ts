@@ -6,8 +6,6 @@ import { theme } from '../theme';
 
 const createInput = (node: TreeNode, ctx: DefinitionEditorContext): HTMLTextAreaElement => {
   const { state } = ctx;
-  const isProposed = node.status === 'proposed';
-  const isIssue = node.type === 'issue' || node.text.startsWith('?');
 
   const input = document.createElement('textarea');
   input.rows = 1;
@@ -22,10 +20,9 @@ const createInput = (node: TreeNode, ctx: DefinitionEditorContext): HTMLTextArea
     overflow: 'hidden',
     whiteSpace: 'pre-wrap',
     wordBreak: 'break-word',
-    background: isIssue ? theme.issueBg : isProposed ? theme.proposedBg : 'transparent',
-    color: isIssue ? theme.issueText : isProposed ? theme.proposedText : 'inherit',
-    fontStyle: isProposed ? 'italic' : 'normal',
-    borderRadius: isIssue || isProposed ? '3px' : '0',
+    background: 'transparent',
+    color: 'inherit',
+    borderRadius: '0',
     fontFamily: 'inherit',
     fontSize: 'inherit',
     lineHeight: 'inherit',
@@ -84,9 +81,6 @@ export const buildUl = (list: TreeNode[], depth: number, ctx: DefinitionEditorCo
   ul.style.margin = '0';
 
   for (const node of list) {
-    const isProposed = node.status === 'proposed';
-    const isIssue = node.type === 'issue' || node.text.startsWith('?');
-
     const li = document.createElement('li');
 
     const row = document.createElement('div');
@@ -97,7 +91,7 @@ export const buildUl = (list: TreeNode[], depth: number, ctx: DefinitionEditorCo
     const bullet = document.createElement('span');
     bullet.textContent = !node.children?.length ? '•' : state.collapsedIds.has(node.id) ? '▸' : '▾';
     bullet.style.userSelect = 'none';
-    bullet.style.color = isIssue ? theme.issueAccent : isProposed ? theme.proposedAccent : theme.textDim;
+    bullet.style.color = theme.textDim;
     bullet.style.flexShrink = '0';
     bullet.style.width = '10px';
     bullet.style.fontSize = '10px';

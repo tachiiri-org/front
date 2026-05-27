@@ -128,7 +128,7 @@ type KnowledgeNode = {
 };
 
 type DocNode = { id: string; text: string; children?: DocNode[] };
-type GraphWord = { id: string; text: string; status?: string; type?: string };
+type GraphWord = { id: string; text: string };
 type GraphText = { id: string; text: string; wordIds: string[] };
 
 const flattenKnowledgeNodes = (nodes: KnowledgeNode[]): KnowledgeNode[] => {
@@ -183,7 +183,7 @@ const handleMigrateKnowledgeToWordGraph = async (
 
     if (!doc.nodes?.length) continue;
 
-    words.push({ id: kNode.id, text: kNode.text, status: kNode.status, type: kNode.type });
+    words.push({ id: kNode.id, text: kNode.text });
 
     for (const dn of flattenDocNodes(doc.nodes)) {
       texts.push({ id: crypto.randomUUID(), text: dn.text, wordIds: [kNode.id] });

@@ -136,13 +136,16 @@ const buildColumn = (
   draftRow.appendChild(draftInput);
   col.appendChild(draftRow);
 
+  const withAlpha = (color: string, alpha: number): string =>
+    color.replace(/,\s*[\d.]+\)$/, `, ${alpha})`);
+
   // Item rows
   for (const item of items) {
     const isInPath = state.path[colIndex] === item.id;
-    const isProposed = (item as { status?: string }).status === 'proposed';
-    const isIssue =
-      (item as { type?: string }).type === 'issue' || item.text.startsWith('?');
-    const isTask = (item as { type?: string }).type === 'task';
+    const wordIds = 'wordIds' in item ? (item as GraphText).wordIds : [];
+    const accentColor = isTextCol
+      ? (wordIds.map((id) => state.words.find((w) => w.id === id)?.color).find(Boolean) ?? null)
+      : ((item as GraphWord).color ?? null);
 
     const row = document.createElement('div');
     row.dataset.nodeRow = item.id;
@@ -161,18 +164,11 @@ const buildColumn = (
     }
     if (inp.value !== item.text) inp.value = item.text;
     inp.dataset.columnIndex = String(colIndex);
-    inp.style.background = isIssue ? theme.issueBg : isTask ? theme.taskBg : isProposed ? theme.proposedBg : 'transparent';
-    inp.style.color = isIssue ? theme.issueText : isTask ? theme.taskText : isProposed ? theme.proposedText : 'inherit';
-    inp.style.fontStyle = isProposed ? 'italic' : 'normal';
-    inp.style.borderRadius = isIssue || isTask || isProposed ? '3px' : '0';
+    inp.style.background = accentColor ? withAlpha(accentColor, 0.10) : 'transparent';
+    inp.style.color = accentColor ?? 'inherit';
+    inp.style.borderRadius = accentColor ? '3px' : '0';
 
-    const markerColor = isIssue
-      ? theme.issueMarkerBright
-      : isTask
-      ? theme.taskMarkerBright
-      : isProposed
-      ? theme.proposedMarkerBright
-      : theme.markerDefault;
+    const markerColor = accentColor ? withAlpha(accentColor, 0.70) : theme.markerDefault;
     const marker = document.createElement('span');
     Object.assign(marker.style, {
       width: '6px',
@@ -198,13 +194,7 @@ const buildColumn = (
       arrow.textContent = '›';
       Object.assign(arrow.style, {
         userSelect: 'none',
-        color: isIssue
-          ? theme.issueAccent
-          : isTask
-          ? theme.taskAccent
-          : isProposed
-          ? theme.proposedAccent
-          : theme.textFaint,
+        color: accentColor ? withAlpha(accentColor, 0.50) : theme.textFaint,
         fontSize: '14px',
         flexShrink: '0',
         paddingRight: '2px',

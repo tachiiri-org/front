@@ -63,23 +63,14 @@ export const migrateGraphData = (
 ): { texts: GraphText[]; words: GraphWord[] } => {
   const words: GraphWord[] = (raw.words as Array<Record<string, unknown>>).map((w) => ({
     id: String(w.id),
-    text: String(w.text),
+    text: String(w.text) === 'task' ? 'goal' : String(w.text),
     ...(typeof w.color === 'string' ? { color: w.color } : {}),
   }));
-
-  const ensureWord = (text: string): string => {
-    let w = words.find((x) => x.text === text);
-    if (!w) { w = { id: randomId(), text }; words.push(w); }
-    return w.id;
-  };
 
   const texts: GraphText[] = (raw.texts as Array<Record<string, unknown>>).map((t) => {
     const wordIds: string[] = Array.isArray(t.wordIds)
       ? (t.wordIds as unknown[]).filter((id): id is string => typeof id === 'string')
       : [];
-    if (t.type === 'issue') { const id = ensureWord('issue'); if (!wordIds.includes(id)) wordIds.push(id); }
-    else if (t.type === 'task') { const id = ensureWord('task'); if (!wordIds.includes(id)) wordIds.push(id); }
-    if (t.status === 'proposed') { const id = ensureWord('proposed'); if (!wordIds.includes(id)) wordIds.push(id); }
     return { id: String(t.id), text: String(t.text), wordIds };
   });
 
