@@ -19,7 +19,7 @@ export type AuthorizeEnv = {
 
 export function hasAuthorizeConfig(env: AuthorizeEnv): boolean {
   const hasBackend = Boolean(
-    (env.BACKEND || env.BACKEND_ORIGIN) && env.FRONT_TO_AUTHORIZE_TOKEN && env.INTERNAL_AUTH_SIGNING_KEY,
+    (env.BACKEND || env.BACKEND_ORIGIN) && env.FRONT_TO_BACKEND_TOKEN && env.INTERNAL_AUTH_SIGNING_KEY,
   );
   const hasAuthorize = Boolean(
     (env.AUTHORIZE || env.AUTHORIZE_ORIGIN) && env.FRONT_TO_AUTHORIZE_TOKEN && env.INTERNAL_AUTH_SIGNING_KEY,
