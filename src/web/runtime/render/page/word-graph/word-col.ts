@@ -490,7 +490,7 @@ export const renderWordGraphWordCol = (
     const linkedIds = contextTextId
       ? new Set(findText(state.texts, contextTextId)?.wordIds ?? [])
       : null;
-    const items = [...state.words];
+    const items = [...state.words].sort((a, b) => a.text.localeCompare(b.text));
 
     const ctx: ColContext = {
       id,

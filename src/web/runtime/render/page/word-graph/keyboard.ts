@@ -89,7 +89,7 @@ export const createKeydownHandler = (
       if (colIndex === 0) {
         // Delete text entirely
         state.texts = state.texts.filter((t) => t.id !== item.id);
-        if (state.path[0] === item.id) state.path = [];
+        if (state.path[0] === item.id) state.path = prevId ? [prevId] : [];
       } else if (!isTextCol) {
         // Delete word entirely from global words list and all texts
         state.words = state.words.filter((w) => w.id !== item.id);
@@ -155,7 +155,7 @@ export const createKeydownHandler = (
 
       if (colIndex === 0) {
         state.texts = state.texts.filter((t) => t.id !== item.id);
-        if (state.path[0] === item.id) state.path = [];
+        if (state.path[0] === item.id) state.path = prevId ? [prevId] : [];
       } else if (!isTextCol) {
         state.words = state.words.filter((w) => w.id !== item.id);
         for (const t of state.texts) {
