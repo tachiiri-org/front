@@ -43,15 +43,15 @@ export const createKeydownHandler = (
       return;
     }
 
-    // Ctrl+Enter: accept (remove "proposed" word link)
+    // Ctrl+Enter: accept (remove "draft" word link)
     if (e.key === 'Enter' && e.ctrlKey && !e.shiftKey && !e.altKey) {
       e.preventDefault();
       if (!isTextCol) return;
       ctx.pushHistory();
       const text = state.texts.find((t) => t.id === item.id);
       if (text) {
-        const proposedWord = state.words.find((w) => w.text === 'proposed');
-        if (proposedWord) text.wordIds = text.wordIds.filter((id) => id !== proposedWord.id);
+        const draftWord = state.words.find((w) => w.text === 'draft');
+        if (draftWord) text.wordIds = text.wordIds.filter((id) => id !== draftWord.id);
         ctx.scheduleSave();
         ctx.render();
       }

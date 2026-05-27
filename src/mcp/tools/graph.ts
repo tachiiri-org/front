@@ -100,7 +100,7 @@ export const GRAPH_TOOLS = [
   },
   {
     name: "graph_read_texts_by_word",
-    description: "Read all texts linked to a specific word. Use word='issue' to read issues, word='goal' to read goals, word='proposed' to read unaccepted texts.",
+    description: "Read all texts linked to a specific word. Use word='issue' to read issues, word='goal' to read goals, word='draft' to read unaccepted texts.",
     inputSchema: {
       type: "object",
       properties: {
@@ -124,7 +124,7 @@ export const GRAPH_TOOLS = [
   },
   {
     name: "graph_write_text",
-    description: "Create or update a text entry and set the words linked to it. Words that do not exist are created automatically. Include 'issue' in words for contradictions/undefined items, 'goal' for divergence between ideal and current state. All AI-written texts are automatically linked to 'proposed'.",
+    description: "Create or update a text entry and set the words linked to it. Words that do not exist are created automatically. Include 'issue' in words for contradictions/undefined items, 'goal' for divergence between ideal and current state. All AI-written texts are automatically linked to 'draft'.",
     inputSchema: {
       type: "object",
       properties: {
@@ -133,7 +133,7 @@ export const GRAPH_TOOLS = [
         words: {
           type: "array",
           items: { type: "string" },
-          description: "Word names to link to this text. 'proposed' is added automatically. Include 'issue' for contradictions, 'goal' for ideal/current divergence.",
+          description: "Word names to link to this text. 'draft' is added automatically. Include 'issue' for contradictions, 'goal' for ideal/current divergence.",
         },
       },
       required: ["graph_id", "text", "words"],
@@ -181,8 +181,8 @@ export async function callGraphTool(
       const textContent = String(args.text);
       const wordNames = (args.words as unknown[]).map(String);
 
-      // Ensure "proposed" is always linked for AI-written texts
-      if (!wordNames.includes("proposed")) wordNames.push("proposed");
+      // Ensure "draft" is always linked for AI-written texts
+      if (!wordNames.includes("draft")) wordNames.push("draft");
 
       const wordIds: string[] = [];
       for (const wname of wordNames) {
