@@ -1,5 +1,5 @@
 import type { WordGraphTextColComponent } from '../../../../schema/component/kind/word-graph-col';
-import { applyCssProps, cloneData } from './ops';
+import { applyCssProps, cloneData, migrateGraphData } from './ops';
 import { getOrCreateGraphState } from './store';
 import type { ColContext } from './types';
 import { findWord, randomId, findText } from './ops';
@@ -126,12 +126,15 @@ const buildTextColContent = (
   draftRow.appendChild(draftInput);
   col.appendChild(draftRow);
 
+  // wordId → color lookup
+  const wordColorById = new Map<string, string>(
+    state.words.filter((w) => w.color).map((w) => [w.id, w.color!]),
+  );
+
   // Item rows
   for (const item of items) {
     const isInPath = state.path[colIndex] === item.id;
-    const isProposed = (item as { status?: string }).status === 'proposed';
-    const isIssue = (item as { type?: string }).type === 'issue' || item.text.startsWith('?');
-    const isTask = (item as { type?: string }).type === 'task';
+    const textColor = item.wordIds.map((id) => wordColorById.get(id)).find(Boolean) ?? null;
 
     const row = document.createElement('div');
     row.dataset.nodeRow = item.id;
@@ -150,14 +153,14 @@ const buildTextColContent = (
     }
     if (inp.value !== item.text) inp.value = item.text;
     inp.dataset.columnIndex = String(colIndex);
-    inp.style.background = isIssue ? theme.issueBg : isTask ? theme.taskBg : isProposed ? theme.proposedBg : 'transparent';
-    inp.style.color = isIssue ? theme.issueText : isTask ? theme.taskText : isProposed ? theme.proposedText : 'inherit';
-    inp.style.fontStyle = isProposed ? 'italic' : 'normal';
-    inp.style.borderRadius = isIssue || isTask || isProposed ? '3px' : '0';
+    inp.style.background = 'transparent';
+    inp.style.color = textColor ?? 'inherit';
+    inp.style.fontStyle = 'normal';
+    inp.style.borderRadius = '0';
 
     const wordCount = (item as GraphText).wordIds?.length ?? 0;
     const hasLinks = wordCount > 0;
-    const markerColor = isIssue ? theme.issueMarkerBright : isTask ? theme.taskMarkerBright : isProposed ? theme.proposedMarkerBright : theme.markerDefault;
+    const markerColor = textColor ?? theme.markerDefault;
     const marker = document.createElement('span');
     Object.assign(marker.style, {
       width: '6px',
@@ -189,7 +192,7 @@ const buildTextColContent = (
       arrow.textContent = '›';
       Object.assign(arrow.style, {
         userSelect: 'none',
-        color: isIssue ? theme.issueAccent : isTask ? theme.taskAccent : isProposed ? theme.proposedAccent : theme.textFaint,
+        color: textColor ?? theme.textFaint,
         fontSize: '14px',
         flexShrink: '0',
         paddingRight: '2px',
@@ -321,8 +324,12 @@ export const renderWordGraphTextCol = (
       .then((res) => res.ok ? (res.json() as Promise<unknown>) : Promise.resolve({ texts: [], words: [] }))
       .then((data) => {
         const d = data as Record<string, unknown>;
-        shared.texts = Array.isArray(d.texts) ? (d.texts as GraphText[]) : [];
-        shared.words = Array.isArray(d.words) ? (d.words as GraphWord[]) : [];
+        const migrated = migrateGraphData({
+          texts: Array.isArray(d.texts) ? d.texts : [],
+          words: Array.isArray(d.words) ? d.words : [],
+        });
+        shared.texts = migrated.texts;
+        shared.words = migrated.words;
         notify();
       })
       .catch(() => notify());

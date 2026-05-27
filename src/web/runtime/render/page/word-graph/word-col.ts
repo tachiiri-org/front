@@ -1,5 +1,5 @@
 import type { WordGraphWordColComponent } from '../../../../schema/component/kind/word-graph-col';
-import { applyCssProps, cloneData, findText, findWord, randomId } from './ops';
+import { applyCssProps, cloneData, findText, findWord, randomId, migrateGraphData } from './ops';
 import { getOrCreateGraphState } from './store';
 import type { ColContext } from './types';
 import { createInput } from './input';
@@ -10,11 +10,90 @@ import type { GraphText, GraphWord } from '../../../../schema/component/kind/wor
 
 const COL_INDEX = 1;
 
+const PRESET_COLORS: Array<string | null> = [
+  'rgba(255,190,60,0.90)',
+  'rgba(200,120,255,0.90)',
+  'rgba(60,220,120,0.90)',
+  'rgba(80,160,255,0.90)',
+  'rgba(255,100,100,0.90)',
+  'rgba(60,220,220,0.90)',
+  null,
+];
+
+const showColorPicker = (
+  anchor: HTMLElement,
+  wordId: string,
+  ctx: ColContext,
+): void => {
+  document.querySelector('.wg-color-picker')?.remove();
+
+  const { state } = ctx;
+  const picker = document.createElement('div');
+  picker.className = 'wg-color-picker';
+  Object.assign(picker.style, {
+    position: 'fixed',
+    display: 'flex',
+    gap: '4px',
+    padding: '6px',
+    background: '#2a2a2a',
+    border: '1px solid rgba(255,255,255,0.15)',
+    borderRadius: '6px',
+    zIndex: '1000',
+    boxShadow: '0 4px 12px rgba(0,0,0,0.5)',
+  });
+
+  for (const color of PRESET_COLORS) {
+    const swatch = document.createElement('div');
+    Object.assign(swatch.style, {
+      width: '16px',
+      height: '16px',
+      borderRadius: '3px',
+      cursor: 'pointer',
+      flexShrink: '0',
+      background: color ?? 'transparent',
+      border: color ? 'none' : '1px solid rgba(255,255,255,0.35)',
+      display: 'flex',
+      alignItems: 'center',
+      justifyContent: 'center',
+      fontSize: '11px',
+      color: 'rgba(255,255,255,0.55)',
+    });
+    if (!color) swatch.textContent = '×';
+    swatch.addEventListener('mousedown', (e) => {
+      e.preventDefault();
+      e.stopPropagation();
+      ctx.pushHistory();
+      const w = state.words.find((x) => x.id === wordId);
+      if (w) {
+        if (color) w.color = color;
+        else delete w.color;
+      }
+      ctx.scheduleSave();
+      ctx.render();
+      picker.remove();
+    });
+    picker.appendChild(swatch);
+  }
+
+  const rect = anchor.getBoundingClientRect();
+  picker.style.top = `${rect.bottom + 4}px`;
+  picker.style.left = `${rect.left}px`;
+  document.body.appendChild(picker);
+
+  const dismiss = (e: MouseEvent): void => {
+    if (!picker.contains(e.target as Node)) {
+      picker.remove();
+      document.removeEventListener('mousedown', dismiss);
+    }
+  };
+  setTimeout(() => document.addEventListener('mousedown', dismiss), 0);
+};
+
 const buildWordColContent = (
   items: GraphWord[],
   contextTextId: string | null,
+  linkedIds: Set<string> | null,
   ctx: ColContext,
-  unlinkedItems?: GraphWord[],
 ): HTMLElement => {
   const { state } = ctx;
 
@@ -238,12 +317,12 @@ const buildWordColContent = (
   col.appendChild(draftRow);
   col.appendChild(suggestionsEl);
 
-  // Item rows
+  // Item rows — all words in fixed global order, dimmed if not linked to selected text
   for (const item of items) {
     const isInPath = state.path[COL_INDEX] === item.id;
-    const isProposed = (item as { status?: string }).status === 'proposed';
-    const isIssue = (item as { type?: string }).type === 'issue' || item.text.startsWith('?');
-    const isTask = (item as { type?: string }).type === 'task';
+    const isLinked = linkedIds === null || linkedIds.has(item.id);
+    const wordColor = isLinked ? (item.color ?? null) : null;
+    const markerColor = isLinked ? (wordColor ?? theme.markerDefault) : theme.textFaint;
 
     const row = document.createElement('div');
     row.dataset.nodeRow = item.id;
@@ -262,25 +341,45 @@ const buildWordColContent = (
     }
     if (inp.value !== item.text) inp.value = item.text;
     inp.dataset.columnIndex = String(COL_INDEX);
-    inp.style.background = isIssue ? theme.issueBg : isTask ? theme.taskBg : isProposed ? theme.proposedBg : 'transparent';
-    inp.style.color = isIssue ? theme.issueText : isTask ? theme.taskText : isProposed ? theme.proposedText : 'inherit';
-    inp.style.fontStyle = isProposed ? 'italic' : 'normal';
-    inp.style.borderRadius = isIssue || isTask || isProposed ? '3px' : '0';
+    inp.style.background = 'transparent';
+    inp.style.color = isLinked ? (wordColor ?? 'inherit') : theme.textDim;
+    inp.style.fontStyle = 'normal';
+    inp.style.borderRadius = '0';
 
     const linkedTextCount = state.texts.filter((t) => t.wordIds.includes(item.id)).length;
     const hasLinks = linkedTextCount > 0;
-    const markerColor = isIssue ? theme.issueMarkerBright : isTask ? theme.taskMarkerBright : isProposed ? theme.proposedMarkerBright : theme.markerDefault;
     const marker = document.createElement('span');
     Object.assign(marker.style, {
-      width: '6px',
-      height: '6px',
+      width: '8px',
+      height: '8px',
       flexShrink: '0',
       alignSelf: 'center',
-      borderRadius: '1px',
+      borderRadius: '2px',
       boxSizing: 'border-box',
       background: hasLinks ? markerColor : 'transparent',
       border: hasLinks ? 'none' : `1.5px solid ${markerColor}`,
+      cursor: 'pointer',
     });
+    marker.addEventListener('mousedown', (e) => {
+      e.preventDefault();
+      e.stopPropagation();
+      if (e.button === 2) {
+        showColorPicker(marker, item.id, ctx);
+      } else if (e.button === 0 && contextTextId) {
+        ctx.pushHistory();
+        const text = findText(state.texts, contextTextId);
+        if (text) {
+          if (text.wordIds.includes(item.id)) {
+            text.wordIds = text.wordIds.filter((id) => id !== item.id);
+          } else {
+            text.wordIds.push(item.id);
+          }
+          ctx.scheduleSave();
+          ctx.render();
+        }
+      }
+    });
+    marker.addEventListener('contextmenu', (e) => e.preventDefault());
 
     row.appendChild(marker);
     row.appendChild(inp);
@@ -301,7 +400,7 @@ const buildWordColContent = (
       arrow.textContent = '›';
       Object.assign(arrow.style, {
         userSelect: 'none',
-        color: isIssue ? theme.issueAccent : isTask ? theme.taskAccent : isProposed ? theme.proposedAccent : theme.textFaint,
+        color: isLinked ? (wordColor ?? theme.textFaint) : theme.textFaint,
         fontSize: '14px',
         flexShrink: '0',
         paddingRight: '2px',
@@ -311,91 +410,6 @@ const buildWordColContent = (
     }
 
     col.appendChild(row);
-  }
-
-  if (unlinkedItems && unlinkedItems.length > 0) {
-    const separator = document.createElement('div');
-    Object.assign(separator.style, {
-      margin: '4px 12px',
-      height: '1px',
-      background: theme.borderFaint,
-      flexShrink: '0',
-    });
-    col.appendChild(separator);
-
-    for (const item of unlinkedItems) {
-      const isInPath = state.path[COL_INDEX] === item.id;
-      const isProposed = (item as { status?: string }).status === 'proposed';
-      const isIssue = (item as { type?: string }).type === 'issue' || item.text.startsWith('?');
-      const isTask = (item as { type?: string }).type === 'task';
-
-      const row = document.createElement('div');
-      row.dataset.nodeRow = item.id;
-      row.style.display = 'flex';
-      row.style.alignItems = 'flex-start';
-      row.style.gap = '4px';
-      row.style.padding = '1px 8px 1px 12px';
-      row.style.background = isInPath ? theme.selectSubtle : 'transparent';
-      row.style.flexShrink = '0';
-
-      const cacheKey = `${COL_INDEX}:${item.id}`;
-      let inp = state.inputCache.get(cacheKey);
-      if (!inp) {
-        inp = createInput(item, COL_INDEX, null, ctx as unknown as import('./types').WordGraphContext);
-        state.inputCache.set(cacheKey, inp);
-      }
-      if (inp.value !== item.text) inp.value = item.text;
-      inp.dataset.columnIndex = String(COL_INDEX);
-      inp.style.background = isIssue ? theme.issueBg : isTask ? theme.taskBg : isProposed ? theme.proposedBg : 'transparent';
-      inp.style.color = isIssue ? theme.issueText : isTask ? theme.taskText : isProposed ? theme.proposedText : theme.textDim;
-      inp.style.fontStyle = isProposed ? 'italic' : 'normal';
-      inp.style.borderRadius = isIssue || isTask || isProposed ? '3px' : '0';
-
-      const linkedTextCount = state.texts.filter((t) => t.wordIds.includes(item.id)).length;
-      const hasLinks = linkedTextCount > 0;
-      const markerColor = isIssue ? theme.issueMarkerBright : isTask ? theme.taskMarkerBright : isProposed ? theme.proposedMarkerBright : theme.textFaint;
-      const marker = document.createElement('span');
-      Object.assign(marker.style, {
-        width: '6px',
-        height: '6px',
-        flexShrink: '0',
-        alignSelf: 'center',
-        borderRadius: '1px',
-        boxSizing: 'border-box',
-        background: hasLinks ? markerColor : 'transparent',
-        border: hasLinks ? 'none' : `1.5px solid ${markerColor}`,
-      });
-
-      row.appendChild(marker);
-      row.appendChild(inp);
-
-      if (hasLinks) {
-        const countLabel = document.createElement('span');
-        countLabel.textContent = String(linkedTextCount);
-        Object.assign(countLabel.style, {
-          fontSize: '10px',
-          color: theme.textFaint,
-          userSelect: 'none',
-          flexShrink: '0',
-          alignSelf: 'center',
-        });
-        row.appendChild(countLabel);
-
-        const arrow = document.createElement('span');
-        arrow.textContent = '›';
-        Object.assign(arrow.style, {
-          userSelect: 'none',
-          color: isIssue ? theme.issueAccent : isTask ? theme.taskAccent : isProposed ? theme.proposedAccent : theme.textFaint,
-          fontSize: '14px',
-          flexShrink: '0',
-          paddingRight: '2px',
-          alignSelf: 'center',
-        });
-        row.appendChild(arrow);
-      }
-
-      col.appendChild(row);
-    }
   }
 
   return col;
@@ -472,20 +486,11 @@ export const renderWordGraphWordCol = (
       ? state.path[0]
       : null;
 
-    let items: GraphWord[];
-    let contextTextId: string | null = null;
-    let unlinkedItems: GraphWord[] | undefined;
-    if (col1TextId) {
-      contextTextId = col1TextId;
-      const text = findText(state.texts, col1TextId);
-      const linkedIds = new Set(text ? text.wordIds : []);
-      items = text
-        ? text.wordIds.map((wid) => findWord(state.words, wid)).filter((w): w is GraphWord => w !== undefined)
-        : [];
-      unlinkedItems = state.words.filter((w) => !linkedIds.has(w.id));
-    } else {
-      items = [...state.words];
-    }
+    const contextTextId = col1TextId;
+    const linkedIds = contextTextId
+      ? new Set(findText(state.texts, contextTextId)?.wordIds ?? [])
+      : null;
+    const items = [...state.words];
 
     const ctx: ColContext = {
       id,
@@ -497,7 +502,7 @@ export const renderWordGraphWordCol = (
       scheduleRender: () => requestAnimationFrame(notify),
     };
 
-    outer.replaceChildren(buildWordColContent(items, contextTextId, ctx, unlinkedItems));
+    outer.replaceChildren(buildWordColContent(items, contextTextId, linkedIds, ctx));
 
     if (!supportsFieldSizing) {
       const tas = Array.from(outer.querySelectorAll<HTMLTextAreaElement>('textarea[data-nav-input]'));
@@ -520,8 +525,12 @@ export const renderWordGraphWordCol = (
       .then((res) => res.ok ? (res.json() as Promise<unknown>) : Promise.resolve({ texts: [], words: [] }))
       .then((data) => {
         const d = data as Record<string, unknown>;
-        shared.texts = Array.isArray(d.texts) ? (d.texts as GraphText[]) : [];
-        shared.words = Array.isArray(d.words) ? (d.words as GraphWord[]) : [];
+        const migrated = migrateGraphData({
+          texts: Array.isArray(d.texts) ? d.texts : [],
+          words: Array.isArray(d.words) ? d.words : [],
+        });
+        shared.texts = migrated.texts;
+        shared.words = migrated.words;
         notify();
       })
       .catch(() => notify());

@@ -43,33 +43,35 @@ export const createKeydownHandler = (
       return;
     }
 
-    // Ctrl+Enter: accept (proposed → accepted)
+    // Ctrl+Enter: accept (remove "proposed" word link)
     if (e.key === 'Enter' && e.ctrlKey && !e.shiftKey && !e.altKey) {
       e.preventDefault();
+      if (!isTextCol) return;
       ctx.pushHistory();
-      const target = isTextCol
-        ? state.texts.find((t) => t.id === item.id)
-        : state.words.find((w) => w.id === item.id);
-      if (target) {
-        target.status = 'accepted';
-        if (target.type === 'issue') target.type = 'knowledge';
-        delete target.proposedAt;
-        delete target.proposedBy;
+      const text = state.texts.find((t) => t.id === item.id);
+      if (text) {
+        const proposedWord = state.words.find((w) => w.text === 'proposed');
+        if (proposedWord) text.wordIds = text.wordIds.filter((id) => id !== proposedWord.id);
         ctx.scheduleSave();
         ctx.render();
       }
       return;
     }
 
-    // Ctrl+?: toggle issue type
+    // Ctrl+?: toggle "issue" word link
     if (e.key === '?' && e.ctrlKey) {
       e.preventDefault();
+      if (!isTextCol) return;
       ctx.pushHistory();
-      const target = isTextCol
-        ? state.texts.find((t) => t.id === item.id)
-        : state.words.find((w) => w.id === item.id);
-      if (target) {
-        target.type = target.type === 'issue' ? 'knowledge' : 'issue';
+      const text = state.texts.find((t) => t.id === item.id);
+      if (text) {
+        let issueWord = state.words.find((w) => w.text === 'issue');
+        if (!issueWord) { issueWord = { id: randomId(), text: 'issue' }; state.words.push(issueWord); }
+        if (text.wordIds.includes(issueWord.id)) {
+          text.wordIds = text.wordIds.filter((id) => id !== issueWord!.id);
+        } else {
+          text.wordIds.push(issueWord.id);
+        }
         ctx.scheduleSave();
         ctx.render();
       }
@@ -258,17 +260,13 @@ export const createKeydownHandler = (
     if (e.key === 'ArrowUp' && e.ctrlKey && e.shiftKey) {
       e.preventDefault();
       ctx.pushHistory();
-      if (!isTextCol && contextTextId) {
-        const text = findText(state.texts, contextTextId);
-        if (text) {
-          const idx = text.wordIds.indexOf(item.id);
-          if (idx > 0) {
-            [text.wordIds[idx - 1], text.wordIds[idx]] = [text.wordIds[idx], text.wordIds[idx - 1]];
-            state.pendingFocusId = item.id;
-            state.pendingFocusColumn = colIndex;
-            ctx.scheduleSave();
-            ctx.render();
-          }
+      if (!isTextCol) {
+        const idx = state.words.findIndex((w) => w.id === item.id);
+        if (idx > 0) {
+          [state.words[idx - 1], state.words[idx]] = [state.words[idx], state.words[idx - 1]];
+          ctx.scheduleSave();
+          ctx.render();
+          requestAnimationFrame(() => input.focus({ preventScroll: true }));
         }
       } else {
         const idx = state.texts.findIndex((t) => t.id === item.id);
@@ -287,17 +285,13 @@ export const createKeydownHandler = (
     if (e.key === 'ArrowDown' && e.ctrlKey && e.shiftKey) {
       e.preventDefault();
       ctx.pushHistory();
-      if (!isTextCol && contextTextId) {
-        const text = findText(state.texts, contextTextId);
-        if (text) {
-          const idx = text.wordIds.indexOf(item.id);
-          if (idx < text.wordIds.length - 1) {
-            [text.wordIds[idx], text.wordIds[idx + 1]] = [text.wordIds[idx + 1], text.wordIds[idx]];
-            state.pendingFocusId = item.id;
-            state.pendingFocusColumn = colIndex;
-            ctx.scheduleSave();
-            ctx.render();
-          }
+      if (!isTextCol) {
+        const idx = state.words.findIndex((w) => w.id === item.id);
+        if (idx < state.words.length - 1) {
+          [state.words[idx], state.words[idx + 1]] = [state.words[idx + 1], state.words[idx]];
+          ctx.scheduleSave();
+          ctx.render();
+          requestAnimationFrame(() => input.focus({ preventScroll: true }));
         }
       } else {
         const idx = state.texts.findIndex((t) => t.id === item.id);

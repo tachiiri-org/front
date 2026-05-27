@@ -5,20 +5,13 @@ import type { SchemaField } from './form/field';
 export type GraphWord = {
   id: string;
   text: string;
-  status?: 'accepted' | 'proposed';
-  type?: 'knowledge' | 'issue' | 'task';
-  proposedAt?: string;
-  proposedBy?: string;
+  color?: string;
 };
 
 export type GraphText = {
   id: string;
   text: string;
   wordIds: string[];
-  status?: 'accepted' | 'proposed';
-  type?: 'knowledge' | 'issue' | 'task';
-  proposedAt?: string;
-  proposedBy?: string;
 };
 
 export type WordGraphComponent = {
