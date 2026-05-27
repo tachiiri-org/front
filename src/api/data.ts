@@ -1,6 +1,7 @@
 import type { SpecDocument } from '../shared/spec-document';
 import type { UiShellSettings } from '../shared/ui-shell-settings';
 import { readGitHubSession } from '../identify';
+import type { AuthorizeEnv } from '../auth';
 
 type StoredObject = {
   text(): Promise<string>;
@@ -108,13 +109,7 @@ export async function handleApiRequest(request: Request, env: ApiEnv): Promise<R
 
 export async function handleGitHubAuthStatus(
   request: Request,
-  env: {
-    readonly IDENTIFY?: {
-      fetch(request: Request): Promise<Response>;
-    };
-    readonly IDENTIFY_ORIGIN?: string;
-    readonly FRONT_TO_IDENTIFY_TOKEN?: string | { get(): Promise<string> };
-  },
+  env: AuthorizeEnv,
 ): Promise<Response | null> {
   if (new URL(request.url).pathname !== '/api/auth/github/status') {
     return null;

@@ -1,4 +1,4 @@
-import { beforeAll, expect, it, vi } from "vitest";
+import { beforeAll, beforeEach, expect, it, vi } from "vitest";
 import { webcrypto } from "node:crypto";
 
 import worker from "../src/worker";
@@ -8,6 +8,17 @@ beforeAll(() => {
     value: webcrypto,
     configurable: true,
   });
+});
+
+let privateKeyJwk: string;
+
+beforeEach(async () => {
+  const keyPair = (await crypto.subtle.generateKey(
+    { name: "ECDSA", namedCurve: "P-256" },
+    true,
+    ["sign", "verify"],
+  )) as CryptoKeyPair;
+  privateKeyJwk = JSON.stringify(await crypto.subtle.exportKey("jwk", keyPair.privateKey));
 });
 
 it("starts GitHub OAuth from the public front route", async () => {
@@ -30,12 +41,13 @@ it("starts GitHub OAuth from the public front route", async () => {
   expect(response.headers.get("Set-Cookie")).toContain("github_explorer_oauth_state=");
 });
 
-it("exchanges the GitHub OAuth callback through identify", async () => {
-  const identifyFetch = vi.fn(async (request: Request) => {
-    expect(request.url).toBe("https://identify.internal/internal/github/oauth/callback");
+it("exchanges the GitHub OAuth callback through backend", async () => {
+  const backendFetch = vi.fn(async (request: Request) => {
+    expect(request.url).toBe("https://backend.local/api/v1/identify/session/github/oauth/callback");
     expect(request.method).toBe("POST");
-    expect(request.headers.get("x-front-to-identify-token")).toBe("front-token");
-    await expect(request.json()).resolves.toEqual({ code: "abc" });
+    const body = (await request.json()) as { code: string; redirectUri: string };
+    expect(body.code).toBe("abc");
+    expect(body.redirectUri).toBe("https://front.example.com/oauth/github/callback");
     return new Response(null, { status: 204 });
   });
 
@@ -50,8 +62,9 @@ it("exchanges the GitHub OAuth callback through identify", async () => {
         fetch: async () => new Response("not used"),
       },
       FRONTEND_ORIGIN: "https://front.example.com",
-      FRONT_TO_IDENTIFY_TOKEN: "front-token",
-      IDENTIFY: { fetch: identifyFetch },
+      FRONT_TO_BACKEND_TOKEN: "backend-token",
+      INTERNAL_AUTH_SIGNING_KEY: privateKeyJwk,
+      BACKEND: { fetch: backendFetch },
     } as never,
   );
 
@@ -59,15 +72,13 @@ it("exchanges the GitHub OAuth callback through identify", async () => {
   expect(response.headers.get("Location")).toBe(
     "https://front.example.com/?tab=openapi-explorer",
   );
-  expect(response.headers.get("Set-Cookie")).toContain("github_explorer_oauth_state=");
-  expect(identifyFetch).toHaveBeenCalledOnce();
+  expect(backendFetch).toHaveBeenCalledOnce();
 });
 
 it("accepts the legacy GitHub OAuth callback path", async () => {
-  const identifyFetch = vi.fn(async (request: Request) => {
-    expect(request.url).toBe("https://identify.internal/internal/github/oauth/callback");
+  const backendFetch = vi.fn(async (request: Request) => {
+    expect(request.url).toBe("https://backend.local/api/v1/identify/session/github/oauth/callback");
     expect(request.method).toBe("POST");
-    await expect(request.json()).resolves.toEqual({ code: "abc" });
     return new Response(null, { status: 204 });
   });
 
@@ -82,8 +93,9 @@ it("accepts the legacy GitHub OAuth callback path", async () => {
         fetch: async () => new Response("not used"),
       },
       FRONTEND_ORIGIN: "https://front.example.com",
-      FRONT_TO_IDENTIFY_TOKEN: "front-token",
-      IDENTIFY: { fetch: identifyFetch },
+      FRONT_TO_BACKEND_TOKEN: "backend-token",
+      INTERNAL_AUTH_SIGNING_KEY: privateKeyJwk,
+      BACKEND: { fetch: backendFetch },
     } as never,
   );
 
@@ -91,5 +103,5 @@ it("accepts the legacy GitHub OAuth callback path", async () => {
   expect(response.headers.get("Location")).toBe(
     "https://front.example.com/?tab=openapi-explorer",
   );
-  expect(identifyFetch).toHaveBeenCalledOnce();
+  expect(backendFetch).toHaveBeenCalledOnce();
 });
