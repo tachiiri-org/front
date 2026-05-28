@@ -82,7 +82,20 @@ export const createKeydownHandler = (
     if (e.key === 'Backspace' && e.ctrlKey && e.shiftKey) {
       e.preventDefault();
       ctx.pushHistory();
-      const colIds = getColumnItemIds(state.texts, state.words, state.path, colIndex);
+      // For col2+ text columns, getColumnItemIds(path, 2) uses path[1] as word ID.
+      // In the special case (path = [wordId, ...]), path[1] may be a text ID or
+      // undefined, giving wrong results. Use the driving word directly instead.
+      let colIds: string[];
+      if (colIndex >= 2) {
+        const drivingWordId = findText(state.texts, state.path[0])
+          ? state.path[1]   // normal: path = [text, word, ...]
+          : state.path[0];  // special: path = [word, ...]
+        colIds = drivingWordId
+          ? state.texts.filter(t => t.wordIds.includes(drivingWordId)).map(t => t.id)
+          : [];
+      } else {
+        colIds = getColumnItemIds(state.texts, state.words, state.path, colIndex);
+      }
       const idx = colIds.indexOf(item.id);
       const prevId = idx > 0 ? colIds[idx - 1] : (colIds.length > 1 ? colIds[1] : null);
 
@@ -99,12 +112,9 @@ export const createKeydownHandler = (
         const pathIdx = state.path.indexOf(item.id);
         if (pathIdx >= 0) state.path = state.path.slice(0, pathIdx);
       } else {
-        // Text column > 0: unlink context word from this text
-        const contextWordId = state.path[colIndex - 1];
-        const text = findText(state.texts, item.id);
-        if (text && contextWordId) {
-          text.wordIds = text.wordIds.filter((id) => id !== contextWordId);
-        }
+        // Text column > 0: delete text entirely (same as col0)
+        state.texts = state.texts.filter((t) => t.id !== item.id);
+        if (state.path[colIndex] === item.id) state.path = state.path.slice(0, colIndex);
       }
 
       state.focusedId = prevId;

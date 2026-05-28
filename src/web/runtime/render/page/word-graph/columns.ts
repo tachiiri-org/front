@@ -139,9 +139,15 @@ const buildColumn = (
   const withAlpha = (color: string, alpha: number): string =>
     color.replace(/,\s*[\d.]+\)$/, `, ${alpha})`);
 
+  // For the word column (col1): determine context text for dimming unrelated words
+  const contextText = !isTextCol && contextTextId
+    ? findText(ctx.state.texts, contextTextId)
+    : null;
+
   // Item rows
   for (const item of items) {
-    const isInPath = state.path[colIndex] === item.id;
+    const isInPath = state.path[colIndex] === item.id ||
+      (state.focusedId === item.id && state.focusedColumn === colIndex);
     const wordIds = 'wordIds' in item ? (item as GraphText).wordIds : [];
     const accentColor = isTextCol
       ? (wordIds.map((id) => state.words.find((w) => w.id === id)?.color).find(Boolean) ?? null)
@@ -155,6 +161,10 @@ const buildColumn = (
     row.style.gap = '4px';
     row.style.padding = '1px 8px 1px 12px';
     row.style.background = isInPath ? theme.selectSubtle : 'transparent';
+    // Dim words not linked to the context text (col0 selection)
+    if (contextText && !isTextCol) {
+      row.style.opacity = contextText.wordIds.includes(item.id) ? '1' : '0.35';
+    }
 
     const cacheKey = `${colIndex}:${item.id}`;
     let inp = state.inputCache.get(cacheKey);
@@ -223,24 +233,26 @@ export const buildColumns = (ctx: WordGraphContext): HTMLElement => {
   // Column 0: all texts
   wrapper.appendChild(buildColumn(state.texts, 0, null, ctx));
 
-  // Column 1: words - always visible at 15vw
-  // path[0] is a text ID when a text is selected; otherwise show all words
+  // Column 1: words - always show all words regardless of text selection
+  // col1TextId is used only as context for creating new words (links them to the selected text)
   const col1TextId = state.path.length >= 1 && findText(state.texts, state.path[0])
     ? state.path[0]
     : null;
-  const col1Items = col1TextId
-    ? getColumnItems(state.texts, state.words, state.path, 1)
-    : [...state.words];
+  const col1Items = [...state.words];
   wrapper.appendChild(buildColumn(col1Items, 1, col1TextId, ctx));
 
   // Additional columns driven by path (skip i=0 since col 1 is always rendered above)
   // Cap at colIndex=2 (3rd column) — no 4th column shown
-  for (let i = 1; i < state.path.length && i <= 1; i++) {
-    const colIndex = i + 1;
-    const isTextCol = isTextColumn(colIndex);
-    const ctxTextId = !isTextCol ? state.path[i] : null;
-    const items = getColumnItems(state.texts, state.words, state.path, colIndex);
-    wrapper.appendChild(buildColumn(items, colIndex, ctxTextId, ctx));
+  // Guard: only run when col1TextId exists (path[0] is a text), to avoid wrong col2
+  // when path starts with a word id (special case handled below)
+  if (col1TextId) {
+    for (let i = 1; i < state.path.length && i <= 1; i++) {
+      const colIndex = i + 1;
+      const isTextCol = isTextColumn(colIndex);
+      const ctxTextId = !isTextCol ? state.path[i] : null;
+      const items = getColumnItems(state.texts, state.words, state.path, colIndex);
+      wrapper.appendChild(buildColumn(items, colIndex, ctxTextId, ctx));
+    }
   }
 
   // Special case: path[0] is a word (clicked from all-words view, no text context)
