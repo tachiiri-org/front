@@ -12,6 +12,7 @@ type GraphText = {
   id: string;
   text: string;
   wordIds: string[];
+  heartbeat?: string;
 };
 
 type WordGraph = {
@@ -30,7 +31,12 @@ function migrateGraph(raw: Record<string, unknown>): WordGraph {
     const wordIds: string[] = Array.isArray(t.wordIds)
       ? (t.wordIds as unknown[]).filter((id): id is string => typeof id === 'string')
       : [];
-    return { id: String(t.id), text: String(t.text), wordIds };
+    return {
+      id: String(t.id),
+      text: String(t.text),
+      wordIds,
+      ...(typeof t.heartbeat === 'string' ? { heartbeat: t.heartbeat } : {}),
+    };
   });
 
   return { words, texts };
@@ -135,6 +141,10 @@ export const GRAPH_TOOLS = [
           items: { type: "string" },
           description: "Word names to link to this text. 'draft' is added automatically. Include 'issue' for contradictions, 'goal' for ideal/current divergence.",
         },
+        heartbeat: {
+          type: "string",
+          description: "ISO 8601 timestamp. Set by the watcher process to indicate the runner is alive. Omit to clear.",
+        },
       },
       required: ["graph_id", "text", "words"],
     },
@@ -164,7 +174,10 @@ export async function callGraphTool(
       const wordText = String(args.word);
       const word = graph.words.find((w) => w.text === wordText);
       if (!word) return { content: [{ type: "text", text: `Word not found: ${wordText}` }], isError: true };
-      const texts = graph.texts.filter((t) => t.wordIds.includes(word.id)).map((t) => t.text).filter(Boolean);
+      const texts = graph.texts
+        .filter((t) => t.wordIds.includes(word.id))
+        .map((t) => t.heartbeat ? `${t.text} [heartbeat: ${t.heartbeat}]` : t.text)
+        .filter(Boolean);
       return { content: [{ type: "text", text: texts.join("\n") || "(no texts linked)" }] };
     }
 
@@ -194,11 +207,18 @@ export async function callGraphTool(
         wordIds.push(word.id);
       }
 
+      const heartbeat = typeof args.heartbeat === 'string' ? args.heartbeat : undefined;
+
       const entry = graph.texts.find((t) => t.text === textContent);
       if (entry) {
         entry.wordIds = wordIds;
+        if (heartbeat !== undefined) {
+          entry.heartbeat = heartbeat;
+        } else {
+          delete entry.heartbeat;
+        }
       } else {
-        graph.texts.unshift({ id: crypto.randomUUID(), text: textContent, wordIds });
+        graph.texts.push({ id: crypto.randomUUID(), text: textContent, wordIds, ...(heartbeat ? { heartbeat } : {}) });
       }
 
       await writeWordGraph(env, graphId, graph);
