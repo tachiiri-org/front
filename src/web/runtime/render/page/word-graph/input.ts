@@ -44,7 +44,18 @@ export const createInput = (
         const newPath = [...state.path.slice(0, colIndex), item.id];
         const pathChanged = JSON.stringify(newPath) !== JSON.stringify(state.path);
         state.path = newPath;
-        if (pathChanged) ctx.scheduleRender();
+        if (pathChanged) {
+          if (colIndex === 1) {
+            // Col1 (words): use synchronous render so focusPending() restores the
+            // text cursor in the same call stack. scheduleRender (rAF) rebuilds the
+            // DOM asynchronously after the focus event ends, removing the focused
+            // element mid-event and requiring a double-click to start editing —
+            // the same issue noted for col2 above.
+            ctx.render();
+          } else {
+            ctx.scheduleRender();
+          }
+        }
       } else {
         // Col2 (last column): update visuals directly without DOM rebuild.
         // scheduleRender causes outer.replaceChildren() which removes the focused
