@@ -256,15 +256,18 @@ export const renderWordGraphTextCol = (
     const fid = state.pendingFocusId;
     const fcol = state.pendingFocusColumn;
     const cursorPos = state.pendingFocusCursorPos;
+    // Search only within this column's own container so that a sibling column's
+    // focusPending call does not consume the pending focus for a different column
+    // (which would focus a stale DOM element that gets removed when the target
+    // column re-renders, causing the cursor to vanish).
+    const selector = fcol !== null
+      ? `[data-node-id="${CSS.escape(fid)}"][data-column-index="${fcol}"]`
+      : `[data-node-id="${CSS.escape(fid)}"]`;
+    const el = outer.querySelector<HTMLTextAreaElement>(selector);
+    if (!el) return;
     state.pendingFocusId = null;
     state.pendingFocusColumn = null;
     state.pendingFocusCursorPos = null;
-    const graphId = component.graphId;
-    const selector = fcol !== null
-      ? `[data-graph-id="${CSS.escape(graphId)}"] [data-node-id="${CSS.escape(fid)}"][data-column-index="${fcol}"]`
-      : `[data-graph-id="${CSS.escape(graphId)}"] [data-node-id="${CSS.escape(fid)}"]`;
-    const el = document.querySelector<HTMLTextAreaElement>(selector);
-    if (!el) return;
     el.focus({ preventScroll: true });
     if (cursorPos !== null) {
       el.selectionStart = cursorPos;
