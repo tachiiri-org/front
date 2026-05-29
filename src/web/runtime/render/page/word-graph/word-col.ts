@@ -491,7 +491,11 @@ export const renderWordGraphWordCol = (
       ? state.path[0]
       : null;
 
-    const contextTextId = col1TextId;
+    // When a related text (col2) is selected, highlight its words rather than col0's.
+    const col3TextId = state.path[2] && findText(state.texts, state.path[2])
+      ? state.path[2]
+      : null;
+    const contextTextId = col3TextId ?? col1TextId;
     const linkedIds = contextTextId
       ? new Set(findText(state.texts, contextTextId)?.wordIds ?? [])
       : null;

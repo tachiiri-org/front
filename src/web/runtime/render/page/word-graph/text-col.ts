@@ -133,7 +133,10 @@ const buildTextColContent = (
 
   // Item rows
   for (const item of items) {
-    const isInPath = state.path[colIndex] === item.id;
+    // Highlight if selected in this column's path slot, or if col0 and the same
+    // text is selected in the related-texts column (col2 path slot).
+    const isInPath = state.path[colIndex] === item.id ||
+      (colIndex === 0 && state.path[2] === item.id);
     const textColor = item.wordIds.map((id) => wordColorById.get(id)).find(Boolean) ?? null;
 
     const row = document.createElement('div');

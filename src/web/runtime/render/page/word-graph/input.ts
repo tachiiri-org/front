@@ -2,7 +2,6 @@ import type { GraphText, GraphWord } from '../../../../schema/component/kind/wor
 import type { WordGraphContext } from './types';
 import { randomId, findText, findWord, isTextColumn } from './ops';
 import { createKeydownHandler } from './keyboard';
-import { theme } from '../theme';
 
 export const createInput = (
   item: GraphText | GraphWord,
@@ -37,50 +36,19 @@ export const createInput = (
     if (state.focusedId !== item.id || state.focusedColumn !== colIndex) {
       state.focusedId = item.id;
       state.focusedColumn = colIndex;
-      if (colIndex < 2) {
-        state.pendingFocusId = item.id;
-        state.pendingFocusColumn = colIndex;
-        // Col0/Col1: extend path and re-render only when path changes
-        const newPath = [...state.path.slice(0, colIndex), item.id];
-        const pathChanged = JSON.stringify(newPath) !== JSON.stringify(state.path);
-        state.path = newPath;
-        if (pathChanged) {
-          if (colIndex === 1) {
-            // Col1 (words): use synchronous render so focusPending() restores the
-            // text cursor in the same call stack. scheduleRender (rAF) rebuilds the
-            // DOM asynchronously after the focus event ends, removing the focused
-            // element mid-event and requiring a double-click to start editing —
-            // the same issue noted for col2 above.
-            ctx.render();
-          } else {
-            ctx.scheduleRender();
-          }
-        }
-      } else {
-        // Col2 (last column): update visuals directly without DOM rebuild.
-        // scheduleRender causes outer.replaceChildren() which removes the focused
-        // element mid-event, requiring a double-click to re-focus.
-
-        // 1. Un-highlight all col3 item rows via their textarea's data-column-index
-        ctx.outer.querySelectorAll<HTMLTextAreaElement>(
-          `[data-nav-input="node"][data-column-index="${colIndex}"]`,
-        ).forEach(inp => {
-          const row = inp.closest<HTMLElement>('[data-node-row]');
-          if (row) row.style.background = 'transparent';
-        });
-        // 2. Highlight the clicked row
-        const curRow = input.closest<HTMLElement>('[data-node-row]');
-        if (curRow) curRow.style.background = theme.selectSubtle;
-
-        // 3. Dim col2 words not linked to this col3 text
-        const text = isTextColumn(colIndex) ? findText(state.texts, item.id) : undefined;
-        const wordIds = new Set(text?.wordIds ?? []);
-        const col1Div = ctx.outer.querySelector<HTMLElement>('[data-col-index="1"]');
-        if (col1Div) {
-          col1Div.querySelectorAll<HTMLElement>('[data-node-row]').forEach(row => {
-            const wid = row.dataset.nodeRow;
-            row.style.opacity = (!wid || wordIds.has(wid)) ? '1' : '0.35';
-          });
+      // Update path and re-render all columns when path changes.
+      // pendingFocusId restores focus after DOM is rebuilt by scheduleRender.
+      // Col1 (words) uses synchronous render so the text cursor appears on first click.
+      state.pendingFocusId = item.id;
+      state.pendingFocusColumn = colIndex;
+      const newPath = [...state.path.slice(0, colIndex), item.id];
+      const pathChanged = JSON.stringify(newPath) !== JSON.stringify(state.path);
+      state.path = newPath;
+      if (pathChanged) {
+        if (colIndex === 1) {
+          ctx.render();
+        } else {
+          ctx.scheduleRender();
         }
       }
     }
