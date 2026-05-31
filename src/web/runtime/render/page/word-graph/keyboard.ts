@@ -52,6 +52,18 @@ export const createKeydownHandler = (
       if (text) {
         const draftWord = state.words.find((w) => w.text === 'draft');
         if (draftWord) text.wordIds = text.wordIds.filter((id) => id !== draftWord.id);
+        // Move focus to next item in column, or stay on current if last
+        const colIds = (colIndex === 0
+          ? state.texts
+          : state.texts.filter((t) => {
+              const wordId = state.path[colIndex - 1] ?? null;
+              return wordId ? t.wordIds.includes(wordId) : false;
+            })
+        ).map((t) => t.id);
+        const idx = colIds.indexOf(item.id);
+        const nextId = idx < colIds.length - 1 ? colIds[idx + 1] : (idx > 0 ? colIds[idx - 1] : item.id);
+        state.pendingFocusId = nextId;
+        state.pendingFocusColumn = colIndex;
         ctx.scheduleSave();
         ctx.render();
       }
@@ -87,9 +99,9 @@ export const createKeydownHandler = (
       // undefined, giving wrong results. Use the driving word directly instead.
       let colIds: string[];
       if (colIndex >= 2) {
-        const drivingWordId = findText(state.texts, state.path[0])
-          ? state.path[1]   // normal: path = [text, word, ...]
-          : state.path[0];  // special: path = [word, ...]
+        // path[1] is always the word slot (col1 selection).
+        // path[0] is either a text ID (normal view) or empty-string / undefined.
+        const drivingWordId = state.path[1] ?? null;
         colIds = drivingWordId
           ? state.texts.filter(t => t.wordIds.includes(drivingWordId)).map(t => t.id)
           : [];

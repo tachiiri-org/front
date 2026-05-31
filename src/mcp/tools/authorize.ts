@@ -1,5 +1,12 @@
 import { authorizeFetch, type AuthorizeEnv } from "../../auth";
-import { buildGitHubOAuthStartUrl, readGitHubSession } from "../../identify";
+import {
+  buildGitHubLoginUrl,
+  buildGitHubConnectUrl,
+  buildGoogleLoginUrl,
+  readGitHubSession,
+  readGitHubConnectSession,
+  readGoogleSession,
+} from "../../identify";
 
 type Tool = {
   name: string;
@@ -13,12 +20,30 @@ export const TOOLS: Tool[] = [
   {
     name: "authorize_github_login",
     description:
-      "Generate the public front GitHub OAuth URL. Open the URL in a browser to authenticate — identify stores the session and subsequent authorize_github calls read it from identify.",
+      "Generate the public front GitHub login URL (scope: read:user — identity only). Open the URL in a browser to authenticate with GitHub identity.",
+    inputSchema: {
+      type: "object",
+      properties: {},
+    },
+  },
+  {
+    name: "authorize_github_connect",
+    description:
+      "Generate the public front GitHub connect URL for resource access. Open the URL in a browser to authorize GitHub resource access (repo etc.).",
     inputSchema: {
       type: "object",
       properties: {
         scope: { type: "string", description: "GitHub OAuth scopes space-separated (default: 'repo read:user')" },
       },
+    },
+  },
+  {
+    name: "authorize_google_login",
+    description:
+      "Generate the public front Google login URL (scope: openid email profile). Open the URL in a browser to authenticate with Google identity.",
+    inputSchema: {
+      type: "object",
+      properties: {},
     },
   },
   {
@@ -99,14 +124,46 @@ export async function callTool(
   env: AuthorizeEnv,
 ): Promise<ToolResult> {
   if (name === "authorize_github_login") {
-    const scope = String(args.scope ?? "repo read:user");
     try {
-      const url = buildGitHubOAuthStartUrl(env, scope);
+      const url = buildGitHubLoginUrl(env);
       return {
         content: [
           {
             type: "text",
-            text: `Open this URL in your browser to authenticate with GitHub:\n${url}`,
+            text: `Open this URL in your browser to authenticate with GitHub (identity only):\n${url}`,
+          },
+        ],
+      };
+    } catch (error) {
+      return { content: [{ type: "text", text: String(error) }], isError: true };
+    }
+  }
+
+  if (name === "authorize_github_connect") {
+    const scope = String(args.scope ?? "repo read:user");
+    try {
+      const url = buildGitHubConnectUrl(env, scope);
+      return {
+        content: [
+          {
+            type: "text",
+            text: `Open this URL in your browser to connect GitHub resource access:\n${url}`,
+          },
+        ],
+      };
+    } catch (error) {
+      return { content: [{ type: "text", text: String(error) }], isError: true };
+    }
+  }
+
+  if (name === "authorize_google_login") {
+    try {
+      const url = buildGoogleLoginUrl(env);
+      return {
+        content: [
+          {
+            type: "text",
+            text: `Open this URL in your browser to authenticate with Google:\n${url}`,
           },
         ],
       };
@@ -128,19 +185,25 @@ export async function callTool(
 
   const headers: Record<string, string> = {};
   if (name === "authorize_github") {
-    const session = await readGitHubSession(env);
-    if (!session) {
-      return {
-        content: [
-          {
-            type: "text",
-            text: "GitHub session not found. Run authorize_github_login first.",
-          },
-        ],
-        isError: true,
-      };
+    // Prefer connect session (resource access scopes), fall back to login session
+    const connectSession = await readGitHubConnectSession(env);
+    if (connectSession) {
+      headers["x-github-access-token"] = connectSession.accessToken;
+    } else {
+      const session = await readGitHubSession(env);
+      if (!session) {
+        return {
+          content: [
+            {
+              type: "text",
+              text: "GitHub session not found. Run authorize_github_login first, then authorize_github_connect for resource access.",
+            },
+          ],
+          isError: true,
+        };
+      }
+      headers["x-github-access-token"] = session.accessToken;
     }
-    headers["x-github-access-token"] = session.accessToken;
   }
 
   try {

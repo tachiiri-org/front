@@ -161,28 +161,56 @@ const loadEditor = async (screenId: string): Promise<void> => {
   await hydrateEditor(reloadEditor, screenId, rerender);
 };
 
+type AuthStatus = {
+  github: { authenticated: boolean; login: string | null };
+  google: { authenticated: boolean; email: string | null; name: string | null };
+};
+
 const renderAuthPage = async (): Promise<void> => {
-  const res = await fetch('/api/auth/github/status');
-  const status = (await res.json()) as { authenticated: boolean; login: string | null };
+  const res = await fetch('/api/auth/status');
+  const status = (await res.json()) as AuthStatus;
 
   root.replaceChildren();
   const wrap = document.createElement('div');
-  wrap.style.cssText = 'display:flex;align-items:center;justify-content:center;height:100vh;font-family:monospace;gap:1em;';
+  wrap.style.cssText = 'display:flex;flex-direction:column;align-items:center;justify-content:center;height:100vh;font-family:monospace;gap:1em;';
 
-  if (status.authenticated) {
+  if (status.github.authenticated) {
+    const row = document.createElement('div');
+    row.style.cssText = 'display:flex;align-items:center;gap:0.5em;';
     const label = document.createElement('span');
-    label.textContent = `@${status.login ?? 'unknown'}`;
+    label.textContent = `GitHub: @${status.github.login ?? 'unknown'}`;
     const btn = document.createElement('button');
     btn.textContent = 'Logout';
     btn.onclick = async () => {
-      await fetch('/api/auth/logout', { method: 'POST' });
+      await fetch('/api/auth/github/logout', { method: 'POST' });
       void renderAuthPage();
     };
-    wrap.append(label, btn);
+    row.append(label, btn);
+    wrap.appendChild(row);
   } else {
     const a = document.createElement('a');
     a.href = '/oauth/github/start';
     a.textContent = 'Login with GitHub';
+    wrap.appendChild(a);
+  }
+
+  if (status.google.authenticated) {
+    const row = document.createElement('div');
+    row.style.cssText = 'display:flex;align-items:center;gap:0.5em;';
+    const label = document.createElement('span');
+    label.textContent = `Google: ${status.google.email ?? status.google.name ?? 'unknown'}`;
+    const btn = document.createElement('button');
+    btn.textContent = 'Logout';
+    btn.onclick = async () => {
+      await fetch('/api/auth/google/logout', { method: 'POST' });
+      void renderAuthPage();
+    };
+    row.append(label, btn);
+    wrap.appendChild(row);
+  } else {
+    const a = document.createElement('a');
+    a.href = '/oauth/google/start';
+    a.textContent = 'Login with Google';
     wrap.appendChild(a);
   }
 

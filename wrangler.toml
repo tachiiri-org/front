@@ -21,20 +21,12 @@ bucket_name = "layouts-stage"
 
 [env.stage.vars]
 FRONTEND_ORIGIN = "https://front-stage.tachiiri.workers.dev"
+GITHUB_OAUTH_CLIENT_ID = "Ov23li098QXLtF5UbEg5"
+GOOGLE_OAUTH_CLIENT_ID = "804252639051-hdkilk1189bomeiv9opnsu0h2basdtr8.apps.googleusercontent.com"
 
 [[env.stage.services]]
 binding = "BACKEND"
 service = "backend-stage"
-
-[[env.stage.secrets_store_secrets]]
-binding = "FRONT_TO_BACKEND_TOKEN"
-store_id = "4637b8eeef4d4774a131ba3cf7011234"
-secret_name = "FRONT_TO_BACKEND_TOKEN_STAGE"
-
-[[env.stage.secrets_store_secrets]]
-binding = "INTERNAL_AUTH_SIGNING_KEY"
-store_id = "4637b8eeef4d4774a131ba3cf7011234"
-secret_name = "INTERNAL_AUTH_SIGNING_KEY_STAGE"
 
 [env.production]
 name = "front-production"
@@ -47,20 +39,11 @@ bucket_name = "layouts-prod"
 [env.production.vars]
 FRONTEND_ORIGIN = "https://front-production.tachiiri.workers.dev"
 GITHUB_OAUTH_CLIENT_ID = "Ov23li098QXLtF5UbEg5"
+GOOGLE_OAUTH_CLIENT_ID = "804252639051-hdkilk1189bomeiv9opnsu0h2basdtr8.apps.googleusercontent.com"
 
 [[env.production.services]]
 binding = "BACKEND"
 service = "backend-production"
-
-[[env.production.secrets_store_secrets]]
-binding = "FRONT_TO_BACKEND_TOKEN"
-store_id = "4637b8eeef4d4774a131ba3cf7011234"
-secret_name = "FRONT_TO_BACKEND_TOKEN_PROD"
-
-[[env.production.secrets_store_secrets]]
-binding = "INTERNAL_AUTH_SIGNING_KEY"
-store_id = "4637b8eeef4d4774a131ba3cf7011234"
-secret_name = "INTERNAL_AUTH_SIGNING_KEY_PROD"
 
 [env.dev]
 name = "front-dev"
@@ -71,6 +54,7 @@ FRONTEND_ORIGIN = "http://localhost:8787"
 BACKEND_ORIGIN = "https://backend-dev.tachiiri.workers.dev"
 FRONT_TO_BACKEND_TOKEN = "b109b22738647033f1ef4ad11426c8a8a05aae7c3ec3da9f88e0ad4dbd768781"
 GITHUB_OAUTH_CLIENT_ID = "Ov23litfbD8WRrXkM4iR"
+GOOGLE_OAUTH_CLIENT_ID = "804252639051-hdkilk1189bomeiv9opnsu0h2basdtr8.apps.googleusercontent.com"
 LAYOUTS_BUCKET_ID = "bucket-dev"
 
 [[env.dev.r2_buckets]]

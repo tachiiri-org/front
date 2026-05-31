@@ -41,7 +41,14 @@ export const createInput = (
       // Col1 (words) uses synchronous render so the text cursor appears on first click.
       state.pendingFocusId = item.id;
       state.pendingFocusColumn = colIndex;
-      const newPath = [...state.path.slice(0, colIndex), item.id];
+      // Pad with existing path values so that item.id lands at index colIndex.
+      // Without padding, state.path.slice(0, colIndex) may be shorter than colIndex
+      // (e.g. path = [wordId] and colIndex = 2) causing item.id to land at the wrong
+      // index, corrupting the word-slot (path[1]) and making col2 render empty.
+      const base = state.path.length >= colIndex
+        ? state.path.slice(0, colIndex)
+        : [...state.path, ...Array(colIndex - state.path.length).fill('')];
+      const newPath = [...base, item.id];
       const pathChanged = JSON.stringify(newPath) !== JSON.stringify(state.path);
       state.path = newPath;
       if (pathChanged) {

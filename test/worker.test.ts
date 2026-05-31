@@ -38,7 +38,7 @@ it("starts GitHub OAuth from the public front route", async () => {
   expect(location).toContain("https://github.com/login/oauth/authorize");
   expect(location).toContain("client_id=github-client-id");
   expect(location).toContain("redirect_uri=https%3A%2F%2Ffront.example.com%2Foauth%2Fgithub%2Fcallback");
-  expect(response.headers.get("Set-Cookie")).toContain("github_explorer_oauth_state=");
+  expect(response.headers.get("Set-Cookie")).toContain("github_login_oauth_state=");
 });
 
 it("exchanges the GitHub OAuth callback through backend", async () => {
@@ -54,7 +54,7 @@ it("exchanges the GitHub OAuth callback through backend", async () => {
   const response = await worker.fetch(
     new Request("https://front.example.com/oauth/github/callback?code=abc&state=xyz", {
       headers: {
-        Cookie: "github_explorer_oauth_state=xyz",
+        Cookie: "github_login_oauth_state=xyz",
       },
     }),
     {
@@ -85,7 +85,7 @@ it("accepts the legacy GitHub OAuth callback path", async () => {
   const response = await worker.fetch(
     new Request("https://front.example.com/github/oauth/callback?code=abc&state=xyz", {
       headers: {
-        Cookie: "github_explorer_oauth_state=xyz",
+        Cookie: "github_login_oauth_state=xyz",
       },
     }),
     {

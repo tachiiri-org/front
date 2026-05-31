@@ -1,6 +1,6 @@
 import type { SpecDocument } from '../shared/spec-document';
 import type { UiShellSettings } from '../shared/ui-shell-settings';
-import { readGitHubSession } from '../identify';
+import { readGitHubSession, readGitHubConnectSession, readGoogleSession } from '../identify';
 import type { AuthorizeEnv } from '../auth';
 
 type StoredObject = {
@@ -127,4 +127,42 @@ export async function handleGitHubAuthStatus(
   } catch {
     return json({ authenticated: false, login: null }, { status: 200 });
   }
+}
+
+export async function handleAuthStatus(
+  request: Request,
+  env: AuthorizeEnv,
+): Promise<Response | null> {
+  if (new URL(request.url).pathname !== '/api/auth/status') {
+    return null;
+  }
+
+  const [githubResult, githubConnectResult, googleResult] = await Promise.allSettled([
+    readGitHubSession(env),
+    readGitHubConnectSession(env),
+    readGoogleSession(env),
+  ]);
+
+  const githubSession = githubResult.status === 'fulfilled' ? githubResult.value : null;
+  const githubConnectSession = githubConnectResult.status === 'fulfilled' ? githubConnectResult.value : null;
+  const googleSession = googleResult.status === 'fulfilled' ? googleResult.value : null;
+
+  return json(
+    {
+      github: {
+        authenticated: Boolean(githubSession),
+        login: githubSession?.viewer.login ?? null,
+      },
+      githubConnect: {
+        authenticated: Boolean(githubConnectSession),
+        scopes: githubConnectSession?.scopes ?? null,
+      },
+      google: {
+        authenticated: Boolean(googleSession),
+        email: googleSession?.email ?? null,
+        name: googleSession?.name ?? null,
+      },
+    },
+    { status: 200 },
+  );
 }

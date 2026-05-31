@@ -15,6 +15,7 @@ export type AuthorizeEnv = {
   readonly INTERNAL_AUTH_TOKEN_ISSUER?: string;
   readonly FRONTEND_ORIGIN?: string;
   readonly GITHUB_OAUTH_CLIENT_ID?: string;
+  readonly GOOGLE_OAUTH_CLIENT_ID?: string;
 };
 
 export function hasAuthorizeConfig(env: AuthorizeEnv): boolean {

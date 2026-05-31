@@ -25,7 +25,7 @@ import {
   handleComponentSchemaGet,
   handleComponentSchemaPut,
 } from './component-schemas';
-import { type AuthorizeEnv } from '../../auth';
+import { authorizeFetch, type AuthorizeEnv } from '../../auth';
 
 type Env = {
   readonly ASSETS: {
@@ -363,6 +363,22 @@ export const handleApiRequest = async (request: Request, env: Env): Promise<Resp
     if (request.method === 'GET') return handleResourceGet(backend, 'word-graphs/', graphId);
     if (request.method === 'PUT') return handleResourcePut(request, backend, 'word-graphs/', graphId);
     return new Response('Method Not Allowed', { status: 405 });
+  }
+
+  // D1-backed graph API — proxy to backend /api/v1/graph/*
+  const graphApiMatch = url.pathname.match(/^\/api\/graph\/(.+)$/);
+  if (graphApiMatch) {
+    const suffix = graphApiMatch[1];
+    const backendPath = `/api/v1/graph/${suffix}${url.search}`;
+    const body = request.method !== 'GET' && request.method !== 'HEAD' ? await request.text() : undefined;
+    try {
+      const res = await authorizeFetch(env, { path: backendPath, method: request.method, body });
+      console.log(`[graph-proxy] ${request.method} ${backendPath} → ${res.status}`);
+      return res;
+    } catch (e) {
+      console.error(`[graph-proxy] ${request.method} ${backendPath} threw:`, e);
+      throw e;
+    }
   }
 
   const treesMatch = url.pathname.match(/^\/api\/trees\/(.+)$/);

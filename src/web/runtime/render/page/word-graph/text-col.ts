@@ -237,7 +237,7 @@ export const renderWordGraphTextCol = (
     if (state.saveTimer) clearTimeout(state.saveTimer);
     state.saveTimer = setTimeout(() => {
       state.saveTimer = null;
-      void fetch(`/api/word-graphs/${encodeURIComponent(component.graphId)}`, {
+      void fetch(`/api/graph/${encodeURIComponent(component.graphId)}`, {
         method: 'PUT',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ texts: state.texts, words: state.words }),
@@ -326,16 +326,16 @@ export const renderWordGraphTextCol = (
   // Load data once per graphId
   if (!shared.loaded) {
     shared.loaded = true;
-    void fetch(`/api/word-graphs/${encodeURIComponent(component.graphId)}`)
-      .then((res) => res.ok ? (res.json() as Promise<unknown>) : Promise.resolve({ texts: [], words: [] }))
-      .then((data) => {
-        const d = data as Record<string, unknown>;
-        const migrated = migrateGraphData({
-          texts: Array.isArray(d.texts) ? d.texts : [],
-          words: Array.isArray(d.words) ? d.words : [],
-        });
-        shared.texts = migrated.texts;
-        shared.words = migrated.words;
+    const base = `/api/graph/${encodeURIComponent(component.graphId)}`;
+    void Promise.all([
+      fetch(`${base}/words`).then((r) => r.ok ? r.json() as Promise<unknown> : { words: [] }),
+      fetch(`${base}/texts`).then((r) => r.ok ? r.json() as Promise<unknown> : { texts: [] }),
+    ])
+      .then(([wordsData, textsData]) => {
+        const wd = wordsData as Record<string, unknown>;
+        const td = textsData as Record<string, unknown>;
+        shared.words = Array.isArray(wd.words) ? (wd.words as typeof shared.words) : [];
+        shared.texts = Array.isArray(td.texts) ? (td.texts as typeof shared.texts) : [];
         notify();
       })
       .catch(() => notify());

@@ -51,7 +51,7 @@ export const renderWordGraph = (
     if (state.saveTimer) clearTimeout(state.saveTimer);
     state.saveTimer = setTimeout(() => {
       state.saveTimer = null;
-      void fetch(`/api/word-graphs/${encodeURIComponent(resolvedGraphId!)}`, {
+      void fetch(`/api/graph/${encodeURIComponent(resolvedGraphId!)}`, {
         method: 'PUT',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ texts: state.texts, words: state.words }),
@@ -128,15 +128,17 @@ export const renderWordGraph = (
 
   ctx = { id, outer, state, scheduleSave, pushHistory, render, scheduleRender };
 
-  if (component.source) {
-    void fetch(component.source.url)
-      .then((res) =>
-        res.ok ? (res.json() as Promise<unknown>) : Promise.resolve({ texts: [], words: [] }),
-      )
-      .then((data) => {
-        const d = data as Record<string, unknown>;
-        state.texts = Array.isArray(d.texts) ? (d.texts as typeof state.texts) : [];
-        state.words = Array.isArray(d.words) ? (d.words as typeof state.words) : [];
+  if (resolvedGraphId) {
+    const base = `/api/graph/${encodeURIComponent(resolvedGraphId)}`;
+    void Promise.all([
+      fetch(`${base}/words`).then((r) => r.ok ? r.json() as Promise<unknown> : { words: [] }),
+      fetch(`${base}/texts`).then((r) => r.ok ? r.json() as Promise<unknown> : { texts: [] }),
+    ])
+      .then(([wordsData, textsData]) => {
+        const wd = wordsData as Record<string, unknown>;
+        const td = textsData as Record<string, unknown>;
+        state.words = Array.isArray(wd.words) ? (wd.words as typeof state.words) : [];
+        state.texts = Array.isArray(td.texts) ? (td.texts as typeof state.texts) : [];
         render();
       })
       .catch(() => render());

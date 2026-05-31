@@ -1,9 +1,15 @@
-import { handleGitHubOAuthCallback, handleGitHubOAuthStart } from './auth/github';
+import {
+  handleGitHubOAuthCallback,
+  handleGitHubOAuthStart,
+  handleGitHubConnectStart,
+  handleGitHubConnectCallback,
+} from './auth/github';
+import { handleGoogleLoginStart, handleGoogleLoginCallback } from './auth/google';
 import type { AuthorizeEnv } from './auth';
-import { handleApiRequest as handleDataApiRequest, handleGitHubAuthStatus } from './api/data';
+import { handleApiRequest as handleDataApiRequest, handleGitHubAuthStatus, handleAuthStatus } from './api/data';
 import { handleApiRequest as handleLayoutApiRequest } from './web/api/layout';
 import { handleMcp } from './mcp/handler';
-import { logoutGitHub } from './identify';
+import { logoutGitHub, logoutGoogle } from './identify';
 
 type AssetsEnv = {
   readonly ASSETS: {
@@ -57,15 +63,44 @@ export default {
         return authStatusResponse;
       }
     }
+    if (pathname === '/api/auth/status') {
+      const authStatusResponse = await handleAuthStatus(request, env);
+      if (authStatusResponse) {
+        return authStatusResponse;
+      }
+    }
     if (pathname === '/api/auth/logout' && request.method === 'POST') {
       await logoutGitHub(env);
       return new Response(null, { status: 204 });
     }
+    if (pathname === '/api/auth/github/logout' && request.method === 'POST') {
+      await logoutGitHub(env);
+      return new Response(null, { status: 204 });
+    }
+    if (pathname === '/api/auth/google/logout' && request.method === 'POST') {
+      await logoutGoogle(env);
+      return new Response(null, { status: 204 });
+    }
+    // GitHub login (read:user scope — identity only)
     if (pathname === '/oauth/github/start' || pathname === '/github/oauth/start') {
       return handleGitHubOAuthStart({ request, env });
     }
     if (pathname === '/oauth/github/callback' || pathname === '/github/oauth/callback') {
       return handleGitHubOAuthCallback({ request, env });
+    }
+    // GitHub connect (resource access scopes)
+    if (pathname === '/oauth/github/connect/start') {
+      return handleGitHubConnectStart({ request, env });
+    }
+    if (pathname === '/oauth/github/connect/callback') {
+      return handleGitHubConnectCallback({ request, env });
+    }
+    // Google login (openid email profile)
+    if (pathname === '/oauth/google/start') {
+      return handleGoogleLoginStart({ request, env });
+    }
+    if (pathname === '/oauth/google/callback') {
+      return handleGoogleLoginCallback({ request, env });
     }
 
     if (pathname === '/mcp' || pathname.startsWith('/mcp/')) {

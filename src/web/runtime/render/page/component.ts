@@ -77,6 +77,7 @@ const renderResolved = (
     const el = document.createElement(c.tag as keyof HTMLElementTagNameMap);
     el.dataset.frameId = id;
     if (typeof c.text === 'string') el.textContent = c.text;
+    if (typeof c.href === 'string' && el instanceof HTMLAnchorElement) el.href = c.href;
     applyCssProps(el, c);
     return el;
   }

@@ -139,7 +139,7 @@ describe("authorize helpers", () => {
         FRONTEND_ORIGIN: "https://front-dev.tachiiri.workers.dev",
       }),
     ).toBe(
-      "https://front-dev.tachiiri.workers.dev/oauth/github/start?scope=repo+read%3Auser",
+      "https://front-dev.tachiiri.workers.dev/oauth/github/start?scope=read%3Auser",
     );
   });
 

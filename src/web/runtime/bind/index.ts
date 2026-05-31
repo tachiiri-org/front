@@ -431,6 +431,37 @@ const hydrateSelectTableBindings = async (
       });
     }
   }
+
+  // Fourth pass: element source.endpoint bindings
+  const endpointCache = new Map<string, unknown>();
+  for (const frame of store.screen.frames) {
+    const c = frame as Record<string, unknown>;
+    if (c.kind !== 'element') continue;
+    const source = c.source as Record<string, unknown> | undefined;
+    if (source?.kind !== 'endpoint' || typeof source.url !== 'string' || !source.url) continue;
+
+    const el = domMap.get(frame.id);
+    if (!(el instanceof HTMLElement)) continue;
+
+    try {
+      let payload = endpointCache.get(source.url);
+      if (payload === undefined) {
+        const res = await fetch(source.url);
+        if (res.ok) {
+          payload = (await res.json()) as unknown;
+          endpointCache.set(source.url, payload);
+        }
+      }
+      const valuePath = typeof source.valuePath === 'string' ? source.valuePath : undefined;
+      const fallback = typeof source.fallback === 'string' ? source.fallback : '';
+      const raw = getByPath(payload, valuePath);
+      el.textContent = raw !== null && raw !== undefined && raw !== false
+        ? String(raw)
+        : fallback;
+    } catch {
+      // ignore fetch errors
+    }
+  }
 };
 
 export const hydrateEditor = async (
