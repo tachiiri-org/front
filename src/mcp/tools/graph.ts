@@ -31,8 +31,13 @@ async function getWords(env: AuthorizeEnv, graphId: string): Promise<ApiWord[]> 
   return data.words;
 }
 
-async function getTexts(env: AuthorizeEnv, graphId: string, wordId?: string): Promise<ApiText[]> {
-  const resource = wordId ? `texts?word_id=${encodeURIComponent(wordId)}` : "texts";
+async function getTexts(env: AuthorizeEnv, graphId: string, wordId?: string, wordText?: string): Promise<ApiText[]> {
+  let resource = "texts";
+  if (wordText) {
+    resource = `texts?word=${encodeURIComponent(wordText)}`;
+  } else if (wordId) {
+    resource = `texts?word_id=${encodeURIComponent(wordId)}`;
+  }
   const res = await graphFetch(env, graphId, resource);
   if (!res.ok) throw new Error(`get_texts_failed:${res.status}`);
   const data = (await res.json()) as { texts: ApiText[] };
@@ -130,10 +135,7 @@ export async function callGraphTool(
 
     if (name === "graph_read_texts_by_word") {
       const wordText = String(args.word);
-      const words = await getWords(env, graphId);
-      const word = words.find((w) => w.text === wordText);
-      if (!word) return { content: [{ type: "text", text: `Word not found: ${wordText}` }], isError: true };
-      const texts = await getTexts(env, graphId, word.id);
+      const texts = await getTexts(env, graphId, undefined, wordText);
       return { content: [{ type: "text", text: texts.map((t) => t.text).filter(Boolean).join("\n") || "(no texts linked)" }] };
     }
 
