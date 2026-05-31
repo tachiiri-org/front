@@ -50,9 +50,7 @@ export const createKeydownHandler = (
       ctx.pushHistory();
       const text = state.texts.find((t) => t.id === item.id);
       if (text) {
-        const draftWord = state.words.find((w) => w.text === 'draft');
-        if (draftWord) text.wordIds = text.wordIds.filter((id) => id !== draftWord.id);
-        // Move focus to next item in column, or stay on current if last
+        // Compute colIds and idx BEFORE removing draft, so the current item is still in the list
         const colIds = (colIndex === 0
           ? state.texts
           : state.texts.filter((t) => {
@@ -62,6 +60,8 @@ export const createKeydownHandler = (
         ).map((t) => t.id);
         const idx = colIds.indexOf(item.id);
         const nextId = idx < colIds.length - 1 ? colIds[idx + 1] : (idx > 0 ? colIds[idx - 1] : item.id);
+        const draftWord = state.words.find((w) => w.text === 'draft');
+        if (draftWord) text.wordIds = text.wordIds.filter((id) => id !== draftWord.id);
         state.pendingFocusId = nextId;
         state.pendingFocusColumn = colIndex;
         ctx.scheduleSave();
