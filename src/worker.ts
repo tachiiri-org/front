@@ -93,6 +93,14 @@ export default {
       await logoutGoogle(env);
       return new Response(null, { status: 204 });
     }
+    if (pathname === '/oauth/github/logout' && request.method === 'GET') {
+      await logoutGitHub(env);
+      return new Response(null, { status: 302, headers: { Location: '/identify-viewer' } });
+    }
+    if (pathname === '/oauth/google/logout' && request.method === 'GET') {
+      await logoutGoogle(env);
+      return new Response(null, { status: 302, headers: { Location: '/identify-viewer' } });
+    }
     // GitHub login (read:user scope — identity only)
     if (pathname === '/oauth/github/start' || pathname === '/github/oauth/start') {
       return handleGitHubOAuthStart({ request, env });
