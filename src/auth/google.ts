@@ -1,4 +1,4 @@
-import { exchangeGoogleOAuthCode } from "../identify";
+import { exchangeGoogleOAuthCode, readGoogleSession, findOrCreateUserByGoogle } from "../identify";
 import { clearCookie, parseCookies, serializeCookie } from "./cookies";
 import type { AuthorizeEnv } from "./index";
 
@@ -84,13 +84,29 @@ export async function handleGoogleLoginCallback(context: RouteContext): Promise<
 
   const headers = new Headers();
   headers.append("Set-Cookie", clearCookie(LOGIN_STATE_COOKIE_NAME, context.request));
-  headers.set(
-    "Location",
-    `${resolveFrontendOrigin(context.request, context.env)}/identify-viewer`,
-  );
 
+  try {
+    const session = await readGoogleSession(context.env);
+    if (session) {
+      const userId = await findOrCreateUserByGoogle(context.env, session.sub, session.email);
+      headers.append(
+        "Set-Cookie",
+        serializeCookie(IDENTITY_USER_ID_COOKIE, userId, {
+          maxAge: 60 * 10,
+          path: "/",
+          secure: isSecureRequest(context.request),
+          httpOnly: true,
+        }),
+      );
+    }
+  } catch {
+    // identity lookup failure is non-fatal; org-select page will handle the missing state
+  }
+
+  headers.set("Location", `${resolveFrontendOrigin(context.request, context.env)}/org-select`);
   return new Response(null, { status: 302, headers });
 }
 
 const LOGIN_STATE_COOKIE_NAME = "google_login_oauth_state";
+const IDENTITY_USER_ID_COOKIE = "identity_user_id";
 const STATE_TTL_SECONDS = 60 * 10;

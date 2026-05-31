@@ -1,6 +1,7 @@
 import type { SpecDocument } from '../shared/spec-document';
 import type { UiShellSettings } from '../shared/ui-shell-settings';
-import { readGitHubSession, readGitHubConnectSession, readGoogleSession } from '../identify';
+import { readGitHubSession, readGitHubConnectSession, readGoogleSession, listUserOrganizations, createOrganization } from '../identify';
+import { parseCookies } from '../auth/cookies';
 import type { AuthorizeEnv } from '../auth';
 
 type StoredObject = {
@@ -165,4 +166,69 @@ export async function handleAuthStatus(
     },
     { status: 200 },
   );
+}
+
+export async function handleIdentityStatus(
+  request: Request,
+  env: AuthorizeEnv,
+): Promise<Response | null> {
+  if (new URL(request.url).pathname !== '/api/auth/identity-status') {
+    return null;
+  }
+
+  const cookies = parseCookies(request);
+  const userId = cookies.get('identity_user_id') ?? null;
+
+  if (!userId) {
+    return json({ user_id: null, organizations: [] }, { status: 200 });
+  }
+
+  try {
+    const organizations = await listUserOrganizations(env, userId);
+    return json({ user_id: userId, organizations }, { status: 200 });
+  } catch {
+    return json({ user_id: userId, organizations: [] }, { status: 200 });
+  }
+}
+
+export function handleSelectOrg(request: Request): Response | null {
+  const url = new URL(request.url);
+  if (url.pathname !== '/api/auth/select-org' || request.method !== 'GET') {
+    return null;
+  }
+
+  const orgId = url.searchParams.get('org_id');
+  if (!orgId) {
+    return json({ error: 'org_id_required' }, { status: 400 });
+  }
+
+  const isSecure = url.protocol === 'https:';
+  const cookieHeader = `identity_org_id=${encodeURIComponent(orgId)}; Path=/; Max-Age=${60 * 60 * 24}${isSecure ? '; Secure' : ''}; SameSite=Lax`;
+  return new Response(null, {
+    status: 302,
+    headers: { Location: '/', 'Set-Cookie': cookieHeader },
+  });
+}
+
+export async function handleOrgCreate(
+  request: Request,
+  env: AuthorizeEnv,
+): Promise<Response | null> {
+  if (new URL(request.url).pathname !== '/api/auth/organizations' || request.method !== 'POST') {
+    return null;
+  }
+
+  const cookies = parseCookies(request);
+  const userId = cookies.get('identity_user_id');
+  if (!userId) {
+    return json({ error: 'not_authenticated' }, { status: 401 });
+  }
+
+  const body = (await request.json()) as { name?: string };
+  if (!body.name) {
+    return json({ error: 'name_required' }, { status: 400 });
+  }
+
+  const org = await createOrganization(env, userId, body.name);
+  return json(org, { status: 201 });
 }

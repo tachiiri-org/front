@@ -26,6 +26,7 @@ import {
   handleComponentSchemaPut,
 } from './component-schemas';
 import { authorizeFetch, type AuthorizeEnv } from '../../auth';
+import { parseCookies } from '../../auth/cookies';
 
 type Env = {
   readonly ASSETS: {
@@ -371,8 +372,13 @@ export const handleApiRequest = async (request: Request, env: Env): Promise<Resp
     const suffix = graphApiMatch[1];
     const backendPath = `/api/v1/graph/${suffix}${url.search}`;
     const body = request.method !== 'GET' && request.method !== 'HEAD' ? await request.text() : undefined;
+    const cookies = parseCookies(request);
+    const tenantContext = {
+      tenantId: cookies.get('identity_org_id') ?? undefined,
+      subjectId: cookies.get('identity_user_id') ?? undefined,
+    };
     try {
-      const res = await authorizeFetch(env, { path: backendPath, method: request.method, body });
+      const res = await authorizeFetch(env, { path: backendPath, method: request.method, body, tenantContext });
       console.log(`[graph-proxy] ${request.method} ${backendPath} → ${res.status}`);
       return res;
     } catch (e) {

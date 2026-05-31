@@ -166,6 +166,11 @@ type AuthStatus = {
   google: { authenticated: boolean; email: string | null; name: string | null };
 };
 
+type IdentityStatus = {
+  user_id: string | null;
+  organizations: { id: string; name: string }[];
+};
+
 const renderAuthPage = async (): Promise<void> => {
   const res = await fetch('/api/auth/status');
   const status = (await res.json()) as AuthStatus;
@@ -217,7 +222,81 @@ const renderAuthPage = async (): Promise<void> => {
   root.appendChild(wrap);
 };
 
+const bindOrgSelectScreen = async (): Promise<void> => {
+  // Populate org-picker select from identity-status
+  const pickerEl = document.querySelector('[data-frame-id="org-picker"]');
+  const selectBtnEl = document.querySelector('[data-frame-id="org-select-btn"]');
+  const nameInputEl = document.querySelector('[data-frame-id="org-name"]');
+  const createBtnEl = document.querySelector('[data-frame-id="org-create-btn"]');
+
+  if (pickerEl instanceof HTMLSelectElement && selectBtnEl instanceof HTMLAnchorElement) {
+    const res = await fetch('/api/auth/identity-status');
+    const status = (await res.json()) as IdentityStatus;
+
+    pickerEl.replaceChildren();
+    if (!status.user_id) {
+      window.location.href = '/';
+      return;
+    }
+
+    const placeholder = document.createElement('option');
+    placeholder.value = '';
+    placeholder.textContent = status.organizations.length > 0 ? '組織を選択...' : '(組織がありません)';
+    pickerEl.appendChild(placeholder);
+
+    for (const org of status.organizations) {
+      const opt = document.createElement('option');
+      opt.value = org.id;
+      opt.textContent = org.name;
+      pickerEl.appendChild(opt);
+    }
+
+    const updateSelectBtn = (): void => {
+      const orgId = pickerEl.value;
+      if (orgId) {
+        selectBtnEl.href = `/api/auth/select-org?org_id=${encodeURIComponent(orgId)}`;
+        selectBtnEl.style.opacity = '1';
+        selectBtnEl.style.pointerEvents = '';
+      } else {
+        selectBtnEl.href = '';
+        selectBtnEl.style.opacity = '0.4';
+        selectBtnEl.style.pointerEvents = 'none';
+      }
+    };
+
+    updateSelectBtn();
+    pickerEl.addEventListener('change', updateSelectBtn);
+  }
+
+  if (nameInputEl instanceof HTMLInputElement && createBtnEl instanceof HTMLButtonElement) {
+    nameInputEl.placeholder = '組織名を入力';
+    createBtnEl.onclick = async (e) => {
+      e.preventDefault();
+      const name = nameInputEl.value.trim();
+      if (!name) return;
+      createBtnEl.disabled = true;
+      const r = await fetch('/api/auth/organizations', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ name }),
+      });
+      if (r.ok) {
+        const org = (await r.json()) as { id: string; name: string };
+        window.location.href = `/api/auth/select-org?org_id=${encodeURIComponent(org.id)}`;
+      } else {
+        createBtnEl.disabled = false;
+      }
+    };
+  }
+};
+
 const loadEditorBootstrap = async (): Promise<void> => {
+  if (window.location.pathname === '/org-select') {
+    await renderScreen('org-select');
+    await bindOrgSelectScreen();
+    return;
+  }
+
   const pathnameScreenId = getScreenIdFromPathname();
   const screenId = pathnameScreenId ?? await findEditorScreenId();
   if (!screenId) {

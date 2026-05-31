@@ -1,4 +1,4 @@
-import { exchangeGitHubOAuthCode, exchangeGitHubConnectCode } from "../identify";
+import { exchangeGitHubOAuthCode, exchangeGitHubConnectCode, readGitHubSession, findOrCreateUserByGitHub } from "../identify";
 import { clearCookie, parseCookies, serializeCookie } from "./cookies";
 import type { AuthorizeEnv } from "./index";
 
@@ -51,14 +51,14 @@ function buildGitHubAuthorizeUrl(request: Request, env: GitHubOAuthEnv, state: s
   return url.toString();
 }
 
-// GitHub login start (scope: read:user only — identity confirmation)
+// GitHub login start (scope: read:user user:email — identity + verified email)
 export function handleGitHubLoginStart(context: RouteContext): Response {
   if (!context.env.GITHUB_OAUTH_CLIENT_ID) {
     return new Response("Missing GITHUB_OAUTH_CLIENT_ID", { status: 503 });
   }
 
   const state = createRandomState();
-  const scope = "read:user";
+  const scope = "read:user user:email";
   const headers = new Headers();
   headers.set(
     "Set-Cookie",
@@ -93,11 +93,26 @@ export async function handleGitHubLoginCallback(context: RouteContext): Promise<
 
   const headers = new Headers();
   headers.append("Set-Cookie", clearCookie(LOGIN_STATE_COOKIE_NAME, context.request));
-  headers.set(
-    "Location",
-    `${resolveFrontendOrigin(context.request, context.env)}/identify-viewer`,
-  );
 
+  try {
+    const session = await readGitHubSession(context.env);
+    if (session) {
+      const userId = await findOrCreateUserByGitHub(context.env, session.viewer.login, session.accessToken);
+      headers.append(
+        "Set-Cookie",
+        serializeCookie(IDENTITY_USER_ID_COOKIE, userId, {
+          maxAge: 60 * 10,
+          path: "/",
+          secure: isSecureRequest(context.request),
+          httpOnly: true,
+        }),
+      );
+    }
+  } catch {
+    // identity lookup failure is non-fatal; org-select page will handle the missing state
+  }
+
+  headers.set("Location", `${resolveFrontendOrigin(context.request, context.env)}/org-select`);
   return new Response(null, { status: 302, headers });
 }
 
@@ -163,6 +178,7 @@ export async function handleGitHubOAuthCallback(context: RouteContext): Promise<
 
 const LOGIN_STATE_COOKIE_NAME = "github_login_oauth_state";
 const CONNECT_STATE_COOKIE_NAME = "github_connect_oauth_state";
+const IDENTITY_USER_ID_COOKIE = "identity_user_id";
 /** @deprecated Use LOGIN_STATE_COOKIE_NAME or CONNECT_STATE_COOKIE_NAME */
 const STATE_COOKIE_NAME = LOGIN_STATE_COOKIE_NAME;
 const STATE_TTL_SECONDS = 60 * 10;

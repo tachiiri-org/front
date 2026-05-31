@@ -49,7 +49,7 @@ async function resolveSecret(value: SecretValue | undefined): Promise<string | u
 
 export async function issueInternalToken(
   env: { INTERNAL_AUTH_SIGNING_KEY?: SecretValue; INTERNAL_AUTH_TOKEN_ISSUER?: string },
-  input: { audience: string },
+  input: { audience: string; tenantId?: string; subjectId?: string },
 ): Promise<string> {
   const signingKey = await resolveSecret(env.INTERNAL_AUTH_SIGNING_KEY);
   if (!signingKey) {
@@ -67,6 +67,8 @@ export async function issueInternalToken(
     exp: now + 300,
     iat: now,
     jti: crypto.randomUUID(),
+    ...(input.tenantId ? { tenant_id: input.tenantId } : {}),
+    ...(input.subjectId ? { subject_id: input.subjectId } : {}),
   };
 
   const header = { alg: "ES256", typ: "JWT" };

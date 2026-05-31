@@ -25,6 +25,7 @@ export async function authorizeFetch(
     body?: string;
     headers?: HeadersInit;
     audience?: string;
+    tenantContext?: { tenantId?: string; subjectId?: string };
   },
 ): Promise<Response> {
   const hasBackend = Boolean((env.BACKEND || env.BACKEND_ORIGIN) && env.FRONT_TO_BACKEND_TOKEN);
@@ -46,7 +47,11 @@ export async function authorizeFetch(
   headers.set("x-internal-token", internalToken);
   headers.set(
     "authorization",
-    `Bearer ${await issueInternalToken(env, { audience })}`,
+    `Bearer ${await issueInternalToken(env, {
+      audience,
+      tenantId: input.tenantContext?.tenantId,
+      subjectId: input.tenantContext?.subjectId,
+    })}`,
   );
 
   if (input.body && !headers.has("Content-Type")) {
