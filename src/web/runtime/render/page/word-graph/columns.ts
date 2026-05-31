@@ -1,6 +1,6 @@
 import type { GraphText, GraphWord } from '../../../../schema/component/kind/word-graph';
 import type { WordGraphContext } from './types';
-import { randomId, findText, findWord, isTextColumn, getColumnItems } from './ops';
+import { randomId, findText, findWord, isTextColumn } from './ops';
 import { createInput } from './input';
 import { theme } from '../theme';
 
@@ -230,35 +230,12 @@ export const buildColumns = (ctx: WordGraphContext): HTMLElement => {
   wrapper.style.overflowX = 'auto';
   wrapper.style.position = 'relative';
 
-  // Column 0: all texts
-  wrapper.appendChild(buildColumn(state.texts, 0, null, ctx));
+  // Column 0 (display): all words — colIndex=1 preserves the odd/even convention
+  wrapper.appendChild(buildColumn([...state.words], 1, null, ctx));
 
-  // Column 1: words - always show all words regardless of text selection
-  // col1TextId is used only as context for creating new words (links them to the selected text)
-  const col1TextId = state.path.length >= 1 && findText(state.texts, state.path[0])
-    ? state.path[0]
-    : null;
-  const col1Items = [...state.words];
-  wrapper.appendChild(buildColumn(col1Items, 1, col1TextId, ctx));
-
-  // Additional columns driven by path (skip i=0 since col 1 is always rendered above)
-  // Cap at colIndex=2 (3rd column) — no 4th column shown
-  // Guard: only run when col1TextId exists (path[0] is a text), to avoid wrong col2
-  // when path starts with a word id (special case handled below)
-  if (col1TextId) {
-    for (let i = 1; i < state.path.length && i <= 1; i++) {
-      const colIndex = i + 1;
-      const isTextCol = isTextColumn(colIndex);
-      const ctxTextId = !isTextCol ? state.path[i] : null;
-      const items = getColumnItems(state.texts, state.words, state.path, colIndex);
-      wrapper.appendChild(buildColumn(items, colIndex, ctxTextId, ctx));
-    }
-  }
-
-  // Special case: path[0] is a word (clicked from all-words view, no text context)
-  // show col 2 with texts that contain that word
-  if (!col1TextId && state.path.length >= 1 && findWord(state.words, state.path[0])) {
-    const col2Items = state.texts.filter(t => t.wordIds.includes(state.path[0]));
+  // Column 1 (display): texts linked to the selected word (path[1])
+  if (state.path.length >= 2 && findWord(state.words, state.path[1])) {
+    const col2Items = state.texts.filter(t => t.wordIds.includes(state.path[1]));
     wrapper.appendChild(buildColumn(col2Items, 2, null, ctx));
   }
 
@@ -297,6 +274,7 @@ export const buildColumns = (ctx: WordGraphContext): HTMLElement => {
 
   for (let i = 0; i < state.path.length; i++) {
     const id = state.path[i];
+    if (!id) continue;
     const isTextIdx = i % 2 === 0;
     const entity = isTextIdx
       ? findText(state.texts, id)

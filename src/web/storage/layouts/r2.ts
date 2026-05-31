@@ -34,15 +34,16 @@ type R2BucketLike = {
   delete(keys: string | string[]): Promise<unknown>;
 };
 
-const DEFAULT_BUCKET_ID = "layouts-dev";
-
 const fromBase64 = (value: string): string => {
   const normalized = value.replace(/-/g, "+").replace(/_/g, "/");
   const padded = normalized + "=".repeat((4 - (normalized.length % 4 || 4)) % 4);
   return new TextDecoder().decode(Uint8Array.from(atob(padded), (char) => char.charCodeAt(0)));
 };
 
-const getBucketId = (env: LayoutsEnv): string => env.LAYOUTS_BUCKET_ID ?? DEFAULT_BUCKET_ID;
+const getBucketId = (env: LayoutsEnv): string => {
+  if (!env.LAYOUTS_BUCKET_ID) throw new Error("LAYOUTS_BUCKET_ID is not configured");
+  return env.LAYOUTS_BUCKET_ID;
+};
 
 export type LayoutsEnv = AuthorizeEnv & {
   readonly LAYOUTS?: R2BucketLike;
