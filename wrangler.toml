@@ -63,6 +63,7 @@ workers_dev = true
 binding = "IDENTITY_DB"
 database_name = "identity-dev"
 database_id = "38652751-ca79-47ae-ac3f-92b59088e11e"
+remote = true
 
 [env.dev.vars]
 FRONTEND_ORIGIN = "http://localhost:8787"

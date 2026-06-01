@@ -18,6 +18,7 @@ async function graphFetch(
     path: `/api/v1/graph/${encodeURIComponent(graphId)}/${resource}`,
     method,
     body: body !== undefined ? JSON.stringify(body) : undefined,
+    tenantContext: env.actor?.tenant ? { tenantId: env.actor.tenant } : undefined,
   });
 }
 

@@ -10,15 +10,13 @@ type JsonRpcRequest = {
   params?: unknown;
 };
 
-type McpEnv = AuthorizeEnv & { actor?: { tenant?: string; userId?: string; scopes?: string[] } };
-
 export async function handleMcp(request: Request, env: AuthorizeEnv): Promise<Response> {
   if (request.method !== "POST") {
     return new Response("Method Not Allowed", { status: 405 });
   }
 
   // Resolve actor from Bearer token if present
-  const mcpEnv: McpEnv = { ...env };
+  let mcpEnv: AuthorizeEnv = env;
   const authHeader = request.headers.get("Authorization");
   if (authHeader?.startsWith("Bearer ")) {
     const token = authHeader.slice(7);
@@ -34,7 +32,7 @@ export async function handleMcp(request: Request, env: AuthorizeEnv): Promise<Re
       : typeof claims.scopes === "string"
       ? claims.scopes.split(" ")
       : [];
-    mcpEnv.actor = { tenant: claims.tenant_id, userId: claims.subject_id, scopes };
+    mcpEnv = { ...env, actor: { tenant: claims.tenant_id, userId: claims.subject_id, scopes } };
   }
 
   const body = (await request.json()) as JsonRpcRequest;

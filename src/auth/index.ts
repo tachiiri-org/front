@@ -4,6 +4,7 @@ type SecretValue = string | { get(): Promise<string> };
 
 export type AuthorizeEnv = {
   readonly IDENTITY_DB?: D1Database;
+  readonly actor?: { tenant?: string; userId?: string; scopes?: string[] };
   readonly BACKEND?: {
     fetch(request: Request): Promise<Response>;
   };
