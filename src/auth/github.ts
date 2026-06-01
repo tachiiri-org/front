@@ -112,7 +112,11 @@ export async function handleGitHubLoginCallback(context: RouteContext): Promise<
     // identity lookup failure is non-fatal; org-select page will handle the missing state
   }
 
-  headers.set("Location", `${resolveFrontendOrigin(context.request, context.env)}/org-select`);
+  const cookies2 = parseCookies(context.request);
+  const dest = cookies2.has(MCP_OAUTH_PARAMS_COOKIE)
+    ? `${resolveFrontendOrigin(context.request, context.env)}/oauth/mcp/select-org`
+    : `${resolveFrontendOrigin(context.request, context.env)}/org-select`;
+  headers.set("Location", dest);
   return new Response(null, { status: 302, headers });
 }
 
@@ -178,7 +182,8 @@ export async function handleGitHubOAuthCallback(context: RouteContext): Promise<
 
 const LOGIN_STATE_COOKIE_NAME = "github_login_oauth_state";
 const CONNECT_STATE_COOKIE_NAME = "github_connect_oauth_state";
-const IDENTITY_USER_ID_COOKIE = "identity_user_id";
+export const IDENTITY_USER_ID_COOKIE = "identity_user_id";
+export const MCP_OAUTH_PARAMS_COOKIE = "mcp_oauth_params";
 /** @deprecated Use LOGIN_STATE_COOKIE_NAME or CONNECT_STATE_COOKIE_NAME */
 const STATE_COOKIE_NAME = LOGIN_STATE_COOKIE_NAME;
 const STATE_TTL_SECONDS = 60 * 10;

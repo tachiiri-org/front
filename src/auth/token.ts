@@ -5,7 +5,7 @@ type SecretValue = string | { get(): Promise<string> };
 type InternalTokenClaims = {
   claims_set_version: number;
   actor_id: string;
-  actor_type: "human" | "service" | "ops";
+  actor_type: "human" | "service" | "ops" | "ai";
   iss: string;
   aud: string;
   exp: number;
@@ -38,6 +38,75 @@ async function importSigningKey(jwkJson: string): Promise<CryptoKey> {
     false,
     ["sign"],
   );
+}
+
+async function importVerifyKey(jwkJson: string): Promise<CryptoKey> {
+  const { d: _d, key_ops: _ops, ...pub } = JSON.parse(jwkJson) as JsonWebKey;
+  return crypto.subtle.importKey(
+    "jwk",
+    { ...pub, key_ops: ["verify"] },
+    { name: "ECDSA", namedCurve: "P-256" },
+    false,
+    ["verify"],
+  );
+}
+
+function fromBase64Url(str: string): Uint8Array {
+  const base64 = str.replace(/-/g, "+").replace(/_/g, "/").padEnd(str.length + ((4 - (str.length % 4)) % 4), "=");
+  const binary = atob(base64);
+  return new Uint8Array([...binary].map((c) => c.charCodeAt(0)));
+}
+
+export async function verifyInternalToken(
+  env: { INTERNAL_AUTH_SIGNING_KEY?: SecretValue },
+  token: string,
+): Promise<InternalTokenClaims | null> {
+  try {
+    const signingKey = await resolveSecret(env.INTERNAL_AUTH_SIGNING_KEY);
+    if (!signingKey) return null;
+    const key = await importVerifyKey(signingKey);
+    const [headerB64, payloadB64, signatureB64] = token.split(".");
+    if (!headerB64 || !payloadB64 || !signatureB64) return null;
+    const valid = await crypto.subtle.verify(
+      { name: "ECDSA", hash: "SHA-256" },
+      key,
+      fromBase64Url(signatureB64).buffer as ArrayBuffer,
+      encoder.encode(`${headerB64}.${payloadB64}`),
+    );
+    if (!valid) return null;
+    const claims = JSON.parse(new TextDecoder().decode(fromBase64Url(payloadB64))) as InternalTokenClaims;
+    if (claims.exp < Math.floor(Date.now() / 1000)) return null;
+    return claims;
+  } catch {
+    return null;
+  }
+}
+
+export async function issueMcpToken(
+  env: { INTERNAL_AUTH_SIGNING_KEY?: SecretValue; INTERNAL_AUTH_TOKEN_ISSUER?: string },
+  input: { orgId: string; userId: string; scopes: string[]; clientId: string },
+): Promise<string> {
+  const signingKey = await resolveSecret(env.INTERNAL_AUTH_SIGNING_KEY);
+  if (!signingKey) throw new Error("missing_internal_auth_signing_key");
+  const key = await importSigningKey(signingKey);
+  const now = Math.floor(Date.now() / 1000);
+  const payload: InternalTokenClaims = {
+    claims_set_version: 1,
+    actor_id: input.clientId,
+    actor_type: "ai",
+    iss: env.INTERNAL_AUTH_TOKEN_ISSUER ?? "front",
+    aud: "backend",
+    exp: now + 28800,
+    iat: now,
+    jti: crypto.randomUUID(),
+    tenant_id: input.orgId,
+    subject_id: input.userId,
+    scopes: input.scopes,
+  };
+  const header = { alg: "ES256", typ: "JWT" };
+  const signingInput = `${toBase64Url(encoder.encode(JSON.stringify(header)))}.${toBase64Url(encoder.encode(JSON.stringify(payload)))}`;
+  const signature = await crypto.subtle.sign({ name: "ECDSA", hash: "SHA-256" }, key, encoder.encode(signingInput));
+  return `${signingInput}.${toBase64Url(new Uint8Array(signature))}`;
 }
 
 async function resolveSecret(value: SecretValue | undefined): Promise<string | undefined> {

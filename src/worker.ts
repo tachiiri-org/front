@@ -9,6 +9,13 @@ import type { AuthorizeEnv } from './auth';
 import { handleApiRequest as handleDataApiRequest, handleGitHubAuthStatus, handleAuthStatus, handleIdentityStatus, handleOrgCreate, handleSelectOrg } from './api/data';
 import { handleApiRequest as handleLayoutApiRequest } from './web/api/layout';
 import { handleMcp } from './mcp/handler';
+import {
+  handleOAuthMetadata,
+  handleMcpAuthorize,
+  handleMcpSelectOrg,
+  handleMcpApprove,
+  handleMcpToken,
+} from './mcp/oauth';
 import { logoutGitHub, logoutGoogle } from './identify';
 
 type AssetsEnv = {
@@ -123,6 +130,21 @@ export default {
       return handleGoogleLoginCallback({ request, env });
     }
 
+    if (pathname === '/.well-known/oauth-authorization-server') {
+      return handleOAuthMetadata(request, env);
+    }
+    if (pathname === '/oauth/mcp/authorize') {
+      return handleMcpAuthorize(request, env);
+    }
+    if (pathname === '/oauth/mcp/select-org') {
+      return handleMcpSelectOrg(request, env);
+    }
+    if (pathname === '/oauth/mcp/approve' && request.method === 'POST') {
+      return handleMcpApprove(request, env);
+    }
+    if (pathname === '/oauth/mcp/token' && request.method === 'POST') {
+      return handleMcpToken(request, env);
+    }
     if (pathname === '/mcp' || pathname.startsWith('/mcp/')) {
       return handleMcp(request, env);
     }

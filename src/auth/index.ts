@@ -1,6 +1,9 @@
+import type { D1Database } from '@cloudflare/workers-types';
+
 type SecretValue = string | { get(): Promise<string> };
 
 export type AuthorizeEnv = {
+  readonly IDENTITY_DB?: D1Database;
   readonly BACKEND?: {
     fetch(request: Request): Promise<Response>;
   };

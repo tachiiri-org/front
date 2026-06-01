@@ -1,4 +1,5 @@
 import type { AuthorizeEnv } from "../auth";
+import { verifyInternalToken } from "../auth/token";
 import { TOOLS, callTool } from "./tools/authorize";
 import { GRAPH_TOOLS, callGraphTool } from "./tools/graph";
 
@@ -9,9 +10,31 @@ type JsonRpcRequest = {
   params?: unknown;
 };
 
+type McpEnv = AuthorizeEnv & { actor?: { tenant?: string; userId?: string; scopes?: string[] } };
+
 export async function handleMcp(request: Request, env: AuthorizeEnv): Promise<Response> {
   if (request.method !== "POST") {
     return new Response("Method Not Allowed", { status: 405 });
+  }
+
+  // Resolve actor from Bearer token if present
+  const mcpEnv: McpEnv = { ...env };
+  const authHeader = request.headers.get("Authorization");
+  if (authHeader?.startsWith("Bearer ")) {
+    const token = authHeader.slice(7);
+    const claims = await verifyInternalToken(env, token);
+    if (!claims) {
+      return Response.json(
+        { jsonrpc: "2.0", id: null, error: { code: -32001, message: "Unauthorized: invalid or expired token" } },
+        { status: 401 },
+      );
+    }
+    const scopes = Array.isArray(claims.scopes)
+      ? claims.scopes
+      : typeof claims.scopes === "string"
+      ? claims.scopes.split(" ")
+      : [];
+    mcpEnv.actor = { tenant: claims.tenant_id, userId: claims.subject_id, scopes };
   }
 
   const body = (await request.json()) as JsonRpcRequest;
@@ -36,8 +59,8 @@ export async function handleMcp(request: Request, env: AuthorizeEnv): Promise<Re
       arguments: Record<string, unknown>;
     };
     result = name.startsWith("graph_")
-      ? await callGraphTool(name, args, env)
-      : await callTool(name, args, env);
+      ? await callGraphTool(name, args, mcpEnv)
+      : await callTool(name, args, mcpEnv);
   } else {
     return Response.json({
       jsonrpc: "2.0",

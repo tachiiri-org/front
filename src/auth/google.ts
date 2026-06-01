@@ -103,10 +103,15 @@ export async function handleGoogleLoginCallback(context: RouteContext): Promise<
     // identity lookup failure is non-fatal; org-select page will handle the missing state
   }
 
-  headers.set("Location", `${resolveFrontendOrigin(context.request, context.env)}/org-select`);
+  const cookies2 = parseCookies(context.request);
+  const dest = cookies2.has(MCP_OAUTH_PARAMS_COOKIE)
+    ? `${resolveFrontendOrigin(context.request, context.env)}/oauth/mcp/select-org`
+    : `${resolveFrontendOrigin(context.request, context.env)}/org-select`;
+  headers.set("Location", dest);
   return new Response(null, { status: 302, headers });
 }
 
 const LOGIN_STATE_COOKIE_NAME = "google_login_oauth_state";
 const IDENTITY_USER_ID_COOKIE = "identity_user_id";
+export const MCP_OAUTH_PARAMS_COOKIE = "mcp_oauth_params";
 const STATE_TTL_SECONDS = 60 * 10;
