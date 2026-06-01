@@ -1,4 +1,4 @@
-import { exchangeGitHubOAuthCode, exchangeGitHubConnectCode, readGitHubSession, findOrCreateUserByGitHub } from "../identify";
+import { exchangeGitHubOAuthCode, exchangeGitHubConnectCode, serializeGitHubSessionCookie, serializeGitHubConnectSessionCookie, findOrCreateUserByGitHub } from "../identify";
 import { clearCookie, parseCookies, serializeCookie } from "./cookies";
 import type { AuthorizeEnv } from "./index";
 
@@ -85,8 +85,9 @@ export async function handleGitHubLoginCallback(context: RouteContext): Promise<
     return new Response("GitHub OAuth state validation failed", { status: 400 });
   }
 
+  let session;
   try {
-    await exchangeGitHubOAuthCode(context.env, code, getGitHubLoginCallbackUrl(context.request, context.env));
+    session = await exchangeGitHubOAuthCode(context.env, code, getGitHubLoginCallbackUrl(context.request, context.env));
   } catch (error) {
     return new Response(`GitHub OAuth code exchange failed: ${String(error)}`, { status: 502 });
   }
@@ -95,19 +96,17 @@ export async function handleGitHubLoginCallback(context: RouteContext): Promise<
   headers.append("Set-Cookie", clearCookie(LOGIN_STATE_COOKIE_NAME, context.request));
 
   try {
-    const session = await readGitHubSession(context.env);
-    if (session) {
-      const userId = await findOrCreateUserByGitHub(context.env, session.viewer.login, session.accessToken);
-      headers.append(
-        "Set-Cookie",
-        serializeCookie(IDENTITY_USER_ID_COOKIE, userId, {
-          maxAge: 60 * 10,
-          path: "/",
-          secure: isSecureRequest(context.request),
-          httpOnly: true,
-        }),
-      );
-    }
+    headers.append("Set-Cookie", await serializeGitHubSessionCookie(session, context.env, context.request));
+    const userId = await findOrCreateUserByGitHub(context.env, session.viewer.login, session.accessToken);
+    headers.append(
+      "Set-Cookie",
+      serializeCookie(IDENTITY_USER_ID_COOKIE, userId, {
+        maxAge: 60 * 10,
+        path: "/",
+        secure: isSecureRequest(context.request),
+        httpOnly: true,
+      }),
+    );
   } catch {
     // identity lookup failure is non-fatal; org-select page will handle the missing state
   }
@@ -154,18 +153,19 @@ export async function handleGitHubConnectCallback(context: RouteContext): Promis
     return new Response("GitHub OAuth state validation failed", { status: 400 });
   }
 
+  let connectSession;
   try {
-    await exchangeGitHubConnectCode(context.env, code, getGitHubConnectCallbackUrl(context.request, context.env));
+    connectSession = await exchangeGitHubConnectCode(context.env, code, getGitHubConnectCallbackUrl(context.request, context.env));
   } catch (error) {
     return new Response(`GitHub connect OAuth code exchange failed: ${String(error)}`, { status: 502 });
   }
 
   const headers = new Headers();
   headers.append("Set-Cookie", clearCookie(CONNECT_STATE_COOKIE_NAME, context.request));
-  headers.set(
-    "Location",
-    `${resolveFrontendOrigin(context.request, context.env)}/identify-viewer`,
-  );
+  try {
+    headers.append("Set-Cookie", await serializeGitHubConnectSessionCookie(connectSession, context.env, context.request));
+  } catch { /* non-fatal */ }
+  headers.set("Location", `${resolveFrontendOrigin(context.request, context.env)}/identify-viewer`);
 
   return new Response(null, { status: 302, headers });
 }

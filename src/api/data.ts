@@ -117,7 +117,7 @@ export async function handleGitHubAuthStatus(
   }
 
   try {
-    const session = await readGitHubSession(env);
+    const session = await readGitHubSession(request, env);
     return json(
       {
         authenticated: Boolean(session),
@@ -139,9 +139,9 @@ export async function handleAuthStatus(
   }
 
   const [githubResult, githubConnectResult, googleResult] = await Promise.allSettled([
-    readGitHubSession(env),
-    readGitHubConnectSession(env),
-    readGoogleSession(env),
+    readGitHubSession(request, env),
+    readGitHubConnectSession(request, env),
+    readGoogleSession(request, env),
   ]);
 
   const githubSession = githubResult.status === 'fulfilled' ? githubResult.value : null;

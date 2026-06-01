@@ -17,7 +17,7 @@ import {
   handleMcpApprove,
   handleMcpToken,
 } from './mcp/oauth';
-import { logoutGitHub, logoutGoogle } from './identify';
+import { clearGitHubSessionCookies, clearGitHubConnectSessionCookies, clearGoogleSessionCookies } from './identify';
 
 type AssetsEnv = {
   readonly ASSETS: {
@@ -90,24 +90,35 @@ export default {
       if (res) return res;
     }
     if (pathname === '/api/auth/logout' && request.method === 'POST') {
-      await logoutGitHub(env);
-      return new Response(null, { status: 204 });
+      const headers = new Headers();
+      for (const c of [...clearGitHubSessionCookies(request), ...clearGitHubConnectSessionCookies(request), ...clearGoogleSessionCookies(request)]) {
+        headers.append('Set-Cookie', c);
+      }
+      return new Response(null, { status: 204, headers });
     }
     if (pathname === '/api/auth/github/logout' && request.method === 'POST') {
-      await logoutGitHub(env);
-      return new Response(null, { status: 204 });
+      const headers = new Headers();
+      for (const c of [...clearGitHubSessionCookies(request), ...clearGitHubConnectSessionCookies(request)]) {
+        headers.append('Set-Cookie', c);
+      }
+      return new Response(null, { status: 204, headers });
     }
     if (pathname === '/api/auth/google/logout' && request.method === 'POST') {
-      await logoutGoogle(env);
-      return new Response(null, { status: 204 });
+      const headers = new Headers();
+      for (const c of clearGoogleSessionCookies(request)) headers.append('Set-Cookie', c);
+      return new Response(null, { status: 204, headers });
     }
     if (pathname === '/oauth/github/logout' && request.method === 'GET') {
-      await logoutGitHub(env);
-      return new Response(null, { status: 302, headers: { Location: '/identify-viewer' } });
+      const headers = new Headers({ Location: '/identify-viewer' });
+      for (const c of [...clearGitHubSessionCookies(request), ...clearGitHubConnectSessionCookies(request)]) {
+        headers.append('Set-Cookie', c);
+      }
+      return new Response(null, { status: 302, headers });
     }
     if (pathname === '/oauth/google/logout' && request.method === 'GET') {
-      await logoutGoogle(env);
-      return new Response(null, { status: 302, headers: { Location: '/identify-viewer' } });
+      const headers = new Headers({ Location: '/identify-viewer' });
+      for (const c of clearGoogleSessionCookies(request)) headers.append('Set-Cookie', c);
+      return new Response(null, { status: 302, headers });
     }
     // GitHub login (read:user scope — identity only)
     if (pathname === '/oauth/github/start' || pathname === '/github/oauth/start') {

@@ -1,4 +1,4 @@
-import { exchangeGoogleOAuthCode, readGoogleSession, findOrCreateUserByGoogle } from "../identify";
+import { exchangeGoogleOAuthCode, serializeGoogleSessionCookie, findOrCreateUserByGoogle } from "../identify";
 import { clearCookie, parseCookies, serializeCookie } from "./cookies";
 import type { AuthorizeEnv } from "./index";
 
@@ -76,8 +76,9 @@ export async function handleGoogleLoginCallback(context: RouteContext): Promise<
     return new Response("Google OAuth state validation failed", { status: 400 });
   }
 
+  let googleSession;
   try {
-    await exchangeGoogleOAuthCode(context.env, code, getGoogleCallbackUrl(context.request, context.env));
+    googleSession = await exchangeGoogleOAuthCode(context.env, code, getGoogleCallbackUrl(context.request, context.env));
   } catch (error) {
     return new Response(`Google OAuth code exchange failed: ${String(error)}`, { status: 502 });
   }
@@ -86,19 +87,17 @@ export async function handleGoogleLoginCallback(context: RouteContext): Promise<
   headers.append("Set-Cookie", clearCookie(LOGIN_STATE_COOKIE_NAME, context.request));
 
   try {
-    const session = await readGoogleSession(context.env);
-    if (session) {
-      const userId = await findOrCreateUserByGoogle(context.env, session.sub, session.email);
-      headers.append(
-        "Set-Cookie",
-        serializeCookie(IDENTITY_USER_ID_COOKIE, userId, {
-          maxAge: 60 * 10,
-          path: "/",
-          secure: isSecureRequest(context.request),
-          httpOnly: true,
-        }),
-      );
-    }
+    headers.append("Set-Cookie", await serializeGoogleSessionCookie(googleSession, context.env, context.request));
+    const userId = await findOrCreateUserByGoogle(context.env, googleSession.sub, googleSession.email);
+    headers.append(
+      "Set-Cookie",
+      serializeCookie(IDENTITY_USER_ID_COOKIE, userId, {
+        maxAge: 60 * 10,
+        path: "/",
+        secure: isSecureRequest(context.request),
+        httpOnly: true,
+      }),
+    );
   } catch {
     // identity lookup failure is non-fatal; org-select page will handle the missing state
   }

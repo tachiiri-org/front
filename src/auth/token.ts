@@ -151,3 +151,44 @@ export async function issueInternalToken(
   );
   return `${signingInput}.${toBase64Url(new Uint8Array(signature))}`;
 }
+
+export async function issueSessionToken(
+  env: { INTERNAL_AUTH_SIGNING_KEY?: SecretValue },
+  data: Record<string, unknown>,
+  ttlSeconds = 600,
+): Promise<string> {
+  const signingKey = await resolveSecret(env.INTERNAL_AUTH_SIGNING_KEY);
+  if (!signingKey) throw new Error("missing_internal_auth_signing_key");
+  const key = await importSigningKey(signingKey);
+  const now = Math.floor(Date.now() / 1000);
+  const payload = { ...data, exp: now + ttlSeconds, iat: now };
+  const header = { alg: "ES256", typ: "JWT" };
+  const signingInput = `${toBase64Url(encoder.encode(JSON.stringify(header)))}.${toBase64Url(encoder.encode(JSON.stringify(payload)))}`;
+  const signature = await crypto.subtle.sign({ name: "ECDSA", hash: "SHA-256" }, key, encoder.encode(signingInput));
+  return `${signingInput}.${toBase64Url(new Uint8Array(signature))}`;
+}
+
+export async function readSessionToken<T extends Record<string, unknown>>(
+  env: { INTERNAL_AUTH_SIGNING_KEY?: SecretValue },
+  token: string,
+): Promise<T | null> {
+  const signingKey = await resolveSecret(env.INTERNAL_AUTH_SIGNING_KEY);
+  if (!signingKey) return null;
+  try {
+    const key = await importVerifyKey(signingKey);
+    const [headerB64, payloadB64, signatureB64] = token.split(".");
+    if (!headerB64 || !payloadB64 || !signatureB64) return null;
+    const valid = await crypto.subtle.verify(
+      { name: "ECDSA", hash: "SHA-256" },
+      key,
+      fromBase64Url(signatureB64).buffer as ArrayBuffer,
+      encoder.encode(`${headerB64}.${payloadB64}`),
+    );
+    if (!valid) return null;
+    const data = JSON.parse(new TextDecoder().decode(fromBase64Url(payloadB64))) as T & { exp?: number };
+    if (data.exp && data.exp < Math.floor(Date.now() / 1000)) return null;
+    return data;
+  } catch {
+    return null;
+  }
+}

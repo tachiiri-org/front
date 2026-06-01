@@ -58,7 +58,7 @@ export async function handleMcp(request: Request, env: AuthorizeEnv): Promise<Re
     };
     result = name.startsWith("graph_")
       ? await callGraphTool(name, args, mcpEnv)
-      : await callTool(name, args, mcpEnv);
+      : await callTool(name, args, mcpEnv, request);
   } else {
     return Response.json({
       jsonrpc: "2.0",

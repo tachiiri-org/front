@@ -122,6 +122,7 @@ export async function callTool(
   name: string,
   args: Record<string, unknown>,
   env: AuthorizeEnv,
+  request?: Request,
 ): Promise<ToolResult> {
   if (name === "authorize_github_login") {
     try {
@@ -186,11 +187,11 @@ export async function callTool(
   const headers: Record<string, string> = {};
   if (name === "authorize_github") {
     // Prefer connect session (resource access scopes), fall back to login session
-    const connectSession = await readGitHubConnectSession(env);
+    const connectSession = await readGitHubConnectSession(request ?? null, env);
     if (connectSession) {
       headers["x-github-access-token"] = connectSession.accessToken;
     } else {
-      const session = await readGitHubSession(env);
+      const session = await readGitHubSession(request ?? null, env);
       if (!session) {
         return {
           content: [
