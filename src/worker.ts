@@ -11,6 +11,7 @@ import { handleApiRequest as handleLayoutApiRequest } from './web/api/layout';
 import { handleMcp } from './mcp/handler';
 import {
   handleOAuthMetadata,
+  handleMcpRegister,
   handleMcpAuthorize,
   handleMcpSelectOrg,
   handleMcpApprove,
@@ -132,6 +133,9 @@ export default {
 
     if (pathname === '/.well-known/oauth-authorization-server') {
       return handleOAuthMetadata(request, env);
+    }
+    if (pathname === '/oauth/mcp/register' && request.method === 'POST') {
+      return handleMcpRegister(request, env);
     }
     if (pathname === '/oauth/mcp/authorize') {
       return handleMcpAuthorize(request, env);

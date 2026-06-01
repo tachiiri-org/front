@@ -1,3 +1,4 @@
+import type { D1Database } from "@cloudflare/workers-types";
 import type { AuthorizeEnv } from "../auth";
 import { parseCookies, serializeCookie, clearCookie } from "../auth/cookies";
 import { issueMcpToken } from "../auth/token";
@@ -5,7 +6,6 @@ import { authorizeFetch } from "../auth/fetch";
 import { IDENTITY_USER_ID_COOKIE, MCP_OAUTH_PARAMS_COOKIE } from "../auth/github";
 
 const CODE_TTL = 60 * 10; // 10 minutes
-const ALLOWED_CLIENTS = ["claude-mcp"];
 
 type McpOAuthParams = {
   client_id: string;
@@ -14,6 +14,13 @@ type McpOAuthParams = {
   code_challenge_method: string;
   state: string;
   scope: string;
+};
+
+type DbClient = {
+  id: string;
+  name: string;
+  actor_type: string;
+  redirect_uris: string;
 };
 
 function toBase64Url(data: Uint8Array): string {
@@ -30,6 +37,12 @@ function origin(request: Request, env: AuthorizeEnv): string {
   return env.FRONTEND_ORIGIN ?? new URL(request.url).origin;
 }
 
+async function lookupClient(db: D1Database, clientId: string): Promise<DbClient | null> {
+  return db.prepare("SELECT id, name, actor_type, redirect_uris FROM m_oauth_clients WHERE id = ?")
+    .bind(clientId)
+    .first<DbClient>();
+}
+
 // GET /.well-known/oauth-authorization-server
 export function handleOAuthMetadata(request: Request, env: AuthorizeEnv): Response {
   const base = origin(request, env);
@@ -37,15 +50,49 @@ export function handleOAuthMetadata(request: Request, env: AuthorizeEnv): Respon
     issuer: base,
     authorization_endpoint: `${base}/oauth/mcp/authorize`,
     token_endpoint: `${base}/oauth/mcp/token`,
+    registration_endpoint: `${base}/oauth/mcp/register`,
     response_types_supported: ["code"],
     grant_types_supported: ["authorization_code"],
     code_challenge_methods_supported: ["S256"],
+    token_endpoint_auth_methods_supported: ["none"],
     scopes_supported: ["graph:read", "graph:write"],
   });
 }
 
+// POST /oauth/mcp/register  (RFC 7591 Dynamic Client Registration)
+export async function handleMcpRegister(request: Request, env: AuthorizeEnv): Promise<Response> {
+  if (!env.IDENTITY_DB) return Response.json({ error: "server_error" }, { status: 500 });
+
+  const body = await request.json() as {
+    client_name?: string;
+    redirect_uris?: string[];
+    grant_types?: string[];
+    response_types?: string[];
+    token_endpoint_auth_method?: string;
+  };
+
+  const clientId = crypto.randomUUID();
+  const clientName = body.client_name ?? "Unknown Client";
+  const redirectUris = JSON.stringify(body.redirect_uris ?? []);
+
+  await env.IDENTITY_DB.prepare(
+    "INSERT INTO m_oauth_clients (id, name, actor_type, redirect_uris) VALUES (?, ?, 'ai', ?)"
+  ).bind(clientId, clientName, redirectUris).run();
+
+  return Response.json({
+    client_id: clientId,
+    client_name: clientName,
+    redirect_uris: body.redirect_uris ?? [],
+    grant_types: ["authorization_code"],
+    response_types: ["code"],
+    token_endpoint_auth_method: "none",
+  }, { status: 201 });
+}
+
 // GET /oauth/mcp/authorize
-export function handleMcpAuthorize(request: Request, env: AuthorizeEnv): Response {
+export async function handleMcpAuthorize(request: Request, env: AuthorizeEnv): Promise<Response> {
+  if (!env.IDENTITY_DB) return new Response("IDENTITY_DB not configured", { status: 503 });
+
   const url = new URL(request.url);
   const clientId = url.searchParams.get("client_id") ?? "";
   const redirectUri = url.searchParams.get("redirect_uri") ?? "";
@@ -54,14 +101,19 @@ export function handleMcpAuthorize(request: Request, env: AuthorizeEnv): Respons
   const state = url.searchParams.get("state") ?? "";
   const scope = url.searchParams.get("scope") ?? "graph:read graph:write";
 
-  if (!ALLOWED_CLIENTS.includes(clientId)) {
-    return new Response("Unknown client_id", { status: 400 });
-  }
   if (!redirectUri || !codeChallenge || !state) {
     return new Response("Missing required parameters", { status: 400 });
   }
   if (codeChallengeMethod !== "S256") {
     return new Response("Only S256 code_challenge_method is supported", { status: 400 });
+  }
+
+  const client = await lookupClient(env.IDENTITY_DB, clientId);
+  if (!client) return new Response("Unknown client_id", { status: 400 });
+
+  const allowedUris: string[] = JSON.parse(client.redirect_uris);
+  if (allowedUris.length > 0 && !allowedUris.includes(redirectUri)) {
+    return new Response("Invalid redirect_uri", { status: 400 });
   }
 
   const params: McpOAuthParams = { client_id: clientId, redirect_uri: redirectUri, code_challenge: codeChallenge, code_challenge_method: codeChallengeMethod, state, scope };
@@ -90,8 +142,8 @@ export function handleMcpAuthorize(request: Request, env: AuthorizeEnv): Respons
   </style>
 </head>
 <body>
-  <h1>Authorize Claude Code</h1>
-  <p>Claude Code is requesting access to your graph data. Sign in to continue.</p>
+  <h1>Authorize ${client.name}</h1>
+  <p>Sign in to grant access to your graph data.</p>
   <div class="scope">Scopes: ${scope}</div>
   <a class="btn github" href="/oauth/github/start">Sign in with GitHub</a>
   <a class="btn google" href="/oauth/google/start">Sign in with Google</a>
@@ -147,7 +199,7 @@ export async function handleMcpSelectOrg(request: Request, env: AuthorizeEnv): P
 </head>
 <body>
   <h1>Select Organization</h1>
-  <p>Grant Claude Code access to one of your organizations.</p>
+  <p>Grant access to one of your organizations.</p>
   <div class="scope">Scopes: ${params.scope}</div>
   ${organizations.length === 0
     ? '<p class="empty">No organizations found. Create an organization first.</p>'
@@ -226,6 +278,9 @@ export async function handleMcpToken(request: Request, env: AuthorizeEnv): Promi
     return Response.json({ error: "invalid_request" }, { status: 400 });
   }
 
+  const client = await lookupClient(env.IDENTITY_DB, clientId);
+  if (!client) return Response.json({ error: "invalid_client" }, { status: 400 });
+
   const row = await env.IDENTITY_DB.prepare(`
     SELECT code, client_id, user_id, org_id, scopes, code_challenge, code_challenge_method, redirect_uri, expires_at, used
     FROM m_oauth_authorization_codes WHERE code = ?
@@ -241,7 +296,6 @@ export async function handleMcpToken(request: Request, env: AuthorizeEnv): Promi
   if (row.redirect_uri !== redirectUri) return Response.json({ error: "invalid_grant", error_description: "redirect_uri mismatch" }, { status: 400 });
   if (row.client_id !== clientId) return Response.json({ error: "invalid_client" }, { status: 400 });
 
-  // PKCE validation
   const hash = await crypto.subtle.digest("SHA-256", new TextEncoder().encode(codeVerifier));
   const computed = toBase64Url(new Uint8Array(hash));
   if (computed !== row.code_challenge) {
