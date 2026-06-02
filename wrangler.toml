@@ -7,17 +7,9 @@ workers_dev = false
 directory = "./dist"
 binding = "ASSETS"
 
-[[r2_buckets]]
-binding = "LAYOUTS"
-bucket_name = "layouts-dev"
-
 [env.stage]
 name = "front-stage"
 workers_dev = true
-
-[[env.stage.r2_buckets]]
-binding = "LAYOUTS"
-bucket_name = "layouts-stage"
 
 [[env.stage.d1_databases]]
 binding = "IDENTITY_DB"
@@ -28,6 +20,7 @@ database_id = "20dfc9c6-170c-47e7-927c-d703918a6449"
 FRONTEND_ORIGIN = "https://front-stage.tachiiri.workers.dev"
 GITHUB_OAUTH_CLIENT_ID = "Ov23li098QXLtF5UbEg5"
 GOOGLE_OAUTH_CLIENT_ID = "804252639051-hdkilk1189bomeiv9opnsu0h2basdtr8.apps.googleusercontent.com"
+LAYOUTS_BUCKET_ID = "bucket-stage"
 
 [[env.stage.services]]
 binding = "BACKEND"
@@ -36,10 +29,6 @@ service = "backend-stage"
 [env.production]
 name = "front-production"
 workers_dev = true
-
-[[env.production.r2_buckets]]
-binding = "LAYOUTS"
-bucket_name = "layouts-prod"
 
 [[env.production.d1_databases]]
 binding = "IDENTITY_DB"
@@ -73,6 +62,3 @@ GITHUB_OAUTH_CLIENT_ID = "Ov23litfbD8WRrXkM4iR"
 GOOGLE_OAUTH_CLIENT_ID = "804252639051-hdkilk1189bomeiv9opnsu0h2basdtr8.apps.googleusercontent.com"
 LAYOUTS_BUCKET_ID = "bucket-dev"
 
-[[env.dev.r2_buckets]]
-binding = "LAYOUTS"
-bucket_name = "layouts-dev"
