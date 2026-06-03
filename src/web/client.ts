@@ -5,7 +5,11 @@ import { renderComponent, fetchFrameComponent, findEditorScreenId, hydrateEditor
 import { clearGraphStore } from './runtime/render/page/word-graph/store';
 import type { FrameState } from './state';
 
+const HEADER_HEIGHT = 36;
+
+const nav = document.createElement('nav');
 const root = document.createElement('div');
+document.body.appendChild(nav);
 document.body.appendChild(root);
 
 const applyViewportLayout = (): void => {
@@ -16,11 +20,72 @@ const applyViewportLayout = (): void => {
   document.body.style.margin = '0';
   document.body.style.padding = '0';
   document.body.style.overflow = 'hidden';
+  document.body.style.display = 'flex';
+  document.body.style.flexDirection = 'column';
+
+  nav.style.display = 'flex';
+  nav.style.flexShrink = '0';
+  nav.style.height = `${HEADER_HEIGHT}px`;
 
   root.style.width = '100%';
-  root.style.height = '100%';
-  root.style.minHeight = '100vh';
+  root.style.flex = '1';
+  root.style.minHeight = '0';
   root.style.boxSizing = 'border-box';
+};
+
+const renderNav = async (screenId: string): Promise<void> => {
+  nav.replaceChildren();
+  Object.assign(nav.style, {
+    display: 'flex',
+    alignItems: 'center',
+    padding: '0 12px',
+    gap: '8px',
+    background: '#111827',
+    color: '#d1d5db',
+    fontFamily: 'monospace',
+    fontSize: '13px',
+    height: `${HEADER_HEIGHT}px`,
+    flexShrink: '0',
+    boxSizing: 'border-box',
+    borderBottom: '1px solid #374151',
+  });
+
+  const titleEl = document.createElement('span');
+  titleEl.textContent = screenId;
+  Object.assign(titleEl.style, { fontWeight: '600', color: '#f9fafb' });
+  nav.appendChild(titleEl);
+
+  const spacer = document.createElement('div');
+  spacer.style.flex = '1';
+  nav.appendChild(spacer);
+
+  const select = document.createElement('select');
+  select.style.cssText =
+    'background:#1f2937;color:#d1d5db;border:1px solid #374151;padding:2px 8px;font-size:12px;font-family:monospace;border-radius:4px;cursor:pointer;height:24px;';
+
+  try {
+    const res = await fetch('/api/layouts/json-files');
+    if (res.ok) {
+      const data = (await res.json()) as { items: { value: string; label: string }[] };
+      for (const item of data.items) {
+        const opt = document.createElement('option');
+        opt.value = item.value;
+        opt.textContent = item.label;
+        if (item.value === screenId) opt.selected = true;
+        select.appendChild(opt);
+      }
+    }
+  } catch { /* ignore */ }
+
+  select.addEventListener('change', () => {
+    const next = select.value;
+    if (next && next !== screenId) {
+      history.pushState(null, '', `/${encodeURIComponent(next)}`);
+      void loadEditor(next);
+    }
+  });
+
+  nav.appendChild(select);
 };
 
 const getScreenIdFromPathname = (): string | null => {
@@ -73,6 +138,7 @@ const renderScreen = async (screenId: string): Promise<void> => {
   clearGraphStore();
 
   applyViewportLayout();
+  void renderNav(screenId);
 
   root.innerHTML = '';
   document.title = store.screen.head.title;
@@ -172,6 +238,9 @@ type IdentityStatus = {
 };
 
 const renderAuthPage = async (): Promise<void> => {
+  nav.style.display = 'none';
+  document.body.style.display = '';
+
   const res = await fetch('/api/auth/status');
   const status = (await res.json()) as AuthStatus;
 
@@ -305,5 +374,9 @@ const loadEditorBootstrap = async (): Promise<void> => {
   }
   await loadEditor(screenId);
 };
+
+window.addEventListener('popstate', () => {
+  void loadEditorBootstrap();
+});
 
 void loadEditorBootstrap();

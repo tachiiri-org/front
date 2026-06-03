@@ -232,17 +232,17 @@ export async function handleMcpApprove(request: Request, env: AuthorizeEnv): Pro
   }
 
   const formData = await request.formData();
-  const orgId = formData.get("org_id") as string | null;
-  if (!orgId) return new Response("org_id required", { status: 400 });
+  const groupId = formData.get("org_id") as string | null;
+  if (!groupId) return new Response("org_id required", { status: 400 });
 
   const code = crypto.randomUUID();
   const expiresAt = Math.floor(Date.now() / 1000) + CODE_TTL;
 
   await env.IDENTITY_DB.prepare(`
     INSERT INTO m_oauth_authorization_codes
-      (code, client_id, user_id, org_id, scopes, code_challenge, code_challenge_method, redirect_uri, expires_at)
+      (code, client_id, user_id, group_id, scopes, code_challenge, code_challenge_method, redirect_uri, expires_at)
     VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
-  `).bind(code, params.client_id, userId, orgId, params.scope, params.code_challenge, params.code_challenge_method, params.redirect_uri, expiresAt).run();
+  `).bind(code, params.client_id, userId, groupId, params.scope, params.code_challenge, params.code_challenge_method, params.redirect_uri, expiresAt).run();
 
   const headers = new Headers();
   headers.append("Set-Cookie", clearCookie(MCP_OAUTH_PARAMS_COOKIE, request));
@@ -282,10 +282,10 @@ export async function handleMcpToken(request: Request, env: AuthorizeEnv): Promi
   if (!client) return Response.json({ error: "invalid_client" }, { status: 400 });
 
   const row = await env.IDENTITY_DB.prepare(`
-    SELECT code, client_id, user_id, org_id, scopes, code_challenge, code_challenge_method, redirect_uri, expires_at, used
+    SELECT code, client_id, user_id, group_id, scopes, code_challenge, code_challenge_method, redirect_uri, expires_at, used
     FROM m_oauth_authorization_codes WHERE code = ?
   `).bind(code).first<{
-    code: string; client_id: string; user_id: string; org_id: string; scopes: string;
+    code: string; client_id: string; user_id: string; group_id: string; scopes: string;
     code_challenge: string; code_challenge_method: string; redirect_uri: string;
     expires_at: number; used: number;
   }>();
@@ -306,7 +306,7 @@ export async function handleMcpToken(request: Request, env: AuthorizeEnv): Promi
 
   const scopes = row.scopes.split(" ").filter(Boolean);
   const accessToken = await issueMcpToken(env, {
-    orgId: row.org_id,
+    orgId: row.group_id,
     userId: row.user_id,
     scopes,
     clientId: row.client_id,
