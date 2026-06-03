@@ -28,6 +28,7 @@ import {
 import { authorizeFetch, type AuthorizeEnv } from '../../auth';
 import { parseCookies } from '../../auth/cookies';
 
+
 type Env = {
   readonly ASSETS: {
         fetch(request: Request): Promise<Response>;
@@ -334,7 +335,9 @@ const handleCanvasOptionsGet = async (backend: LayoutBackend, screenId: string):
 
 export const handleApiRequest = async (request: Request, env: Env): Promise<Response> => {
   const url = new URL(request.url);
-  const backend = createLayoutsBackend(env);
+  const cookies = parseCookies(request);
+  const tenantId = cookies.get('identity_org_id') ?? undefined;
+  const backend = createLayoutsBackend(env, tenantId);
 
   if (url.pathname === '/api/component-schemas') {
     if (request.method === 'GET') {

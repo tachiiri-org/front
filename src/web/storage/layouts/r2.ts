@@ -40,11 +40,6 @@ const fromBase64 = (value: string): string => {
   return new TextDecoder().decode(Uint8Array.from(atob(padded), (char) => char.charCodeAt(0)));
 };
 
-const getBucketId = (env: LayoutsEnv): string => {
-  if (!env.LAYOUTS_BUCKET_ID) throw new Error("LAYOUTS_BUCKET_ID is not configured");
-  return env.LAYOUTS_BUCKET_ID;
-};
-
 export type LayoutsEnv = AuthorizeEnv & {
   readonly LAYOUTS?: R2BucketLike;
   readonly LAYOUTS_BUCKET_ID?: string;
@@ -88,64 +83,74 @@ const createDirectBackend = (env: LayoutsEnv): LayoutBackend => ({
   },
 });
 
-const createAuthorizeBackend = (env: LayoutsEnv): LayoutBackend => ({
-  async list(prefix: string, cursor?: string) {
-    const response = await authorizeFetch(env, {
-      path: "/api/v1/cloudflare-r2-adapter/s3/r2_file_list",
-      method: "POST",
-      body: JSON.stringify({
-        bucket_id: getBucketId(env),
-        prefix,
-        cursor,
-        delimiter: "",
-      }),
-    });
-    if (!response.ok) throw new Error(`layouts_list_failed:${response.status}`);
-    const payload = (await response.json()) as LayoutListResponse;
-    return {
-      objects: payload.objects.map((object) => ({ key: object.key })),
-      truncated: payload.is_truncated,
-      cursor: payload.cursor ?? undefined,
-    };
-  },
-  async getText(key: string) {
-    const response = await authorizeFetch(env, {
-      path: "/api/v1/cloudflare-r2-adapter/s3/r2_file_get",
-      method: "POST",
-      body: JSON.stringify({
-        bucket_id: getBucketId(env),
-        key,
-      }),
-    });
-    if (response.status === 404) return null;
-    if (!response.ok) throw new Error(`layouts_get_failed:${response.status}`);
-    const payload = (await response.json()) as LayoutFileResponse;
-    return fromBase64(payload.content_base64);
-  },
-  async putText(key: string, body: string) {
-    const response = await authorizeFetch(env, {
-      path: "/api/v1/cloudflare-r2-adapter/s3/r2_file_save",
-      method: "POST",
-      body: JSON.stringify({
-        bucket_id: getBucketId(env),
-        key,
-        content: body,
-      }),
-    });
-    if (!response.ok) throw new Error(`layouts_put_failed:${response.status}`);
-  },
-  async deleteKey(key: string) {
-    const response = await authorizeFetch(env, {
-      path: "/api/v1/cloudflare-r2-adapter/s3/r2_file_delete",
-      method: "POST",
-      body: JSON.stringify({
-        bucket_id: getBucketId(env),
-        key,
-      }),
-    });
-    if (!response.ok) throw new Error(`layouts_delete_failed:${response.status}`);
-  },
-});
+const createAuthorizeBackend = (env: LayoutsEnv, tenantId?: string): LayoutBackend => {
+  let resolvedBucketId: string | null = null;
 
-export const createLayoutsBackend = (env: LayoutsEnv): LayoutBackend =>
-  hasAuthorizeConfig(env) ? createAuthorizeBackend(env) : createDirectBackend(env);
+  const resolveBucketId = async (): Promise<string> => {
+    if (resolvedBucketId) return resolvedBucketId;
+    if (env.LAYOUTS_BUCKET_ID) {
+      resolvedBucketId = env.LAYOUTS_BUCKET_ID;
+      return resolvedBucketId;
+    }
+    if (!tenantId) throw new Error("tenant_id_required_for_dynamic_bucket");
+    const response = await authorizeFetch(env, {
+      path: `/api/v1/identity/r2-bucket?group_id=${encodeURIComponent(tenantId)}`,
+      method: "GET",
+    });
+    if (!response.ok) throw new Error(`bucket_resolve_failed:${response.status}`);
+    const payload = (await response.json()) as { bucket_id: string };
+    resolvedBucketId = payload.bucket_id;
+    return resolvedBucketId;
+  };
+
+  return {
+    async list(prefix: string, cursor?: string) {
+      const bucketId = await resolveBucketId();
+      const response = await authorizeFetch(env, {
+        path: "/api/v1/cloudflare-r2-adapter/s3/r2_file_list",
+        method: "POST",
+        body: JSON.stringify({ bucket_id: bucketId, prefix, cursor, delimiter: "" }),
+      });
+      if (!response.ok) throw new Error(`layouts_list_failed:${response.status}`);
+      const payload = (await response.json()) as LayoutListResponse;
+      return {
+        objects: payload.objects.map((object) => ({ key: object.key })),
+        truncated: payload.is_truncated,
+        cursor: payload.cursor ?? undefined,
+      };
+    },
+    async getText(key: string) {
+      const bucketId = await resolveBucketId();
+      const response = await authorizeFetch(env, {
+        path: "/api/v1/cloudflare-r2-adapter/s3/r2_file_get",
+        method: "POST",
+        body: JSON.stringify({ bucket_id: bucketId, key }),
+      });
+      if (response.status === 404) return null;
+      if (!response.ok) throw new Error(`layouts_get_failed:${response.status}`);
+      const payload = (await response.json()) as LayoutFileResponse;
+      return fromBase64(payload.content_base64);
+    },
+    async putText(key: string, body: string) {
+      const bucketId = await resolveBucketId();
+      const response = await authorizeFetch(env, {
+        path: "/api/v1/cloudflare-r2-adapter/s3/r2_file_save",
+        method: "POST",
+        body: JSON.stringify({ bucket_id: bucketId, key, content: body }),
+      });
+      if (!response.ok) throw new Error(`layouts_put_failed:${response.status}`);
+    },
+    async deleteKey(key: string) {
+      const bucketId = await resolveBucketId();
+      const response = await authorizeFetch(env, {
+        path: "/api/v1/cloudflare-r2-adapter/s3/r2_file_delete",
+        method: "POST",
+        body: JSON.stringify({ bucket_id: bucketId, key }),
+      });
+      if (!response.ok) throw new Error(`layouts_delete_failed:${response.status}`);
+    },
+  };
+};
+
+export const createLayoutsBackend = (env: LayoutsEnv, tenantId?: string): LayoutBackend =>
+  hasAuthorizeConfig(env) ? createAuthorizeBackend(env, tenantId) : createDirectBackend(env);
