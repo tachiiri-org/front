@@ -406,6 +406,11 @@ const bindOrgSelectScreen = async (): Promise<void> => {
   }
 };
 
+const getCookie = (name: string): string | null => {
+  const match = document.cookie.match(new RegExp(`(?:^|; )${name}=([^;]*)`));
+  return match ? decodeURIComponent(match[1]) : null;
+};
+
 const loadEditorBootstrap = async (): Promise<void> => {
   if (window.location.pathname === '/org-select') {
     renderOrgSelectPage();
@@ -419,6 +424,18 @@ const loadEditorBootstrap = async (): Promise<void> => {
     void renderAuthPage();
     return;
   }
+
+  if (!getCookie('identity_org_id')) {
+    const res = await fetch('/api/auth/identity-status').catch(() => null);
+    const status = res?.ok ? (await res.json() as { user_id: string | null }) : null;
+    if (!status?.user_id) {
+      void renderAuthPage();
+      return;
+    }
+    window.location.href = '/org-select';
+    return;
+  }
+
   await loadEditor(screenId);
 };
 
