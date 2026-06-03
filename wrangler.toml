@@ -62,4 +62,5 @@ service = "backend-dev"
 FRONT_TO_BACKEND_TOKEN = "b109b22738647033f1ef4ad11426c8a8a05aae7c3ec3da9f88e0ad4dbd768781"
 GITHUB_OAUTH_CLIENT_ID = "Ov23litfbD8WRrXkM4iR"
 GOOGLE_OAUTH_CLIENT_ID = "804252639051-hdkilk1189bomeiv9opnsu0h2basdtr8.apps.googleusercontent.com"
+LAYOUTS_BUCKET_ID = "bucket-dev"
 

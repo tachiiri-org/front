@@ -335,9 +335,7 @@ const handleCanvasOptionsGet = async (backend: LayoutBackend, screenId: string):
 
 export const handleApiRequest = async (request: Request, env: Env): Promise<Response> => {
   const url = new URL(request.url);
-  const cookies = parseCookies(request);
-  const tenantId = cookies.get('identity_org_id') ?? undefined;
-  const backend = createLayoutsBackend(env, tenantId);
+  const backend = createLayoutsBackend(env);
 
   if (url.pathname === '/api/component-schemas') {
     if (request.method === 'GET') {
