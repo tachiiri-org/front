@@ -125,6 +125,7 @@ export {
   type TableColumn,
   type TableSelectSource,
   type TableDefaultValue,
+  type TableEndpointSource,
   isTableComponent,
   isTableSchema,
   isTableData,

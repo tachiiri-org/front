@@ -10,6 +10,7 @@ export type IdentifyGitHubSession = {
     login: string;
     name: string | null;
   };
+  email: string | null;
 };
 
 // GitHub connect session (repo and other resource scopes)
@@ -240,18 +241,6 @@ async function linkEmailToUser(env: AuthorizeEnv, userId: string, email: string)
   });
 }
 
-async function fetchGitHubVerifiedEmail(env: AuthorizeEnv, accessToken: string): Promise<string | null> {
-  const res = await authorizeFetch(env, {
-    path: "/api/v1/github/user/emails",
-    method: "GET",
-    headers: { "x-github-access-token": accessToken },
-  });
-  if (!res.ok) return null;
-  const emails = (await res.json()) as Array<{ email: string; verified: boolean; primary: boolean }>;
-  const primary = emails.find((e) => e.primary && e.verified);
-  return primary?.email.toLowerCase() ?? null;
-}
-
 async function linkGitHubToUser(env: AuthorizeEnv, userId: string, githubId: string): Promise<void> {
   await authorizeFetch(env, {
     path: `/api/v1/identity/users/${encodeURIComponent(userId)}/link-github`,
@@ -271,7 +260,7 @@ async function linkGoogleToUser(env: AuthorizeEnv, userId: string, googleSub: st
 export async function findOrCreateUserByGitHub(
   env: AuthorizeEnv,
   githubId: string,
-  accessToken?: string,
+  email?: string | null,
 ): Promise<string> {
   const findRes = await authorizeFetch(env, {
     path: `/api/v1/identity/users/by-github/${encodeURIComponent(githubId)}`,
@@ -279,24 +268,18 @@ export async function findOrCreateUserByGitHub(
   });
   if (findRes.ok) {
     const userId = ((await findRes.json()) as IdentityUser).user_id;
-    if (accessToken) {
-      const email = await fetchGitHubVerifiedEmail(env, accessToken).catch(() => null);
-      if (email) await linkEmailToUser(env, userId, email).catch(() => null);
-    }
+    if (email) await linkEmailToUser(env, userId, email).catch(() => null);
     return userId;
   }
   if (findRes.status !== 404) throw new Error(`identity_find_github_failed:${findRes.status}`);
 
-  if (accessToken) {
+  if (email) {
     try {
-      const email = await fetchGitHubVerifiedEmail(env, accessToken);
-      if (email) {
-        const userId = await findUserByEmail(env, email);
-        if (userId) {
-          await linkGitHubToUser(env, userId, githubId);
-          await linkEmailToUser(env, userId, email).catch(() => null);
-          return userId;
-        }
+      const userId = await findUserByEmail(env, email);
+      if (userId) {
+        await linkGitHubToUser(env, userId, githubId);
+        await linkEmailToUser(env, userId, email).catch(() => null);
+        return userId;
       }
     } catch { /* non-fatal */ }
   }
@@ -308,10 +291,7 @@ export async function findOrCreateUserByGitHub(
   });
   if (!createRes.ok) throw new Error(`identity_create_user_failed:${createRes.status}`);
   const userId = ((await createRes.json()) as IdentityUser).user_id;
-  if (accessToken) {
-    const email = await fetchGitHubVerifiedEmail(env, accessToken).catch(() => null);
-    if (email) await linkEmailToUser(env, userId, email).catch(() => null);
-  }
+  if (email) await linkEmailToUser(env, userId, email).catch(() => null);
   return userId;
 }
 
@@ -351,6 +331,30 @@ export async function findOrCreateUserByGoogle(
   const userId = ((await createRes.json()) as IdentityUser).user_id;
   if (email) await linkEmailToUser(env, userId, email).catch(() => null);
   return userId;
+}
+
+export type OrgUser = {
+  orgUserId: string;
+  created: boolean;
+};
+
+export async function resolveOrgUser(
+  env: AuthorizeEnv,
+  orgId: string,
+  identityUserId: string,
+  email: string,
+): Promise<OrgUser | null> {
+  try {
+    const res = await authorizeFetch(env, {
+      path: "/api/v1/identify/org-user",
+      method: "POST",
+      body: JSON.stringify({ orgId, identityUserId, email }),
+    });
+    if (!res.ok) return null;
+    return (await res.json()) as OrgUser;
+  } catch {
+    return null;
+  }
 }
 
 export async function listUserOrganizations(env: AuthorizeEnv, userId: string): Promise<IdentityOrg[]> {

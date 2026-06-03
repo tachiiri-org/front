@@ -97,7 +97,7 @@ export async function handleGitHubLoginCallback(context: RouteContext): Promise<
 
   try {
     headers.append("Set-Cookie", await serializeGitHubSessionCookie(session, context.env, context.request));
-    const userId = await findOrCreateUserByGitHub(context.env, session.viewer.login, session.accessToken);
+    const userId = await findOrCreateUserByGitHub(context.env, session.viewer.login, session.email);
     headers.append(
       "Set-Cookie",
       serializeCookie(IDENTITY_USER_ID_COOKIE, userId, {

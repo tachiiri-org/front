@@ -4,6 +4,7 @@ import {
   type TableComponent,
   type TableData,
   type TableSchema,
+  type TableEndpointSource,
 } from '../../../schema/component';
 import { CSS_PROP_KEYS } from '../../../schema/component/style';
 import {
@@ -218,6 +219,23 @@ const persistTableDraft = async (
       frame.id === saveTarget.frameId ? { ...(frame as Record<string, unknown>), ...next } : frame,
     ),
   }));
+};
+
+const fetchSourceRows = async (
+  source: TableEndpointSource,
+): Promise<TableData['rows']> => {
+  const res = await fetch(source.url);
+  if (!res.ok) throw new Error(`source_fetch_failed:${res.status}`);
+  const payload = (await res.json()) as unknown;
+  const items: unknown[] = source.itemsPath
+    ? ((payload as Record<string, unknown>)[source.itemsPath] as unknown[]) ?? []
+    : Array.isArray(payload) ? payload : [];
+  return items.map((item, i) => {
+    const obj = (typeof item === 'object' && item !== null ? item : {}) as Record<string, unknown>;
+    const id = source.idKey ? String(obj[source.idKey] ?? i) : String(i);
+    const values: Record<string, unknown> = { ...obj };
+    return { id, values };
+  });
 };
 
 const renderEditableTable = (
@@ -625,6 +643,33 @@ const renderEditableTable = (
 
     toolbar.appendChild(saveBtn);
 
+    if (component.source) {
+      const reloadBtn = document.createElement('button');
+      reloadBtn.type = 'button';
+      reloadBtn.textContent = 'Reload';
+      Object.assign(reloadBtn.style, {
+        fontSize: '11px',
+        padding: '2px 10px',
+        cursor: 'pointer',
+        border: '1px solid rgba(0,0,0,0.14)',
+        borderRadius: '4px',
+        background: 'white',
+      });
+      reloadBtn.addEventListener('click', () => {
+        reloadBtn.disabled = true;
+        reloadBtn.textContent = '...';
+        void fetchSourceRows(component.source!).then((rows) => {
+          draft.data.rows = rows;
+          markDirtyAndRender();
+        }).catch((err) => {
+          showToast(err instanceof Error ? err.message : String(err), 'error');
+          reloadBtn.disabled = false;
+          reloadBtn.textContent = 'Reload';
+        });
+      });
+      toolbar.appendChild(reloadBtn);
+    }
+
     const hiddenLabel = document.createElement('label');
     Object.assign(hiddenLabel.style, {
       display: 'flex',
@@ -852,6 +897,16 @@ const renderEditableTable = (
 
   render();
   updateStatus();
+
+  if (component.source && draft.data.rows.length === 0) {
+    void fetchSourceRows(component.source).then((rows) => {
+      draft.data.rows = rows;
+      markDirtyAndRender();
+    }).catch((err) => {
+      showToast(err instanceof Error ? err.message : String(err), 'error');
+    });
+  }
+
   return wrapper;
 };
 

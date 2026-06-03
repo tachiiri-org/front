@@ -1,7 +1,8 @@
 import type { SpecDocument } from '../shared/spec-document';
 import type { UiShellSettings } from '../shared/ui-shell-settings';
-import { readGitHubSession, readGitHubConnectSession, readGoogleSession, listUserOrganizations, createOrganization } from '../identify';
+import { readGitHubSession, readGitHubConnectSession, readGoogleSession, listUserOrganizations, createOrganization, resolveOrgUser } from '../identify';
 import { parseCookies } from '../auth/cookies';
+import { authorizeFetch } from '../auth/fetch';
 import type { AuthorizeEnv } from '../auth';
 
 type StoredObject = {
@@ -191,7 +192,7 @@ export async function handleIdentityStatus(
   }
 }
 
-export function handleSelectOrg(request: Request): Response | null {
+export async function handleSelectOrg(request: Request, env: AuthorizeEnv): Promise<Response | null> {
   const url = new URL(request.url);
   if (url.pathname !== '/api/auth/select-org' || request.method !== 'GET') {
     return null;
@@ -202,12 +203,31 @@ export function handleSelectOrg(request: Request): Response | null {
     return json({ error: 'org_id_required' }, { status: 400 });
   }
 
+  const cookies = parseCookies(request);
+  const identityUserId = cookies.get('identity_user_id');
   const isSecure = url.protocol === 'https:';
-  const cookieHeader = `identity_org_id=${encodeURIComponent(orgId)}; Path=/; Max-Age=${60 * 60 * 24}${isSecure ? '; Secure' : ''}; SameSite=Lax`;
-  return new Response(null, {
-    status: 302,
-    headers: { Location: '/', 'Set-Cookie': cookieHeader },
-  });
+  const headers = new Headers();
+  headers.set('Location', '/');
+  headers.append('Set-Cookie', `identity_org_id=${encodeURIComponent(orgId)}; Path=/; Max-Age=${60 * 60 * 24}${isSecure ? '; Secure' : ''}; SameSite=Lax`);
+
+  if (identityUserId) {
+    const [githubSession, googleSession] = await Promise.allSettled([
+      readGitHubSession(request, env),
+      readGoogleSession(request, env),
+    ]);
+    const email =
+      (githubSession.status === 'fulfilled' ? githubSession.value?.email : null) ??
+      (googleSession.status === 'fulfilled' ? googleSession.value?.email : null);
+
+    if (email) {
+      const orgUser = await resolveOrgUser(env, orgId, identityUserId, email);
+      if (orgUser) {
+        headers.append('Set-Cookie', `org_user_id=${encodeURIComponent(orgUser.orgUserId)}; Path=/; Max-Age=${60 * 60 * 24}${isSecure ? '; Secure' : ''}; SameSite=Lax; HttpOnly`);
+      }
+    }
+  }
+
+  return new Response(null, { status: 302, headers });
 }
 
 export async function handleOrgCreate(
@@ -231,4 +251,32 @@ export async function handleOrgCreate(
 
   const org = await createOrganization(env, userId, body.name);
   return json(org, { status: 201 });
+}
+
+export async function handleOrgMembers(request: Request, env: AuthorizeEnv): Promise<Response | null> {
+  const url = new URL(request.url);
+  if (!url.pathname.startsWith('/api/auth/members')) return null;
+
+  const cookies = parseCookies(request);
+  const orgId = cookies.get('identity_org_id');
+  const orgUserId = cookies.get('org_user_id');
+  if (!orgId) {
+    return json({ error: 'not_authenticated' }, { status: 401 });
+  }
+
+  const backendPath = url.pathname.replace('/api/auth/members', '/api/v1/graph/members') + url.search;
+  const bodyText = request.body ? await request.text() : undefined;
+
+  const res = await authorizeFetch(env, {
+    path: backendPath,
+    method: request.method,
+    body: bodyText,
+    tenantContext: { tenantId: orgId, subjectId: orgUserId ?? undefined },
+  });
+
+  const text = await res.text();
+  return new Response(text, {
+    status: res.status,
+    headers: { 'Content-Type': 'application/json; charset=utf-8' },
+  });
 }

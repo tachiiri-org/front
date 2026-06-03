@@ -138,19 +138,45 @@ const renderResolved = (
     table.appendChild(thead);
 
     const tbody = document.createElement('tbody');
-    for (const row of c.data.rows) {
-      const tr = document.createElement('tr');
-      tr.dataset.rowId = row.id;
-      for (const column of c.schema.columns.filter((column) => !column.hidden)) {
-        const td = document.createElement('td');
-        td.style.borderBottom = '1px solid rgba(0,0,0,0.06)';
-        td.style.padding = '4px 6px';
-        const value = row.values[column.key];
-        td.textContent = value === undefined || value === null ? '' : String(value);
-        tr.appendChild(td);
+
+    const renderRows = (rows: typeof c.data.rows): void => {
+      tbody.replaceChildren();
+      for (const row of rows) {
+        const tr = document.createElement('tr');
+        tr.dataset.rowId = row.id;
+        for (const column of c.schema.columns.filter((col) => !col.hidden)) {
+          const td = document.createElement('td');
+          td.style.borderBottom = '1px solid rgba(0,0,0,0.06)';
+          td.style.padding = '4px 6px';
+          const value = row.values[column.key];
+          td.textContent = value === undefined || value === null ? '' : String(value);
+          tr.appendChild(td);
+        }
+        tbody.appendChild(tr);
       }
-      tbody.appendChild(tr);
+    };
+
+    renderRows(c.data.rows);
+
+    if (c.source) {
+      void (async () => {
+        try {
+          const res = await fetch(c.source!.url);
+          if (!res.ok) return;
+          const payload = (await res.json()) as unknown;
+          const items: unknown[] = c.source!.itemsPath
+            ? ((payload as Record<string, unknown>)[c.source!.itemsPath] as unknown[]) ?? []
+            : Array.isArray(payload) ? payload : [];
+          const rows = items.map((item, i) => {
+            const obj = (typeof item === 'object' && item !== null ? item : {}) as Record<string, unknown>;
+            const rowId = c.source!.idKey ? String(obj[c.source!.idKey] ?? i) : String(i);
+            return { id: rowId, values: { ...obj } };
+          });
+          renderRows(rows);
+        } catch { /* non-fatal */ }
+      })();
     }
+
     table.appendChild(tbody);
     wrapper.appendChild(table);
     return wrapper;

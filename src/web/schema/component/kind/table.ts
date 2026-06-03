@@ -94,11 +94,28 @@ export type TableData = {
   rows: TableRow[];
 };
 
+export type TableEndpointSource = {
+  url: string;
+  itemsPath?: string;
+  idKey?: string;
+};
+
+export const isTableEndpointSource = (value: unknown): value is TableEndpointSource => {
+  if (typeof value !== 'object' || value === null || Array.isArray(value)) return false;
+  const c = value as Record<string, unknown>;
+  return (
+    typeof c.url === 'string' &&
+    (c.itemsPath === undefined || typeof c.itemsPath === 'string') &&
+    (c.idKey === undefined || typeof c.idKey === 'string')
+  );
+};
+
 export type TableComponent = {
   kind: 'table';
   name?: string;
   schema: TableSchema;
   data: TableData;
+  source?: TableEndpointSource;
 } & CssStyleProps;
 
 export const tableDefaults: TableComponent = {
@@ -223,6 +240,7 @@ export const isTableComponent = (value: unknown): value is TableComponent => {
     (c.name === undefined || typeof c.name === 'string') &&
     isTableSchema(c.schema) &&
     isTableData(c.data) &&
+    (c.source === undefined || isTableEndpointSource(c.source)) &&
     ALL_CSS_PROP_KEYS.every((k) => c[k] === undefined || typeof c[k] === 'string')
   );
 };
