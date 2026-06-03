@@ -291,6 +291,53 @@ const renderAuthPage = async (): Promise<void> => {
   root.appendChild(wrap);
 };
 
+const renderOrgSelectPage = (): void => {
+  nav.style.display = 'none';
+  document.body.style.display = '';
+
+  root.replaceChildren();
+  const wrap = document.createElement('div');
+  wrap.style.cssText = 'display:flex;flex-direction:column;align-items:center;justify-content:center;height:100vh;font-family:monospace;gap:1.5em;';
+
+  const title = document.createElement('h2');
+  title.textContent = '組織を選択';
+  title.style.cssText = 'margin:0;font-size:1.2em;';
+  wrap.appendChild(title);
+
+  // Org picker
+  const pickerRow = document.createElement('div');
+  pickerRow.style.cssText = 'display:flex;align-items:center;gap:0.5em;';
+  const picker = document.createElement('select');
+  picker.setAttribute('data-frame-id', 'org-picker');
+  picker.style.cssText = 'font-family:monospace;padding:4px 8px;';
+  const selectBtn = document.createElement('a');
+  selectBtn.setAttribute('data-frame-id', 'org-select-btn');
+  selectBtn.textContent = '選択';
+  selectBtn.style.cssText = 'padding:4px 12px;border:1px solid #555;border-radius:4px;text-decoration:none;color:inherit;opacity:0.4;pointer-events:none;';
+  pickerRow.append(picker, selectBtn);
+  wrap.appendChild(pickerRow);
+
+  const sep = document.createElement('hr');
+  sep.style.cssText = 'width:200px;border-color:#444;';
+  wrap.appendChild(sep);
+
+  // Org create
+  const createRow = document.createElement('div');
+  createRow.style.cssText = 'display:flex;align-items:center;gap:0.5em;';
+  const nameInput = document.createElement('input');
+  nameInput.setAttribute('data-frame-id', 'org-name');
+  nameInput.type = 'text';
+  nameInput.style.cssText = 'font-family:monospace;padding:4px 8px;';
+  const createBtn = document.createElement('button');
+  createBtn.setAttribute('data-frame-id', 'org-create-btn');
+  createBtn.textContent = '作成';
+  createBtn.style.cssText = 'font-family:monospace;padding:4px 12px;';
+  createRow.append(nameInput, createBtn);
+  wrap.appendChild(createRow);
+
+  root.appendChild(wrap);
+};
+
 const bindOrgSelectScreen = async (): Promise<void> => {
   // Populate org-picker select from identity-status
   const pickerEl = document.querySelector('[data-frame-id="org-picker"]');
@@ -361,7 +408,7 @@ const bindOrgSelectScreen = async (): Promise<void> => {
 
 const loadEditorBootstrap = async (): Promise<void> => {
   if (window.location.pathname === '/org-select') {
-    await renderScreen('org-select');
+    renderOrgSelectPage();
     await bindOrgSelectScreen();
     return;
   }
