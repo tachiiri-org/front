@@ -428,12 +428,10 @@ const loadEditorBootstrap = async (): Promise<void> => {
   if (!getCookie('identity_org_id')) {
     const res = await fetch('/api/auth/identity-status').catch(() => null);
     const status = res?.ok ? (await res.json() as { user_id: string | null }) : null;
-    if (!status?.user_id) {
-      void renderAuthPage();
+    if (status?.user_id) {
+      window.location.href = '/org-select';
       return;
     }
-    window.location.href = '/org-select';
-    return;
   }
 
   await loadEditor(screenId);
