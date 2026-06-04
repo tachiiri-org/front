@@ -351,20 +351,27 @@ const handleMigrateScreensToFolder = async (
 
   // Delete old root files and _registry.json only if all succeeded
   const allOk = results.every((r) => r.status === 'ok');
+  let cleanupError: string | null = null;
   if (allOk) {
-    for (const entry of entries) {
-      await backend.deleteKey(`${entry.id}.json`);
-      let cursor: string | undefined;
-      do {
-        const result = await backend.list(`${entry.id}/components/`, cursor);
-        for (const obj of result.objects) await backend.deleteKey(obj.key);
-        cursor = result.truncated ? result.cursor : undefined;
-      } while (cursor);
+    try {
+      for (const entry of entries) {
+        await backend.deleteKey(`${entry.id}.json`);
+        let cursor: string | undefined;
+        let result = await backend.list(`${entry.id}/components/`, cursor);
+        while (result.objects.length > 0 || result.truncated) {
+          for (const obj of result.objects) await backend.deleteKey(obj.key);
+          if (!result.truncated) break;
+          cursor = result.cursor;
+          result = await backend.list(`${entry.id}/components/`, cursor);
+        }
+      }
+      await backend.deleteKey(REGISTRY_KEY);
+    } catch (e) {
+      cleanupError = String(e);
     }
-    await backend.deleteKey(REGISTRY_KEY);
   }
 
-  return new Response(JSON.stringify({ migrated: results.filter((r) => r.status === 'ok').length, allOk, results }), {
+  return new Response(JSON.stringify({ migrated: results.filter((r) => r.status === 'ok').length, allOk, cleanupError, results }), {
     headers: { 'Content-Type': 'application/json' },
   });
 };
