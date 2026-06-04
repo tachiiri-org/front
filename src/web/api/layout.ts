@@ -367,6 +367,78 @@ export const handleApiRequest = async (request: Request, env: Env): Promise<Resp
     return new Response('Method Not Allowed', { status: 405 });
   }
 
+  // Storage Explorer: D1 proxy
+  if (url.pathname === '/api/viewer/d1/databases' && request.method === 'GET') {
+    const cookies = parseCookies(request);
+    const tenantContext = {
+      tenantId: cookies.get('identity_org_id') ?? undefined,
+      subjectId: cookies.get('identity_user_id') ?? undefined,
+    };
+    return authorizeFetch(env, { path: '/api/v1/d1/v4/databases', method: 'GET', tenantContext });
+  }
+
+  const d1QueryMatch = url.pathname.match(/^\/api\/viewer\/d1\/([^/]+)\/query$/);
+  if (d1QueryMatch && request.method === 'POST') {
+    const dbId = decodeURIComponent(d1QueryMatch[1]);
+    const body = await request.text();
+    const cookies = parseCookies(request);
+    const tenantContext = {
+      tenantId: cookies.get('identity_org_id') ?? undefined,
+      subjectId: cookies.get('identity_user_id') ?? undefined,
+    };
+    return authorizeFetch(env, {
+      path: `/api/v1/d1/v4/databases/${dbId}/query`,
+      method: 'POST',
+      body,
+      tenantContext,
+    });
+  }
+
+  // Storage Explorer: R2 proxy
+  if (url.pathname === '/api/viewer/r2/buckets' && request.method === 'GET') {
+    const cookies = parseCookies(request);
+    const tenantContext = {
+      tenantId: cookies.get('identity_org_id') ?? undefined,
+      subjectId: cookies.get('identity_user_id') ?? undefined,
+    };
+    return authorizeFetch(env, {
+      path: '/api/v1/cloudflare-r2-adapter/control/r2_bucket_list',
+      method: 'POST',
+      body: '{}',
+      tenantContext,
+    });
+  }
+
+  if (url.pathname === '/api/viewer/r2/files' && request.method === 'POST') {
+    const body = await request.text();
+    const cookies = parseCookies(request);
+    const tenantContext = {
+      tenantId: cookies.get('identity_org_id') ?? undefined,
+      subjectId: cookies.get('identity_user_id') ?? undefined,
+    };
+    return authorizeFetch(env, {
+      path: '/api/v1/cloudflare-r2-adapter/s3/r2_file_list',
+      method: 'POST',
+      body,
+      tenantContext,
+    });
+  }
+
+  if (url.pathname === '/api/viewer/r2/file' && request.method === 'POST') {
+    const body = await request.text();
+    const cookies = parseCookies(request);
+    const tenantContext = {
+      tenantId: cookies.get('identity_org_id') ?? undefined,
+      subjectId: cookies.get('identity_user_id') ?? undefined,
+    };
+    return authorizeFetch(env, {
+      path: '/api/v1/cloudflare-r2-adapter/s3/r2_file_get',
+      method: 'POST',
+      body,
+      tenantContext,
+    });
+  }
+
   // D1-backed graph API — proxy to backend /api/v1/graph/*
   const graphApiMatch = url.pathname.match(/^\/api\/graph\/(.+)$/);
   if (graphApiMatch) {

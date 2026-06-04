@@ -13,6 +13,7 @@ import {
   isWordGraphComponent,
   isWordGraphTextColComponent,
   isWordGraphWordColComponent,
+  isStorageExplorerComponent,
   ALL_CSS_PROP_KEYS,
   applyDefaults,
   type TableComponent,
@@ -26,6 +27,7 @@ import {
   type WordGraphComponent,
   type WordGraphTextColComponent,
   type WordGraphWordColComponent,
+  type StorageExplorerComponent,
   type Component,
 } from '../../../schema/component';
 import { type Frame, type FrameRef, isFrameRef } from '../../../schema/screen/screen';
@@ -43,6 +45,7 @@ import { renderDefinitionEditor } from './definition-editor';
 import { renderWordGraph } from './word-graph';
 import { renderWordGraphTextCol } from './word-graph/text-col';
 import { renderWordGraphWordCol } from './word-graph/word-col';
+import { renderStorageExplorer } from './storage-explorer';
 
 const applyCssProps = (el: HTMLElement, c: Record<string, unknown>): void => {
   for (const propKey of ALL_CSS_PROP_KEYS) {
@@ -330,6 +333,9 @@ export const renderComponent = (
       ? (frame as Record<string, unknown>).graphId as string
       : undefined;
     return renderWordGraph(id, frame as WordGraphComponent, graphId);
+  }
+  if (isStorageExplorerComponent(frame)) {
+    return renderStorageExplorer(id, frame as StorageExplorerComponent);
   }
   if (isTableComponent(frame) && options?.screenId) {
     return renderEditableTable(
