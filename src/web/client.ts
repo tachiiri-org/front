@@ -403,7 +403,7 @@ const loadEditorBootstrap = async (): Promise<void> => {
     return;
   }
 
-  if (!getCookie('identity_org_id')) {
+  if (screenId !== 'org-select' && !getCookie('identity_org_id')) {
     const res = await fetch('/api/auth/identity-status').catch(() => null);
     const status = res?.ok ? (await res.json() as { user_id: string | null }) : null;
     if (status?.user_id) {
