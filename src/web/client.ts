@@ -87,6 +87,30 @@ const renderNav = async (screenId: string): Promise<void> => {
 
   nav.appendChild(select);
 
+  const envSelect = document.createElement('select');
+  envSelect.style.cssText =
+    'background:#1f2937;color:#d1d5db;border:1px solid #374151;padding:2px 8px;font-size:12px;font-family:monospace;border-radius:4px;cursor:pointer;height:24px;';
+  const ENVS = [
+    { label: 'production', host: 'front-production.tachiiri.workers.dev' },
+    { label: 'stage', host: 'front-stage.tachiiri.workers.dev' },
+    { label: 'development', host: 'front-dev.tachiiri.workers.dev' },
+  ];
+  const currentHost = window.location.hostname;
+  for (const env of ENVS) {
+    const opt = document.createElement('option');
+    opt.value = env.host;
+    opt.textContent = env.label;
+    if (env.host === currentHost) opt.selected = true;
+    envSelect.appendChild(opt);
+  }
+  envSelect.addEventListener('change', () => {
+    const host = envSelect.value;
+    if (host && host !== currentHost) {
+      window.location.href = `https://${host}${window.location.pathname}`;
+    }
+  });
+  nav.appendChild(envSelect);
+
   const [authResult, identityResult] = await Promise.allSettled([
     fetch('/api/auth/status'),
     fetch('/api/auth/identity-status'),
@@ -138,11 +162,16 @@ const renderNav = async (screenId: string): Promise<void> => {
         Object.assign(logoutLink.style, { color: '#6b7280', fontSize: '12px', textDecoration: 'none' });
         nav.appendChild(logoutLink);
       } else {
-        const loginLink = document.createElement('a');
-        loginLink.textContent = 'Login';
-        loginLink.href = '/identify-viewer';
-        Object.assign(loginLink.style, { color: '#6b7280', fontSize: '12px', textDecoration: 'none' });
-        nav.appendChild(loginLink);
+        const linkStyle = 'color:#6b7280;font-size:12px;text-decoration:none;';
+        const ghLink = document.createElement('a');
+        ghLink.textContent = 'GitHub';
+        ghLink.href = '/oauth/github/start';
+        ghLink.style.cssText = linkStyle;
+        const gLink = document.createElement('a');
+        gLink.textContent = 'Google';
+        gLink.href = '/oauth/google/start';
+        gLink.style.cssText = linkStyle;
+        nav.append(ghLink, gLink);
       }
     }
   } catch { /* ignore */ }
@@ -285,7 +314,6 @@ const loadEditor = async (screenId: string): Promise<void> => {
   currentEditorScreenId = screenId;
   await renderScreen(screenId);
   await hydrateEditor(reloadEditor, screenId, rerender);
-  await bindOrgSelectScreen();
 };
 
 type AuthStatus = {
@@ -298,128 +326,6 @@ type IdentityStatus = {
   organizations: { id: string; name: string }[];
 };
 
-const renderAuthPage = async (): Promise<void> => {
-  nav.style.display = 'none';
-  document.body.style.display = '';
-
-  const res = await fetch('/api/auth/status');
-  const status = (await res.json()) as AuthStatus;
-
-  root.replaceChildren();
-  const wrap = document.createElement('div');
-  wrap.style.cssText = 'display:flex;flex-direction:column;align-items:center;justify-content:center;height:100vh;font-family:monospace;gap:1em;';
-
-  if (status.github.authenticated) {
-    const row = document.createElement('div');
-    row.style.cssText = 'display:flex;align-items:center;gap:0.5em;';
-    const label = document.createElement('span');
-    label.textContent = `GitHub: @${status.github.login ?? 'unknown'}`;
-    const btn = document.createElement('button');
-    btn.textContent = 'Logout';
-    btn.onclick = async () => {
-      await fetch('/api/auth/github/logout', { method: 'POST' });
-      void renderAuthPage();
-    };
-    row.append(label, btn);
-    wrap.appendChild(row);
-  } else {
-    const a = document.createElement('a');
-    a.href = '/oauth/github/start';
-    a.textContent = 'Login with GitHub';
-    wrap.appendChild(a);
-  }
-
-  if (status.google.authenticated) {
-    const row = document.createElement('div');
-    row.style.cssText = 'display:flex;align-items:center;gap:0.5em;';
-    const label = document.createElement('span');
-    label.textContent = `Google: ${status.google.email ?? status.google.name ?? 'unknown'}`;
-    const btn = document.createElement('button');
-    btn.textContent = 'Logout';
-    btn.onclick = async () => {
-      await fetch('/api/auth/google/logout', { method: 'POST' });
-      void renderAuthPage();
-    };
-    row.append(label, btn);
-    wrap.appendChild(row);
-  } else {
-    const a = document.createElement('a');
-    a.href = '/oauth/google/start';
-    a.textContent = 'Login with Google';
-    wrap.appendChild(a);
-  }
-
-  root.appendChild(wrap);
-};
-
-
-const bindOrgSelectScreen = async (): Promise<void> => {
-  // Populate org-picker select from identity-status
-  const pickerEl = document.querySelector('[data-frame-id="org-picker"]');
-  const selectBtnEl = document.querySelector('[data-frame-id="org-select-btn"]');
-  const nameInputEl = document.querySelector('[data-frame-id="org-name"]');
-  const createBtnEl = document.querySelector('[data-frame-id="org-create-btn"]');
-
-  if (pickerEl instanceof HTMLSelectElement && selectBtnEl instanceof HTMLAnchorElement) {
-    const res = await fetch('/api/auth/identity-status');
-    const status = (await res.json()) as IdentityStatus;
-
-    pickerEl.replaceChildren();
-    if (!status.user_id) {
-      window.location.href = '/';
-      return;
-    }
-
-    const placeholder = document.createElement('option');
-    placeholder.value = '';
-    placeholder.textContent = status.organizations.length > 0 ? '組織を選択...' : '(組織がありません)';
-    pickerEl.appendChild(placeholder);
-
-    for (const org of status.organizations) {
-      const opt = document.createElement('option');
-      opt.value = org.id;
-      opt.textContent = org.name;
-      pickerEl.appendChild(opt);
-    }
-
-    const updateSelectBtn = (): void => {
-      const orgId = pickerEl.value;
-      if (orgId) {
-        selectBtnEl.href = `/api/auth/select-org?org_id=${encodeURIComponent(orgId)}`;
-        selectBtnEl.style.opacity = '1';
-        selectBtnEl.style.pointerEvents = '';
-      } else {
-        selectBtnEl.href = '';
-        selectBtnEl.style.opacity = '0.4';
-        selectBtnEl.style.pointerEvents = 'none';
-      }
-    };
-
-    updateSelectBtn();
-    pickerEl.addEventListener('change', updateSelectBtn);
-  }
-
-  if (nameInputEl instanceof HTMLInputElement && createBtnEl instanceof HTMLButtonElement) {
-    nameInputEl.placeholder = '組織名を入力';
-    createBtnEl.onclick = async (e) => {
-      e.preventDefault();
-      const name = nameInputEl.value.trim();
-      if (!name) return;
-      createBtnEl.disabled = true;
-      const r = await fetch('/api/auth/organizations', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ name }),
-      });
-      if (r.ok) {
-        const org = (await r.json()) as { id: string; name: string };
-        window.location.href = `/api/auth/select-org?org_id=${encodeURIComponent(org.id)}`;
-      } else {
-        createBtnEl.disabled = false;
-      }
-    };
-  }
-};
 
 const getCookie = (name: string): string | null => {
   const match = document.cookie.match(new RegExp(`(?:^|; )${name}=([^;]*)`));
@@ -430,7 +336,8 @@ const loadEditorBootstrap = async (): Promise<void> => {
   const pathnameScreenId = getScreenIdFromPathname();
   const screenId = pathnameScreenId ?? await findEditorScreenId();
   if (!screenId) {
-    void renderAuthPage();
+    applyViewportLayout();
+    void renderNav('');
     return;
   }
 
