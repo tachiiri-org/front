@@ -1,4 +1,4 @@
-import { createLayoutsBackend, type LayoutsEnv, type LayoutBackend } from '../storage/layouts/r2';
+import { createLayoutsBackend, createScreenNameBackend, type LayoutsEnv, type LayoutBackend, type ScreenNameBackend } from '../storage/layouts/r2';
 import { isScreen, isCanvasFrame } from '../schema/screen/screen';
 import { getEntityDisplayName } from '../schema/component/name';
 import {
@@ -47,17 +47,7 @@ type ResourceConfig = {
   normalizePut?: (backend: LayoutBackend, id: string, value: unknown) => Promise<unknown | null>;
 };
 
-const RESOURCE_CONFIGS: ResourceConfig[] = [
-  {
-    name: 'layouts',
-    storagePrefix: '',
-    handleList: handleScreensListGet,
-    handleGet: handleScreenGet,
-    handlePut: handleScreenPut,
-    handleDelete: handleScreenDelete,
-    handleRename: handleScreenRename,
-  },
-];
+const RESOURCE_CONFIGS: ResourceConfig[] = [];
 
 // --- Doc helpers ---
 
@@ -278,7 +268,7 @@ const handleMigrateListsToTree = async (backend: LayoutBackend): Promise<Respons
               changed = true;
             }
             if (changed) {
-              await backend.putText(`${screen.id}.json`, JSON.stringify(screenData));
+              await backend.putText(`screens/${screen.id}.json`, JSON.stringify(screenData));
             }
           } catch { /* fall through */ }
         }
@@ -307,6 +297,78 @@ const handleMigrateListsToTree = async (backend: LayoutBackend): Promise<Respons
   });
 };
 
+const handleMigrateScreensToFolder = async (
+  backend: LayoutBackend,
+  screenNames: ScreenNameBackend,
+): Promise<Response> => {
+  const REGISTRY_KEY = '_registry.json';
+  const registryText = await backend.getText(REGISTRY_KEY);
+  if (!registryText) {
+    return new Response(JSON.stringify({ migrated: 0, message: 'No _registry.json found' }), {
+      headers: { 'Content-Type': 'application/json' },
+    });
+  }
+
+  type Entry = { id: string; name: string };
+  let entries: Entry[] = [];
+  try {
+    const parsed = JSON.parse(registryText) as unknown;
+    if (Array.isArray(parsed)) {
+      entries = (parsed as unknown[]).filter((e): e is Entry =>
+        typeof e === 'object' && e !== null &&
+        typeof (e as Record<string, unknown>).id === 'string' &&
+        typeof (e as Record<string, unknown>).name === 'string'
+      );
+    }
+  } catch { /* */ }
+
+  const results: { id: string; name: string; status: string }[] = [];
+
+  for (const entry of entries) {
+    try {
+      // Copy JSON to screens/ prefix
+      const body = await backend.getText(`${entry.id}.json`);
+      if (body) {
+        await backend.putText(`screens/${entry.id}.json`, body);
+      }
+      // Copy components if any
+      let cursor: string | undefined;
+      do {
+        const result = await backend.list(`${entry.id}/components/`, cursor);
+        for (const obj of result.objects) {
+          const file = await backend.getText(obj.key);
+          if (file) await backend.putText(`screens/${obj.key}`, file);
+        }
+        cursor = result.truncated ? result.cursor : undefined;
+      } while (cursor);
+      // Register in D1
+      await screenNames.create(entry.id, entry.name);
+      results.push({ id: entry.id, name: entry.name, status: 'ok' });
+    } catch (e) {
+      results.push({ id: entry.id, name: entry.name, status: `error:${String(e)}` });
+    }
+  }
+
+  // Delete old root files and _registry.json only if all succeeded
+  const allOk = results.every((r) => r.status === 'ok');
+  if (allOk) {
+    for (const entry of entries) {
+      await backend.deleteKey(`${entry.id}.json`);
+      let cursor: string | undefined;
+      do {
+        const result = await backend.list(`${entry.id}/components/`, cursor);
+        for (const obj of result.objects) await backend.deleteKey(obj.key);
+        cursor = result.truncated ? result.cursor : undefined;
+      } while (cursor);
+    }
+    await backend.deleteKey(REGISTRY_KEY);
+  }
+
+  return new Response(JSON.stringify({ migrated: results.filter((r) => r.status === 'ok').length, allOk, results }), {
+    headers: { 'Content-Type': 'application/json' },
+  });
+};
+
 const isNavigationRequest = (request: Request): boolean => {
   if (request.method !== 'GET' && request.method !== 'HEAD') return false;
   const accept = request.headers.get('Accept') ?? '';
@@ -314,7 +376,7 @@ const isNavigationRequest = (request: Request): boolean => {
 };
 
 const handleCanvasOptionsGet = async (backend: LayoutBackend, screenId: string): Promise<Response> => {
-  const body = await backend.getText(`${screenId}.json`);
+  const body = await backend.getText(`screens/${screenId}.json`);
   if (!body) return new Response('Not Found', { status: 404 });
   try {
     const parsed = JSON.parse(body) as unknown;
@@ -336,6 +398,12 @@ const handleCanvasOptionsGet = async (backend: LayoutBackend, screenId: string):
 export const handleApiRequest = async (request: Request, env: Env): Promise<Response> => {
   const url = new URL(request.url);
   const backend = createLayoutsBackend(env);
+  const cookies = parseCookies(request);
+  const tenantContext = {
+    tenantId: cookies.get('identity_org_id') ?? undefined,
+    subjectId: cookies.get('identity_user_id') ?? undefined,
+  };
+  const screenNames = createScreenNameBackend(env, tenantContext);
 
   if (url.pathname === '/api/component-schemas') {
     if (request.method === 'GET') {
@@ -347,6 +415,11 @@ export const handleApiRequest = async (request: Request, env: Env): Promise<Resp
 
   if (url.pathname === '/api/migrate/lists-to-tree') {
     if (request.method === 'POST') return handleMigrateListsToTree(backend);
+    return new Response('Method Not Allowed', { status: 405 });
+  }
+
+  if (url.pathname === '/api/migrate/screens-to-folder') {
+    if (request.method === 'POST') return handleMigrateScreensToFolder(backend, screenNames);
     return new Response('Method Not Allowed', { status: 405 });
   }
 
@@ -474,7 +547,8 @@ export const handleApiRequest = async (request: Request, env: Env): Promise<Resp
   const canvasOptionsMatch = url.pathname.match(/^\/api\/layouts\/([^/]+)\/canvases$/);
   if (canvasOptionsMatch) {
     const screenName = decodeURIComponent(canvasOptionsMatch[1]);
-    const storageId = (await resolveScreenStorageId(backend, screenName)) ?? screenName;
+    const storageId = await resolveScreenStorageId(backend, screenNames, screenName);
+    if (!storageId) return new Response('Not Found', { status: 404 });
     if (request.method === 'GET') return handleCanvasOptionsGet(backend, storageId);
     return new Response('Method Not Allowed', { status: 405 });
   }
@@ -499,7 +573,8 @@ export const handleApiRequest = async (request: Request, env: Env): Promise<Resp
   if (componentMatch) {
     const screenName = decodeURIComponent(componentMatch[1]);
     const componentId = decodeURIComponent(componentMatch[2]);
-    const storageId = (await resolveScreenStorageId(backend, screenName)) ?? screenName;
+    const storageId = await resolveScreenStorageId(backend, screenNames, screenName);
+    if (!storageId) return new Response('Not Found', { status: 404 });
     if (request.method === 'GET') return handleComponentGet(backend, storageId, componentId);
     if (request.method === 'PUT') return handleComponentPut(request, backend, storageId, componentId);
     if (request.method === 'DELETE') return handleComponentDelete(backend, storageId, componentId);
@@ -509,7 +584,8 @@ export const handleApiRequest = async (request: Request, env: Env): Promise<Resp
   const jsonFilesSubMatch = url.pathname.match(/^\/api\/layouts\/([^/]+)\/json-files$/);
   if (jsonFilesSubMatch) {
     const screenName = decodeURIComponent(jsonFilesSubMatch[1]);
-    const storageId = (await resolveScreenStorageId(backend, screenName)) ?? screenName;
+    const storageId = await resolveScreenStorageId(backend, screenNames, screenName);
+    if (!storageId) return new Response('Not Found', { status: 404 });
     if (request.method === 'GET') {
       const prefix = url.searchParams.get('prefix') ?? 'components/';
       return handleJsonFilesGet(backend, storageId, prefix);
@@ -517,16 +593,24 @@ export const handleApiRequest = async (request: Request, env: Env): Promise<Resp
     return new Response('Method Not Allowed', { status: 405 });
   }
 
-  const resourceJsonFilesMatch = url.pathname.match(/^\/api\/([^/]+)\/json-files$/);
-  if (resourceJsonFilesMatch) {
-    const resourceName = decodeURIComponent(resourceJsonFilesMatch[1]);
-    const config = RESOURCE_CONFIGS.find((c) => c.name === resourceName);
-    if (!config) return new Response('Not Found', { status: 404 });
-    if (request.method === 'GET') {
-      return config.handleList
-        ? config.handleList(backend)
-        : handleResourceListGet(backend, config.storagePrefix);
-    }
+  if (url.pathname === '/api/layouts/json-files') {
+    if (request.method === 'GET') return handleScreensListGet(screenNames);
+    return new Response('Method Not Allowed', { status: 405 });
+  }
+
+  const layoutsRenameMatch = url.pathname.match(/^\/api\/layouts\/([^/]+)\/rename$/);
+  if (layoutsRenameMatch) {
+    const name = decodeURIComponent(layoutsRenameMatch[1]);
+    if (request.method === 'POST') return handleScreenRename(request, backend, screenNames, name);
+    return new Response('Method Not Allowed', { status: 405 });
+  }
+
+  const layoutsItemMatch = url.pathname.match(/^\/api\/layouts\/([^/]+)$/);
+  if (layoutsItemMatch) {
+    const name = decodeURIComponent(layoutsItemMatch[1]);
+    if (request.method === 'GET') return handleScreenGet(backend, screenNames, name);
+    if (request.method === 'PUT') return handleScreenPut(request, backend, screenNames, name);
+    if (request.method === 'DELETE') return handleScreenDelete(backend, screenNames, name);
     return new Response('Method Not Allowed', { status: 405 });
   }
 

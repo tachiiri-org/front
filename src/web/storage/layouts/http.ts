@@ -1,7 +1,9 @@
 import { isScreen } from '../../schema/screen/screen';
 import { isSelectComponent } from '../../schema/component';
-import type { LayoutBackend } from './r2';
+import type { LayoutBackend, ScreenNameBackend } from './r2';
 import { normalizeScreen, normalizeComponentValue } from './normalize';
+
+const SCREEN_PREFIX = 'screens/';
 
 type ListItem = {
   value: string;
@@ -39,127 +41,59 @@ const buildJsonFileItems = async (
 
 const normalizeScreenJson: JsonNormalizer = (_, __, value) => normalizeScreen(value);
 
-// --- Screen registry ---
+// --- Screen registry (D1-backed via ScreenNameBackend) ---
 
-const SCREEN_REGISTRY_KEY = '_registry.json';
-
-type ScreenRegistryEntry = { id: string; name: string };
-
-const isScreenRegistryEntry = (v: unknown): v is ScreenRegistryEntry => {
-  if (typeof v !== 'object' || v === null || Array.isArray(v)) return false;
-  const c = v as Record<string, unknown>;
-  return typeof c.id === 'string' && typeof c.name === 'string';
+export const resolveScreenStorageId = async (
+  backend: LayoutBackend,
+  screenNames: ScreenNameBackend,
+  name: string,
+): Promise<string | null> => {
+  const entries = await screenNames.list();
+  const entry = entries.find((e) => e.name === name);
+  return entry ? entry.id : null;
 };
 
-const loadScreenRegistry = async (backend: LayoutBackend): Promise<ScreenRegistryEntry[]> => {
-  const stored = await backend.getText(SCREEN_REGISTRY_KEY);
-  if (!stored) return [];
-  try {
-    const parsed = JSON.parse(stored) as unknown;
-    if (Array.isArray(parsed)) return parsed.filter(isScreenRegistryEntry);
-  } catch { /* */ }
-  return [];
-};
-
-const saveScreenRegistry = async (backend: LayoutBackend, entries: ScreenRegistryEntry[]): Promise<void> => {
-  await backend.putText(SCREEN_REGISTRY_KEY, JSON.stringify(entries));
-};
-
-const copyScreenFiles = async (backend: LayoutBackend, fromId: string, toId: string): Promise<void> => {
-  const mainBody = await backend.getText(`${fromId}.json`);
-  if (mainBody) await backend.putText(`${toId}.json`, mainBody);
-  const prefix = `${fromId}/components/`;
-  let cursor: string | undefined;
-  do {
-    const result = await backend.list(prefix, cursor);
-    for (const object of result.objects) {
-      const file = await backend.getText(object.key);
-      if (file) {
-        await backend.putText(`${toId}/components/${object.key.slice(prefix.length)}`, file);
-      }
-    }
-    cursor = result.truncated ? result.cursor : undefined;
-  } while (cursor);
-};
-
-const migrateScreensToRegistry = async (backend: LayoutBackend): Promise<ScreenRegistryEntry[]> => {
-  const registry: ScreenRegistryEntry[] = [];
-  let cursor: string | undefined;
-  do {
-    const result = await backend.list('', cursor);
-    for (const object of result.objects) {
-      if (!object.key.endsWith('.json')) continue;
-      if (object.key === SCREEN_REGISTRY_KEY) continue;
-      if (object.key.includes('/')) continue;
-      const name = object.key.slice(0, -'.json'.length);
-      const id = crypto.randomUUID();
-      await copyScreenFiles(backend, name, id);
-      registry.push({ id, name });
-    }
-    cursor = result.truncated ? result.cursor : undefined;
-  } while (cursor);
-  await saveScreenRegistry(backend, registry);
-  return registry;
-};
-
-export const resolveScreenStorageId = async (backend: LayoutBackend, name: string): Promise<string | null> => {
-  if (name === SCREEN_REGISTRY_KEY.slice(0, -'.json'.length)) return null;
-  const registry = await loadScreenRegistry(backend);
-  const entry = registry.find((e) => e.name === name);
-  if (entry) return entry.id;
-  const legacyBody = await backend.getText(`${name}.json`);
-  if (legacyBody !== null) return name;
-  return null;
-};
-
-const getOrCreateScreenStorageId = async (backend: LayoutBackend, name: string): Promise<string> => {
-  const registry = await loadScreenRegistry(backend);
-  const existing = registry.find((e) => e.name === name);
+const getOrCreateScreenStorageId = async (
+  backend: LayoutBackend,
+  screenNames: ScreenNameBackend,
+  name: string,
+): Promise<string> => {
+  const entries = await screenNames.list();
+  const existing = entries.find((e) => e.name === name);
   if (existing) return existing.id;
-  const legacyBody = await backend.getText(`${name}.json`);
-  if (legacyBody !== null) {
-    const id = crypto.randomUUID();
-    await copyScreenFiles(backend, name, id);
-    registry.push({ id, name });
-    await saveScreenRegistry(backend, registry);
-    return id;
-  }
   const id = crypto.randomUUID();
-  registry.push({ id, name });
-  await saveScreenRegistry(backend, registry);
+  await screenNames.create(id, name);
   return id;
 };
 
 // --- End screen registry ---
 
-export const handleScreensListGet = async (backend: LayoutBackend): Promise<Response> => {
-  let registry = await loadScreenRegistry(backend);
-  if (registry.length === 0) {
-    registry = await migrateScreensToRegistry(backend);
-  }
-  const items = registry
-    .map((e) => ({ value: e.name, label: e.name }))
-    .sort((a, b) => a.label.localeCompare(b.label));
+export const handleScreensListGet = async (screenNames: ScreenNameBackend): Promise<Response> => {
+  const entries = await screenNames.list();
+  const items = entries.map((e) => ({ value: e.name, label: e.name }));
   return new Response(JSON.stringify({ items }), { headers: { 'Content-Type': 'application/json' } });
 };
 
-export const handleScreenGet = async (backend: LayoutBackend, name: string): Promise<Response> => {
-  const storageId = await resolveScreenStorageId(backend, name);
+export const handleScreenGet = async (
+  backend: LayoutBackend,
+  screenNames: ScreenNameBackend,
+  name: string,
+): Promise<Response> => {
+  const storageId = await resolveScreenStorageId(backend, screenNames, name);
   if (!storageId) return new Response('Not Found', { status: 404 });
-  return handleResourceGet(backend, '', storageId, normalizeScreenJson);
+  return handleResourceGet(backend, SCREEN_PREFIX, storageId, normalizeScreenJson);
 };
 
 export const handleComponentGet = async (backend: LayoutBackend, screenId: string, componentId: string): Promise<Response> => {
-  const body = await backend.getText(`${screenId}/components/${componentId}.json`);
+  const key = `${SCREEN_PREFIX}${screenId}/components/${componentId}.json`;
+  const body = await backend.getText(key);
   if (body === null) return new Response('Not Found', { status: 404 });
   try {
     const value = JSON.parse(body) as unknown;
     const normalized = await normalizeComponentValue(backend, screenId, componentId, value);
     if (!normalized) return new Response('Invalid component', { status: 400 });
     const normalizedBody = JSON.stringify(normalized);
-    if (body !== normalizedBody) {
-      await backend.putText(`${screenId}/components/${componentId}.json`, normalizedBody);
-    }
+    if (body !== normalizedBody) await backend.putText(key, normalizedBody);
     return new Response(normalizedBody, { headers: { 'Content-Type': 'application/json' } });
   } catch {
     return new Response('Invalid JSON', { status: 400 });
@@ -167,20 +101,25 @@ export const handleComponentGet = async (backend: LayoutBackend, screenId: strin
 };
 
 export const handleJsonFilesGet = async (backend: LayoutBackend, screenId: string, prefix: string): Promise<Response> => {
-  const items = await buildJsonFileItems(backend, `${screenId}/${prefix}`);
+  const items = await buildJsonFileItems(backend, `${SCREEN_PREFIX}${screenId}/${prefix}`);
   return new Response(JSON.stringify({ items }), { headers: { 'Content-Type': 'application/json' } });
 };
 
-export const handleScreenPut = async (request: Request, backend: LayoutBackend, name: string): Promise<Response> => {
-  const storageId = await getOrCreateScreenStorageId(backend, name);
-  return handleResourcePut(request, backend, '', storageId, normalizeScreenJson);
+export const handleScreenPut = async (
+  request: Request,
+  backend: LayoutBackend,
+  screenNames: ScreenNameBackend,
+  name: string,
+): Promise<Response> => {
+  const storageId = await getOrCreateScreenStorageId(backend, screenNames, name);
+  return handleResourcePut(request, backend, SCREEN_PREFIX, storageId, normalizeScreenJson);
 };
 
 export const deleteScreenObjects = async (backend: LayoutBackend, screenId: string): Promise<void> => {
-  await backend.deleteKey(`${screenId}.json`);
+  await backend.deleteKey(`${SCREEN_PREFIX}${screenId}.json`);
   let cursor: string | undefined;
   do {
-    const result = await backend.list(`${screenId}/components/`, cursor);
+    const result = await backend.list(`${SCREEN_PREFIX}${screenId}/components/`, cursor);
     if (result.objects.length > 0) {
       await Promise.all(result.objects.map((o) => backend.deleteKey(o.key)));
     }
@@ -188,20 +127,26 @@ export const deleteScreenObjects = async (backend: LayoutBackend, screenId: stri
   } while (cursor);
 };
 
-export const handleScreenDelete = async (backend: LayoutBackend, name: string): Promise<Response> => {
-  const registry = await loadScreenRegistry(backend);
-  const idx = registry.findIndex((e) => e.name === name);
-  if (idx !== -1) {
-    const [entry] = registry.splice(idx, 1);
+export const handleScreenDelete = async (
+  backend: LayoutBackend,
+  screenNames: ScreenNameBackend,
+  name: string,
+): Promise<Response> => {
+  const entries = await screenNames.list();
+  const entry = entries.find((e) => e.name === name);
+  if (entry) {
     await deleteScreenObjects(backend, entry.id);
-    await saveScreenRegistry(backend, registry);
-  } else {
-    await deleteScreenObjects(backend, name);
+    await screenNames.delete(entry.id);
   }
   return new Response(null, { status: 204 });
 };
 
-export const handleScreenRename = async (request: Request, backend: LayoutBackend, name: string): Promise<Response> => {
+export const handleScreenRename = async (
+  request: Request,
+  backend: LayoutBackend,
+  screenNames: ScreenNameBackend,
+  name: string,
+): Promise<Response> => {
   const body = await request.text();
   let to: string;
   try {
@@ -216,43 +161,16 @@ export const handleScreenRename = async (request: Request, backend: LayoutBacken
 
   if (!to || to === name || to.includes('/')) return new Response('Invalid target name', { status: 400 });
 
-  const registry = await loadScreenRegistry(backend);
-  const idx = registry.findIndex((e) => e.name === name);
+  const entries = await screenNames.list();
+  const entry = entries.find((e) => e.name === name);
+  if (!entry) return new Response('Not Found', { status: 404 });
 
-  if (idx === -1) {
-    // Legacy fallback: file-based rename
-    const source = await backend.getText(`${name}.json`);
-    if (!source) return new Response('Not Found', { status: 404 });
-
-    const existing = await backend.getText(`${to}.json`);
-    if (existing) return new Response('Conflict', { status: 409 });
-
-    await backend.putText(`${to}.json`, source);
-
-    const prefix = `${name}/components/`;
-    let cursor: string | undefined;
-    do {
-      const result = await backend.list(prefix, cursor);
-      for (const object of result.objects) {
-        const file = await backend.getText(object.key);
-        if (file) {
-          await backend.putText(
-            `${to}/components/${object.key.slice(prefix.length)}`,
-            file,
-          );
-        }
-      }
-      cursor = result.truncated ? result.cursor : undefined;
-    } while (cursor);
-
-    await deleteScreenObjects(backend, name);
-    return new Response(null, { status: 204 });
+  try {
+    await screenNames.rename(entry.id, to);
+  } catch (e) {
+    if (e instanceof Error && e.message === 'screens_rename_conflict') return new Response('Conflict', { status: 409 });
+    throw e;
   }
-
-  if (registry.some((e) => e.name === to)) return new Response('Conflict', { status: 409 });
-
-  registry[idx] = { ...registry[idx], name: to };
-  await saveScreenRegistry(backend, registry);
   return new Response(null, { status: 204 });
 };
 
@@ -270,7 +188,7 @@ export const handleComponentPut = async (
     if (normalized.kind === 'select' && !isSelectComponent(normalized)) {
       return new Response('Invalid component', { status: 400 });
     }
-    await backend.putText(`${screenId}/components/${componentId}.json`, JSON.stringify(normalized));
+    await backend.putText(`${SCREEN_PREFIX}${screenId}/components/${componentId}.json`, JSON.stringify(normalized));
   } catch {
     return new Response('Invalid JSON', { status: 400 });
   }
@@ -278,7 +196,7 @@ export const handleComponentPut = async (
 };
 
 export const handleComponentDelete = async (backend: LayoutBackend, screenId: string, componentId: string): Promise<Response> => {
-  await backend.deleteKey(`${screenId}/components/${componentId}.json`);
+  await backend.deleteKey(`${SCREEN_PREFIX}${screenId}/components/${componentId}.json`);
   return new Response(null, { status: 204 });
 };
 

@@ -136,3 +136,101 @@ const createAuthorizeBackend = (env: LayoutsEnv): LayoutBackend => {
 
 export const createLayoutsBackend = (env: LayoutsEnv): LayoutBackend =>
   hasAuthorizeConfig(env) ? createAuthorizeBackend(env) : createDirectBackend(env);
+
+export type ScreenNameEntry = { id: string; name: string };
+
+export type ScreenNameBackend = {
+  list(): Promise<ScreenNameEntry[]>;
+  create(id: string, name: string): Promise<void>;
+  rename(id: string, name: string): Promise<void>;
+  delete(id: string): Promise<void>;
+};
+
+const createAuthorizeScreenNameBackend = (
+  env: LayoutsEnv,
+  tenantContext?: { tenantId?: string; subjectId?: string },
+): ScreenNameBackend => ({
+  async list() {
+    const response = await authorizeFetch(env, { path: "/api/v1/screens", method: "GET", tenantContext });
+    if (!response.ok) throw new Error(`screens_list_failed:${response.status}`);
+    const payload = (await response.json()) as { screens: ScreenNameEntry[] };
+    return payload.screens;
+  },
+  async create(id, name) {
+    const response = await authorizeFetch(env, {
+      path: "/api/v1/screens",
+      method: "POST",
+      body: JSON.stringify({ id, name }),
+      tenantContext,
+    });
+    if (!response.ok) throw new Error(`screens_create_failed:${response.status}`);
+  },
+  async rename(id, name) {
+    const response = await authorizeFetch(env, {
+      path: `/api/v1/screens/${encodeURIComponent(id)}`,
+      method: "PUT",
+      body: JSON.stringify({ name }),
+      tenantContext,
+    });
+    if (response.status === 409) throw new Error("screens_rename_conflict");
+    if (!response.ok) throw new Error(`screens_rename_failed:${response.status}`);
+  },
+  async delete(id) {
+    const response = await authorizeFetch(env, {
+      path: `/api/v1/screens/${encodeURIComponent(id)}`,
+      method: "DELETE",
+      tenantContext,
+    });
+    if (!response.ok) throw new Error(`screens_delete_failed:${response.status}`);
+  },
+});
+
+const SCREEN_REGISTRY_KEY = "_registry.json";
+
+const createDirectScreenNameBackend = (env: LayoutsEnv): ScreenNameBackend => {
+  const load = async (): Promise<ScreenNameEntry[]> => {
+    if (!env.LAYOUTS) throw new Error("layouts_not_configured");
+    const obj = await env.LAYOUTS.get(SCREEN_REGISTRY_KEY);
+    if (!obj) return [];
+    try {
+      const parsed = JSON.parse(await obj.text()) as unknown;
+      if (Array.isArray(parsed)) return parsed.filter((e): e is ScreenNameEntry =>
+        typeof e === "object" && e !== null && typeof (e as Record<string, unknown>).id === "string" && typeof (e as Record<string, unknown>).name === "string"
+      );
+    } catch { /* */ }
+    return [];
+  };
+  const save = async (entries: ScreenNameEntry[]) => {
+    if (!env.LAYOUTS) throw new Error("layouts_not_configured");
+    await env.LAYOUTS.put(SCREEN_REGISTRY_KEY, JSON.stringify(entries));
+  };
+  return {
+    async list() { return load(); },
+    async create(id, name) {
+      const entries = await load();
+      if (!entries.find((e) => e.id === id)) {
+        entries.push({ id, name });
+        await save(entries);
+      }
+    },
+    async rename(id, name) {
+      const entries = await load();
+      if (entries.find((e) => e.name === name && e.id !== id)) throw new Error("screens_rename_conflict");
+      const entry = entries.find((e) => e.id === id);
+      if (entry) { entry.name = name; await save(entries); }
+    },
+    async delete(id) {
+      const entries = await load();
+      const filtered = entries.filter((e) => e.id !== id);
+      if (filtered.length !== entries.length) await save(filtered);
+    },
+  };
+};
+
+export const createScreenNameBackend = (
+  env: LayoutsEnv,
+  tenantContext?: { tenantId?: string; subjectId?: string },
+): ScreenNameBackend =>
+  hasAuthorizeConfig(env)
+    ? createAuthorizeScreenNameBackend(env, tenantContext)
+    : createDirectScreenNameBackend(env);
