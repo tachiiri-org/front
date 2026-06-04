@@ -86,6 +86,35 @@ const renderNav = async (screenId: string): Promise<void> => {
   });
 
   nav.appendChild(select);
+
+  try {
+    const authRes = await fetch('/api/auth/status');
+    if (authRes.ok) {
+      const authStatus = (await authRes.json()) as AuthStatus;
+      if (authStatus.github.authenticated || authStatus.google.authenticated) {
+        const userEl = document.createElement('span');
+        userEl.textContent = authStatus.github.login
+          ? `@${authStatus.github.login}`
+          : (authStatus.google.email ?? '');
+        Object.assign(userEl.style, { color: '#9ca3af', fontSize: '12px' });
+        nav.appendChild(userEl);
+
+        const logoutLink = document.createElement('a');
+        logoutLink.textContent = 'Logout';
+        logoutLink.href = authStatus.github.authenticated
+          ? '/oauth/github/logout'
+          : '/oauth/google/logout';
+        Object.assign(logoutLink.style, { color: '#6b7280', fontSize: '12px', textDecoration: 'none' });
+        nav.appendChild(logoutLink);
+      } else {
+        const loginLink = document.createElement('a');
+        loginLink.textContent = 'Login';
+        loginLink.href = '/identify-viewer';
+        Object.assign(loginLink.style, { color: '#6b7280', fontSize: '12px', textDecoration: 'none' });
+        nav.appendChild(loginLink);
+      }
+    }
+  } catch { /* ignore */ }
 };
 
 const getScreenIdFromPathname = (): string | null => {
@@ -225,6 +254,7 @@ const loadEditor = async (screenId: string): Promise<void> => {
   currentEditorScreenId = screenId;
   await renderScreen(screenId);
   await hydrateEditor(reloadEditor, screenId, rerender);
+  await bindOrgSelectScreen();
 };
 
 type AuthStatus = {
@@ -291,52 +321,6 @@ const renderAuthPage = async (): Promise<void> => {
   root.appendChild(wrap);
 };
 
-const renderOrgSelectPage = (): void => {
-  nav.style.display = 'none';
-  document.body.style.display = '';
-
-  root.replaceChildren();
-  const wrap = document.createElement('div');
-  wrap.style.cssText = 'display:flex;flex-direction:column;align-items:center;justify-content:center;height:100vh;font-family:monospace;gap:1.5em;';
-
-  const title = document.createElement('h2');
-  title.textContent = '組織を選択';
-  title.style.cssText = 'margin:0;font-size:1.2em;';
-  wrap.appendChild(title);
-
-  // Org picker
-  const pickerRow = document.createElement('div');
-  pickerRow.style.cssText = 'display:flex;align-items:center;gap:0.5em;';
-  const picker = document.createElement('select');
-  picker.setAttribute('data-frame-id', 'org-picker');
-  picker.style.cssText = 'font-family:monospace;padding:4px 8px;';
-  const selectBtn = document.createElement('a');
-  selectBtn.setAttribute('data-frame-id', 'org-select-btn');
-  selectBtn.textContent = '選択';
-  selectBtn.style.cssText = 'padding:4px 12px;border:1px solid #555;border-radius:4px;text-decoration:none;color:inherit;opacity:0.4;pointer-events:none;';
-  pickerRow.append(picker, selectBtn);
-  wrap.appendChild(pickerRow);
-
-  const sep = document.createElement('hr');
-  sep.style.cssText = 'width:200px;border-color:#444;';
-  wrap.appendChild(sep);
-
-  // Org create
-  const createRow = document.createElement('div');
-  createRow.style.cssText = 'display:flex;align-items:center;gap:0.5em;';
-  const nameInput = document.createElement('input');
-  nameInput.setAttribute('data-frame-id', 'org-name');
-  nameInput.type = 'text';
-  nameInput.style.cssText = 'font-family:monospace;padding:4px 8px;';
-  const createBtn = document.createElement('button');
-  createBtn.setAttribute('data-frame-id', 'org-create-btn');
-  createBtn.textContent = '作成';
-  createBtn.style.cssText = 'font-family:monospace;padding:4px 12px;';
-  createRow.append(nameInput, createBtn);
-  wrap.appendChild(createRow);
-
-  root.appendChild(wrap);
-};
 
 const bindOrgSelectScreen = async (): Promise<void> => {
   // Populate org-picker select from identity-status
@@ -412,12 +396,6 @@ const getCookie = (name: string): string | null => {
 };
 
 const loadEditorBootstrap = async (): Promise<void> => {
-  if (window.location.pathname === '/org-select') {
-    renderOrgSelectPage();
-    await bindOrgSelectScreen();
-    return;
-  }
-
   const pathnameScreenId = getScreenIdFromPathname();
   const screenId = pathnameScreenId ?? await findEditorScreenId();
   if (!screenId) {
