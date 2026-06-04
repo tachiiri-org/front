@@ -202,7 +202,7 @@ export const renderStorageExplorer = (
   main.append(mainHeader, mainContent);
   body.appendChild(main);
 
-  // --- Helpers ---
+  // --- Shared helpers ---
 
   const showMessage = (msg: string): void => {
     mainContent.replaceChildren();
@@ -213,40 +213,9 @@ export const renderStorageExplorer = (
     mainContent.appendChild(p);
   };
 
-  const makeSidebarItem = (label: string, onClick: () => void): HTMLElement => {
-    const item = styled('div', {
-      padding: '4px 12px',
-      cursor: 'pointer',
-      fontSize: '12px',
-      color: C.text,
-      whiteSpace: 'nowrap',
-      overflow: 'hidden',
-      textOverflow: 'ellipsis',
-    });
-    item.title = label;
-    item.textContent = label;
-    item.addEventListener('mouseenter', () => {
-      if (!item.dataset.selected) item.style.background = C.hoverBg;
-    });
-    item.addEventListener('mouseleave', () => {
-      if (!item.dataset.selected) item.style.background = '';
-    });
-    item.addEventListener('click', () => {
-      for (const el of sidebarList.querySelectorAll<HTMLElement>('[data-selected]')) {
-        el.style.background = '';
-        delete el.dataset.selected;
-      }
-      item.dataset.selected = '1';
-      item.style.background = C.selectedBg;
-      onClick();
-    });
-    return item;
-  };
-
   const makeTableHeader = (labels: string[]): HTMLTableSectionElement => {
     const thead = document.createElement('thead');
     const tr = document.createElement('tr');
-    tr.style.background = C.surface;
     for (const label of labels) {
       const th = styled('th', {
         padding: '5px 8px',
@@ -273,6 +242,33 @@ export const renderStorageExplorer = (
 
   const D1_LIMIT = 100;
 
+  // D1 sidebar uses simple list items (not tree)
+  let d1SelectedRow: HTMLElement | null = null;
+  const selectD1Row = (row: HTMLElement): void => {
+    if (d1SelectedRow) { d1SelectedRow.style.background = ''; delete d1SelectedRow.dataset.selected; }
+    d1SelectedRow = row;
+    row.dataset.selected = '1';
+    row.style.background = C.selectedBg;
+  };
+
+  const makeD1SidebarItem = (label: string, onClick: () => void): HTMLElement => {
+    const item = styled('div', {
+      padding: '4px 12px',
+      cursor: 'pointer',
+      fontSize: '12px',
+      color: C.text,
+      whiteSpace: 'nowrap',
+      overflow: 'hidden',
+      textOverflow: 'ellipsis',
+    });
+    item.title = label;
+    item.textContent = label;
+    item.addEventListener('mouseenter', () => { if (!item.dataset.selected) item.style.background = C.hoverBg; });
+    item.addEventListener('mouseleave', () => { if (!item.dataset.selected) item.style.background = ''; });
+    item.addEventListener('click', () => { selectD1Row(item); onClick(); });
+    return item;
+  };
+
   const loadD1Databases = async (): Promise<void> => {
     showMessage('データベースを読み込み中...');
     try {
@@ -282,18 +278,17 @@ export const renderStorageExplorer = (
       const dbs = Array.isArray(data.result) ? data.result : [];
 
       sourceSelect.replaceChildren();
-      const ph = document.createElement('option');
-      ph.value = ''; ph.textContent = '-- DB を選択 --'; ph.disabled = true; ph.selected = true;
-      sourceSelect.appendChild(ph);
-
       if (dbs.length === 0) { showMessage('データベースが見つかりません'); return; }
+
       for (const db of dbs) {
         const opt = document.createElement('option');
         opt.value = db.uuid;
         opt.textContent = db.name;
         sourceSelect.appendChild(opt);
       }
-      showMessage('データベースを選択してください');
+      // Auto-select first
+      sourceSelect.value = dbs[0].uuid;
+      void loadD1Tables(dbs[0].uuid);
     } catch {
       showMessage('データベースの取得に失敗しました');
     }
@@ -301,6 +296,7 @@ export const renderStorageExplorer = (
 
   const loadD1Tables = async (dbId: string): Promise<void> => {
     sidebarList.replaceChildren();
+    d1SelectedRow = null;
     showMessage('テーブルを読み込み中...');
     try {
       const res = await fetch(`/api/viewer/d1/${encodeURIComponent(dbId)}/query`, {
@@ -316,7 +312,7 @@ export const renderStorageExplorer = (
       showMessage('テーブルを選択してください');
       for (const row of rows) {
         const name = String(row.name ?? '');
-        sidebarList.appendChild(makeSidebarItem(name, () => loadD1TableData(dbId, name)));
+        sidebarList.appendChild(makeD1SidebarItem(name, () => loadD1TableData(dbId, name)));
       }
     } catch {
       showMessage('テーブル一覧の取得に失敗しました');
@@ -377,11 +373,7 @@ export const renderStorageExplorer = (
       }
 
       const columns = Object.keys(rows[0]);
-      const table = styled('table', {
-        width: '100%',
-        borderCollapse: 'collapse',
-        fontSize: '12px',
-      });
+      const table = styled('table', { width: '100%', borderCollapse: 'collapse', fontSize: '12px' });
       table.appendChild(makeTableHeader(columns));
 
       const tbody = document.createElement('tbody');
@@ -414,152 +406,20 @@ export const renderStorageExplorer = (
   };
 
   // ================================================================
-  // R2
+  // R2 — VS Code style tree
   // ================================================================
 
-  const loadR2Buckets = async (): Promise<void> => {
-    showMessage('バケットを読み込み中...');
-    try {
-      const res = await fetch('/api/viewer/r2/buckets');
-      if (!res.ok) { showMessage(`エラー: ${res.status}`); return; }
-      const data = (await res.json()) as R2BucketsResponse;
-      const buckets = Array.isArray(data.buckets) ? data.buckets : [];
-
-      sourceSelect.replaceChildren();
-      const ph = document.createElement('option');
-      ph.value = ''; ph.textContent = '-- バケットを選択 --'; ph.disabled = true; ph.selected = true;
-      sourceSelect.appendChild(ph);
-
-      if (buckets.length === 0) { showMessage('バケットが見つかりません'); return; }
-      for (const b of buckets) {
-        const opt = document.createElement('option');
-        opt.value = b.name;
-        opt.textContent = b.name;
-        sourceSelect.appendChild(opt);
-      }
-      showMessage('バケットを選択してください');
-    } catch {
-      showMessage('バケットの取得に失敗しました');
-    }
-  };
-
-  const loadR2Files = async (bucketId: string, prefix = ''): Promise<void> => {
-    sidebarList.replaceChildren();
-    mainContent.replaceChildren();
-
-    // Breadcrumb
-    mainHeader.replaceChildren();
-    const parts = prefix.split('/').filter(Boolean);
-
-    const makeBC = (label: string, targetPrefix: string): HTMLElement => {
-      const span = styled('span', { cursor: 'pointer', color: C.accent });
-      span.textContent = label;
-      span.addEventListener('click', () => loadR2Files(bucketId, targetPrefix));
-      return span;
-    };
-    const sep = (): HTMLElement => {
-      const s = styled('span', { color: C.textDim });
-      s.textContent = '/';
-      return s;
-    };
-
-    mainHeader.appendChild(makeBC(bucketId, ''));
-    for (let i = 0; i < parts.length; i++) {
-      mainHeader.appendChild(sep());
-      mainHeader.appendChild(makeBC(parts[i], parts.slice(0, i + 1).join('/') + '/'));
-    }
-
-    try {
-      const res = await fetch('/api/viewer/r2/files', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ bucket_id: bucketId, prefix, delimiter: '/' }),
-      });
-      if (!res.ok) { showMessage(`エラー: ${res.status}`); return; }
-      const data = (await res.json()) as R2FilesResponse;
-      const folders = data.delimited_prefixes ?? [];
-      const files = data.objects ?? [];
-
-      // Sidebar: folders only
-      for (const folderPrefix of folders) {
-        const name = folderPrefix.slice(prefix.length).replace(/\/$/, '');
-        sidebarList.appendChild(
-          makeSidebarItem(`📁 ${name}`, () => loadR2Files(bucketId, folderPrefix)),
-        );
-      }
-
-      if (folders.length === 0 && files.length === 0) {
-        const empty = styled('div', { padding: '16px', color: C.textDim });
-        empty.textContent = '空のフォルダです';
-        mainContent.appendChild(empty);
-        return;
-      }
-
-      // Main: file list table
-      const table = styled('table', { width: '100%', borderCollapse: 'collapse', fontSize: '12px' });
-      table.appendChild(makeTableHeader(['名前', 'サイズ', '更新日時']));
-      const tbody = document.createElement('tbody');
-
-      for (const folderPrefix of folders) {
-        const name = folderPrefix.slice(prefix.length);
-        const tr = document.createElement('tr');
-        tr.style.cursor = 'pointer';
-        tr.addEventListener('mouseenter', () => { tr.style.background = C.hoverBg; });
-        tr.addEventListener('mouseleave', () => { tr.style.background = ''; });
-        tr.addEventListener('click', () => loadR2Files(bucketId, folderPrefix));
-
-        const nameCell = styled('td', { padding: '4px 8px', borderBottom: `1px solid ${C.border}`, color: C.accent });
-        nameCell.textContent = `📁 ${name}`;
-        const dash = (text: string): HTMLTableCellElement => {
-          const td = styled('td', { padding: '4px 8px', borderBottom: `1px solid ${C.border}`, color: C.textDim });
-          td.textContent = text;
-          return td;
-        };
-        tr.append(nameCell, dash('-'), dash('-'));
-        tbody.appendChild(tr);
-      }
-
-      for (const file of files) {
-        const name = file.key.slice(prefix.length);
-        if (!name) continue;
-        const tr = document.createElement('tr');
-        tr.style.cursor = 'pointer';
-        tr.addEventListener('mouseenter', () => { tr.style.background = C.hoverBg; });
-        tr.addEventListener('mouseleave', () => { tr.style.background = ''; });
-        tr.addEventListener('click', () => loadR2FileContent(bucketId, file.key));
-
-        const nameCell = styled('td', { padding: '4px 8px', borderBottom: `1px solid ${C.border}`, color: C.text });
-        nameCell.textContent = name;
-
-        const sizeCell = styled('td', {
-          padding: '4px 8px', borderBottom: `1px solid ${C.border}`,
-          color: C.textDim, whiteSpace: 'nowrap',
-        });
-        sizeCell.textContent = formatSize(file.size);
-
-        const dateCell = styled('td', {
-          padding: '4px 8px', borderBottom: `1px solid ${C.border}`,
-          color: C.textDim, whiteSpace: 'nowrap',
-        });
-        dateCell.textContent = file.uploaded
-          ? new Date(file.uploaded).toLocaleString('ja-JP')
-          : '-';
-
-        tr.append(nameCell, sizeCell, dateCell);
-        tbody.appendChild(tr);
-      }
-
-      table.appendChild(tbody);
-      mainContent.appendChild(table);
-    } catch {
-      showMessage('ファイル一覧の取得に失敗しました');
-    }
+  let r2SelectedRow: HTMLElement | null = null;
+  const selectR2Row = (row: HTMLElement): void => {
+    if (r2SelectedRow) { r2SelectedRow.style.background = ''; delete r2SelectedRow.dataset.selected; }
+    r2SelectedRow = row;
+    row.dataset.selected = '1';
+    row.style.background = C.selectedBg;
   };
 
   const loadR2FileContent = async (bucketId: string, key: string): Promise<void> => {
     mainContent.replaceChildren();
     mainHeader.replaceChildren();
-
     const keyLabel = styled('span', { color: C.textDim });
     keyLabel.textContent = key;
     mainHeader.appendChild(keyLabel);
@@ -619,6 +479,172 @@ export const renderStorageExplorer = (
     }
   };
 
+  const fetchR2Children = async (
+    bucketId: string,
+    prefix: string,
+  ): Promise<{ folders: string[]; files: R2FileEntry[] }> => {
+    const res = await fetch('/api/viewer/r2/files', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ bucket_id: bucketId, prefix, delimiter: '/' }),
+    });
+    if (!res.ok) return { folders: [], files: [] };
+    const data = (await res.json()) as R2FilesResponse;
+    return { folders: data.delimited_prefixes ?? [], files: data.objects ?? [] };
+  };
+
+  const makeR2TreeNode = (
+    bucketId: string,
+    fullPrefix: string,
+    name: string,
+    isFolder: boolean,
+    depth: number,
+  ): HTMLElement => {
+    const wrapper = document.createElement('div');
+
+    const row = styled('div', {
+      display: 'flex',
+      alignItems: 'center',
+      padding: '3px 8px',
+      paddingLeft: `${depth * 14 + 6}px`,
+      cursor: 'pointer',
+      fontSize: '12px',
+      color: C.text,
+      userSelect: 'none',
+      gap: '3px',
+    });
+
+    const arrow = styled('span', {
+      width: '12px',
+      flexShrink: '0',
+      fontSize: '9px',
+      color: C.textDim,
+      textAlign: 'center',
+    });
+    arrow.textContent = isFolder ? '▶' : '';
+
+    const icon = styled('span', { fontSize: '11px', flexShrink: '0' });
+    icon.textContent = isFolder ? '📁' : '📄';
+
+    const label = styled('span', {
+      overflow: 'hidden',
+      textOverflow: 'ellipsis',
+      whiteSpace: 'nowrap',
+      flex: '1',
+    });
+    label.textContent = name;
+    label.title = name;
+
+    row.append(arrow, icon, label);
+    row.addEventListener('mouseenter', () => { if (!row.dataset.selected) row.style.background = C.hoverBg; });
+    row.addEventListener('mouseleave', () => { if (!row.dataset.selected) row.style.background = ''; });
+    wrapper.appendChild(row);
+
+    if (!isFolder) {
+      row.addEventListener('click', () => {
+        selectR2Row(row);
+        void loadR2FileContent(bucketId, fullPrefix + name);
+      });
+      return wrapper;
+    }
+
+    // Folder: expand/collapse children
+    const childrenEl = styled('div', { display: 'none' });
+    wrapper.appendChild(childrenEl);
+
+    let expanded = false;
+    let loaded = false;
+
+    const expand = async (): Promise<void> => {
+      if (!loaded) {
+        loaded = true;
+        const childPrefix = fullPrefix + name + '/';
+        try {
+          const { folders, files } = await fetchR2Children(bucketId, childPrefix);
+          for (const fp of folders) {
+            const childName = fp.slice(childPrefix.length).replace(/\/$/, '');
+            childrenEl.appendChild(makeR2TreeNode(bucketId, childPrefix, childName, true, depth + 1));
+          }
+          for (const file of files) {
+            const fileName = file.key.slice(childPrefix.length);
+            if (fileName) childrenEl.appendChild(makeR2TreeNode(bucketId, childPrefix, fileName, false, depth + 1));
+          }
+        } catch { /* ignore */ }
+      }
+      childrenEl.style.display = '';
+      arrow.textContent = '▼';
+      icon.textContent = '📂';
+      expanded = true;
+    };
+
+    const collapse = (): void => {
+      childrenEl.style.display = 'none';
+      arrow.textContent = '▶';
+      icon.textContent = '📁';
+      expanded = false;
+    };
+
+    row.addEventListener('click', () => {
+      selectR2Row(row);
+      if (expanded) collapse();
+      else void expand();
+    });
+
+    return wrapper;
+  };
+
+  const loadR2Tree = async (bucketId: string): Promise<void> => {
+    sidebarList.replaceChildren();
+    r2SelectedRow = null;
+    showMessage('読み込み中...');
+    try {
+      const { folders, files } = await fetchR2Children(bucketId, '');
+      mainHeader.replaceChildren();
+      mainContent.replaceChildren();
+      if (folders.length === 0 && files.length === 0) {
+        showMessage('バケットが空です');
+        return;
+      }
+      for (const fp of folders) {
+        const name = fp.replace(/\/$/, '');
+        sidebarList.appendChild(makeR2TreeNode(bucketId, '', name, true, 0));
+      }
+      for (const file of files) {
+        if (file.key) sidebarList.appendChild(makeR2TreeNode(bucketId, '', file.key, false, 0));
+      }
+      const hint = styled('div', { padding: '16px', color: C.textDim, fontSize: '12px' });
+      hint.textContent = 'ファイルを選択してください';
+      mainContent.appendChild(hint);
+    } catch {
+      showMessage('バケットの読み込みに失敗しました');
+    }
+  };
+
+  const loadR2Buckets = async (): Promise<void> => {
+    showMessage('バケットを読み込み中...');
+    try {
+      const res = await fetch('/api/viewer/r2/buckets');
+      if (!res.ok) { showMessage(`エラー: ${res.status}`); return; }
+      const data = (await res.json()) as R2BucketsResponse;
+      const buckets = Array.isArray(data.buckets) ? data.buckets : [];
+
+      sourceSelect.replaceChildren();
+      if (buckets.length === 0) { showMessage('バケットが見つかりません'); return; }
+
+      for (const b of buckets) {
+        const opt = document.createElement('option');
+        opt.value = b.name;
+        opt.textContent = b.name;
+        sourceSelect.appendChild(opt);
+      }
+      // Auto-select first
+      sourceSelect.value = buckets[0].name;
+      void loadR2Tree(buckets[0].name);
+    } catch {
+      showMessage('バケットの取得に失敗しました');
+    }
+  };
+
   // ================================================================
   // Tab control
   // ================================================================
@@ -643,9 +669,8 @@ export const renderStorageExplorer = (
   sourceSelect.addEventListener('change', () => {
     const val = sourceSelect.value;
     if (!val) return;
-    sidebarList.replaceChildren();
     if (currentMode === 'd1') void loadD1Tables(val);
-    else void loadR2Files(val, '');
+    else void loadR2Tree(val);
   });
 
   d1Tab.addEventListener('click', () => activateTab('d1'));
