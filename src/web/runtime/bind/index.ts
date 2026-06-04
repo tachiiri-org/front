@@ -432,7 +432,34 @@ const hydrateSelectTableBindings = async (
     }
   }
 
-  // Fourth pass: element source.endpoint bindings
+  // Fourth pass: navigateTo selects — populate from endpoint and navigate on change
+  for (const frame of store.screen.frames) {
+    const c = frame as Record<string, unknown>;
+    if (c.kind !== 'select') continue;
+    const navigateTo = typeof c.navigateTo === 'string' ? c.navigateTo : '';
+    if (!navigateTo) continue;
+
+    const selectEl = domMap.get(frame.id);
+    if (!(selectEl instanceof HTMLSelectElement)) continue;
+
+    const source = c.source as Record<string, unknown> | undefined;
+    if (source?.kind === 'endpoint' && typeof source.url === 'string' && source.url) {
+      await populateSelectFromEndpoint(selectEl, source.url, source);
+      const placeholder = document.createElement('option');
+      placeholder.value = '';
+      placeholder.textContent = typeof c.placeholder === 'string' ? c.placeholder : '選択...';
+      placeholder.disabled = true;
+      selectEl.insertBefore(placeholder, selectEl.firstChild);
+      selectEl.value = '';
+    }
+
+    selectEl.addEventListener('change', () => {
+      if (!selectEl.value) return;
+      window.location.href = navigateTo.replace('{value}', encodeURIComponent(selectEl.value));
+    });
+  }
+
+  // Fifth pass: element source.endpoint bindings
   const endpointCache = new Map<string, unknown>();
   for (const frame of store.screen.frames) {
     const c = frame as Record<string, unknown>;
