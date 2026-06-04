@@ -119,12 +119,18 @@ const renderNav = async (screenId: string): Promise<void> => {
   try {
     if (identityResult.status === 'fulfilled' && identityResult.value.ok) {
       const identity = (await identityResult.value.json()) as IdentityStatus;
-      if (identity.user_id && identity.organizations.length > 0) {
+      if (identity.user_id) {
         const rawOrgId = document.cookie.match(/(?:^|; )identity_org_id=([^;]*)/)?.[1];
         const currentOrgId = rawOrgId ? decodeURIComponent(rawOrgId) : null;
         const orgSelect = document.createElement('select');
         orgSelect.style.cssText =
           'background:#1f2937;color:#d1d5db;border:1px solid #374151;padding:2px 8px;font-size:12px;font-family:monospace;border-radius:4px;cursor:pointer;height:24px;';
+        if (!currentOrgId || identity.organizations.length === 0) {
+          const placeholder = document.createElement('option');
+          placeholder.value = '';
+          placeholder.textContent = identity.organizations.length === 0 ? '(組織なし)' : '組織を選択...';
+          orgSelect.appendChild(placeholder);
+        }
         for (const org of identity.organizations) {
           const opt = document.createElement('option');
           opt.value = org.id;
@@ -162,16 +168,25 @@ const renderNav = async (screenId: string): Promise<void> => {
         Object.assign(logoutLink.style, { color: '#6b7280', fontSize: '12px', textDecoration: 'none' });
         nav.appendChild(logoutLink);
       } else {
-        const linkStyle = 'color:#6b7280;font-size:12px;text-decoration:none;';
-        const ghLink = document.createElement('a');
-        ghLink.textContent = 'GitHub';
-        ghLink.href = '/oauth/github/start';
-        ghLink.style.cssText = linkStyle;
-        const gLink = document.createElement('a');
-        gLink.textContent = 'Google';
-        gLink.href = '/oauth/google/start';
-        gLink.style.cssText = linkStyle;
-        nav.append(ghLink, gLink);
+        const loginSelect = document.createElement('select');
+        loginSelect.style.cssText =
+          'background:#1f2937;color:#d1d5db;border:1px solid #374151;padding:2px 8px;font-size:12px;font-family:monospace;border-radius:4px;cursor:pointer;height:24px;';
+        const placeholder = document.createElement('option');
+        placeholder.value = '';
+        placeholder.textContent = 'Login...';
+        placeholder.disabled = true;
+        placeholder.selected = true;
+        loginSelect.appendChild(placeholder);
+        [['GitHub', '/oauth/github/start'], ['Google', '/oauth/google/start']].forEach(([label, href]) => {
+          const opt = document.createElement('option');
+          opt.value = href;
+          opt.textContent = label;
+          loginSelect.appendChild(opt);
+        });
+        loginSelect.addEventListener('change', () => {
+          if (loginSelect.value) window.location.href = loginSelect.value;
+        });
+        nav.appendChild(loginSelect);
       }
     }
   } catch { /* ignore */ }
