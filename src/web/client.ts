@@ -87,10 +87,41 @@ const renderNav = async (screenId: string): Promise<void> => {
 
   nav.appendChild(select);
 
+  const [authResult, identityResult] = await Promise.allSettled([
+    fetch('/api/auth/status'),
+    fetch('/api/auth/identity-status'),
+  ]);
+
   try {
-    const authRes = await fetch('/api/auth/status');
-    if (authRes.ok) {
-      const authStatus = (await authRes.json()) as AuthStatus;
+    if (identityResult.status === 'fulfilled' && identityResult.value.ok) {
+      const identity = (await identityResult.value.json()) as IdentityStatus;
+      if (identity.user_id && identity.organizations.length > 0) {
+        const rawOrgId = document.cookie.match(/(?:^|; )identity_org_id=([^;]*)/)?.[1];
+        const currentOrgId = rawOrgId ? decodeURIComponent(rawOrgId) : null;
+        const orgSelect = document.createElement('select');
+        orgSelect.style.cssText =
+          'background:#1f2937;color:#d1d5db;border:1px solid #374151;padding:2px 8px;font-size:12px;font-family:monospace;border-radius:4px;cursor:pointer;height:24px;';
+        for (const org of identity.organizations) {
+          const opt = document.createElement('option');
+          opt.value = org.id;
+          opt.textContent = org.name;
+          if (org.id === currentOrgId) opt.selected = true;
+          orgSelect.appendChild(opt);
+        }
+        orgSelect.addEventListener('change', async () => {
+          const orgId = orgSelect.value;
+          if (!orgId) return;
+          await fetch(`/api/auth/select-org?org_id=${encodeURIComponent(orgId)}`, { redirect: 'manual' });
+          window.location.reload();
+        });
+        nav.appendChild(orgSelect);
+      }
+    }
+  } catch { /* ignore */ }
+
+  try {
+    if (authResult.status === 'fulfilled' && authResult.value.ok) {
+      const authStatus = (await authResult.value.json()) as AuthStatus;
       if (authStatus.github.authenticated || authStatus.google.authenticated) {
         const userEl = document.createElement('span');
         userEl.textContent = authStatus.github.login
