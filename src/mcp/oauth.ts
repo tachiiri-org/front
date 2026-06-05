@@ -18,9 +18,8 @@ type McpOAuthParams = {
 
 type DbClient = {
   id: string;
-  name: string;
-  actor_type: string;
-  redirect_uris: string;
+  name: string | null;
+  redirect_uris: string; // JSON array string from json_group_array
 };
 
 function toBase64Url(data: Uint8Array): string {
@@ -38,9 +37,19 @@ function origin(request: Request, env: AuthorizeEnv): string {
 }
 
 async function lookupClient(db: D1Database, clientId: string): Promise<DbClient | null> {
-  return db.prepare("SELECT id, name, actor_type, redirect_uris FROM m_oauth_clients WHERE id = ?")
-    .bind(clientId)
-    .first<DbClient>();
+  return db.prepare(`
+    SELECT
+      c.id,
+      cn.value AS name,
+      COALESCE(json_group_array(r.value) FILTER (WHERE r.value IS NOT NULL), '[]') AS redirect_uris
+    FROM m_clients c
+    LEFT JOIN j_clients_names jcn ON jcn.client_id = c.id
+    LEFT JOIN m_client_names cn ON cn.id = jcn.name_id
+    LEFT JOIN j_clients_redirect_uris jcr ON jcr.client_id = c.id
+    LEFT JOIN m_redirect_uris r ON r.id = jcr.redirect_uri_id
+    WHERE c.id = ?
+    GROUP BY c.id
+  `).bind(clientId).first<DbClient>();
 }
 
 // GET /.well-known/oauth-authorization-server
@@ -73,16 +82,46 @@ export async function handleMcpRegister(request: Request, env: AuthorizeEnv): Pr
 
   const clientId = crypto.randomUUID();
   const clientName = body.client_name ?? "Unknown Client";
-  const redirectUris = JSON.stringify(body.redirect_uris ?? []);
+  const nameId = crypto.randomUUID();
+  const redirectUris = body.redirect_uris ?? [];
 
-  await env.IDENTITY_DB.prepare(
-    "INSERT INTO m_oauth_clients (id, name, actor_type, redirect_uris) VALUES (?, ?, 'ai', ?)"
-  ).bind(clientId, clientName, redirectUris).run();
+  const actorRow = await env.IDENTITY_DB.prepare("SELECT id FROM m_actors WHERE value = 'ai'")
+    .first<{ id: string }>();
+  if (!actorRow) return Response.json({ error: "server_error" }, { status: 500 });
+
+  await env.IDENTITY_DB.batch([
+    env.IDENTITY_DB.prepare("INSERT INTO m_clients (id) VALUES (?)").bind(clientId),
+    env.IDENTITY_DB.prepare("INSERT INTO m_client_names (id, value) VALUES (?, ?)").bind(nameId, clientName),
+    env.IDENTITY_DB.prepare("INSERT INTO j_clients_names (client_id, name_id) VALUES (?, ?)").bind(clientId, nameId),
+    env.IDENTITY_DB.prepare("INSERT INTO j_clients_actors (client_id, actor_id) VALUES (?, ?)").bind(clientId, actorRow.id),
+  ]);
+
+  if (redirectUris.length > 0) {
+    await env.IDENTITY_DB.batch(
+      redirectUris.map(uri =>
+        env.IDENTITY_DB.prepare("INSERT OR IGNORE INTO m_redirect_uris (id, value) VALUES (?, ?)").bind(crypto.randomUUID(), uri)
+      )
+    );
+
+    const placeholders = redirectUris.map(() => "?").join(", ");
+    const uriRows = await env.IDENTITY_DB.prepare(
+      `SELECT id, value FROM m_redirect_uris WHERE value IN (${placeholders})`
+    ).bind(...redirectUris).all<{ id: string; value: string }>();
+
+    const uriIdMap = new Map(uriRows.results.map(r => [r.value, r.id]));
+    await env.IDENTITY_DB.batch(
+      redirectUris
+        .filter(uri => uriIdMap.has(uri))
+        .map(uri =>
+          env.IDENTITY_DB.prepare("INSERT OR IGNORE INTO j_clients_redirect_uris (client_id, redirect_uri_id) VALUES (?, ?)").bind(clientId, uriIdMap.get(uri))
+        )
+    );
+  }
 
   return Response.json({
     client_id: clientId,
     client_name: clientName,
-    redirect_uris: body.redirect_uris ?? [],
+    redirect_uris: redirectUris,
     grant_types: ["authorization_code"],
     response_types: ["code"],
     token_endpoint_auth_method: "none",
@@ -142,7 +181,7 @@ export async function handleMcpAuthorize(request: Request, env: AuthorizeEnv): P
   </style>
 </head>
 <body>
-  <h1>Authorize ${client.name}</h1>
+  <h1>Authorize ${client.name ?? ""}</h1>
   <p>Sign in to grant access to your graph data.</p>
   <div class="scope">Scopes: ${scope}</div>
   <a class="btn github" href="/oauth/github/start">Sign in with GitHub</a>
@@ -239,7 +278,7 @@ export async function handleMcpApprove(request: Request, env: AuthorizeEnv): Pro
   const expiresAt = Math.floor(Date.now() / 1000) + CODE_TTL;
 
   await env.IDENTITY_DB.prepare(`
-    INSERT INTO m_oauth_authorization_codes
+    INSERT INTO t_oauth_authorization_codes
       (code, client_id, user_id, group_id, scopes, code_challenge, code_challenge_method, redirect_uri, expires_at)
     VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
   `).bind(code, params.client_id, userId, groupId, params.scope, params.code_challenge, params.code_challenge_method, params.redirect_uri, expiresAt).run();
@@ -283,7 +322,7 @@ export async function handleMcpToken(request: Request, env: AuthorizeEnv): Promi
 
   const row = await env.IDENTITY_DB.prepare(`
     SELECT code, client_id, user_id, group_id, scopes, code_challenge, code_challenge_method, redirect_uri, expires_at, used
-    FROM m_oauth_authorization_codes WHERE code = ?
+    FROM t_oauth_authorization_codes WHERE code = ?
   `).bind(code).first<{
     code: string; client_id: string; user_id: string; group_id: string; scopes: string;
     code_challenge: string; code_challenge_method: string; redirect_uri: string;
@@ -302,7 +341,7 @@ export async function handleMcpToken(request: Request, env: AuthorizeEnv): Promi
     return Response.json({ error: "invalid_grant", error_description: "PKCE verification failed" }, { status: 400 });
   }
 
-  await env.IDENTITY_DB.prepare("UPDATE m_oauth_authorization_codes SET used = 1 WHERE code = ?").bind(code).run();
+  await env.IDENTITY_DB.prepare("UPDATE t_oauth_authorization_codes SET used = 1 WHERE code = ?").bind(code).run();
 
   const scopes = row.scopes.split(" ").filter(Boolean);
   const accessToken = await issueMcpToken(env, {
