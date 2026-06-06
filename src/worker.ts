@@ -15,6 +15,7 @@ import {
   handleMcpAuthorize,
   handleMcpSelectOrg,
   handleMcpApprove,
+  handleMcpCreateOrg,
   handleMcpToken,
 } from './mcp/oauth';
 import { clearGitHubSessionCookies, clearGitHubConnectSessionCookies, clearGoogleSessionCookies } from './identify';
@@ -160,6 +161,9 @@ export default {
     }
     if (pathname === '/oauth/mcp/approve' && request.method === 'POST') {
       return handleMcpApprove(request, env);
+    }
+    if (pathname === '/oauth/mcp/create-org' && request.method === 'POST') {
+      return handleMcpCreateOrg(request, env);
     }
     if (pathname === '/oauth/mcp/token' && request.method === 'POST') {
       return handleMcpToken(request, env);

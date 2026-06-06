@@ -4,6 +4,7 @@ import { parseCookies, serializeCookie, clearCookie } from "../auth/cookies";
 import { issueMcpToken } from "../auth/token";
 import { authorizeFetch } from "../auth/fetch";
 import { IDENTITY_USER_ID_COOKIE, MCP_OAUTH_PARAMS_COOKIE } from "../auth/github";
+import { createOrganization } from "../identify";
 
 const CODE_TTL = 60 * 10; // 10 minutes
 
@@ -253,19 +254,30 @@ export async function handleMcpSelectOrg(request: Request, env: AuthorizeEnv): P
     select { width: 100%; padding: 10px; border: 1px solid #d1d5db; border-radius: 6px; font-size: 1rem; margin-bottom: 16px; }
     .scope { background: #f3f4f6; padding: 8px 12px; border-radius: 6px; font-size: .875rem; margin-bottom: 20px; }
     button { width: 100%; padding: 12px; background: #2563eb; color: #fff; border: none; border-radius: 8px; font-size: 1rem; font-weight: 600; cursor: pointer; }
-    .empty { color: #ef4444; }
+    hr { border: none; border-top: 1px solid #e5e7eb; margin: 24px 0; }
+    label { display: block; font-size: .875rem; font-weight: 600; margin-bottom: 6px; }
+    input[type=text] { width: 100%; padding: 10px; border: 1px solid #d1d5db; border-radius: 6px; font-size: 1rem; margin-bottom: 12px; box-sizing: border-box; }
+    .create-btn { background: #059669; }
+    h2 { font-size: 1.1rem; margin-bottom: 8px; }
   </style>
 </head>
 <body>
   <h1>Select Organization</h1>
   <p>Grant access to one of your organizations.</p>
   <div class="scope">Scopes: ${params.scope}</div>
-  ${organizations.length === 0
-    ? '<p class="empty">No organizations found. Create an organization first.</p>'
-    : `<form method="POST" action="/oauth/mcp/approve">
+  ${organizations.length > 0
+    ? `<form method="POST" action="/oauth/mcp/approve">
          <select name="org_id" required>${options}</select>
          <button type="submit">Authorize</button>
-       </form>`}
+       </form>
+       <hr>`
+    : ""}
+  <h2>${organizations.length === 0 ? "Create an Organization" : "Or create a new organization"}</h2>
+  <form method="POST" action="/oauth/mcp/create-org">
+    <label for="org_name">Organization name</label>
+    <input type="text" id="org_name" name="org_name" required placeholder="My Organization">
+    <button type="submit" class="create-btn">Create &amp; Authorize</button>
+  </form>
 </body>
 </html>`;
 
@@ -302,6 +314,55 @@ export async function handleMcpApprove(request: Request, env: AuthorizeEnv): Pro
       (code, client_id, user_id, group_id, scopes, code_challenge, code_challenge_method, redirect_uri, expires_at)
     VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
   `).bind(code, params.client_id, userId, groupId, params.scope, params.code_challenge, params.code_challenge_method, params.redirect_uri, expiresAt).run();
+
+  const headers = new Headers();
+  headers.append("Set-Cookie", clearCookie(MCP_OAUTH_PARAMS_COOKIE, request));
+  headers.append("Set-Cookie", clearCookie(IDENTITY_USER_ID_COOKIE, request));
+
+  const redirectUrl = new URL(params.redirect_uri);
+  redirectUrl.searchParams.set("code", code);
+  redirectUrl.searchParams.set("state", params.state);
+  headers.set("Location", redirectUrl.toString());
+  return new Response(null, { status: 302, headers });
+}
+
+// POST /oauth/mcp/create-org
+export async function handleMcpCreateOrg(request: Request, env: AuthorizeEnv): Promise<Response> {
+  if (!env.IDENTITY_DB) return new Response("IDENTITY_DB not configured", { status: 503 });
+
+  const cookies = parseCookies(request);
+  const userId = cookies.get(IDENTITY_USER_ID_COOKIE);
+  const paramsRaw = cookies.get(MCP_OAUTH_PARAMS_COOKIE);
+  if (!userId || !paramsRaw) {
+    return new Response("Session expired. Please restart the authorization flow.", { status: 400 });
+  }
+
+  let params: McpOAuthParams;
+  try {
+    params = JSON.parse(atob(paramsRaw)) as McpOAuthParams;
+  } catch {
+    return new Response("Invalid session.", { status: 400 });
+  }
+
+  const formData = await request.formData();
+  const orgName = (formData.get("org_name") as string | null)?.trim();
+  if (!orgName) return new Response("org_name required", { status: 400 });
+
+  let org: { id: string };
+  try {
+    org = await createOrganization(env, userId, orgName);
+  } catch (e) {
+    return new Response(`Failed to create organization: ${String(e)}`, { status: 500 });
+  }
+
+  const code = crypto.randomUUID();
+  const expiresAt = Math.floor(Date.now() / 1000) + CODE_TTL;
+
+  await env.IDENTITY_DB.prepare(`
+    INSERT INTO t_oauth_authorization_code
+      (code, client_id, user_id, group_id, scopes, code_challenge, code_challenge_method, redirect_uri, expires_at)
+    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
+  `).bind(code, params.client_id, userId, org.id, params.scope, params.code_challenge, params.code_challenge_method, params.redirect_uri, expiresAt).run();
 
   const headers = new Headers();
   headers.append("Set-Cookie", clearCookie(MCP_OAUTH_PARAMS_COOKIE, request));
