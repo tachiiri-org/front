@@ -574,4 +574,78 @@ export const hydrateEditor = async (
   }
 
   await hydrateSelectTableBindings(onFrameRerender);
+  await hydrateMigrationComponents();
+};
+
+const hydrateMigrationComponents = async (): Promise<void> => {
+  if (!store.screen) return;
+
+  const frames = store.screen.frames as Array<Record<string, unknown>>;
+  const startFrame = frames.find((f) => f.name === 'migration-start');
+  const targetFrame = frames.find((f) => f.name === 'migration-target');
+  const progressFrame = frames.find((f) => f.name === 'migration-progress');
+
+  if (!startFrame || !progressFrame) return;
+
+  const startBtn = startFrame.id ? domMap.get(startFrame.id as string) : null;
+  const progressEl = progressFrame.id ? domMap.get(progressFrame.id as string) : null;
+
+  if (!(startBtn instanceof HTMLButtonElement) || !(progressEl instanceof HTMLElement)) return;
+
+  const log = (msg: string, isError = false): void => {
+    const line = document.createElement('div');
+    line.textContent = msg;
+    line.style.cssText = `font-size:13px;padding:2px 0;color:${isError ? '#dc2626' : 'inherit'}`;
+    progressEl.appendChild(line);
+    progressEl.scrollTop = progressEl.scrollHeight;
+  };
+
+  startBtn.addEventListener('click', () => {
+    void (async () => {
+      const targetEl = targetFrame?.id ? domMap.get(targetFrame.id as string) : null;
+      const target = targetEl instanceof HTMLSelectElement ? targetEl.value : '';
+      if (!target) { log('対象環境を選択してください', true); return; }
+
+      progressEl.replaceChildren();
+      startBtn.disabled = true;
+      log(`[${target}] マイグレーション開始...`);
+
+      try {
+        const schemaRes = await fetch('/api/admin/migration/schema', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ target }),
+        });
+        if (!schemaRes.ok) {
+          const err = (await schemaRes.json() as Record<string, unknown>).error ?? schemaRes.status;
+          log(`スキーマ再作成失敗: ${String(err)}`, true);
+          return;
+        }
+        const schema = await schemaRes.json() as { tables: string[]; views: string[]; dataTableOrder: string[] };
+        log(`スキーマ完了 (tables: ${schema.tables.length}, views: ${schema.views.length})`);
+
+        for (const tableName of schema.dataTableOrder) {
+          log(`  [${tableName}] 移行中...`);
+          const tableRes = await fetch('/api/admin/migration/table', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ target, table: tableName }),
+          });
+          if (!tableRes.ok) {
+            const err = (await tableRes.json() as Record<string, unknown>).error ?? tableRes.status;
+            log(`  [${tableName}] 失敗: ${String(err)}`, true);
+            return;
+          }
+          const result = await tableRes.json() as { migrated: number };
+          log(`  [${tableName}] 完了 (${result.migrated} 行)`);
+        }
+
+        log(`マイグレーション完了`);
+      } catch (e) {
+        log(`エラー: ${String(e)}`, true);
+      } finally {
+        startBtn.disabled = false;
+      }
+    })();
+  });
 };

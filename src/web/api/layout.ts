@@ -420,6 +420,28 @@ export const handleApiRequest = async (request: Request, env: Env): Promise<Resp
     return new Response('Method Not Allowed', { status: 405 });
   }
 
+  if (url.pathname === '/api/admin/migration/schema' && request.method === 'POST') {
+    const body = await request.text();
+    return authorizeFetch(env, {
+      path: '/api/v1/admin/migration/schema',
+      method: 'POST',
+      body,
+      tenantContext,
+      actorType: 'ops',
+    });
+  }
+
+  if (url.pathname === '/api/admin/migration/table' && request.method === 'POST') {
+    const body = await request.text();
+    return authorizeFetch(env, {
+      path: '/api/v1/admin/migration/table',
+      method: 'POST',
+      body,
+      tenantContext,
+      actorType: 'ops',
+    });
+  }
+
   if (url.pathname === '/api/migrate/lists-to-tree') {
     if (request.method === 'POST') return handleMigrateListsToTree(backend);
     return new Response('Method Not Allowed', { status: 405 });

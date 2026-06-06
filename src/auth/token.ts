@@ -118,7 +118,7 @@ async function resolveSecret(value: SecretValue | undefined): Promise<string | u
 
 export async function issueInternalToken(
   env: { INTERNAL_AUTH_SIGNING_KEY?: SecretValue; INTERNAL_AUTH_TOKEN_ISSUER?: string },
-  input: { audience: string; tenantId?: string; subjectId?: string },
+  input: { audience: string; tenantId?: string; subjectId?: string; actorType?: InternalTokenClaims['actor_type']; roles?: string[] },
 ): Promise<string> {
   const signingKey = await resolveSecret(env.INTERNAL_AUTH_SIGNING_KEY);
   if (!signingKey) {
@@ -130,7 +130,8 @@ export async function issueInternalToken(
   const payload: InternalTokenClaims = {
     claims_set_version: 1,
     actor_id: "front-local",
-    actor_type: "service",
+    actor_type: input.actorType ?? "service",
+    ...(input.roles ? { roles: input.roles } : {}),
     iss: env.INTERNAL_AUTH_TOKEN_ISSUER ?? "front",
     aud: input.audience,
     exp: now + 300,
