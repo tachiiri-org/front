@@ -168,11 +168,6 @@ export default {
       return handleMcp(request, env);
     }
 
-    if (pathname === '/api/admin/encrypt-migrate' && request.method === 'POST') {
-      const { authorizeFetch } = await import('./auth');
-      return authorizeFetch(env, { path: '/api/v1/identity/encrypt-migrate', method: 'POST' });
-    }
-
     if (pathname.startsWith('/api/')) {
       try {
         return await handleLayoutApiRequest(request, env);
