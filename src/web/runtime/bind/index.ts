@@ -592,12 +592,25 @@ const hydrateMigrationComponents = async (): Promise<void> => {
 
   if (!(startBtn instanceof HTMLButtonElement) || !(progressEl instanceof HTMLElement)) return;
 
-  const log = (msg: string, isError = false): void => {
+  const ts = (): string => new Date().toLocaleTimeString('ja-JP', { hour12: false });
+
+  const log = (msg: string, isError = false, indent = 0): void => {
     const line = document.createElement('div');
-    line.textContent = msg;
-    line.style.cssText = `font-size:13px;padding:2px 0;color:${isError ? '#dc2626' : 'inherit'}`;
+    line.textContent = `[${ts()}] ${'  '.repeat(indent)}${msg}`;
+    line.style.cssText = `font-size:12px;padding:1px 0;color:${isError ? '#dc2626' : isError === false && indent === 0 ? '#1d4ed8' : 'inherit'};font-family:monospace`;
     progressEl.appendChild(line);
     progressEl.scrollTop = progressEl.scrollHeight;
+  };
+
+  const logErr = async (res: Response, context: string): Promise<void> => {
+    try {
+      const body = await res.json() as Record<string, unknown>;
+      const msg = body.message ?? body.error_code ?? res.status;
+      const detail = body.details ? ` / ${String(body.details)}` : '';
+      log(`${context}: ${String(msg)}${detail}`, true);
+    } catch {
+      log(`${context}: HTTP ${res.status}`, true);
+    }
   };
 
   startBtn.addEventListener('click', () => {
@@ -608,41 +621,44 @@ const hydrateMigrationComponents = async (): Promise<void> => {
 
       progressEl.replaceChildren();
       startBtn.disabled = true;
-      log(`[${target}] マイグレーション開始...`);
+      log(`=== マイグレーション開始: prod → ${target} ===`);
 
       try {
+        log('スキーマ移行中 (DROP → CREATE)...');
         const schemaRes = await fetch('/api/admin/migration/schema', {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
           body: JSON.stringify({ target }),
         });
         if (!schemaRes.ok) {
-          const err = (await schemaRes.json() as Record<string, unknown>).error ?? schemaRes.status;
-          log(`スキーマ再作成失敗: ${String(err)}`, true);
+          await logErr(schemaRes, 'スキーマ失敗');
           return;
         }
         const schema = await schemaRes.json() as { tables: string[]; views: string[]; dataTableOrder: string[] };
-        log(`スキーマ完了 (tables: ${schema.tables.length}, views: ${schema.views.length})`);
+        log(`スキーマ完了: tables=${schema.tables.length}, views=${schema.views.length}`);
+        log(`移行順序: ${schema.dataTableOrder.join(' → ')}`, false, 1);
 
+        let succeeded = 0;
         for (const tableName of schema.dataTableOrder) {
-          log(`  [${tableName}] 移行中...`);
+          log(`[${tableName}] 移行中...`, false, 1);
           const tableRes = await fetch('/api/admin/migration/table', {
             method: 'POST',
             headers: { 'Content-Type': 'application/json' },
             body: JSON.stringify({ target, table: tableName }),
           });
           if (!tableRes.ok) {
-            const err = (await tableRes.json() as Record<string, unknown>).error ?? tableRes.status;
-            log(`  [${tableName}] 失敗: ${String(err)}`, true);
+            await logErr(tableRes, `[${tableName}] 失敗`);
+            log(`中断 (${succeeded}/${schema.dataTableOrder.length} テーブル完了)`, true);
             return;
           }
           const result = await tableRes.json() as { migrated: number };
-          log(`  [${tableName}] 完了 (${result.migrated} 行)`);
+          log(`[${tableName}] ✓ ${result.migrated} 行`, false, 1);
+          succeeded++;
         }
 
-        log(`マイグレーション完了`);
+        log(`=== マイグレーション完了 (${succeeded} テーブル) ===`);
       } catch (e) {
-        log(`エラー: ${String(e)}`, true);
+        log(`予期しないエラー: ${String(e)}`, true);
       } finally {
         startBtn.disabled = false;
       }
