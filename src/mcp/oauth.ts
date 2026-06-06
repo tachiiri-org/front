@@ -42,11 +42,11 @@ async function lookupClient(db: D1Database, clientId: string): Promise<DbClient 
       c.id,
       cn.value AS name,
       COALESCE(json_group_array(r.value) FILTER (WHERE r.value IS NOT NULL), '[]') AS redirect_uris
-    FROM m_clients c
-    LEFT JOIN j_clients_names jcn ON jcn.client_id = c.id
-    LEFT JOIN m_client_names cn ON cn.id = jcn.name_id
-    LEFT JOIN j_clients_redirect_uris jcr ON jcr.client_id = c.id
-    LEFT JOIN m_redirect_uris r ON r.id = jcr.redirect_uri_id
+    FROM m_client c
+    LEFT JOIN j_client_name jcn ON jcn.client_id = c.id
+    LEFT JOIN m_client_name cn ON cn.id = jcn.name_id
+    LEFT JOIN j_client_redirect jcr ON jcr.client_id = c.id
+    LEFT JOIN m_redirect r ON r.id = jcr.redirect_uri_id
     WHERE c.id = ?
     GROUP BY c.id
   `).bind(clientId).first<DbClient>();
@@ -85,27 +85,27 @@ export async function handleMcpRegister(request: Request, env: AuthorizeEnv): Pr
   const nameId = crypto.randomUUID();
   const redirectUris = body.redirect_uris ?? [];
 
-  const actorRow = await env.IDENTITY_DB.prepare("SELECT id FROM m_actors WHERE value = 'ai'")
+  const actorRow = await env.IDENTITY_DB.prepare("SELECT id FROM m_actor WHERE value = 'ai'")
     .first<{ id: string }>();
   if (!actorRow) return Response.json({ error: "server_error" }, { status: 500 });
 
   await env.IDENTITY_DB.batch([
-    env.IDENTITY_DB.prepare("INSERT INTO m_clients (id) VALUES (?)").bind(clientId),
-    env.IDENTITY_DB.prepare("INSERT INTO m_client_names (id, value) VALUES (?, ?)").bind(nameId, clientName),
-    env.IDENTITY_DB.prepare("INSERT INTO j_clients_names (client_id, name_id) VALUES (?, ?)").bind(clientId, nameId),
-    env.IDENTITY_DB.prepare("INSERT INTO j_clients_actors (client_id, actor_id) VALUES (?, ?)").bind(clientId, actorRow.id),
+    env.IDENTITY_DB.prepare("INSERT INTO m_client (id) VALUES (?)").bind(clientId),
+    env.IDENTITY_DB.prepare("INSERT INTO m_client_name (id, value) VALUES (?, ?)").bind(nameId, clientName),
+    env.IDENTITY_DB.prepare("INSERT INTO j_client_name (client_id, name_id) VALUES (?, ?)").bind(clientId, nameId),
+    env.IDENTITY_DB.prepare("INSERT INTO j_client_actor (client_id, actor_id) VALUES (?, ?)").bind(clientId, actorRow.id),
   ]);
 
   if (redirectUris.length > 0) {
     await env.IDENTITY_DB.batch(
       redirectUris.map(uri =>
-        env.IDENTITY_DB.prepare("INSERT OR IGNORE INTO m_redirect_uris (id, value) VALUES (?, ?)").bind(crypto.randomUUID(), uri)
+        env.IDENTITY_DB.prepare("INSERT OR IGNORE INTO m_redirect (id, value) VALUES (?, ?)").bind(crypto.randomUUID(), uri)
       )
     );
 
     const placeholders = redirectUris.map(() => "?").join(", ");
     const uriRows = await env.IDENTITY_DB.prepare(
-      `SELECT id, value FROM m_redirect_uris WHERE value IN (${placeholders})`
+      `SELECT id, value FROM m_redirect WHERE value IN (${placeholders})`
     ).bind(...redirectUris).all<{ id: string; value: string }>();
 
     const uriIdMap = new Map(uriRows.results.map(r => [r.value, r.id]));
@@ -113,7 +113,7 @@ export async function handleMcpRegister(request: Request, env: AuthorizeEnv): Pr
       redirectUris
         .filter(uri => uriIdMap.has(uri))
         .map(uri =>
-          env.IDENTITY_DB.prepare("INSERT OR IGNORE INTO j_clients_redirect_uris (client_id, redirect_uri_id) VALUES (?, ?)").bind(clientId, uriIdMap.get(uri))
+          env.IDENTITY_DB.prepare("INSERT OR IGNORE INTO j_client_redirect (client_id, redirect_uri_id) VALUES (?, ?)").bind(clientId, uriIdMap.get(uri))
         )
     );
   }
@@ -278,7 +278,7 @@ export async function handleMcpApprove(request: Request, env: AuthorizeEnv): Pro
   const expiresAt = Math.floor(Date.now() / 1000) + CODE_TTL;
 
   await env.IDENTITY_DB.prepare(`
-    INSERT INTO t_oauth_authorization_codes
+    INSERT INTO t_oauth_authorization_code
       (code, client_id, user_id, group_id, scopes, code_challenge, code_challenge_method, redirect_uri, expires_at)
     VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
   `).bind(code, params.client_id, userId, groupId, params.scope, params.code_challenge, params.code_challenge_method, params.redirect_uri, expiresAt).run();
@@ -322,7 +322,7 @@ export async function handleMcpToken(request: Request, env: AuthorizeEnv): Promi
 
   const row = await env.IDENTITY_DB.prepare(`
     SELECT code, client_id, user_id, group_id, scopes, code_challenge, code_challenge_method, redirect_uri, expires_at, used
-    FROM t_oauth_authorization_codes WHERE code = ?
+    FROM t_oauth_authorization_code WHERE code = ?
   `).bind(code).first<{
     code: string; client_id: string; user_id: string; group_id: string; scopes: string;
     code_challenge: string; code_challenge_method: string; redirect_uri: string;
@@ -341,7 +341,7 @@ export async function handleMcpToken(request: Request, env: AuthorizeEnv): Promi
     return Response.json({ error: "invalid_grant", error_description: "PKCE verification failed" }, { status: 400 });
   }
 
-  await env.IDENTITY_DB.prepare("UPDATE t_oauth_authorization_codes SET used = 1 WHERE code = ?").bind(code).run();
+  await env.IDENTITY_DB.prepare("UPDATE t_oauth_authorization_code SET used = 1 WHERE code = ?").bind(code).run();
 
   const scopes = row.scopes.split(" ").filter(Boolean);
   const accessToken = await issueMcpToken(env, {
