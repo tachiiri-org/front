@@ -28,6 +28,23 @@ function toBase64Url(data: Uint8Array): string {
   return btoa(binary).replace(/\+/g, "-").replace(/\//g, "_").replace(/=+$/u, "");
 }
 
+function hexToBytes(hex: string): Uint8Array {
+  const bytes = new Uint8Array(hex.length / 2);
+  for (let i = 0; i < hex.length; i += 2) bytes[i / 2] = parseInt(hex.slice(i, i + 2), 16);
+  return bytes;
+}
+
+async function hmacHex(keyHex: string, value: string): Promise<string> {
+  const key = await crypto.subtle.importKey("raw", hexToBytes(keyHex), { name: "HMAC", hash: "SHA-256" }, false, ["sign"]);
+  const sig = await crypto.subtle.sign("HMAC", key, new TextEncoder().encode(value));
+  return Array.from(new Uint8Array(sig)).map(b => b.toString(16).padStart(2, "0")).join("");
+}
+
+async function resolveSecret(value: string | { get(): Promise<string> } | undefined): Promise<string | undefined> {
+  if (value && typeof value !== "string") return value.get();
+  return value;
+}
+
 function isSecure(request: Request): boolean {
   return new URL(request.url).protocol === "https:";
 }
@@ -85,8 +102,11 @@ export async function handleMcpRegister(request: Request, env: AuthorizeEnv): Pr
   const nameId = crypto.randomUUID();
   const redirectUris = body.redirect_uris ?? [];
 
-  const actorRow = await env.IDENTITY_DB.prepare("SELECT id FROM m_actor WHERE value = 'ai'")
-    .first<{ id: string }>();
+  const hmacKey = await resolveSecret(env.IDENTITY_HMAC_KEY);
+  if (!hmacKey) return Response.json({ error: "server_error" }, { status: 500 });
+  const aiHash = await hmacHex(hmacKey, "ai");
+  const actorRow = await env.IDENTITY_DB.prepare("SELECT id FROM m_actor WHERE value_hash = ?")
+    .bind(aiHash).first<{ id: string }>();
   if (!actorRow) return Response.json({ error: "server_error" }, { status: 500 });
 
   await env.IDENTITY_DB.batch([

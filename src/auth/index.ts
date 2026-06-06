@@ -16,6 +16,7 @@ export type AuthorizeEnv = {
   readonly FRONT_TO_AUTHORIZE_TOKEN?: SecretValue;
   readonly FRONT_TO_BACKEND_TOKEN?: SecretValue;
   readonly INTERNAL_AUTH_SIGNING_KEY?: SecretValue;
+  readonly IDENTITY_HMAC_KEY?: SecretValue;
   readonly INTERNAL_AUTH_TOKEN_ISSUER?: string;
   readonly FRONTEND_ORIGIN?: string;
   readonly GITHUB_OAUTH_CLIENT_ID?: string;
