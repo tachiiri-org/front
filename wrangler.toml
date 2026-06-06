@@ -39,6 +39,7 @@ database_id = "01fc4992-e113-435a-be70-226cddcfa092"
 FRONTEND_ORIGIN = "https://front-production.tachiiri.workers.dev"
 GITHUB_OAUTH_CLIENT_ID = "Ov23li098QXLtF5UbEg5"
 GOOGLE_OAUTH_CLIENT_ID = "804252639051-hdkilk1189bomeiv9opnsu0h2basdtr8.apps.googleusercontent.com"
+LAYOUTS_BUCKET_ID = "bucket-production"
 
 [[env.production.services]]
 binding = "BACKEND"
