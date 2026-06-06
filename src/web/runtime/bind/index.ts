@@ -634,13 +634,21 @@ const hydrateMigrationComponents = async (): Promise<void> => {
           await logErr(schemaRes, 'スキーマ失敗');
           return;
         }
-        const schema = await schemaRes.json() as { tables: string[]; views: string[]; dataTableOrder: string[] };
-        log(`スキーマ完了: tables=${schema.tables.length}, views=${schema.views.length}`);
-        log(`移行順序: ${schema.dataTableOrder.join(' → ')}`, false, 1);
+        const schema = await schemaRes.json() as {
+          tables: string[]; views: string[]; dataTableOrder: string[];
+          dropped: string[]; droppedExcluded: string[];
+        };
+        log(`スキーマ完了: DROP ${(schema.dropped ?? []).length + (schema.droppedExcluded ?? []).length} → CREATE ${schema.tables.length} tables + ${schema.views.length} views`);
+        if (schema.droppedExcluded?.length) {
+          log(`  除外テーブル (DROP のみ): ${schema.droppedExcluded.join(', ')}`, false, 1);
+        }
+        log(`  作成テーブル: ${schema.tables.join(', ')}`, false, 1);
+        if (schema.views.length) log(`  作成ビュー: ${schema.views.join(', ')}`, false, 1);
+        log(`  データ移行順 (${schema.dataTableOrder.length}件): ${schema.dataTableOrder.join(' → ')}`, false, 1);
 
         let succeeded = 0;
         for (const tableName of schema.dataTableOrder) {
-          log(`[${tableName}] 移行中...`, false, 1);
+          log(`[${tableName}] 移行中... (${succeeded + 1}/${schema.dataTableOrder.length})`, false, 1);
           const tableRes = await fetch('/api/admin/migration/table', {
             method: 'POST',
             headers: { 'Content-Type': 'application/json' },
@@ -651,8 +659,14 @@ const hydrateMigrationComponents = async (): Promise<void> => {
             log(`中断 (${succeeded}/${schema.dataTableOrder.length} テーブル完了)`, true);
             return;
           }
-          const result = await tableRes.json() as { migrated: number };
-          log(`[${tableName}] ✓ ${result.migrated} 行`, false, 1);
+          const result = await tableRes.json() as {
+            migrated: number; encryptedPairs: string[]; reencrypted: number; legacy: number;
+          };
+          const encPairs = result.encryptedPairs ?? [];
+          const encInfo = encPairs.length > 0
+            ? ` | 暗号列:[${encPairs.join(',')}] 再暗号:${result.reencrypted ?? 0}${(result.legacy ?? 0) > 0 ? ` legacy→enc:${result.legacy}` : ''}`
+            : ' | 暗号化列なし';
+          log(`[${tableName}] ✓ ${result.migrated} 行${encInfo}`, false, 1);
           succeeded++;
         }
 
