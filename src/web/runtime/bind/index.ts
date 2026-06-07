@@ -587,20 +587,16 @@ type DbApplyStatus = {
 };
 
 const hydrateMigrationApplyComponents = async (): Promise<void> => {
-  if (!store.screen) { console.log('[dbapply] no store.screen'); return; }
+  if (!store.screen) return;
 
   const frames = store.screen.frames as Array<Record<string, unknown>>;
   const containerFrame = frames.find((f) => f.name === 'db-apply-container');
   const progressFrame = frames.find((f) => f.name === 'db-apply-progress');
 
-  console.log('[dbapply] frames count:', frames.length, 'containerFrame:', containerFrame?.id, 'progressFrame:', progressFrame?.id);
-
   const containerEl = containerFrame?.id ? domMap.get(containerFrame.id as string) : null;
   const progressEl = progressFrame?.id ? domMap.get(progressFrame.id as string) : null;
 
-  console.log('[dbapply] containerEl:', containerEl, 'instanceof HTMLElement:', containerEl instanceof HTMLElement, 'domMap size:', domMap.size);
-
-  if (!(containerEl instanceof HTMLElement)) { console.log('[dbapply] containerEl is not HTMLElement, returning'); return; }
+  if (!(containerEl instanceof HTMLElement)) return;
 
   if (progressEl instanceof HTMLElement) {
     progressEl.style.cssText = 'overflow-y:auto;max-height:60vh;background:#1e1e1e;border-radius:4px;padding:6px 8px';
@@ -617,7 +613,7 @@ const hydrateMigrationApplyComponents = async (): Promise<void> => {
     progressEl.scrollTop = progressEl.scrollHeight;
   };
 
-  containerEl.style.cssText = 'padding:4px 0';
+  containerEl.style.padding = '4px 0';
 
   const headRow = document.createElement('div');
   headRow.style.cssText = 'display:flex;align-items:center;gap:16px;margin-bottom:8px';
