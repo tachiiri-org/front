@@ -12,9 +12,10 @@ export default defineConfig({
     },
     outDir: resolve('dist'),
     emptyOutDir: true,
+    manifest: true,
     rollupOptions: {
       output: {
-        entryFileNames: 'assets/index.js',
+        entryFileNames: 'assets/index-[hash].js',
       },
     },
   },

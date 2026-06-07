@@ -9,9 +9,10 @@
     "build": "vite build",
     "preview": "vite preview",
     "typecheck": "tsc -p tsconfig.node.json --noEmit && tsc -p tsconfig.json --noEmit && tsc -p tsconfig.worker.json --noEmit",
-    "deploy:stage": "bun run build && wrangler deploy --env stage",
-    "deploy:dev": "bun run build && wrangler deploy --env dev",
-    "deploy": "bun run build && wrangler deploy --env production"
+    "gen-client-path": "bun scripts/gen-client-path.ts",
+    "deploy:stage": "bun run build && bun run gen-client-path && wrangler deploy --env stage",
+    "deploy:dev": "bun run build && bun run gen-client-path && wrangler deploy --env dev",
+    "deploy": "bun run build && bun run gen-client-path && wrangler deploy --env production"
   },
   "dependencies": {},
   "devDependencies": {

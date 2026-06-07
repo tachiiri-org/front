@@ -1,3 +1,4 @@
+import { CLIENT_JS_PATH } from './client-path';
 import {
   handleGitHubOAuthCallback,
   handleGitHubOAuthStart,
@@ -196,7 +197,7 @@ export default {
       return new Response('Not Found', { status: 404 });
     }
 
-    return new Response('<!doctype html><script type="module" src="/assets/index.js"></script>', {
+    return new Response(`<!doctype html><script type="module" src="${CLIENT_JS_PATH}"></script>`, {
       headers: { 'Content-Type': 'text/html; charset=UTF-8' },
     });
   },
