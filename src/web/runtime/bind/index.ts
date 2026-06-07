@@ -587,15 +587,20 @@ type DbApplyStatus = {
 };
 
 const hydrateMigrationApplyComponents = async (): Promise<void> => {
-  if (!store.screen) return;
+  if (!store.screen) { console.log('[dbapply] no store.screen'); return; }
 
   const frames = store.screen.frames as Array<Record<string, unknown>>;
-
+  const containerFrame = frames.find((f) => f.name === 'db-apply-container');
   const progressFrame = frames.find((f) => f.name === 'db-apply-progress');
-  const statusFrame = frames.find((f) => f.name === 'db-apply-status');
 
+  console.log('[dbapply] frames count:', frames.length, 'containerFrame:', containerFrame?.id, 'progressFrame:', progressFrame?.id);
+
+  const containerEl = containerFrame?.id ? domMap.get(containerFrame.id as string) : null;
   const progressEl = progressFrame?.id ? domMap.get(progressFrame.id as string) : null;
-  const statusEl = statusFrame?.id ? domMap.get(statusFrame.id as string) : null;
+
+  console.log('[dbapply] containerEl:', containerEl, 'instanceof HTMLElement:', containerEl instanceof HTMLElement, 'domMap size:', domMap.size);
+
+  if (!(containerEl instanceof HTMLElement)) { console.log('[dbapply] containerEl is not HTMLElement, returning'); return; }
 
   if (progressEl instanceof HTMLElement) {
     progressEl.style.cssText = 'overflow-y:auto;max-height:60vh;background:#1e1e1e;border-radius:4px;padding:6px 8px';
@@ -612,10 +617,70 @@ const hydrateMigrationApplyComponents = async (): Promise<void> => {
     progressEl.scrollTop = progressEl.scrollHeight;
   };
 
-  const renderDbBlock = (
-    info: DbApplyStatus,
-    indent = false,
-  ): HTMLElement => {
+  containerEl.style.cssText = 'padding:4px 0';
+
+  const headRow = document.createElement('div');
+  headRow.style.cssText = 'display:flex;align-items:center;gap:16px;margin-bottom:8px';
+  const h2 = document.createElement('h2');
+  h2.style.cssText = 'font-size:17px;font-weight:700;margin:0';
+  h2.textContent = 'DB Apply (Expand-Contract)';
+  const connectLink = document.createElement('a');
+  connectLink.href = '/oauth/github/connect/start';
+  connectLink.textContent = 'GitHub Connect ログイン';
+  connectLink.style.cssText = 'font-size:12px;color:#2563eb;text-decoration:underline';
+  headRow.appendChild(h2);
+  headRow.appendChild(connectLink);
+  containerEl.appendChild(headRow);
+
+  const statusEl = document.createElement('div');
+  statusEl.style.cssText = 'font-size:12px;font-family:monospace;margin-bottom:10px;min-height:20px';
+  containerEl.appendChild(statusEl);
+
+  const makeSection = (title: string): HTMLElement => {
+    const section = document.createElement('div');
+    section.style.cssText = 'margin-bottom:6px';
+    const label = document.createElement('div');
+    label.style.cssText = 'font-size:13px;font-weight:600;color:#444;margin-bottom:3px';
+    label.textContent = title;
+    section.appendChild(label);
+    return section;
+  };
+
+  const makeBtn = (text: string): HTMLButtonElement => {
+    const btn = document.createElement('button');
+    btn.textContent = text;
+    btn.style.cssText = 'padding:4px 12px;font-size:12px;border:1px solid #ccc;border-radius:4px;cursor:pointer;background:#fff';
+    btn.addEventListener('mouseenter', () => { btn.style.background = '#f3f4f6'; });
+    btn.addEventListener('mouseleave', () => { if (!btn.disabled) btn.style.background = '#fff'; });
+    return btn;
+  };
+
+  const identitySection = makeSection('Identity DB');
+  const identityBtns = document.createElement('div');
+  identityBtns.style.cssText = 'display:flex;gap:8px';
+  const identityExpandBtn = makeBtn('Expand 適用');
+  const identityContractBtn = makeBtn('Contract 適用');
+  identityBtns.appendChild(identityExpandBtn);
+  identityBtns.appendChild(identityContractBtn);
+  identitySection.appendChild(identityBtns);
+  containerEl.appendChild(identitySection);
+
+  const userSection = makeSection('User DBs');
+  const userBtns = document.createElement('div');
+  userBtns.style.cssText = 'display:flex;gap:8px';
+  const userExpandBtn = makeBtn('Expand 適用');
+  const userContractBtn = makeBtn('Contract 適用');
+  userBtns.appendChild(userExpandBtn);
+  userBtns.appendChild(userContractBtn);
+  userSection.appendChild(userBtns);
+  containerEl.appendChild(userSection);
+
+  const ciSection = makeSection('CI Deploy (stage→main)');
+  const ciDeployBtn = makeBtn('CI Deploy 実行 (stage→main)');
+  ciSection.appendChild(ciDeployBtn);
+  containerEl.appendChild(ciSection);
+
+  const renderDbBlock = (info: DbApplyStatus, indent = false): HTMLElement => {
     const hasPending = info.pendingExpand.length > 0 || info.pendingContract.length > 0;
     const div = document.createElement('div');
     div.style.cssText = `margin-bottom:5px;padding:4px 8px;border-left:3px solid ${hasPending ? '#b45309' : '#15803d'};background:#fafafa`;
@@ -633,13 +698,11 @@ const hydrateMigrationApplyComponents = async (): Promise<void> => {
     };
 
     row('#666', `適用済み (${info.applied.length}): ${info.applied.join(', ') || 'なし'}`);
-
     if (info.pendingExpand.length > 0) {
       row('#b45309', `▶ Expand 待機 (${info.pendingExpand.length}): ${info.pendingExpand.join(', ')}`);
     } else {
       row('#15803d', '✓ Expand: 待機なし');
     }
-
     if (info.pendingContract.length > 0) {
       row('#b45309', `▶ Contract 待機 (${info.pendingContract.length}): ${info.pendingContract.join(', ')}`);
     } else {
@@ -650,10 +713,7 @@ const hydrateMigrationApplyComponents = async (): Promise<void> => {
   };
 
   const loadStatus = async (): Promise<void> => {
-    if (!(statusEl instanceof HTMLElement)) return;
-    statusEl.style.cssText = 'overflow-y:auto;font-size:12px;font-family:monospace';
     statusEl.innerHTML = '<span style="color:#888">読み込み中...</span>';
-
     try {
       const res = await fetch('/api/admin/db-apply/status');
       if (!res.ok) {
@@ -672,16 +732,9 @@ const hydrateMigrationApplyComponents = async (): Promise<void> => {
         }
         return;
       }
-
-      const data = await res.json() as {
-        identity: DbApplyStatus;
-        userDbs: DbApplyStatus[];
-      };
-
+      const data = await res.json() as { identity: DbApplyStatus; userDbs: DbApplyStatus[] };
       const container = document.createElement('div');
-
       container.appendChild(renderDbBlock(data.identity));
-
       if (data.userDbs.length === 0) {
         const none = document.createElement('div');
         none.style.cssText = 'color:#888;font-size:11px;margin-top:4px';
@@ -692,16 +745,12 @@ const hydrateMigrationApplyComponents = async (): Promise<void> => {
         hdr.style.cssText = 'font-weight:600;color:#444;margin-top:4px;margin-bottom:3px;font-size:12px';
         hdr.textContent = `User DBs (${data.userDbs.length} 件)`;
         container.appendChild(hdr);
-        for (const db of data.userDbs) {
-          container.appendChild(renderDbBlock(db, true));
-        }
+        for (const db of data.userDbs) container.appendChild(renderDbBlock(db, true));
       }
-
       const footer = document.createElement('div');
       footer.style.cssText = 'color:#aaa;font-size:10px;margin-top:6px';
       footer.textContent = `最終更新: ${ts()}`;
       container.appendChild(footer);
-
       statusEl.replaceChildren(container);
     } catch (e) {
       statusEl.innerHTML = `<span style="color:#dc2626">エラー: ${String(e)}</span>`;
@@ -710,11 +759,7 @@ const hydrateMigrationApplyComponents = async (): Promise<void> => {
 
   await loadStatus();
 
-  const bindApplyButton = (frameName: string, endpoint: string, label: string): void => {
-    const btnFrame = frames.find((f) => f.name === frameName);
-    const btn = btnFrame?.id ? domMap.get(btnFrame.id as string) : null;
-    if (!(btn instanceof HTMLButtonElement)) return;
-
+  const bindApply = (btn: HTMLButtonElement, endpoint: string, label: string): void => {
     btn.addEventListener('click', () => {
       void (async () => {
         if (progressEl instanceof HTMLElement) progressEl.replaceChildren();
@@ -729,24 +774,16 @@ const hydrateMigrationApplyComponents = async (): Promise<void> => {
           }
           if ('results' in body && Array.isArray(body.results)) {
             for (const r of body.results as Array<{ label: string; applied: string[]; skipped: string[]; error?: string }>) {
-              if (r.error) {
-                log(`  [${r.label}] エラー: ${r.error}`, true);
-              } else if (r.applied.length === 0 && r.skipped.length === 0) {
-                log(`  [${r.label}] 該当ファイルなし (ブランチにマイグレーションファイルがありません)`);
-              } else {
-                log(`  [${r.label}] 適用: ${r.applied.length}件 [${r.applied.join(', ') || 'なし'}] / スキップ: ${r.skipped.length}件`);
-              }
+              if (r.error) log(`  [${r.label}] エラー: ${r.error}`, true);
+              else if (r.applied.length === 0 && r.skipped.length === 0) log(`  [${r.label}] 該当ファイルなし`);
+              else log(`  [${r.label}] 適用: ${r.applied.length}件 [${r.applied.join(', ') || 'なし'}] / スキップ: ${r.skipped.length}件`);
             }
             log(`=== 完了 (${(body.total as number | undefined) ?? (body.results as unknown[]).length} DB) ===`);
           } else {
             const r = body as { applied: string[]; skipped: string[]; error?: string };
-            if (r.error) {
-              log(`エラー: ${r.error}`, true);
-            } else if (r.applied.length === 0 && r.skipped.length === 0) {
-              log('該当ファイルなし (ブランチにマイグレーションファイルがありません)');
-            } else {
-              log(`適用: ${r.applied.length}件 [${r.applied.join(', ') || 'なし'}] / スキップ: ${r.skipped.length}件`);
-            }
+            if (r.error) log(`エラー: ${r.error}`, true);
+            else if (r.applied.length === 0 && r.skipped.length === 0) log('該当ファイルなし');
+            else log(`適用: ${r.applied.length}件 [${r.applied.join(', ') || 'なし'}] / スキップ: ${r.skipped.length}件`);
             log('=== 完了 ===');
           }
           await loadStatus();
@@ -759,10 +796,10 @@ const hydrateMigrationApplyComponents = async (): Promise<void> => {
     });
   };
 
-  bindApplyButton('db-apply-identity-expand', 'identity/expand', 'Identity Expand');
-  bindApplyButton('db-apply-identity-contract', 'identity/contract', 'Identity Contract');
-  bindApplyButton('db-apply-user-expand', 'user-dbs/expand', 'User DB Expand');
-  bindApplyButton('db-apply-user-contract', 'user-dbs/contract', 'User DB Contract');
+  bindApply(identityExpandBtn, 'identity/expand', 'Identity Expand');
+  bindApply(identityContractBtn, 'identity/contract', 'Identity Contract');
+  bindApply(userExpandBtn, 'user-dbs/expand', 'User DB Expand');
+  bindApply(userContractBtn, 'user-dbs/contract', 'User DB Contract');
 
   const pollCiStatus = async (): Promise<void> => {
     const maxAttempts = 60;
@@ -785,30 +822,26 @@ const hydrateMigrationApplyComponents = async (): Promise<void> => {
     log('CI ステータス確認タイムアウト', true);
   };
 
-  const ciDeployFrame = frames.find((f) => f.name === 'db-apply-ci-deploy');
-  const ciDeployBtn = ciDeployFrame?.id ? domMap.get(ciDeployFrame.id as string) : null;
-  if (ciDeployBtn instanceof HTMLButtonElement) {
-    ciDeployBtn.addEventListener('click', () => {
-      void (async () => {
-        if (progressEl instanceof HTMLElement) progressEl.replaceChildren();
-        ciDeployBtn.disabled = true;
-        log('=== CI デプロイ開始 (stage → main) ===');
-        try {
-          const res = await fetch('/api/admin/db-apply/ci-deploy', { method: 'POST' });
-          const body = await res.json() as { merged?: boolean; alreadyUpToDate?: boolean; conflict?: boolean };
-          if (res.status === 409) { log('コンフリクトが発生しました。手動で解決してください。', true); return; }
-          if (!res.ok) { log(`失敗: HTTP ${res.status}`, true); return; }
-          if (body.alreadyUpToDate) log('既に最新 (already up to date)');
-          else log('マージ完了。CI ワークフロー開始を待っています...');
-          await pollCiStatus();
-        } catch (e) {
-          log(`予期しないエラー: ${String(e)}`, true);
-        } finally {
-          ciDeployBtn.disabled = false;
-        }
-      })();
-    });
-  }
+  ciDeployBtn.addEventListener('click', () => {
+    void (async () => {
+      if (progressEl instanceof HTMLElement) progressEl.replaceChildren();
+      ciDeployBtn.disabled = true;
+      log('=== CI デプロイ開始 (stage → main) ===');
+      try {
+        const res = await fetch('/api/admin/db-apply/ci-deploy', { method: 'POST' });
+        const body = await res.json() as { merged?: boolean; alreadyUpToDate?: boolean; conflict?: boolean };
+        if (res.status === 409) { log('コンフリクトが発生しました。手動で解決してください。', true); return; }
+        if (!res.ok) { log(`失敗: HTTP ${res.status}`, true); return; }
+        if (body.alreadyUpToDate) log('既に最新 (already up to date)');
+        else log('マージ完了。CI ワークフロー開始を待っています...');
+        await pollCiStatus();
+      } catch (e) {
+        log(`予期しないエラー: ${String(e)}`, true);
+      } finally {
+        ciDeployBtn.disabled = false;
+      }
+    })();
+  });
 };
 
 const hydrateMigrationComponents = async (): Promise<void> => {
