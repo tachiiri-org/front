@@ -657,10 +657,19 @@ const hydrateMigrationApplyComponents = async (): Promise<void> => {
     try {
       const res = await fetch('/api/admin/db-apply/status');
       if (!res.ok) {
-        const errMsg = res.status === 401
-          ? 'GitHub連携が必要です。まず /oauth/github/connect/start で認証してください。'
-          : `ステータス取得失敗: HTTP ${res.status}`;
-        statusEl.innerHTML = `<span style="color:#dc2626">${errMsg}</span>`;
+        if (res.status === 401) {
+          const msg = document.createElement('div');
+          msg.style.cssText = 'color:#dc2626;font-size:12px';
+          msg.textContent = 'GitHub連携が必要です。';
+          const link = document.createElement('a');
+          link.href = '/oauth/github/connect/start';
+          link.textContent = 'GitHub Connect でログイン';
+          link.style.cssText = 'color:#2563eb;margin-left:6px;text-decoration:underline';
+          msg.appendChild(link);
+          statusEl.replaceChildren(msg);
+        } else {
+          statusEl.innerHTML = `<span style="color:#dc2626">ステータス取得失敗: HTTP ${res.status}</span>`;
+        }
         return;
       }
 
