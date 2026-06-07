@@ -34,7 +34,7 @@ function getGitHubLoginCallbackUrl(request: Request, env: GitHubOAuthEnv): strin
 }
 
 function getGitHubConnectCallbackUrl(request: Request, env: GitHubOAuthEnv): string {
-  return new URL("/oauth/github/connect/callback", resolveFrontendOrigin(request, env)).toString();
+  return getGitHubLoginCallbackUrl(request, env);
 }
 
 /** @deprecated Use getGitHubLoginCallbackUrl or getGitHubConnectCallbackUrl */
@@ -79,6 +79,13 @@ export async function handleGitHubLoginCallback(context: RouteContext): Promise<
   const state = url.searchParams.get("state");
 
   const cookies = parseCookies(context.request);
+
+  // If the connect state cookie matches, route to connect handler
+  const connectState = cookies.get(CONNECT_STATE_COOKIE_NAME);
+  if (connectState && state === connectState) {
+    return handleGitHubConnectCallback(context);
+  }
+
   const storedState = cookies.get(LOGIN_STATE_COOKIE_NAME);
 
   if (!code || !state || !storedState || state !== storedState) {
