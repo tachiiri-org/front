@@ -592,6 +592,9 @@ const hydrateMigrationComponents = async (): Promise<void> => {
 
   if (!(startBtn instanceof HTMLButtonElement) || !(progressEl instanceof HTMLElement)) return;
 
+  progressEl.style.overflowY = 'auto';
+  if (!progressEl.style.maxHeight) progressEl.style.maxHeight = '60vh';
+
   const ts = (): string => new Date().toLocaleTimeString('ja-JP', { hour12: false });
 
   const log = (msg: string, isError = false, indent = 0): void => {
