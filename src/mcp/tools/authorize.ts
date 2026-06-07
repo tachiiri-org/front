@@ -103,6 +103,19 @@ export const TOOLS: Tool[] = [
       required: ["path", "method"],
     },
   },
+  {
+    name: "authorize_backend",
+    description: "Proxy a request to a backend API endpoint (/api/v1/*). Values returned by the backend (e.g. screen names) are already decrypted. Use this instead of authorize_d1 when you need decrypted data. Example: GET screens to list all screens with decrypted names.",
+    inputSchema: {
+      type: "object",
+      properties: {
+        path: { type: "string", description: "Sub-path below /api/v1 (e.g. 'screens', 'screens/{id}')" },
+        method: methodsEnum(["GET", "POST", "PUT", "PATCH", "DELETE"]),
+        body: { type: "object", description: "Request body for POST/PUT/PATCH" },
+      },
+      required: ["path", "method"],
+    },
+  },
 ];
 
 const BASE_PATHS: Record<string, string> = {
@@ -111,6 +124,7 @@ const BASE_PATHS: Record<string, string> = {
   authorize_r2_s3: "/api/v1/cloudflare-r2-adapter/s3",
   authorize_r2_control: "/api/v1/cloudflare-r2-adapter/control",
   authorize_d1: "/api/v1/d1",
+  authorize_backend: "/api/v1",
 };
 
 type ToolResult = {
