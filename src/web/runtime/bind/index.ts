@@ -575,6 +575,231 @@ export const hydrateEditor = async (
 
   await hydrateSelectTableBindings(onFrameRerender);
   await hydrateMigrationComponents();
+  await hydrateMigrationApplyComponents();
+};
+
+type DbApplyStatus = {
+  label: string;
+  applied: string[];
+  pendingExpand: string[];
+  pendingContract: string[];
+  tableExists: boolean;
+};
+
+const hydrateMigrationApplyComponents = async (): Promise<void> => {
+  if (!store.screen) return;
+
+  const frames = store.screen.frames as Array<Record<string, unknown>>;
+
+  const progressFrame = frames.find((f) => f.name === 'db-apply-progress');
+  const statusFrame = frames.find((f) => f.name === 'db-apply-status');
+
+  const progressEl = progressFrame?.id ? domMap.get(progressFrame.id as string) : null;
+  const statusEl = statusFrame?.id ? domMap.get(statusFrame.id as string) : null;
+
+  if (progressEl instanceof HTMLElement) {
+    progressEl.style.cssText = 'overflow-y:auto;max-height:60vh;background:#1e1e1e;border-radius:4px;padding:6px 8px';
+  }
+
+  const ts = (): string => new Date().toLocaleTimeString('ja-JP', { hour12: false });
+
+  const log = (msg: string, isError = false): void => {
+    if (!(progressEl instanceof HTMLElement)) return;
+    const line = document.createElement('div');
+    line.textContent = `[${ts()}] ${msg}`;
+    line.style.cssText = `font-size:12px;padding:1px 0;white-space:pre-wrap;word-break:break-all;font-family:monospace;color:${isError ? '#f87171' : '#d4d4d4'}`;
+    progressEl.appendChild(line);
+    progressEl.scrollTop = progressEl.scrollHeight;
+  };
+
+  const renderDbBlock = (
+    info: DbApplyStatus,
+    indent = false,
+  ): HTMLElement => {
+    const hasPending = info.pendingExpand.length > 0 || info.pendingContract.length > 0;
+    const div = document.createElement('div');
+    div.style.cssText = `margin-bottom:5px;padding:4px 8px;border-left:3px solid ${hasPending ? '#b45309' : '#15803d'};background:#fafafa`;
+
+    const title = document.createElement('div');
+    title.style.cssText = `font-weight:600;color:#222;${indent ? 'font-size:11px' : ''}`;
+    title.textContent = info.label + (!info.tableExists ? ' ⚠ 未初期化' : '');
+    div.appendChild(title);
+
+    const row = (color: string, text: string): void => {
+      const d = document.createElement('div');
+      d.style.cssText = `color:${color};font-size:11px;padding-left:8px`;
+      d.textContent = text;
+      div.appendChild(d);
+    };
+
+    row('#666', `適用済み (${info.applied.length}): ${info.applied.join(', ') || 'なし'}`);
+
+    if (info.pendingExpand.length > 0) {
+      row('#b45309', `▶ Expand 待機 (${info.pendingExpand.length}): ${info.pendingExpand.join(', ')}`);
+    } else {
+      row('#15803d', '✓ Expand: 待機なし');
+    }
+
+    if (info.pendingContract.length > 0) {
+      row('#b45309', `▶ Contract 待機 (${info.pendingContract.length}): ${info.pendingContract.join(', ')}`);
+    } else {
+      row('#15803d', '✓ Contract: 待機なし');
+    }
+
+    return div;
+  };
+
+  const loadStatus = async (): Promise<void> => {
+    if (!(statusEl instanceof HTMLElement)) return;
+    statusEl.style.cssText = 'overflow-y:auto;font-size:12px;font-family:monospace';
+    statusEl.innerHTML = '<span style="color:#888">読み込み中...</span>';
+
+    try {
+      const res = await fetch('/api/admin/db-apply/status');
+      if (!res.ok) {
+        const errMsg = res.status === 401
+          ? 'GitHub連携が必要です。まず /oauth/github/connect/start で認証してください。'
+          : `ステータス取得失敗: HTTP ${res.status}`;
+        statusEl.innerHTML = `<span style="color:#dc2626">${errMsg}</span>`;
+        return;
+      }
+
+      const data = await res.json() as {
+        identity: DbApplyStatus;
+        userDbs: DbApplyStatus[];
+      };
+
+      const container = document.createElement('div');
+
+      container.appendChild(renderDbBlock(data.identity));
+
+      if (data.userDbs.length === 0) {
+        const none = document.createElement('div');
+        none.style.cssText = 'color:#888;font-size:11px;margin-top:4px';
+        none.textContent = 'User DBs: なし (非本番環境では存在しない場合があります)';
+        container.appendChild(none);
+      } else {
+        const hdr = document.createElement('div');
+        hdr.style.cssText = 'font-weight:600;color:#444;margin-top:4px;margin-bottom:3px;font-size:12px';
+        hdr.textContent = `User DBs (${data.userDbs.length} 件)`;
+        container.appendChild(hdr);
+        for (const db of data.userDbs) {
+          container.appendChild(renderDbBlock(db, true));
+        }
+      }
+
+      const footer = document.createElement('div');
+      footer.style.cssText = 'color:#aaa;font-size:10px;margin-top:6px';
+      footer.textContent = `最終更新: ${ts()}`;
+      container.appendChild(footer);
+
+      statusEl.replaceChildren(container);
+    } catch (e) {
+      statusEl.innerHTML = `<span style="color:#dc2626">エラー: ${String(e)}</span>`;
+    }
+  };
+
+  await loadStatus();
+
+  const bindApplyButton = (frameName: string, endpoint: string, label: string): void => {
+    const btnFrame = frames.find((f) => f.name === frameName);
+    const btn = btnFrame?.id ? domMap.get(btnFrame.id as string) : null;
+    if (!(btn instanceof HTMLButtonElement)) return;
+
+    btn.addEventListener('click', () => {
+      void (async () => {
+        if (progressEl instanceof HTMLElement) progressEl.replaceChildren();
+        btn.disabled = true;
+        log(`=== ${label} 開始 ===`);
+        try {
+          const res = await fetch(`/api/admin/db-apply/${endpoint}`, { method: 'POST' });
+          const body = await res.json() as Record<string, unknown>;
+          if (!res.ok) {
+            log(`失敗 (HTTP ${res.status}): ${String(body.message ?? body.error_code ?? '')}`, true);
+            return;
+          }
+          if ('results' in body && Array.isArray(body.results)) {
+            for (const r of body.results as Array<{ label: string; applied: string[]; skipped: string[]; error?: string }>) {
+              if (r.error) {
+                log(`  [${r.label}] エラー: ${r.error}`, true);
+              } else if (r.applied.length === 0 && r.skipped.length === 0) {
+                log(`  [${r.label}] 該当ファイルなし (ブランチにマイグレーションファイルがありません)`);
+              } else {
+                log(`  [${r.label}] 適用: ${r.applied.length}件 [${r.applied.join(', ') || 'なし'}] / スキップ: ${r.skipped.length}件`);
+              }
+            }
+            log(`=== 完了 (${(body.total as number | undefined) ?? (body.results as unknown[]).length} DB) ===`);
+          } else {
+            const r = body as { applied: string[]; skipped: string[]; error?: string };
+            if (r.error) {
+              log(`エラー: ${r.error}`, true);
+            } else if (r.applied.length === 0 && r.skipped.length === 0) {
+              log('該当ファイルなし (ブランチにマイグレーションファイルがありません)');
+            } else {
+              log(`適用: ${r.applied.length}件 [${r.applied.join(', ') || 'なし'}] / スキップ: ${r.skipped.length}件`);
+            }
+            log('=== 完了 ===');
+          }
+          await loadStatus();
+        } catch (e) {
+          log(`予期しないエラー: ${String(e)}`, true);
+        } finally {
+          btn.disabled = false;
+        }
+      })();
+    });
+  };
+
+  bindApplyButton('db-apply-identity-expand', 'identity/expand', 'Identity Expand');
+  bindApplyButton('db-apply-identity-contract', 'identity/contract', 'Identity Contract');
+  bindApplyButton('db-apply-user-expand', 'user-dbs/expand', 'User DB Expand');
+  bindApplyButton('db-apply-user-contract', 'user-dbs/contract', 'User DB Contract');
+
+  const pollCiStatus = async (): Promise<void> => {
+    const maxAttempts = 60;
+    for (let i = 0; i < maxAttempts; i++) {
+      await new Promise(r => setTimeout(r, 10000));
+      try {
+        const res = await fetch('/api/admin/db-apply/ci-status');
+        if (!res.ok) continue;
+        const body = await res.json() as { run: { status: string; conclusion: string | null; html_url: string; name: string } | null };
+        const run = body.run;
+        if (!run) { log(`CI 待機中... (${i + 1}/${maxAttempts})`); continue; }
+        log(`CI [${run.name}] status: ${run.status} / conclusion: ${run.conclusion ?? '—'}`);
+        if (run.status === 'completed') {
+          const ok = run.conclusion === 'success';
+          log(`=== CI ${ok ? '成功' : '失敗'}: ${run.html_url} ===`, !ok);
+          return;
+        }
+      } catch { /* retry */ }
+    }
+    log('CI ステータス確認タイムアウト', true);
+  };
+
+  const ciDeployFrame = frames.find((f) => f.name === 'db-apply-ci-deploy');
+  const ciDeployBtn = ciDeployFrame?.id ? domMap.get(ciDeployFrame.id as string) : null;
+  if (ciDeployBtn instanceof HTMLButtonElement) {
+    ciDeployBtn.addEventListener('click', () => {
+      void (async () => {
+        if (progressEl instanceof HTMLElement) progressEl.replaceChildren();
+        ciDeployBtn.disabled = true;
+        log('=== CI デプロイ開始 (stage → main) ===');
+        try {
+          const res = await fetch('/api/admin/db-apply/ci-deploy', { method: 'POST' });
+          const body = await res.json() as { merged?: boolean; alreadyUpToDate?: boolean; conflict?: boolean };
+          if (res.status === 409) { log('コンフリクトが発生しました。手動で解決してください。', true); return; }
+          if (!res.ok) { log(`失敗: HTTP ${res.status}`, true); return; }
+          if (body.alreadyUpToDate) log('既に最新 (already up to date)');
+          else log('マージ完了。CI ワークフロー開始を待っています...');
+          await pollCiStatus();
+        } catch (e) {
+          log(`予期しないエラー: ${String(e)}`, true);
+        } finally {
+          ciDeployBtn.disabled = false;
+        }
+      })();
+    });
+  }
 };
 
 const hydrateMigrationComponents = async (): Promise<void> => {

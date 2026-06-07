@@ -27,6 +27,7 @@ import {
 } from './component-schemas';
 import { authorizeFetch, type AuthorizeEnv } from '../../auth';
 import { parseCookies } from '../../auth/cookies';
+import { readGitHubConnectSession } from '../../identify';
 
 
 type Env = {
@@ -418,6 +419,22 @@ export const handleApiRequest = async (request: Request, env: Env): Promise<Resp
       return handleComponentSchemasList(backend, url.searchParams);
     }
     return new Response('Method Not Allowed', { status: 405 });
+  }
+
+  const dbApplyMatch = url.pathname.match(/^\/api\/admin\/db-apply\/(.+)$/);
+  if (dbApplyMatch) {
+    const suffix = dbApplyMatch[1];
+    const body = request.method !== 'GET' ? await request.text() : undefined;
+    const connectSession = await readGitHubConnectSession(request, env);
+    const githubToken = connectSession?.accessToken ?? null;
+    return authorizeFetch(env, {
+      path: `/api/v1/admin/db-apply/${suffix}`,
+      method: request.method,
+      body,
+      headers: githubToken ? { 'x-github-access-token': githubToken } : undefined,
+      tenantContext,
+      actorType: 'ops',
+    });
   }
 
   if (url.pathname === '/api/admin/migration/schema' && request.method === 'POST') {
