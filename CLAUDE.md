@@ -1,6 +1,7 @@
 Before starting any task:
-1. Get the full word list using `mcp__front-stage__graph_read_words` with graph_id `word-graph-1`.
-2. Identify words relevant to the current task and read their texts using `mcp__front-stage__graph_read_texts_by_word`.
+1. If `mcp__front-production__graph_read_words` is not yet loaded, run ToolSearch with query `select:mcp__front-production__graph_read_words,mcp__front-production__graph_read_texts_by_word` to load their schemas.
+2. Get the full word list using `mcp__front-production__graph_read_words` with graph_id `word-graph-1`.
+3. Identify words relevant to the current task and read their texts using `mcp__front-production__graph_read_texts_by_word`.
 
 Before performing any significant action (e.g. deploy, migrate, run scripts):
 - Check if a word in the graph corresponds to that action type.

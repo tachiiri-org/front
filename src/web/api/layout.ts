@@ -442,6 +442,17 @@ export const handleApiRequest = async (request: Request, env: Env): Promise<Resp
     });
   }
 
+  if (url.pathname === '/api/admin/migration/user-databases' && request.method === 'POST') {
+    const body = await request.text();
+    return authorizeFetch(env, {
+      path: '/api/v1/admin/migration/user-databases',
+      method: 'POST',
+      body,
+      tenantContext,
+      actorType: 'ops',
+    });
+  }
+
   if (url.pathname === '/api/migrate/lists-to-tree') {
     if (request.method === 'POST') return handleMigrateListsToTree(backend);
     return new Response('Method Not Allowed', { status: 405 });

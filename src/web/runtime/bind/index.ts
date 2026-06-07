@@ -673,7 +673,27 @@ const hydrateMigrationComponents = async (): Promise<void> => {
           succeeded++;
         }
 
-        log(`=== マイグレーション完了 (${succeeded} テーブル) ===`);
+        log(`Identity DB 完了 (${succeeded} テーブル)`);
+
+        log('テナント DB 移行中...');
+        const userDbRes = await fetch('/api/admin/migration/user-databases', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ target }),
+        });
+        if (!userDbRes.ok) {
+          await logErr(userDbRes, 'テナントDB移行失敗');
+          return;
+        }
+        const userDb = await userDbRes.json() as {
+          tenants: Array<{ groupId: string; newDbId: string; tables: string[]; totalRows: number }>;
+          deleted: number;
+        };
+        for (const t of userDb.tenants) {
+          log(`[${t.groupId}] ✓ ${t.totalRows} 行 / ${t.tables.length} テーブル → ${t.newDbId}`, false, 1);
+        }
+        if (userDb.deleted > 0) log(`旧テナントDB 削除: ${userDb.deleted} 件`, false, 1);
+        log(`=== マイグレーション完了 (Identity: ${succeeded} テーブル / テナントDB: ${userDb.tenants.length} 件) ===`);
       } catch (e) {
         log(`予期しないエラー: ${String(e)}`, true);
       } finally {
