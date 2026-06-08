@@ -7,7 +7,7 @@ import {
 } from './auth/github';
 import { handleGoogleLoginStart, handleGoogleLoginCallback } from './auth/google';
 import type { AuthorizeEnv } from './auth';
-import { handleApiRequest as handleDataApiRequest, handleGitHubAuthStatus, handleAuthStatus, handleIdentityStatus, handleOrgCreate, handleSelectOrg, handleOrgMembers } from './api/data';
+import { handleApiRequest as handleDataApiRequest, handleGitHubAuthStatus, handleAuthStatus, handleIdentityStatus, handleOrgCreate, handleSelectOrg, handleOrgMembers, handleAutoSelectOrg } from './api/data';
 import { handleApiRequest as handleLayoutApiRequest } from './web/api/layout';
 import { handleMcp } from './mcp/handler';
 import {
@@ -85,6 +85,10 @@ export default {
     }
     if (pathname === '/api/auth/organizations' && request.method === 'POST') {
       const res = await handleOrgCreate(request, env);
+      if (res) return res;
+    }
+    if (pathname === '/api/auth/auto-select-org' && request.method === 'GET') {
+      const res = await handleAutoSelectOrg(request, env);
       if (res) return res;
     }
     if (pathname === '/api/auth/select-org' && request.method === 'GET') {

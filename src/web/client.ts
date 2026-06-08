@@ -363,6 +363,11 @@ const loadEditorBootstrap = async (): Promise<void> => {
     const res = await fetch('/api/auth/identity-status').catch(() => null);
     const status = res?.ok ? (await res.json() as { user_id: string | null }) : null;
     if (status?.user_id) {
+      const autoRes = await fetch('/api/auth/auto-select-org').catch(() => null);
+      if (autoRes?.ok) {
+        window.location.reload();
+        return;
+      }
       window.location.href = '/org-select';
       return;
     }

@@ -376,3 +376,21 @@ export async function createOrganization(env: AuthorizeEnv, userId: string, name
   if (!res.ok) throw new Error(`identity_create_org_failed:${res.status}`);
   return (await res.json()) as IdentityOrg;
 }
+
+export async function getDefaultGroup(env: AuthorizeEnv, userId: string): Promise<string | null> {
+  const res = await authorizeFetch(env, {
+    path: `/api/v1/identity/users/${encodeURIComponent(userId)}/default-group`,
+    method: "GET",
+  });
+  if (!res.ok) return null;
+  const data = (await res.json()) as { group_id: string | null };
+  return data.group_id;
+}
+
+export async function setDefaultGroup(env: AuthorizeEnv, userId: string, groupId: string): Promise<void> {
+  await authorizeFetch(env, {
+    path: `/api/v1/identity/users/${encodeURIComponent(userId)}/default-group`,
+    method: "PUT",
+    body: JSON.stringify({ group_id: groupId }),
+  });
+}

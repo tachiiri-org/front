@@ -1,6 +1,6 @@
 import type { SpecDocument } from '../shared/spec-document';
 import type { UiShellSettings } from '../shared/ui-shell-settings';
-import { readGitHubSession, readGitHubConnectSession, readGoogleSession, listUserOrganizations, createOrganization, resolveOrgUser } from '../identify';
+import { readGitHubSession, readGitHubConnectSession, readGoogleSession, listUserOrganizations, createOrganization, resolveOrgUser, getDefaultGroup } from '../identify';
 import { parseCookies } from '../auth/cookies';
 import { authorizeFetch } from '../auth/fetch';
 import type { AuthorizeEnv } from '../auth';
@@ -190,6 +190,45 @@ export async function handleIdentityStatus(
   } catch {
     return json({ user_id: userId, organizations: [] }, { status: 200 });
   }
+}
+
+export async function handleAutoSelectOrg(request: Request, env: AuthorizeEnv): Promise<Response | null> {
+  const url = new URL(request.url);
+  if (url.pathname !== '/api/auth/auto-select-org' || request.method !== 'GET') {
+    return null;
+  }
+
+  const cookies = parseCookies(request);
+  const userId = cookies.get('identity_user_id');
+  if (!userId) {
+    return json({ error: 'not_authenticated' }, { status: 401 });
+  }
+
+  const groupId = await getDefaultGroup(env, userId).catch(() => null);
+  if (!groupId) {
+    return json({ group_id: null }, { status: 404 });
+  }
+
+  const isSecure = url.protocol === 'https:';
+  const headers = new Headers({ 'Content-Type': 'application/json; charset=utf-8' });
+  headers.append('Set-Cookie', `identity_org_id=${encodeURIComponent(groupId)}; Path=/; Max-Age=${60 * 60 * 24}${isSecure ? '; Secure' : ''}; SameSite=Lax`);
+
+  const [githubSession, googleSession] = await Promise.allSettled([
+    readGitHubSession(request, env),
+    readGoogleSession(request, env),
+  ]);
+  const email =
+    (githubSession.status === 'fulfilled' ? githubSession.value?.email : null) ??
+    (googleSession.status === 'fulfilled' ? googleSession.value?.email : null);
+
+  if (email) {
+    const orgUser = await resolveOrgUser(env, groupId, userId, email);
+    if (orgUser) {
+      headers.append('Set-Cookie', `org_user_id=${encodeURIComponent(orgUser.orgUserId)}; Path=/; Max-Age=${60 * 60 * 24}${isSecure ? '; Secure' : ''}; SameSite=Lax; HttpOnly`);
+    }
+  }
+
+  return new Response(JSON.stringify({ group_id: groupId }), { status: 200, headers });
 }
 
 export async function handleSelectOrg(request: Request, env: AuthorizeEnv): Promise<Response | null> {
