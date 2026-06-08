@@ -29,8 +29,8 @@ function toBase64Url(data: Uint8Array): string {
   return btoa(binary).replace(/\+/g, "-").replace(/\//g, "_").replace(/=+$/u, "");
 }
 
-function hexToBytes(hex: string): Uint8Array {
-  const bytes = new Uint8Array(hex.length / 2);
+function hexToBytes(hex: string): Uint8Array<ArrayBuffer> {
+  const bytes = new Uint8Array(new ArrayBuffer(hex.length / 2));
   for (let i = 0; i < hex.length; i += 2) bytes[i / 2] = parseInt(hex.slice(i, i + 2), 16);
   return bytes;
 }
@@ -89,6 +89,7 @@ export function handleOAuthMetadata(request: Request, env: AuthorizeEnv): Respon
 // POST /oauth/mcp/register  (RFC 7591 Dynamic Client Registration)
 export async function handleMcpRegister(request: Request, env: AuthorizeEnv): Promise<Response> {
   if (!env.IDENTITY_DB) return Response.json({ error: "server_error" }, { status: 500 });
+  const db = env.IDENTITY_DB;
 
   const body = await request.json() as {
     client_name?: string;
@@ -106,35 +107,35 @@ export async function handleMcpRegister(request: Request, env: AuthorizeEnv): Pr
   const hmacKey = await resolveSecret(env.IDENTITY_HMAC_KEY);
   if (!hmacKey) return Response.json({ error: "server_error" }, { status: 500 });
   const aiHash = await hmacHex(hmacKey, "ai");
-  const actorRow = await env.IDENTITY_DB.prepare("SELECT id FROM m_actor WHERE value_hash = ?")
+  const actorRow = await db.prepare("SELECT id FROM m_actor WHERE value_hash = ?")
     .bind(aiHash).first<{ id: string }>();
   if (!actorRow) return Response.json({ error: "server_error" }, { status: 500 });
 
-  await env.IDENTITY_DB.batch([
-    env.IDENTITY_DB.prepare("INSERT INTO m_client (id) VALUES (?)").bind(clientId),
-    env.IDENTITY_DB.prepare("INSERT INTO m_client_name (id, value) VALUES (?, ?)").bind(nameId, clientName),
-    env.IDENTITY_DB.prepare("INSERT INTO j_client_name (client_id, name_id) VALUES (?, ?)").bind(clientId, nameId),
-    env.IDENTITY_DB.prepare("INSERT INTO j_client_actor (client_id, actor_id) VALUES (?, ?)").bind(clientId, actorRow.id),
+  await db.batch([
+    db.prepare("INSERT INTO m_client (id) VALUES (?)").bind(clientId),
+    db.prepare("INSERT INTO m_client_name (id, value) VALUES (?, ?)").bind(nameId, clientName),
+    db.prepare("INSERT INTO j_client_name (client_id, name_id) VALUES (?, ?)").bind(clientId, nameId),
+    db.prepare("INSERT INTO j_client_actor (client_id, actor_id) VALUES (?, ?)").bind(clientId, actorRow.id),
   ]);
 
   if (redirectUris.length > 0) {
-    await env.IDENTITY_DB.batch(
+    await db.batch(
       redirectUris.map(uri =>
-        env.IDENTITY_DB.prepare("INSERT OR IGNORE INTO m_redirect (id, value) VALUES (?, ?)").bind(crypto.randomUUID(), uri)
+        db.prepare("INSERT OR IGNORE INTO m_redirect (id, value) VALUES (?, ?)").bind(crypto.randomUUID(), uri)
       )
     );
 
     const placeholders = redirectUris.map(() => "?").join(", ");
-    const uriRows = await env.IDENTITY_DB.prepare(
+    const uriRows = await db.prepare(
       `SELECT id, value FROM m_redirect WHERE value IN (${placeholders})`
     ).bind(...redirectUris).all<{ id: string; value: string }>();
 
     const uriIdMap = new Map(uriRows.results.map(r => [r.value, r.id]));
-    await env.IDENTITY_DB.batch(
+    await db.batch(
       redirectUris
         .filter(uri => uriIdMap.has(uri))
         .map(uri =>
-          env.IDENTITY_DB.prepare("INSERT OR IGNORE INTO j_client_redirect (client_id, redirect_uri_id) VALUES (?, ?)").bind(clientId, uriIdMap.get(uri))
+          db.prepare("INSERT OR IGNORE INTO j_client_redirect (client_id, redirect_uri_id) VALUES (?, ?)").bind(clientId, uriIdMap.get(uri))
         )
     );
   }
