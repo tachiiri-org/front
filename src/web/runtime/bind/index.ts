@@ -693,7 +693,25 @@ const hydrateMigrationComponents = async (): Promise<void> => {
           log(`[${t.groupId}] ✓ ${t.totalRows} 行 / ${t.tables.length} テーブル → ${t.newDbId}`, false, 1);
         }
         if (userDb.deleted > 0) log(`旧テナントDB 削除: ${userDb.deleted} 件`, false, 1);
-        log(`=== マイグレーション完了 (Identity: ${succeeded} テーブル / テナントDB: ${userDb.tenants.length} 件) ===`);
+
+        log('テナント R2 移行中...');
+        const r2Res = await fetch('/api/admin/migration/r2', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ target }),
+        });
+        if (!r2Res.ok) {
+          await logErr(r2Res, 'テナントR2移行失敗');
+          return;
+        }
+        const r2Data = await r2Res.json() as {
+          tenants: Array<{ groupId: string; sourceBucketId: string; targetBucketId: string; copied: number }>;
+        };
+        for (const t of r2Data.tenants) {
+          log(`[${t.groupId}] ✓ ${t.copied} オブジェクト → ${t.targetBucketId}`, false, 1);
+        }
+
+        log(`=== マイグレーション完了 (Identity: ${succeeded} テーブル / テナントDB: ${userDb.tenants.length} 件 / R2: ${r2Data.tenants.length} バケット) ===`);
       } catch (e) {
         log(`予期しないエラー: ${String(e)}`, true);
       } finally {
