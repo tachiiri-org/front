@@ -1,6 +1,6 @@
 import type { GraphText, GraphWord } from '../../../../schema/component/kind/word-graph';
 import type { WordGraphContext } from './types';
-import { randomId, findText, findWord, isTextColumn } from './ops';
+import { randomId, findText, findWord, isTextColumn, setLangText } from './ops';
 import { createKeydownHandler } from './keyboard';
 
 export const createInput = (
@@ -69,10 +69,10 @@ export const createInput = (
 
     if (isTextColumn(colIndex)) {
       const text = findText(state.texts, item.id);
-      if (text) text.text = input.value;
+      if (text) setLangText(text, state.lang, input.value);
     } else {
       const word = findWord(state.words, item.id);
-      if (word) word.text = input.value;
+      if (word) setLangText(word, state.lang, input.value);
     }
     ctx.scheduleSave();
   });

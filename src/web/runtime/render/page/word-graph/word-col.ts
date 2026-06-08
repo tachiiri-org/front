@@ -1,5 +1,5 @@
 import type { WordGraphWordColComponent } from '../../../../schema/component/kind/word-graph-col';
-import { applyCssProps, cloneData, findText, findWord, randomId, migrateGraphData } from './ops';
+import { applyCssProps, cloneData, findText, findWord, randomId, migrateGraphData, getLangText, hasPrimaryLang, setLangText, findWordByText, wordMatchesQuery } from './ops';
 import { getOrCreateGraphState } from './store';
 import type { ColContext } from './types';
 import { createInput } from './input';
@@ -202,7 +202,7 @@ const buildWordColContent = (
     suggestionsEl.style.display = 'flex';
     suggestions.forEach((word, i) => {
       const item = document.createElement('div');
-      item.textContent = word.text;
+      item.textContent = getLangText(word, state.lang);
       const isActive = i === activeIndex;
       Object.assign(item.style, {
         padding: '2px 12px 2px 22px',
@@ -232,7 +232,7 @@ const buildWordColContent = (
       suggestionsEl.style.display = 'none';
       return;
     }
-    suggestions = state.words.filter((w) => !alreadyLinked.has(w.id) && w.text.toLowerCase().includes(q));
+    suggestions = state.words.filter((w) => !alreadyLinked.has(w.id) && wordMatchesQuery(w, q));
     activeIndex = -1;
     renderSuggestions();
   };
@@ -272,12 +272,13 @@ const buildWordColContent = (
         commitWord(suggestions[activeIndex]);
         return;
       }
-      const text = draftInput.value.trim().toLowerCase();
+      const text = draftInput.value.trim();
       if (!text) return;
       ctx.pushHistory();
-      const existing = state.words.find((w) => w.text.toLowerCase() === text);
+      const existing = findWordByText(state.words, text);
       const targetWord = existing ?? ((): GraphWord => {
-        const w: GraphWord = { id: randomId(), text };
+        const w: GraphWord = { id: randomId() };
+        setLangText(w, state.lang, text);
         state.words.push(w);
         return w;
       })();
@@ -341,11 +342,15 @@ const buildWordColContent = (
       inp = createInput(item, COL_INDEX, contextTextId, ctx as unknown as import('./types').WordGraphContext);
       state.inputCache.set(cacheKey, inp);
     }
-    if (inp.value !== item.text) inp.value = item.text;
+    const activeText = state.lang === 'en' ? (item.en ?? '') : (item.ja ?? '');
+    const fallbackText = state.lang === 'en' ? (item.ja ?? '') : (item.en ?? '');
+    const hasPrimary = hasPrimaryLang(item, state.lang);
+    if (inp.value !== activeText) inp.value = activeText;
+    inp.placeholder = fallbackText;
     inp.dataset.columnIndex = String(COL_INDEX);
     inp.style.background = 'transparent';
-    inp.style.color = wordColor ?? (isLinked ? 'inherit' : theme.textDim);
-    inp.style.fontStyle = 'normal';
+    inp.style.color = wordColor ?? (isLinked ? (hasPrimary ? 'inherit' : theme.textDim) : theme.textDim);
+    inp.style.fontStyle = hasPrimary ? 'normal' : 'italic';
     inp.style.borderRadius = '0';
 
     const linkedTextCount = state.texts.filter((t) => t.wordIds.includes(item.id)).length;
@@ -474,7 +479,8 @@ export const renderWordGraphWordCol = (
     const linkedIds = contextTextId
       ? new Set(findText(state.texts, contextTextId)?.wordIds ?? [])
       : null;
-    const items = [...state.words].sort((a, b) => a.text.localeCompare(b.text));
+    const items = [...state.words].sort((a, b) =>
+      getLangText(a, state.lang).localeCompare(getLangText(b, state.lang)));
 
     const ctx: ColContext = {
       id,

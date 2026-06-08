@@ -1,6 +1,6 @@
 import type { GraphText, GraphWord } from '../../../../schema/component/kind/word-graph';
 import type { WordGraphContext } from './types';
-import { randomId, findText, isTextColumn, getColumnItemIds } from './ops';
+import { randomId, findText, isTextColumn, getColumnItemIds, getLangText, setLangText, findWordByText } from './ops';
 import { openWordLink } from './word-link-overlay';
 
 const getColInputs = (outer: HTMLElement, colIndex: number): HTMLTextAreaElement[] => {
@@ -60,7 +60,7 @@ export const createKeydownHandler = (
         ).map((t) => t.id);
         const idx = colIds.indexOf(item.id);
         const nextId = idx < colIds.length - 1 ? colIds[idx + 1] : (idx > 0 ? colIds[idx - 1] : item.id);
-        const draftWord = state.words.find((w) => w.text === 'draft');
+        const draftWord = findWordByText(state.words, 'draft');
         if (draftWord) text.wordIds = text.wordIds.filter((id) => id !== draftWord.id);
         state.pendingFocusId = nextId;
         state.pendingFocusColumn = colIndex;
@@ -77,8 +77,8 @@ export const createKeydownHandler = (
       ctx.pushHistory();
       const text = state.texts.find((t) => t.id === item.id);
       if (text) {
-        let issueWord = state.words.find((w) => w.text === 'issue');
-        if (!issueWord) { issueWord = { id: randomId(), text: 'issue' }; state.words.push(issueWord); }
+        let issueWord = findWordByText(state.words, 'issue');
+        if (!issueWord) { issueWord = { id: randomId(), en: 'issue' }; state.words.push(issueWord); }
         if (text.wordIds.includes(issueWord.id)) {
           text.wordIds = text.wordIds.filter((id) => id !== issueWord!.id);
         } else {
@@ -150,8 +150,9 @@ export const createKeydownHandler = (
         const prevText = findText(state.texts, prevId);
         const currText = findText(state.texts, item.id);
         if (prevText && currText) {
-          const mergePos = prevText.text.length;
-          prevText.text = prevText.text + currText.text;
+          const prevLangText = getLangText(prevText, state.lang);
+          const mergePos = prevLangText.length;
+          setLangText(prevText, state.lang, prevLangText + getLangText(currText, state.lang));
           state.texts = state.texts.filter((t) => t.id !== item.id);
           if (state.path[colIndex] === item.id) {
             state.path = [...state.path.slice(0, colIndex), prevId];
@@ -218,8 +219,12 @@ export const createKeydownHandler = (
         const selectedText = input.value.slice(selStart, selEnd).trim().toLowerCase();
         if (selectedText) {
           ctx.pushHistory();
-          const existing = state.words.find(w => w.text.toLowerCase() === selectedText);
-          const newWord: GraphWord = existing ?? { id: randomId(), text: selectedText };
+          const existing = findWordByText(state.words, selectedText);
+          const newWord: GraphWord = existing ?? (() => {
+            const w: GraphWord = { id: randomId() };
+            setLangText(w, state.lang, selectedText);
+            return w;
+          })();
           if (!existing) state.words.push(newWord);
           const text = findText(state.texts, item.id);
           if (text && !text.wordIds.includes(newWord.id)) {
@@ -246,9 +251,10 @@ export const createKeydownHandler = (
         const after = input.value.slice(cursorPos);
 
         const currentText = state.texts.find((t) => t.id === item.id);
-        if (currentText) currentText.text = before;
+        if (currentText) setLangText(currentText, state.lang, before);
 
-        const newText: GraphText = { id: randomId(), text: after, wordIds: [] };
+        const newText: GraphText = { id: randomId(), wordIds: [] };
+        setLangText(newText, state.lang, after);
         if (colIndex > 0) {
           // Auto-link to context word so it appears in this column
           const contextWordId = state.path[colIndex - 1];
@@ -261,7 +267,7 @@ export const createKeydownHandler = (
         state.pendingFocusColumn = colIndex;
       } else {
         if (!contextTextId) return;
-        const newWord: GraphWord = { id: randomId(), text: '' };
+        const newWord: GraphWord = { id: randomId() };
         state.words.push(newWord);
         const contextText = findText(state.texts, contextTextId);
         if (contextText) {

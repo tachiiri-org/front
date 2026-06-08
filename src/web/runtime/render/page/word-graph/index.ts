@@ -36,6 +36,7 @@ export const renderWordGraph = (
     saveTimer: null,
     history: [],
     inputCache: new Map(),
+    lang: 'en',
   };
 
   let resolvedGraphId = graphId;

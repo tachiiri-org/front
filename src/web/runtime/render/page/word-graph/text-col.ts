@@ -1,5 +1,5 @@
 import type { WordGraphTextColComponent } from '../../../../schema/component/kind/word-graph-col';
-import { applyCssProps, cloneData, migrateGraphData } from './ops';
+import { applyCssProps, cloneData, migrateGraphData, getLangText, hasPrimaryLang, setLangText } from './ops';
 import { getOrCreateGraphState } from './store';
 import type { ColContext } from './types';
 import { findWord, randomId, findText } from './ops';
@@ -24,19 +24,63 @@ const buildTextColContent = (
   col.style.overflowY = 'auto';
   col.style.padding = '4px 0';
 
-  // Column type label
+  // Column header: type label + lang toggle (col0 only)
+  const headerRow = document.createElement('div');
+  Object.assign(headerRow.style, {
+    display: 'flex',
+    alignItems: 'center',
+    padding: '0 8px 2px 12px',
+    flexShrink: '0',
+    gap: '6px',
+  });
+
   const typeLabel = document.createElement('div');
   Object.assign(typeLabel.style, {
     fontSize: '10px',
     color: theme.textFaint,
-    padding: '0 12px 2px',
     userSelect: 'none',
     textTransform: 'uppercase',
     letterSpacing: '0.5px',
-    flexShrink: '0',
+    flex: '1',
   });
   typeLabel.textContent = colIndex === 0 ? 'texts' : 'related texts';
-  col.appendChild(typeLabel);
+  headerRow.appendChild(typeLabel);
+
+  if (colIndex === 0) {
+    const toggleWrap = document.createElement('div');
+    Object.assign(toggleWrap.style, {
+      display: 'flex',
+      gap: '2px',
+      flexShrink: '0',
+    });
+    for (const lng of ['en', 'ja'] as const) {
+      const btn = document.createElement('button');
+      btn.textContent = lng.toUpperCase();
+      const isActive = state.lang === lng;
+      Object.assign(btn.style, {
+        fontSize: '10px',
+        padding: '0 5px',
+        border: isActive ? `1px solid ${theme.borderStrong}` : `1px solid ${theme.borderFaint}`,
+        borderRadius: '3px',
+        background: isActive ? theme.selectSubtle : 'transparent',
+        color: isActive ? theme.textHigh : theme.textFaint,
+        cursor: 'pointer',
+        lineHeight: '1.6',
+        userSelect: 'none',
+      });
+      btn.addEventListener('mousedown', (e) => {
+        e.preventDefault();
+        if (state.lang === lng) return;
+        state.lang = lng;
+        state.inputCache.clear();
+        ctx.render();
+      });
+      toggleWrap.appendChild(btn);
+    }
+    headerRow.appendChild(toggleWrap);
+  }
+
+  col.appendChild(headerRow);
 
   // Draft input row
   const draftRow = document.createElement('div');
@@ -92,7 +136,8 @@ const buildTextColContent = (
       const text = draftInput.value.trim();
       if (!text) return;
       ctx.pushHistory();
-      const newText: GraphText = { id: randomId(), text, wordIds: [] };
+      const newText: GraphText = { id: randomId(), wordIds: [] };
+      setLangText(newText, state.lang, text);
       if (colIndex > 0) {
         const contextWordId = state.path[colIndex - 1];
         if (contextWordId) newText.wordIds.push(contextWordId);
@@ -154,11 +199,15 @@ const buildTextColContent = (
       inp = createInput(item, colIndex, null, ctx as unknown as import('./types').WordGraphContext);
       state.inputCache.set(cacheKey, inp);
     }
-    if (inp.value !== item.text) inp.value = item.text;
+    const activeText = state.lang === 'en' ? (item.en ?? '') : (item.ja ?? '');
+    const fallbackText = state.lang === 'en' ? (item.ja ?? '') : (item.en ?? '');
+    const hasPrimary = hasPrimaryLang(item, state.lang);
+    if (inp.value !== activeText) inp.value = activeText;
+    inp.placeholder = fallbackText;
     inp.dataset.columnIndex = String(colIndex);
     inp.style.background = 'transparent';
-    inp.style.color = textColor ?? 'inherit';
-    inp.style.fontStyle = 'normal';
+    inp.style.color = textColor ?? (hasPrimary ? 'inherit' : theme.textDim);
+    inp.style.fontStyle = hasPrimary ? 'normal' : 'italic';
     inp.style.borderRadius = '0';
 
     const wordCount = (item as GraphText).wordIds?.length ?? 0;

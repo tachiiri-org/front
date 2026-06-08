@@ -1,6 +1,35 @@
 import type { GraphText, GraphWord } from '../../../../schema/component/kind/word-graph';
 import { ALL_CSS_PROP_KEYS } from '../../../../schema/component';
 
+export const getLangText = (item: { en?: string; ja?: string }, lang: 'en' | 'ja'): string => {
+  const primary = lang === 'en' ? item.en : item.ja;
+  if (primary !== undefined && primary !== '') return primary;
+  const fallback = lang === 'en' ? item.ja : item.en;
+  return fallback ?? '';
+};
+
+export const hasPrimaryLang = (item: { en?: string; ja?: string }, lang: 'en' | 'ja'): boolean => {
+  const v = lang === 'en' ? item.en : item.ja;
+  return v !== undefined && v !== '';
+};
+
+export const setLangText = (item: GraphText | GraphWord, lang: 'en' | 'ja', value: string): void => {
+  if (lang === 'en') item.en = value;
+  else item.ja = value;
+};
+
+export const findWordByText = (words: GraphWord[], text: string): GraphWord | undefined => {
+  const lower = text.toLowerCase();
+  return words.find(
+    (w) => (w.en ?? '').toLowerCase() === lower || (w.ja ?? '').toLowerCase() === lower,
+  );
+};
+
+export const wordMatchesQuery = (word: GraphWord, q: string): boolean => {
+  const lower = q.toLowerCase();
+  return (word.en ?? '').toLowerCase().includes(lower) || (word.ja ?? '').toLowerCase().includes(lower);
+};
+
 export const randomId = (): string => {
   const c = globalThis.crypto as Crypto | undefined;
   if (c && typeof c.randomUUID === 'function') return c.randomUUID();
@@ -61,17 +90,32 @@ export const getColumnItemIds = (
 export const migrateGraphData = (
   raw: { texts: unknown[]; words: unknown[] },
 ): { texts: GraphText[]; words: GraphWord[] } => {
-  const words: GraphWord[] = (raw.words as Array<Record<string, unknown>>).map((w) => ({
-    id: String(w.id),
-    text: String(w.text) === 'task' ? 'goal' : String(w.text),
-    ...(typeof w.color === 'string' ? { color: w.color } : {}),
-  }));
+  const words: GraphWord[] = (raw.words as Array<Record<string, unknown>>).map((w) => {
+    const legacyText = w.text !== undefined ? String(w.text) : '';
+    const normalized = legacyText === 'task' ? 'goal' : legacyText;
+    const en = w.en !== undefined ? String(w.en) : normalized || undefined;
+    const ja = w.ja !== undefined ? String(w.ja) : undefined;
+    return {
+      id: String(w.id),
+      ...(en ? { en } : {}),
+      ...(ja ? { ja } : {}),
+      ...(typeof w.color === 'string' ? { color: w.color } : {}),
+    };
+  });
 
   const texts: GraphText[] = (raw.texts as Array<Record<string, unknown>>).map((t) => {
+    const legacyText = t.text !== undefined ? String(t.text) : '';
+    const en = t.en !== undefined ? String(t.en) : legacyText || undefined;
+    const ja = t.ja !== undefined ? String(t.ja) : undefined;
     const wordIds: string[] = Array.isArray(t.wordIds)
       ? (t.wordIds as unknown[]).filter((id): id is string => typeof id === 'string')
       : [];
-    return { id: String(t.id), text: String(t.text), wordIds };
+    return {
+      id: String(t.id),
+      ...(en ? { en } : {}),
+      ...(ja ? { ja } : {}),
+      wordIds,
+    };
   });
 
   return { texts, words };

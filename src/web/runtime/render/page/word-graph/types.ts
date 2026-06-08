@@ -16,6 +16,7 @@ export interface WordGraphState {
   saveTimer: ReturnType<typeof setTimeout> | null;
   history: { texts: GraphText[]; words: GraphWord[] }[];
   inputCache: Map<string, HTMLTextAreaElement>;
+  lang: 'en' | 'ja';
 }
 
 export interface WordGraphContext {

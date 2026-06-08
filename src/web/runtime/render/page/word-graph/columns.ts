@@ -1,6 +1,6 @@
 import type { GraphText, GraphWord } from '../../../../schema/component/kind/word-graph';
 import type { WordGraphContext } from './types';
-import { randomId, findText, findWord, isTextColumn } from './ops';
+import { randomId, findText, findWord, isTextColumn, getLangText, hasPrimaryLang, setLangText, findWordByText } from './ops';
 import { createInput } from './input';
 import { theme } from '../theme';
 
@@ -97,7 +97,8 @@ const buildColumn = (
       if (!text) return;
       ctx.pushHistory();
       if (isTextCol) {
-        const newText: GraphText = { id: randomId(), text, wordIds: [] };
+        const newText: GraphText = { id: randomId(), wordIds: [] };
+        setLangText(newText, state.lang, text);
         if (colIndex > 0) {
           const contextWordId = state.path[colIndex - 1];
           if (contextWordId) newText.wordIds.push(contextWordId);
@@ -107,8 +108,13 @@ const buildColumn = (
         state.pendingFocusId = newText.id;
         state.pendingFocusColumn = colIndex;
       } else {
-        const newWord: GraphWord = { id: randomId(), text };
-        state.words.push(newWord);
+        const existing = findWordByText(state.words, text);
+        const newWord: GraphWord = existing ?? (() => {
+          const w: GraphWord = { id: randomId() };
+          setLangText(w, state.lang, text);
+          return w;
+        })();
+        if (!existing) state.words.push(newWord);
         if (contextTextId) {
           const contextText = findText(state.texts, contextTextId);
           if (contextText) contextText.wordIds.push(newWord.id);
@@ -172,10 +178,15 @@ const buildColumn = (
       inp = createInput(item, colIndex, contextTextId, ctx);
       state.inputCache.set(cacheKey, inp);
     }
-    if (inp.value !== item.text) inp.value = item.text;
+    const activeText = state.lang === 'en' ? (item.en ?? '') : (item.ja ?? '');
+    const fallbackText = state.lang === 'en' ? (item.ja ?? '') : (item.en ?? '');
+    const hasPrimary = hasPrimaryLang(item, state.lang);
+    if (inp.value !== activeText) inp.value = activeText;
+    inp.placeholder = fallbackText;
     inp.dataset.columnIndex = String(colIndex);
     inp.style.background = accentColor ? withAlpha(accentColor, 0.10) : 'transparent';
-    inp.style.color = accentColor ?? 'inherit';
+    inp.style.color = accentColor ?? (hasPrimary ? 'inherit' : theme.textDim);
+    inp.style.fontStyle = hasPrimary ? 'normal' : 'italic';
     inp.style.borderRadius = accentColor ? '3px' : '0';
 
     const markerColor = accentColor ? withAlpha(accentColor, 0.70) : theme.markerDefault;
@@ -285,7 +296,7 @@ export const buildColumns = (ctx: WordGraphContext): HTMLElement => {
     sep.style.color = theme.textFaint;
     sep.style.flexShrink = '0';
     breadcrumb.appendChild(sep);
-    breadcrumb.appendChild(makeCrumb(entity.text, i === state.path.length - 1));
+    breadcrumb.appendChild(makeCrumb(getLangText(entity, state.lang), i === state.path.length - 1));
   }
 
   const container = document.createElement('div');

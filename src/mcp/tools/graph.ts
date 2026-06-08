@@ -22,8 +22,8 @@ async function graphFetch(
   });
 }
 
-type ApiWord = { id: string; text: string; color?: string | null };
-type ApiText = { id: string; text: string; wordIds: string[] };
+type ApiWord = { id: string; en?: string | null; ja?: string | null; color?: string | null };
+type ApiText = { id: string; en?: string | null; ja?: string | null; wordIds: string[] };
 
 async function getWords(env: AuthorizeEnv, graphId: string): Promise<ApiWord[]> {
   const res = await graphFetch(env, graphId, "words");
@@ -123,28 +123,31 @@ export async function callGraphTool(
   try {
     const graphId = String(args.graph_id);
 
+    const wordLabel = (w: ApiWord): string => [w.en, w.ja].filter(Boolean).join(" / ");
+    const textLabel = (t: ApiText): string => [t.en, t.ja].filter(Boolean).join(" / ");
+
     if (name === "graph_read_texts") {
       const texts = await getTexts(env, graphId);
-      return { content: [{ type: "text", text: texts.map((t) => t.text).filter(Boolean).join("\n") || "(no texts)" }] };
+      return { content: [{ type: "text", text: texts.map(textLabel).filter(Boolean).join("\n") || "(no texts)" }] };
     }
 
     if (name === "graph_read_words") {
       const words = await getWords(env, graphId);
-      return { content: [{ type: "text", text: words.map((w) => w.text).filter(Boolean).join("\n") || "(no words)" }] };
+      return { content: [{ type: "text", text: words.map(wordLabel).filter(Boolean).join("\n") || "(no words)" }] };
     }
 
     if (name === "graph_read_texts_by_word") {
       const wordText = String(args.word);
       const texts = await getTexts(env, graphId, undefined, wordText);
-      return { content: [{ type: "text", text: texts.map((t) => t.text).filter(Boolean).join("\n") || "(no texts linked)" }] };
+      return { content: [{ type: "text", text: texts.map(textLabel).filter(Boolean).join("\n") || "(no texts linked)" }] };
     }
 
     if (name === "graph_read_words_by_text") {
       const textContent = String(args.text);
       const [texts, words] = await Promise.all([getTexts(env, graphId), getWords(env, graphId)]);
-      const entry = texts.find((t) => t.text === textContent);
+      const entry = texts.find((t) => t.en === textContent || t.ja === textContent);
       if (!entry) return { content: [{ type: "text", text: `Text not found: ${textContent}` }], isError: true };
-      const wordMap = new Map(words.map((w) => [w.id, w.text]));
+      const wordMap = new Map(words.map((w) => [w.id, wordLabel(w)]));
       const linked = entry.wordIds.map((id) => wordMap.get(id)).filter(Boolean) as string[];
       return { content: [{ type: "text", text: linked.join("\n") || "(no words linked)" }] };
     }
@@ -158,7 +161,7 @@ export async function callGraphTool(
         getWords(env, graphId),
       ]);
 
-      const existingText = existingTexts.find((t) => t.text === textContent);
+      const existingText = existingTexts.find((t) => t.en === textContent || t.ja === textContent);
       if (!existingText) {
         return {
           content: [{ type: "text", text: `Text does not exist: "${textContent}". Cannot create new texts via MCP.` }],
@@ -166,8 +169,8 @@ export async function callGraphTool(
         };
       }
 
-      const existingWordTexts = new Set(existingWords.map((w) => w.text));
-      const unknownWords = wordNames.filter((w) => !existingWordTexts.has(w));
+      const existingWordLabels = new Set(existingWords.flatMap((w) => [w.en, w.ja].filter(Boolean) as string[]));
+      const unknownWords = wordNames.filter((w) => !existingWordLabels.has(w));
       if (unknownWords.length > 0) {
         return {
           content: [{ type: "text", text: `Cannot create new words via MCP. Unknown words: ${unknownWords.join(", ")}` }],
@@ -177,9 +180,9 @@ export async function callGraphTool(
 
       const res = await graphFetch(env, graphId, "text", "POST", { text: textContent, words: wordNames });
       if (!res.ok) throw new Error(`write_text_failed:${res.status}`);
-      const result = (await res.json()) as { id: string; text: string; wordIds: string[] };
+      const result = (await res.json()) as { id: string; en?: string; ja?: string; wordIds: string[] };
       return {
-        content: [{ type: "text", text: `Updated: "${result.text}" linked to [${wordNames.join(", ")}]` }],
+        content: [{ type: "text", text: `Updated: "${[result.en, result.ja].filter(Boolean).join(" / ")}" linked to [${wordNames.join(", ")}]` }],
       };
     }
 

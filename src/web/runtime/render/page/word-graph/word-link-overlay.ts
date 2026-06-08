@@ -1,6 +1,6 @@
 import type { GraphWord } from '../../../../schema/component/kind/word-graph';
 import type { WordGraphContext } from './types';
-import { randomId, findText } from './ops';
+import { randomId, findText, getLangText, setLangText, findWordByText, wordMatchesQuery } from './ops';
 import { theme } from '../theme';
 
 export const openWordLink = (textId: string, ctx: WordGraphContext): void => {
@@ -75,8 +75,12 @@ export const openWordLink = (textId: string, ctx: WordGraphContext): void => {
   };
 
   const doCreate = (wordText: string) => {
-    const existing = state.words.find(w => w.text === wordText);
-    const word = existing ?? { id: randomId(), text: wordText };
+    const existing = findWordByText(state.words, wordText);
+    const word = existing ?? (() => {
+      const w: GraphWord = { id: randomId() };
+      setLangText(w, state.lang, wordText);
+      return w;
+    })();
     ctx.pushHistory();
     if (!existing) state.words.push(word);
     const text = findText(state.texts, textId);
@@ -88,12 +92,12 @@ export const openWordLink = (textId: string, ctx: WordGraphContext): void => {
 
   const update = () => {
     const q = searchInput.value.toLowerCase().trim();
-    matches = state.words.filter(w => q === '' || w.text.toLowerCase().includes(q));
+    matches = state.words.filter(w => q === '' || wordMatchesQuery(w, q));
     selectedIdx = -1;
 
     const rows: HTMLElement[] = matches.map(w => {
       const row = document.createElement('div');
-      row.textContent = w.text;
+      row.textContent = getLangText(w, state.lang);
       Object.assign(row.style, { padding: '3px 10px', cursor: 'pointer', color: theme.textHigh, fontSize: 'inherit' });
       row.addEventListener('mouseenter', () => { selectedIdx = matches.indexOf(w); highlight(); });
       row.addEventListener('mouseleave', () => { selectedIdx = -1; highlight(); });
@@ -102,7 +106,7 @@ export const openWordLink = (textId: string, ctx: WordGraphContext): void => {
     });
 
     const q2 = searchInput.value.trim();
-    if (q2 && !state.words.find(w => w.text === q2)) {
+    if (q2 && !findWordByText(state.words, q2)) {
       const createRow = document.createElement('div');
       createRow.textContent = `+ "${q2}" として登録`;
       Object.assign(createRow.style, { padding: '3px 10px', cursor: 'pointer', color: theme.textFaint, fontStyle: 'italic', fontSize: 'inherit' });

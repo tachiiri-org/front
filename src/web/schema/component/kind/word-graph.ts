@@ -4,13 +4,15 @@ import type { SchemaField } from './form/field';
 
 export type GraphWord = {
   id: string;
-  text: string;
+  en?: string;
+  ja?: string;
   color?: string;
 };
 
 export type GraphText = {
   id: string;
-  text: string;
+  en?: string;
+  ja?: string;
   wordIds: string[];
 };
 
@@ -34,7 +36,11 @@ export const wordGraphSchema: SchemaField[] = [
 const isGraphWord = (v: unknown): boolean => {
   if (typeof v !== 'object' || v === null || Array.isArray(v)) return false;
   const c = v as Record<string, unknown>;
-  return typeof c.id === 'string' && typeof c.text === 'string';
+  return (
+    typeof c.id === 'string' &&
+    (c.en === undefined || typeof c.en === 'string') &&
+    (c.ja === undefined || typeof c.ja === 'string')
+  );
 };
 
 const isGraphText = (v: unknown): boolean => {
@@ -42,7 +48,8 @@ const isGraphText = (v: unknown): boolean => {
   const c = v as Record<string, unknown>;
   return (
     typeof c.id === 'string' &&
-    typeof c.text === 'string' &&
+    (c.en === undefined || typeof c.en === 'string') &&
+    (c.ja === undefined || typeof c.ja === 'string') &&
     Array.isArray(c.wordIds) &&
     (c.wordIds as unknown[]).every((id) => typeof id === 'string')
   );

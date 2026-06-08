@@ -15,6 +15,7 @@ export interface GraphSharedState {
   inputCache: Map<string, HTMLTextAreaElement>;
   loaded: boolean;
   subscribers: Set<() => void>;
+  lang: 'en' | 'ja';
 }
 
 const registry = new Map<string, GraphSharedState>();
@@ -38,6 +39,7 @@ export const getOrCreateGraphState = (graphId: string): GraphSharedState => {
       inputCache: new Map(),
       loaded: false,
       subscribers: new Set(),
+      lang: 'en',
     });
   }
   return registry.get(graphId)!;
