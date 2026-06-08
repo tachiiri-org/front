@@ -435,7 +435,7 @@ export async function handleMcpToken(request: Request, env: AuthorizeEnv): Promi
   return Response.json({
     access_token: accessToken,
     token_type: "bearer",
-    expires_in: 28800,
+    expires_in: 7776000,
     scope: row.scopes,
   });
 }

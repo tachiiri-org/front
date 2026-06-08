@@ -365,6 +365,24 @@ export const renderStorageExplorer = (
         mainHeader.appendChild(next);
       }
 
+      if (rows.length > 0) {
+        const copyBtn = styled('button', {
+          fontSize: '11px', padding: '1px 8px', cursor: 'pointer',
+          background: C.surface, color: C.text, border: `1px solid ${C.border}`,
+          borderRadius: '3px', fontFamily: 'monospace', marginLeft: 'auto',
+        });
+        copyBtn.textContent = 'コピー';
+        copyBtn.addEventListener('click', () => {
+          const cols = Object.keys(rows[0]);
+          const tsv = [cols.join('\t'), ...rows.map((r) => cols.map((c) => (r[c] === null || r[c] === undefined ? '' : String(r[c]))).join('\t'))].join('\n');
+          navigator.clipboard.writeText(tsv).then(() => {
+            copyBtn.textContent = '✓ コピー済';
+            setTimeout(() => { copyBtn.textContent = 'コピー'; }, 1500);
+          }).catch(() => { copyBtn.textContent = '失敗'; });
+        });
+        mainHeader.appendChild(copyBtn);
+      }
+
       if (rows.length === 0) {
         const empty = styled('div', { padding: '16px', color: C.textDim });
         empty.textContent = 'データがありません';

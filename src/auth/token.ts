@@ -96,7 +96,7 @@ export async function issueMcpToken(
     actor_type: "ai",
     iss: env.INTERNAL_AUTH_TOKEN_ISSUER ?? "front",
     aud: "backend",
-    exp: now + 28800,
+    exp: now + 7776000,
     iat: now,
     jti: crypto.randomUUID(),
     tenant_id: input.orgId,

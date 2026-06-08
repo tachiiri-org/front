@@ -41,6 +41,51 @@ select:mcp__front-production__graph_read_words,mcp__front-production__graph_read
 deploy・migrate・スクリプト実行など重要な操作を行う前に:
 - ワードグラフに該当するワードがあれば、そのテキストを読んでから実行する（仮定で動かない）
 
+## デプロイフロー（毎回必ず踏む）
+
+コード修正後は以下の順番でデプロイ・確認を進める。ショートカットしない。
+
+### 1. 開発環境（dev）
+
+```bash
+git -C front push origin dev
+git -C backend push origin dev
+```
+
+- GitHub Actions が自動デプロイする
+- CI の結果を確認する
+- Playwright スクリーンショットで表示を確認する（下記参照）
+- 問題なければ次のステップへ
+
+### 2. 検証環境（stage）
+
+```bash
+# front
+git -C front checkout stage && git merge dev && git push origin stage && git checkout dev
+
+# backend
+git -C backend checkout stage && git merge dev && git push origin stage && git checkout dev
+```
+
+- CI の結果を確認する
+- Playwright スクリーンショットで表示を確認する
+- 問題なければ次のステップへ
+
+### 3. 本番環境（production）
+
+```bash
+# front
+git -C front checkout main && git merge stage && git push origin main && git checkout dev
+
+# backend
+git -C backend checkout main && git merge stage && git push origin main && git checkout dev
+```
+
+- CI の結果を確認する
+- Playwright スクリーンショットで最終確認する
+
+---
+
 ## フロントエンド確認（PDCA）
 
 コード修正後の確認には `screenshot.ts` を使う:
