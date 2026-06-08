@@ -85,7 +85,7 @@ export async function ensureAuthOnPage(page: Page, context: BrowserContext) {
 /** GitHub に直接ログイン（メール + パスワード + TOTP）*/
 async function doGitHubLogin(page: Page) {
   console.log('[auth] GitHub login...');
-  await page.goto('https://github.com/login', { waitUntil: 'networkidle' });
+  await page.goto('https://github.com/login', { waitUntil: 'load' });
 
   // ログインフォームがある場合のみ認証（既ログイン時は不要）
   const loginField = await page.waitForSelector('#login_field', { timeout: 5_000 }).catch(() => null);
