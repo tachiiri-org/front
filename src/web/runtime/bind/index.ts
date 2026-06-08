@@ -688,11 +688,11 @@ const hydrateMigrationComponents = async (): Promise<void> => {
     }
   };
 
-  const runR2Migration = async (target: string, btn: HTMLButtonElement): Promise<void> => {
+  const runR2TenantMigration = async (target: string, btn: HTMLButtonElement): Promise<void> => {
     progressEl.replaceChildren();
     btn.disabled = true;
     try {
-      log(`=== R2 マイグレーション開始: prod → ${target} ===`);
+      log(`=== R2 テナント移行開始: prod → ${target} ===`);
       log('テナント R2 移行中...');
       const r2Res = await fetch('/api/admin/migration/r2', {
         method: 'POST',
@@ -706,7 +706,55 @@ const hydrateMigrationComponents = async (): Promise<void> => {
       for (const t of r2Data.tenants) {
         log(`[${t.groupId}] ✓ ${t.copied} オブジェクト → ${t.targetBucketId}`, false, 1);
       }
-      log(`=== R2 マイグレーション完了 (${r2Data.tenants.length} バケット) ===`);
+      log(`=== R2 テナント移行完了 (${r2Data.tenants.length} バケット) ===`);
+    } catch (e) {
+      log(`予期しないエラー: ${String(e)}`, true);
+    } finally {
+      btn.disabled = false;
+    }
+  };
+
+  const runR2LayoutsMigration = async (target: string, btn: HTMLButtonElement): Promise<void> => {
+    progressEl.replaceChildren();
+    btn.disabled = true;
+    try {
+      log(`=== R2 Layouts 移行開始: prod → ${target} ===`);
+      const r2Res = await fetch('/api/admin/migration/r2-layouts', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ target }),
+      });
+      if (!r2Res.ok) { await logErr(r2Res, 'Layouts移行失敗'); return; }
+      const r2Data = await r2Res.json() as { sourceBucketId: string; targetBucketId: string; copied: number };
+      log(`${r2Data.sourceBucketId} → ${r2Data.targetBucketId}: ${r2Data.copied} ファイル`);
+      log(`=== R2 Layouts 移行完了 ===`);
+    } catch (e) {
+      log(`予期しないエラー: ${String(e)}`, true);
+    } finally {
+      btn.disabled = false;
+    }
+  };
+
+  const runD1IdentityMigration = async (target: string, btn: HTMLButtonElement): Promise<void> => {
+    progressEl.replaceChildren();
+    btn.disabled = true;
+    try {
+      log(`=== D1 Identity 移行開始: prod → ${target} ===`);
+      const res = await fetch('/api/admin/migration/identity', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ target }),
+      });
+      if (!res.ok) { await logErr(res, 'Identity移行失敗'); return; }
+      const data = await res.json() as {
+        schema: { tables: string[]; views: string[]; dataTableOrder: string[]; dropped: string[]; droppedExcluded: string[] };
+        tables: Array<{ tableName: string; migrated: number; encryptedPairs: string[]; reencrypted: number; legacy: number }>;
+      };
+      log(`スキーマ: DROP ${(data.schema.dropped ?? []).length + (data.schema.droppedExcluded ?? []).length} → CREATE ${data.schema.tables.length} tables`, false, 1);
+      for (const t of data.tables) {
+        log(`[${t.tableName}] ✓ ${t.migrated} 行`, false, 1);
+      }
+      log(`=== D1 Identity 移行完了 (${data.tables.length} テーブル) ===`);
     } catch (e) {
       log(`予期しないエラー: ${String(e)}`, true);
     } finally {
@@ -727,15 +775,26 @@ const hydrateMigrationComponents = async (): Promise<void> => {
     });
   };
 
-  const d1Frame = frames.find((f) => f.name === 'migration-start-d1');
-  const r2Frame = frames.find((f) => f.name === 'migration-start-r2');
+  const d1IdentityFrame = frames.find((f) => f.name === 'migration-start-d1-identity');
+  const d1UserFrame = frames.find((f) => f.name === 'migration-start-d1-user');
+  const r2LayoutsFrame = frames.find((f) => f.name === 'migration-start-r2-layouts');
+  const r2TenantFrame = frames.find((f) => f.name === 'migration-start-r2-tenant');
 
-  if (d1Frame || r2Frame) {
-    wireBtn(d1Frame, runD1Migration);
-    wireBtn(r2Frame, runR2Migration);
+  if (d1IdentityFrame || d1UserFrame || r2LayoutsFrame || r2TenantFrame) {
+    wireBtn(d1IdentityFrame, runD1IdentityMigration);
+    wireBtn(d1UserFrame, runD1Migration);
+    wireBtn(r2LayoutsFrame, runR2LayoutsMigration);
+    wireBtn(r2TenantFrame, runR2TenantMigration);
   } else {
-    // Legacy: single migration-start button → D1 migration
-    const startFrame = frames.find((f) => f.name === 'migration-start');
-    wireBtn(startFrame, runD1Migration);
+    // Legacy: migration-start-d1 / migration-start-r2
+    const d1Frame = frames.find((f) => f.name === 'migration-start-d1');
+    const r2Frame = frames.find((f) => f.name === 'migration-start-r2');
+    if (d1Frame || r2Frame) {
+      wireBtn(d1Frame, runD1Migration);
+      wireBtn(r2Frame, runR2TenantMigration);
+    } else {
+      // Legacy: single migration-start button → D1 migration
+      wireBtn(frames.find((f) => f.name === 'migration-start'), runD1Migration);
+    }
   }
 };
