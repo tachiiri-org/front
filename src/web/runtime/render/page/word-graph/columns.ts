@@ -30,18 +30,58 @@ const buildColumn = (
   col.style.boxSizing = 'border-box';
   col.style.padding = '4px 0';
 
-  // Column type label
+  // Column type label (+ lang toggle for word column)
+  const headerRow = document.createElement('div');
+  Object.assign(headerRow.style, {
+    display: 'flex',
+    alignItems: 'center',
+    padding: '0 8px 2px 12px',
+    gap: '6px',
+  });
+
   const typeLabel = document.createElement('div');
   Object.assign(typeLabel.style, {
     fontSize: '10px',
     color: theme.textFaint,
-    padding: '0 12px 2px',
     userSelect: 'none',
     textTransform: 'uppercase',
     letterSpacing: '0.5px',
+    flex: '1',
   });
   typeLabel.textContent = isTextCol ? 'texts' : 'words';
-  col.appendChild(typeLabel);
+  headerRow.appendChild(typeLabel);
+
+  if (!isTextCol) {
+    const toggleWrap = document.createElement('div');
+    Object.assign(toggleWrap.style, { display: 'flex', gap: '2px', flexShrink: '0' });
+    for (const lng of ['en', 'ja'] as const) {
+      const btn = document.createElement('button');
+      btn.textContent = lng.toUpperCase();
+      const isActive = state.lang === lng;
+      Object.assign(btn.style, {
+        fontSize: '10px',
+        padding: '0 5px',
+        border: isActive ? `1px solid ${theme.borderStrong}` : `1px solid ${theme.borderFaint}`,
+        borderRadius: '3px',
+        background: isActive ? theme.selectSubtle : 'transparent',
+        color: isActive ? theme.textHigh : theme.textFaint,
+        cursor: 'pointer',
+        lineHeight: '1.6',
+        userSelect: 'none',
+      });
+      btn.addEventListener('mousedown', (e) => {
+        e.preventDefault();
+        if (state.lang === lng) return;
+        state.lang = lng;
+        state.inputCache.clear();
+        ctx.render();
+      });
+      toggleWrap.appendChild(btn);
+    }
+    headerRow.appendChild(toggleWrap);
+  }
+
+  col.appendChild(headerRow);
 
   // Draft input row (text and word columns share same textarea UI)
   const draftRow = document.createElement('div');
