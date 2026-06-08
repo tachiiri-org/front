@@ -11,6 +11,9 @@ binding = "ASSETS"
 name = "front-stage"
 workers_dev = true
 
+[env.stage.observability]
+enabled = true
+
 [[env.stage.d1_databases]]
 binding = "IDENTITY_DB"
 database_name = "identity-stage"
@@ -31,6 +34,9 @@ service = "backend-stage"
 name = "front-production"
 workers_dev = true
 
+[env.production.observability]
+enabled = true
+
 [[env.production.d1_databases]]
 binding = "IDENTITY_DB"
 database_name = "identity-production"
@@ -50,6 +56,9 @@ service = "backend-production"
 [env.dev]
 name = "front-dev"
 workers_dev = true
+
+[env.dev.observability]
+enabled = true
 
 [[env.dev.d1_databases]]
 binding = "IDENTITY_DB"

@@ -10,9 +10,7 @@ import type { TableComponent } from './kind/table';
 import type { TreeEditorComponent } from './kind/tree-editor';
 import type { OutlinerComponent } from './kind/outliner';
 import type { TextEditorComponent } from './kind/text-editor';
-import type { KnowledgeEditorComponent } from './kind/knowledge-editor';
 import type { DocumentEditorComponent } from './kind/document-editor';
-import type { WordEditorComponent } from './kind/word-editor';
 import type { DefinitionEditorComponent } from './kind/definition-editor';
 import type { WordGraphComponent } from './kind/word-graph';
 import type { WordGraphTextColComponent, WordGraphWordColComponent } from './kind/word-graph-col';
@@ -30,9 +28,7 @@ import { isTableComponent, tableDefaults, tableSchema } from './kind/table';
 import { isTreeEditorComponent, treeEditorDefaults, treeEditorSchema } from './kind/tree-editor';
 import { isOutlinerComponent, outlinerDefaults, outlinerSchema } from './kind/outliner';
 import { isTextEditorComponent, textEditorDefaults, textEditorSchema } from './kind/text-editor';
-import { isKnowledgeEditorComponent, knowledgeEditorDefaults, knowledgeEditorSchema } from './kind/knowledge-editor';
 import { isDocumentEditorComponent, documentEditorDefaults, documentEditorSchema } from './kind/document-editor';
-import { isWordEditorComponent, wordEditorDefaults, wordEditorSchema } from './kind/word-editor';
 import { isDefinitionEditorComponent, definitionEditorDefaults, definitionEditorSchema } from './kind/definition-editor';
 import { isWordGraphComponent, wordGraphDefaults, wordGraphSchema } from './kind/word-graph';
 import { isWordGraphTextColComponent, isWordGraphWordColComponent, wordGraphTextColDefaults, wordGraphWordColDefaults, wordGraphTextColSchema, wordGraphWordColSchema } from './kind/word-graph-col';
@@ -80,23 +76,11 @@ export {
   textEditorSchema,
 } from './kind/text-editor';
 export {
-  type KnowledgeEditorComponent,
-  isKnowledgeEditorComponent,
-  knowledgeEditorDefaults,
-  knowledgeEditorSchema,
-} from './kind/knowledge-editor';
-export {
   type DocumentEditorComponent,
   isDocumentEditorComponent,
   documentEditorDefaults,
   documentEditorSchema,
 } from './kind/document-editor';
-export {
-  type WordEditorComponent,
-  isWordEditorComponent,
-  wordEditorDefaults,
-  wordEditorSchema,
-} from './kind/word-editor';
 export {
   type DefinitionEditorComponent,
   isDefinitionEditorComponent,
@@ -167,9 +151,7 @@ export type Component =
   | TreeEditorComponent
   | OutlinerComponent
   | TextEditorComponent
-  | KnowledgeEditorComponent
   | DocumentEditorComponent
-  | WordEditorComponent
   | DefinitionEditorComponent
   | WordGraphComponent
   | WordGraphTextColComponent
@@ -190,9 +172,7 @@ export const isComponent = (value: unknown): value is Component =>
   isTreeEditorComponent(value) ||
   isOutlinerComponent(value) ||
   isTextEditorComponent(value) ||
-  isKnowledgeEditorComponent(value) ||
   isDocumentEditorComponent(value) ||
-  isWordEditorComponent(value) ||
   isDefinitionEditorComponent(value) ||
   isWordGraphComponent(value) ||
   isWordGraphTextColComponent(value) ||
@@ -213,9 +193,7 @@ export const componentDefaults: Record<string, Record<string, unknown>> = {
   'tree-editor': treeEditorDefaults as Record<string, unknown>,
   outliner: outlinerDefaults as Record<string, unknown>,
   'text-editor': textEditorDefaults as Record<string, unknown>,
-  'knowledge-editor': knowledgeEditorDefaults as Record<string, unknown>,
   'document-editor': documentEditorDefaults as Record<string, unknown>,
-  'word-editor': wordEditorDefaults as Record<string, unknown>,
   'definition-editor': definitionEditorDefaults as Record<string, unknown>,
   'word-graph': wordGraphDefaults as Record<string, unknown>,
   'word-graph-text-col': wordGraphTextColDefaults as Record<string, unknown>,
@@ -237,9 +215,7 @@ export const componentSchemas: Record<string, SchemaField[]> = {
   'tree-editor': treeEditorSchema,
   outliner: outlinerSchema,
   'text-editor': textEditorSchema,
-  'knowledge-editor': knowledgeEditorSchema,
   'document-editor': documentEditorSchema,
-  'word-editor': wordEditorSchema,
   'definition-editor': definitionEditorSchema,
   'word-graph': wordGraphSchema,
   'word-graph-text-col': wordGraphTextColSchema,

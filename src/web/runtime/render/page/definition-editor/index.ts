@@ -184,46 +184,6 @@ export const renderDefinitionEditor = (
     closeBtn.addEventListener('click', closePanel);
 
     const listenFrameId = component.sourceComponentId;
-    document.addEventListener('word-editor:insert-to-doc', (e: Event) => {
-      const detail = (e as CustomEvent<{ wordEditorFrameId: string; nodes: TreeNode[] }>).detail;
-      if (detail.wordEditorFrameId !== listenFrameId) return;
-      if (outer.style.display === 'none') return;
-      pushHistory();
-      const newNodes: TreeNode[] = detail.nodes.map(n => ({
-        id: randomId(),
-        text: n.text,
-        ...(n.type ? { type: n.type } : {}),
-        ...(n.status ? { status: n.status } : {}),
-      }));
-      state.nodes.push(...newNodes);
-      state.pendingFocusId = newNodes[newNodes.length - 1].id;
-      scheduleSave();
-      render();
-    });
-
-    document.addEventListener('word-editor:doc-toggle', (e: Event) => {
-      const detail = (e as CustomEvent<{ wordEditorFrameId: string; nodeId: string | null; nodeText: string | null }>).detail;
-      if (detail.wordEditorFrameId !== listenFrameId) return;
-      if (detail.nodeId === null) {
-        closePanel();
-        return;
-      }
-      titleEl.textContent = detail.nodeText || '(no title)';
-      state.resolvedTreeId = detail.nodeId;
-      state.nodes = [];
-      while (state.history.length) state.history.pop();
-      outer.style.display = 'flex';
-      outer.style.flexDirection = 'column';
-      render();
-      void fetch(`/api/trees/${encodeURIComponent(detail.nodeId)}`)
-        .then((res) => (res.ok ? (res.json() as Promise<unknown>) : Promise.resolve({ nodes: [] })))
-        .then((data) => {
-          const raw = (data as Record<string, unknown>).nodes ?? data;
-          state.nodes = Array.isArray(raw) ? (raw as TreeNode[]) : [];
-          render();
-        })
-        .catch(() => render());
-    });
   }
 
   if (component.source) {

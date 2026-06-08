@@ -6,9 +6,7 @@ import {
   isTreeEditorComponent,
   isOutlinerComponent,
   isTextEditorComponent,
-  isKnowledgeEditorComponent,
   isDocumentEditorComponent,
-  isWordEditorComponent,
   isDefinitionEditorComponent,
   isWordGraphComponent,
   isWordGraphTextColComponent,
@@ -21,9 +19,7 @@ import {
   type TreeEditorComponent,
   type OutlinerComponent,
   type TextEditorComponent,
-  type KnowledgeEditorComponent,
   type DocumentEditorComponent,
-  type WordEditorComponent,
   type DefinitionEditorComponent,
   type WordGraphComponent,
   type WordGraphTextColComponent,
@@ -40,9 +36,7 @@ import { renderEditableTable } from './table-editor';
 import { renderEditableTree } from './tree-editor';
 import { renderOutliner } from './outliner';
 import { renderTextEditor } from './text-editor';
-import { renderKnowledgeEditor } from './knowledge-editor';
 import { renderDocumentEditor } from './document-editor';
-import { renderWordEditor } from './word-editor';
 import { renderDefinitionEditor } from './definition-editor';
 import { renderWordGraph } from './word-graph';
 import { renderWordGraphTextCol } from './word-graph/text-col';
@@ -301,23 +295,11 @@ export const renderComponent = (
   if (isTextEditorComponent(frame)) {
     return renderTextEditor(id, frame as TextEditorComponent);
   }
-  if (isKnowledgeEditorComponent(frame)) {
-    const treeId = typeof (frame as Record<string, unknown>).treeId === 'string'
-      ? (frame as Record<string, unknown>).treeId as string
-      : undefined;
-    return renderKnowledgeEditor(id, frame as KnowledgeEditorComponent, treeId);
-  }
   if (isDocumentEditorComponent(frame)) {
     const treeId = typeof (frame as Record<string, unknown>).treeId === 'string'
       ? (frame as Record<string, unknown>).treeId as string
       : undefined;
     return renderDocumentEditor(id, frame as DocumentEditorComponent, treeId);
-  }
-  if (isWordEditorComponent(frame)) {
-    const treeId = typeof (frame as Record<string, unknown>).treeId === 'string'
-      ? (frame as Record<string, unknown>).treeId as string
-      : undefined;
-    return renderWordEditor(id, frame as WordEditorComponent, treeId);
   }
   if (isDefinitionEditorComponent(frame)) {
     const treeId = typeof (frame as Record<string, unknown>).treeId === 'string'
