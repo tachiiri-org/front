@@ -95,6 +95,24 @@ export const GRAPH_TOOLS = [
       required: ["graph_id", "text"],
     },
   },
+  {
+    name: "graph_write_text",
+    description:
+      "Update the words linked to an existing text entry. Cannot create new texts or new words — both must already exist in the graph. Use this to change tag associations (e.g. remove 'fix', add 'delete').",
+    inputSchema: {
+      type: "object",
+      properties: {
+        graph_id: { type: "string", description: "Word graph ID (e.g. 'word-graph-1')" },
+        text: { type: "string", description: "Text content to update (must already exist)" },
+        words: {
+          type: "array",
+          items: { type: "string" },
+          description: "Word names to link to this text. All words must already exist in the graph.",
+        },
+      },
+      required: ["graph_id", "text", "words"],
+    },
+  },
 ];
 
 export async function callGraphTool(
@@ -129,6 +147,40 @@ export async function callGraphTool(
       const wordMap = new Map(words.map((w) => [w.id, w.text]));
       const linked = entry.wordIds.map((id) => wordMap.get(id)).filter(Boolean) as string[];
       return { content: [{ type: "text", text: linked.join("\n") || "(no words linked)" }] };
+    }
+
+    if (name === "graph_write_text") {
+      const textContent = String(args.text);
+      const wordNames = (args.words as unknown[]).map(String);
+
+      const [existingTexts, existingWords] = await Promise.all([
+        getTexts(env, graphId),
+        getWords(env, graphId),
+      ]);
+
+      const existingText = existingTexts.find((t) => t.text === textContent);
+      if (!existingText) {
+        return {
+          content: [{ type: "text", text: `Text does not exist: "${textContent}". Cannot create new texts via MCP.` }],
+          isError: true,
+        };
+      }
+
+      const existingWordTexts = new Set(existingWords.map((w) => w.text));
+      const unknownWords = wordNames.filter((w) => !existingWordTexts.has(w));
+      if (unknownWords.length > 0) {
+        return {
+          content: [{ type: "text", text: `Cannot create new words via MCP. Unknown words: ${unknownWords.join(", ")}` }],
+          isError: true,
+        };
+      }
+
+      const res = await graphFetch(env, graphId, "text", "POST", { text: textContent, words: wordNames });
+      if (!res.ok) throw new Error(`write_text_failed:${res.status}`);
+      const result = (await res.json()) as { id: string; text: string; wordIds: string[] };
+      return {
+        content: [{ type: "text", text: `Updated: "${result.text}" linked to [${wordNames.join(", ")}]` }],
+      };
     }
 
     return { content: [{ type: "text", text: `Unknown graph tool: ${name}` }], isError: true };
