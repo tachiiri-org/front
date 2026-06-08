@@ -423,7 +423,7 @@ export const handleApiRequest = async (request: Request, env: Env): Promise<Resp
 
   const dbApplyMatch = url.pathname.match(/^\/api\/admin\/db-apply\/(.+)$/);
   if (dbApplyMatch) {
-    const suffix = dbApplyMatch[1];
+    const suffix = dbApplyMatch[1] + url.search;
     const body = request.method !== 'GET' ? await request.text() : undefined;
     const connectSession = await readGitHubConnectSession(request, env);
     const githubToken = connectSession?.accessToken ?? null;

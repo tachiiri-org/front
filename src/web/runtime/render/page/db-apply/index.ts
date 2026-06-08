@@ -487,7 +487,7 @@ export const renderDbApply = (
     if (allExpand.length > 0) {
       sidebarList.appendChild(makeSectionHeader('EXPAND', C.expandColor));
       for (const name of allExpand) {
-        const s = applied.has(name) ? 'applied' : pendingExpand.has(name) ? 'pending' : 'applied';
+        const s = applied.has(name) ? 'applied' : 'pending';
         sidebarList.appendChild(makeFileRow(name, s));
       }
     }
