@@ -18,7 +18,7 @@ database_id = "20dfc9c6-170c-47e7-927c-d703918a6449"
 
 [env.stage.vars]
 FRONTEND_ORIGIN = "https://front-stage.tachiiri.workers.dev"
-GITHUB_OAUTH_CLIENT_ID = "Ov23li098QXLtF5UbEg5"
+GITHUB_OAUTH_CLIENT_ID = "Ov23lihhhvT7GB1IGasP"
 GOOGLE_OAUTH_CLIENT_ID = "804252639051-hdkilk1189bomeiv9opnsu0h2basdtr8.apps.googleusercontent.com"
 LAYOUTS_BUCKET_ID = "bucket-stage"
 
