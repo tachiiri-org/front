@@ -107,7 +107,7 @@ export const renderDbApply = (
     alignSelf: 'center',
     paddingBottom: '4px',
   });
-  connectLink.href = '/oauth/github/connect/start';
+  connectLink.href = `/oauth/github/connect/start?returnTo=${encodeURIComponent(window.location.pathname)}`;
   connectLink.textContent = 'GitHub Connect';
 
   const ciDeployBtn = styled('button', {

@@ -118,15 +118,18 @@ export default {
       for (const c of clearGoogleSessionCookies(request)) headers.append('Set-Cookie', c);
       return new Response(null, { status: 204, headers });
     }
+    if (pathname === '/identify-viewer') {
+      return new Response(null, { status: 302, headers: new Headers({ Location: '/' }) });
+    }
     if (pathname === '/oauth/github/logout' && request.method === 'GET') {
-      const headers = new Headers({ Location: '/identify-viewer' });
+      const headers = new Headers({ Location: '/' });
       for (const c of [...clearGitHubSessionCookies(request), ...clearGitHubConnectSessionCookies(request)]) {
         headers.append('Set-Cookie', c);
       }
       return new Response(null, { status: 302, headers });
     }
     if (pathname === '/oauth/google/logout' && request.method === 'GET') {
-      const headers = new Headers({ Location: '/identify-viewer' });
+      const headers = new Headers({ Location: '/' });
       for (const c of clearGoogleSessionCookies(request)) headers.append('Set-Cookie', c);
       return new Response(null, { status: 302, headers });
     }

@@ -132,10 +132,13 @@ export function handleGitHubConnectStart(context: RouteContext): Response {
     return new Response("Missing GITHUB_OAUTH_CLIENT_ID", { status: 503 });
   }
 
+  const reqUrl = new URL(context.request.url);
   const state = createRandomState();
-  const scope = new URL(context.request.url).searchParams.get("scope") ?? "repo read:user";
+  const scope = reqUrl.searchParams.get("scope") ?? "repo read:user";
+  const returnTo = reqUrl.searchParams.get("returnTo") ?? "";
+
   const headers = new Headers();
-  headers.set(
+  headers.append(
     "Set-Cookie",
     serializeCookie(CONNECT_STATE_COOKIE_NAME, state, {
       maxAge: STATE_TTL_SECONDS,
@@ -143,6 +146,17 @@ export function handleGitHubConnectStart(context: RouteContext): Response {
       secure: isSecureRequest(context.request),
     }),
   );
+  if (returnTo.startsWith("/")) {
+    headers.append(
+      "Set-Cookie",
+      serializeCookie(CONNECT_RETURN_TO_COOKIE, returnTo, {
+        maxAge: STATE_TTL_SECONDS,
+        path: "/",
+        secure: isSecureRequest(context.request),
+        httpOnly: true,
+      }),
+    );
+  }
   headers.set("Location", buildGitHubAuthorizeUrl(context.request, context.env, state, scope, getGitHubConnectCallbackUrl(context.request, context.env)));
 
   return new Response(null, { status: 302, headers });
@@ -167,12 +181,17 @@ export async function handleGitHubConnectCallback(context: RouteContext): Promis
     return new Response(`GitHub connect OAuth code exchange failed: ${String(error)}`, { status: 502 });
   }
 
+  const returnTo = cookies.get(CONNECT_RETURN_TO_COOKIE) ?? "";
+
   const headers = new Headers();
   headers.append("Set-Cookie", clearCookie(CONNECT_STATE_COOKIE_NAME, context.request));
+  headers.append("Set-Cookie", clearCookie(CONNECT_RETURN_TO_COOKIE, context.request));
   try {
     headers.append("Set-Cookie", await serializeGitHubConnectSessionCookie(connectSession, context.env, context.request));
   } catch { /* non-fatal */ }
-  headers.set("Location", `${resolveFrontendOrigin(context.request, context.env)}/identify-viewer`);
+
+  const dest = returnTo.startsWith("/") ? returnTo : "/";
+  headers.set("Location", `${resolveFrontendOrigin(context.request, context.env)}${dest}`);
 
   return new Response(null, { status: 302, headers });
 }
@@ -189,6 +208,7 @@ export async function handleGitHubOAuthCallback(context: RouteContext): Promise<
 
 const LOGIN_STATE_COOKIE_NAME = "github_login_oauth_state";
 const CONNECT_STATE_COOKIE_NAME = "github_connect_oauth_state";
+const CONNECT_RETURN_TO_COOKIE = "github_connect_return_to";
 export const IDENTITY_USER_ID_COOKIE = "identity_user_id";
 export const MCP_OAUTH_PARAMS_COOKIE = "mcp_oauth_params";
 /** @deprecated Use LOGIN_STATE_COOKIE_NAME or CONNECT_STATE_COOKIE_NAME */
