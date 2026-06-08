@@ -12,13 +12,18 @@
     "gen-client-path": "bun scripts/gen-client-path.ts",
     "deploy:stage": "bun run build && bun run gen-client-path && wrangler deploy --env stage",
     "deploy:dev": "bun run build && bun run gen-client-path && wrangler deploy --env dev",
-    "deploy": "bun run build && bun run gen-client-path && wrangler deploy --env production"
+    "deploy": "bun run build && bun run gen-client-path && wrangler deploy --env production",
+    "e2e": "playwright test",
+    "e2e:stage": "BASE_URL=https://front-stage.tachiiri.workers.dev playwright test",
+    "e2e:prod": "BASE_URL=https://front-production.tachiiri.workers.dev playwright test"
   },
   "dependencies": {},
   "devDependencies": {
     "@cloudflare/workers-types": "^4.20260425.1",
+    "@playwright/test": "^1.60.0",
     "@types/node": "^22.0.0",
     "concurrently": "^9.2.1",
+    "otpauth": "^9.5.1",
     "typescript": "^5.9.3",
     "vite": "^7.1.10",
     "wrangler": "^4.72.0"
