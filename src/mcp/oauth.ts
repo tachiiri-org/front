@@ -1,9 +1,9 @@
 import type { D1Database } from "@cloudflare/workers-types";
-import type { AuthorizeEnv } from "../auth";
-import { parseCookies, serializeCookie, clearCookie } from "../auth/cookies";
-import { issueMcpToken } from "../auth/token";
-import { authorizeFetch } from "../auth/fetch";
-import { IDENTITY_USER_ID_COOKIE, MCP_OAUTH_PARAMS_COOKIE } from "../auth/github";
+import type { AuthorizeEnv } from "../session";
+import { parseCookies, serializeCookie, clearCookie } from "../session/cookies";
+import { issueMcpToken } from "../session/token";
+import { authorizeFetch } from "../session/fetch";
+import { IDENTITY_USER_ID_COOKIE, MCP_OAUTH_PARAMS_COOKIE } from "../session/github";
 import { createOrganization } from "../identify";
 
 const CODE_TTL = 60 * 10; // 10 minutes

@@ -1,4 +1,4 @@
-import { authorizeFetch, type AuthorizeEnv } from "../../auth";
+import { authorizeFetch, type AuthorizeEnv } from "../../session";
 
 type ToolResult = {
   content: Array<{ type: "text"; text: string }>;

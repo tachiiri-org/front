@@ -2,19 +2,19 @@ import {
   COMPONENT_KINDS,
   type SchemaField,
   normalizeFormFieldKind,
-} from '../schema/component';
-import { CSS_PROP_KEYS } from '../schema/component/style';
-import { resolveStyleFieldEntries } from '../schema/component/style/specs';
-import type { StyleEntrySpec } from '../schema/component/style/types';
-import type { TableData, TableSchema } from '../schema/component/kind/table';
-import { editorSchema } from '../editor/component-editor';
-import { sourceEndpointSchema, sourceListSchema } from '../schema/source';
+} from '../web/schema/component';
+import { CSS_PROP_KEYS } from '../web/schema/component/style';
+import { resolveStyleFieldEntries } from '../web/schema/component/style/specs';
+import type { StyleEntrySpec } from '../web/schema/component/style/types';
+import type { TableData, TableSchema } from '../web/schema/component/kind/table';
+import { editorSchema } from '../web/editor/component-editor';
+import { sourceEndpointSchema, sourceListSchema } from '../web/schema/source';
 import {
   schemaEditorTableDataToSchema,
   schemaEditorSchemaToTableData,
   validateSchemaEditorTableDraft,
-} from '../schema/component/schema-editor';
-import type { LayoutBackend } from '../storage/layouts/r2';
+} from '../web/schema/component/schema-editor';
+import type { LayoutBackend } from '../web/storage/layouts/r2';
 
 
 const COMPONENT_SCHEMA_KINDS = [...COMPONENT_KINDS, 'component-editor', 'screen'];

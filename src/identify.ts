@@ -1,6 +1,6 @@
-import { authorizeFetch, type AuthorizeEnv } from "./auth";
-import { issueSessionToken, readSessionToken } from "./auth/token";
-import { parseCookies, serializeCookie, clearCookie } from "./auth/cookies";
+import { authorizeFetch, type AuthorizeEnv } from "./session";
+import { issueSessionToken, readSessionToken } from "./session/token";
+import { parseCookies, serializeCookie, clearCookie } from "./session/cookies";
 
 // GitHub login session (read:user scope — identity only)
 export type IdentifyGitHubSession = {

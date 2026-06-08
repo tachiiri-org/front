@@ -4,11 +4,11 @@ import {
   handleGitHubOAuthStart,
   handleGitHubConnectStart,
   handleGitHubConnectCallback,
-} from './auth/github';
-import { handleGoogleLoginStart, handleGoogleLoginCallback } from './auth/google';
-import type { AuthorizeEnv } from './auth';
-import { handleApiRequest as handleDataApiRequest, handleGitHubAuthStatus, handleAuthStatus, handleIdentityStatus, handleOrgCreate, handleSelectOrg, handleOrgMembers, handleAutoSelectOrg } from './api/data';
-import { handleApiRequest as handleLayoutApiRequest } from './web/api/layout';
+} from './session/github';
+import { handleGoogleLoginStart, handleGoogleLoginCallback } from './session/google';
+import type { AuthorizeEnv } from './session';
+import { handleApiRequest as handleDataApiRequest, handleGitHubAuthStatus, handleAuthStatus, handleIdentityStatus, handleOrgCreate, handleSelectOrg, handleOrgMembers, handleAutoSelectOrg } from './routes/data';
+import { handleApiRequest as handleLayoutApiRequest } from './routes/layout';
 import { handleMcp } from './mcp/handler';
 import {
   handleOAuthMetadata,

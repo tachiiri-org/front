@@ -1,5 +1,5 @@
-import type { AuthorizeEnv } from "../auth";
-import { verifyInternalToken } from "../auth/token";
+import type { AuthorizeEnv } from "../session";
+import { verifyInternalToken } from "../session/token";
 import { TOOLS, callTool } from "./tools/authorize";
 import { GRAPH_TOOLS, callGraphTool } from "./tools/graph";
 

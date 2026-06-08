@@ -1,6 +1,6 @@
-import { createLayoutsBackend, createScreenNameBackend, type LayoutsEnv, type LayoutBackend, type ScreenNameBackend } from '../storage/layouts/r2';
-import { isScreen, isCanvasFrame } from '../schema/screen/screen';
-import { getEntityDisplayName } from '../schema/component/name';
+import { createLayoutsBackend, createScreenNameBackend, type LayoutsEnv, type LayoutBackend, type ScreenNameBackend } from '../web/storage/layouts/r2';
+import { isScreen, isCanvasFrame } from '../web/schema/screen/screen';
+import { getEntityDisplayName } from '../web/schema/component/name';
 import {
   handleComponentGet,
   handleJsonFilesGet,
@@ -17,7 +17,7 @@ import {
   handleResourcePut,
   handleResourceDelete,
   handleResourceRename,
-} from '../storage/layouts/http';
+} from '../web/storage/layouts/http';
 import {
   handleComponentSchemasList,
   handleComponentSchemasTree,
@@ -25,9 +25,9 @@ import {
   handleComponentSchemaGet,
   handleComponentSchemaPut,
 } from './component-schemas';
-import { authorizeFetch, type AuthorizeEnv } from '../../auth';
-import { parseCookies } from '../../auth/cookies';
-import { readGitHubConnectSession } from '../../identify';
+import { authorizeFetch, type AuthorizeEnv } from '../session';
+import { parseCookies } from '../session/cookies';
+import { readGitHubConnectSession } from '../identify';
 
 
 type Env = {

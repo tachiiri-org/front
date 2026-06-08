@@ -1,9 +1,9 @@
 import type { SpecDocument } from '../shared/spec-document';
 import type { UiShellSettings } from '../shared/ui-shell-settings';
 import { readGitHubSession, readGitHubConnectSession, readGoogleSession, listUserOrganizations, createOrganization, resolveOrgUser, getDefaultGroup } from '../identify';
-import { parseCookies } from '../auth/cookies';
-import { authorizeFetch } from '../auth/fetch';
-import type { AuthorizeEnv } from '../auth';
+import { parseCookies } from '../session/cookies';
+import { authorizeFetch } from '../session/fetch';
+import type { AuthorizeEnv } from '../session';
 
 type StoredObject = {
   text(): Promise<string>;
