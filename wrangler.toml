@@ -17,6 +17,7 @@ database_name = "identity-stage"
 database_id = "20dfc9c6-170c-47e7-927c-d703918a6449"
 
 [env.stage.vars]
+LOG_LEVEL = "info"
 FRONTEND_ORIGIN = "https://front-stage.tachiiri.workers.dev"
 GITHUB_OAUTH_CLIENT_ID = "Ov23lihhhvT7GB1IGasP"
 GOOGLE_OAUTH_CLIENT_ID = "804252639051-hdkilk1189bomeiv9opnsu0h2basdtr8.apps.googleusercontent.com"
@@ -36,6 +37,7 @@ database_name = "identity-production"
 database_id = "01fc4992-e113-435a-be70-226cddcfa092"
 
 [env.production.vars]
+LOG_LEVEL = "warn"
 FRONTEND_ORIGIN = "https://front-production.tachiiri.workers.dev"
 GITHUB_OAUTH_CLIENT_ID = "Ov23li098QXLtF5UbEg5"
 GOOGLE_OAUTH_CLIENT_ID = "804252639051-hdkilk1189bomeiv9opnsu0h2basdtr8.apps.googleusercontent.com"
@@ -60,6 +62,7 @@ binding = "BACKEND"
 service = "backend-dev"
 
 [env.dev.vars]
+LOG_LEVEL = "debug"
 FRONT_TO_BACKEND_TOKEN = "b109b22738647033f1ef4ad11426c8a8a05aae7c3ec3da9f88e0ad4dbd768781"
 GITHUB_OAUTH_CLIENT_ID = "Ov23litfbD8WRrXkM4iR"
 GOOGLE_OAUTH_CLIENT_ID = "804252639051-hdkilk1189bomeiv9opnsu0h2basdtr8.apps.googleusercontent.com"

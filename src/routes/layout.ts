@@ -34,6 +34,7 @@ type Env = {
   readonly ASSETS: {
         fetch(request: Request): Promise<Response>;
   };
+  readonly LOG_LEVEL?: string;
 } & LayoutsEnv & AuthorizeEnv;
 
 type ResourceConfig = {
@@ -615,7 +616,7 @@ export const handleApiRequest = async (request: Request, env: Env): Promise<Resp
     };
     try {
       const res = await authorizeFetch(env, { path: backendPath, method: request.method, body, tenantContext });
-      console.log(`[graph-proxy] ${request.method} ${backendPath} → ${res.status}`);
+      if (env.LOG_LEVEL === 'debug') console.log(`[graph-proxy] ${request.method} ${backendPath} → ${res.status}`);
       return res;
     } catch (e) {
       console.error(`[graph-proxy] ${request.method} ${backendPath} threw:`, e);
