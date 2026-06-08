@@ -95,25 +95,6 @@ export const GRAPH_TOOLS = [
       required: ["graph_id", "text"],
     },
   },
-  {
-    name: "graph_write_text",
-    description:
-      "Create or update a text entry and set the words linked to it. Only existing words can be used — new words cannot be created via MCP. Include 'issue' in words for contradictions/undefined items, 'goal' for divergence between ideal and current state. All AI-written texts are automatically linked to 'draft'.",
-    inputSchema: {
-      type: "object",
-      properties: {
-        graph_id: { type: "string", description: "Word graph ID (e.g. 'word-graph-1')" },
-        text: { type: "string", description: "Text content to create or update" },
-        words: {
-          type: "array",
-          items: { type: "string" },
-          description:
-            "Word names to link to this text. 'draft' is added automatically. Include 'issue' for contradictions, 'goal' for ideal/current divergence. All words must already exist in the graph.",
-        },
-      },
-      required: ["graph_id", "text", "words"],
-    },
-  },
 ];
 
 export async function callGraphTool(
@@ -148,30 +129,6 @@ export async function callGraphTool(
       const wordMap = new Map(words.map((w) => [w.id, w.text]));
       const linked = entry.wordIds.map((id) => wordMap.get(id)).filter(Boolean) as string[];
       return { content: [{ type: "text", text: linked.join("\n") || "(no words linked)" }] };
-    }
-
-    if (name === "graph_write_text") {
-      const textContent = String(args.text);
-      const wordNames = (args.words as unknown[]).map(String);
-
-      if (!wordNames.includes("draft")) wordNames.push("draft");
-
-      const existingWords = await getWords(env, graphId);
-      const existingWordTexts = new Set(existingWords.map((w) => w.text));
-      const unknownWords = wordNames.filter((w) => !existingWordTexts.has(w));
-      if (unknownWords.length > 0) {
-        return {
-          content: [{ type: "text", text: `Cannot create new words via MCP. Unknown words: ${unknownWords.join(", ")}` }],
-          isError: true,
-        };
-      }
-
-      const res = await graphFetch(env, graphId, "text", "POST", { text: textContent, words: wordNames });
-      if (!res.ok) throw new Error(`write_text_failed:${res.status}`);
-      const result = (await res.json()) as { id: string; text: string; wordIds: string[] };
-      return {
-        content: [{ type: "text", text: `Saved: "${result.text}" linked to [${wordNames.join(", ")}]` }],
-      };
     }
 
     return { content: [{ type: "text", text: `Unknown graph tool: ${name}` }], isError: true };
