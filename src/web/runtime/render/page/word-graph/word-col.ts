@@ -386,31 +386,6 @@ const buildWordColContent = (
     row.appendChild(marker);
     row.appendChild(inp);
 
-    if (hasLinks) {
-      const countLabel = document.createElement('span');
-      countLabel.textContent = String(linkedTextCount);
-      Object.assign(countLabel.style, {
-        fontSize: '10px',
-        color: theme.textFaint,
-        userSelect: 'none',
-        flexShrink: '0',
-        alignSelf: 'center',
-      });
-      row.appendChild(countLabel);
-
-      const arrow = document.createElement('span');
-      arrow.textContent = '›';
-      Object.assign(arrow.style, {
-        userSelect: 'none',
-        color: wordColor ?? theme.textFaint,
-        fontSize: '14px',
-        flexShrink: '0',
-        paddingRight: '2px',
-        alignSelf: 'center',
-      });
-      row.appendChild(arrow);
-    }
-
     col.appendChild(row);
   }
 
