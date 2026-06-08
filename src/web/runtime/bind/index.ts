@@ -616,6 +616,8 @@ const hydrateMigrationComponents = async (): Promise<void> => {
     }
   };
 
+  const isMigrationAdmin = window.location.pathname.replace(/%20/g, ' ').includes('migration-admin');
+
   startBtn.addEventListener('click', () => {
     void (async () => {
       const targetEl = targetFrame?.id ? domMap.get(targetFrame.id as string) : null;
@@ -624,94 +626,98 @@ const hydrateMigrationComponents = async (): Promise<void> => {
 
       progressEl.replaceChildren();
       startBtn.disabled = true;
-      log(`=== マイグレーション開始: prod → ${target} ===`);
 
       try {
-        log('スキーマ移行中 (DROP → CREATE)...');
-        const schemaRes = await fetch('/api/admin/migration/schema', {
-          method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({ target }),
-        });
-        if (!schemaRes.ok) {
-          await logErr(schemaRes, 'スキーマ失敗');
-          return;
-        }
-        const schema = await schemaRes.json() as {
-          tables: string[]; views: string[]; dataTableOrder: string[];
-          dropped: string[]; droppedExcluded: string[];
-        };
-        log(`スキーマ完了: DROP ${(schema.dropped ?? []).length + (schema.droppedExcluded ?? []).length} → CREATE ${schema.tables.length} tables + ${schema.views.length} views`);
-        if (schema.droppedExcluded?.length) {
-          log(`  除外テーブル (DROP のみ): ${schema.droppedExcluded.join(', ')}`, false, 1);
-        }
-        log(`  作成テーブル: ${schema.tables.join(', ')}`, false, 1);
-        if (schema.views.length) log(`  作成ビュー: ${schema.views.join(', ')}`, false, 1);
-        log(`  データ移行順 (${schema.dataTableOrder.length}件): ${schema.dataTableOrder.join(' → ')}`, false, 1);
-
-        let succeeded = 0;
-        for (const tableName of schema.dataTableOrder) {
-          log(`[${tableName}] 移行中... (${succeeded + 1}/${schema.dataTableOrder.length})`, false, 1);
-          const tableRes = await fetch('/api/admin/migration/table', {
+        if (isMigrationAdmin) {
+          log(`=== R2 マイグレーション開始: prod → ${target} ===`);
+          log('テナント R2 移行中...');
+          const r2Res = await fetch('/api/admin/migration/r2', {
             method: 'POST',
             headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify({ target, table: tableName }),
+            body: JSON.stringify({ target }),
           });
-          if (!tableRes.ok) {
-            await logErr(tableRes, `[${tableName}] 失敗`);
-            log(`中断 (${succeeded}/${schema.dataTableOrder.length} テーブル完了)`, true);
+          if (!r2Res.ok) {
+            await logErr(r2Res, 'テナントR2移行失敗');
             return;
           }
-          const result = await tableRes.json() as {
-            migrated: number; encryptedPairs: string[]; reencrypted: number; legacy: number;
+          const r2Data = await r2Res.json() as {
+            tenants: Array<{ groupId: string; sourceBucketId: string; targetBucketId: string; copied: number }>;
           };
-          const encPairs = result.encryptedPairs ?? [];
-          const encInfo = encPairs.length > 0
-            ? ` | 暗号列:[${encPairs.join(',')}] 再暗号:${result.reencrypted ?? 0}${(result.legacy ?? 0) > 0 ? ` legacy→enc:${result.legacy}` : ''}`
-            : ' | 暗号化列なし';
-          log(`[${tableName}] ✓ ${result.migrated} 行${encInfo}`, false, 1);
-          succeeded++;
-        }
+          for (const t of r2Data.tenants) {
+            log(`[${t.groupId}] ✓ ${t.copied} オブジェクト → ${t.targetBucketId}`, false, 1);
+          }
+          log(`=== R2 マイグレーション完了 (${r2Data.tenants.length} バケット) ===`);
+        } else {
+          log(`=== マイグレーション開始: prod → ${target} ===`);
+          log('スキーマ移行中 (DROP → CREATE)...');
+          const schemaRes = await fetch('/api/admin/migration/schema', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ target }),
+          });
+          if (!schemaRes.ok) {
+            await logErr(schemaRes, 'スキーマ失敗');
+            return;
+          }
+          const schema = await schemaRes.json() as {
+            tables: string[]; views: string[]; dataTableOrder: string[];
+            dropped: string[]; droppedExcluded: string[];
+          };
+          log(`スキーマ完了: DROP ${(schema.dropped ?? []).length + (schema.droppedExcluded ?? []).length} → CREATE ${schema.tables.length} tables + ${schema.views.length} views`);
+          if (schema.droppedExcluded?.length) {
+            log(`  除外テーブル (DROP のみ): ${schema.droppedExcluded.join(', ')}`, false, 1);
+          }
+          log(`  作成テーブル: ${schema.tables.join(', ')}`, false, 1);
+          if (schema.views.length) log(`  作成ビュー: ${schema.views.join(', ')}`, false, 1);
+          log(`  データ移行順 (${schema.dataTableOrder.length}件): ${schema.dataTableOrder.join(' → ')}`, false, 1);
 
-        log(`Identity DB 完了 (${succeeded} テーブル)`);
+          let succeeded = 0;
+          for (const tableName of schema.dataTableOrder) {
+            log(`[${tableName}] 移行中... (${succeeded + 1}/${schema.dataTableOrder.length})`, false, 1);
+            const tableRes = await fetch('/api/admin/migration/table', {
+              method: 'POST',
+              headers: { 'Content-Type': 'application/json' },
+              body: JSON.stringify({ target, table: tableName }),
+            });
+            if (!tableRes.ok) {
+              await logErr(tableRes, `[${tableName}] 失敗`);
+              log(`中断 (${succeeded}/${schema.dataTableOrder.length} テーブル完了)`, true);
+              return;
+            }
+            const result = await tableRes.json() as {
+              migrated: number; encryptedPairs: string[]; reencrypted: number; legacy: number;
+            };
+            const encPairs = result.encryptedPairs ?? [];
+            const encInfo = encPairs.length > 0
+              ? ` | 暗号列:[${encPairs.join(',')}] 再暗号:${result.reencrypted ?? 0}${(result.legacy ?? 0) > 0 ? ` legacy→enc:${result.legacy}` : ''}`
+              : ' | 暗号化列なし';
+            log(`[${tableName}] ✓ ${result.migrated} 行${encInfo}`, false, 1);
+            succeeded++;
+          }
 
-        log('テナント DB 移行中...');
-        const userDbRes = await fetch('/api/admin/migration/user-databases', {
-          method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({ target }),
-        });
-        if (!userDbRes.ok) {
-          await logErr(userDbRes, 'テナントDB移行失敗');
-          return;
-        }
-        const userDb = await userDbRes.json() as {
-          tenants: Array<{ groupId: string; newDbId: string; tables: string[]; totalRows: number }>;
-          deleted: number;
-        };
-        for (const t of userDb.tenants) {
-          log(`[${t.groupId}] ✓ ${t.totalRows} 行 / ${t.tables.length} テーブル → ${t.newDbId}`, false, 1);
-        }
-        if (userDb.deleted > 0) log(`旧テナントDB 削除: ${userDb.deleted} 件`, false, 1);
+          log(`Identity DB 完了 (${succeeded} テーブル)`);
 
-        log('テナント R2 移行中...');
-        const r2Res = await fetch('/api/admin/migration/r2', {
-          method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({ target }),
-        });
-        if (!r2Res.ok) {
-          await logErr(r2Res, 'テナントR2移行失敗');
-          return;
-        }
-        const r2Data = await r2Res.json() as {
-          tenants: Array<{ groupId: string; sourceBucketId: string; targetBucketId: string; copied: number }>;
-        };
-        for (const t of r2Data.tenants) {
-          log(`[${t.groupId}] ✓ ${t.copied} オブジェクト → ${t.targetBucketId}`, false, 1);
-        }
+          log('テナント DB 移行中...');
+          const userDbRes = await fetch('/api/admin/migration/user-databases', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ target }),
+          });
+          if (!userDbRes.ok) {
+            await logErr(userDbRes, 'テナントDB移行失敗');
+            return;
+          }
+          const userDb = await userDbRes.json() as {
+            tenants: Array<{ groupId: string; newDbId: string; tables: string[]; totalRows: number }>;
+            deleted: number;
+          };
+          for (const t of userDb.tenants) {
+            log(`[${t.groupId}] ✓ ${t.totalRows} 行 / ${t.tables.length} テーブル → ${t.newDbId}`, false, 1);
+          }
+          if (userDb.deleted > 0) log(`旧テナントDB 削除: ${userDb.deleted} 件`, false, 1);
 
-        log(`=== マイグレーション完了 (Identity: ${succeeded} テーブル / テナントDB: ${userDb.tenants.length} 件 / R2: ${r2Data.tenants.length} バケット) ===`);
+          log(`=== マイグレーション完了 (Identity: ${succeeded} テーブル / テナントDB: ${userDb.tenants.length} 件) ===`);
+        }
       } catch (e) {
         log(`予期しないエラー: ${String(e)}`, true);
       } finally {
