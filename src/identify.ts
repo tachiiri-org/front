@@ -57,8 +57,7 @@ export async function exchangeGitHubOAuthCode(
     body: JSON.stringify({ code, redirectUri }),
   });
   if (!response.ok) {
-    const body = await response.text().catch(() => "");
-    throw new Error(`identify_github_oauth_exchange_failed:${response.status}:${body}`);
+    throw new Error(`identify_github_oauth_exchange_failed:${response.status}`);
   }
   return (await response.json()) as IdentifyGitHubSession;
 }
