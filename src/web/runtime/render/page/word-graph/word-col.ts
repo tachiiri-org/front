@@ -429,6 +429,19 @@ const buildWordColContent = (
     row.appendChild(marker);
     row.appendChild(inp);
 
+    if (hasLinks) {
+      const countLabel = document.createElement('span');
+      countLabel.textContent = String(linkedTextCount);
+      Object.assign(countLabel.style, {
+        fontSize: '10px',
+        color: theme.textFaint,
+        userSelect: 'none',
+        flexShrink: '0',
+        alignSelf: 'center',
+      });
+      row.appendChild(countLabel);
+    }
+
     col.appendChild(row);
   }
 
