@@ -404,14 +404,31 @@ const handleCanvasOptionsGet = async (backend: LayoutBackend, screenId: string):
   }
 };
 
+const resolveSecretValue = async (v: string | { get(): Promise<string> } | undefined): Promise<string | undefined> => {
+  if (!v) return undefined;
+  if (typeof v === 'string') return v;
+  return v.get();
+};
+
 export const handleApiRequest = async (request: Request, env: Env): Promise<Response> => {
   const url = new URL(request.url);
   const backend = createLayoutsBackend(env);
+
+  // Build-token auth: x-build-token header + x-org-id header (for CI screen generation)
+  const buildToken = request.headers.get('x-build-token');
+  const expectedToken = await resolveSecretValue(env.BUILD_SCREENS_TOKEN);
+  const isBuildRequest = buildToken && expectedToken && buildToken === expectedToken;
+
   const cookies = parseCookies(request);
-  const tenantContext = {
-    tenantId: cookies.get('identity_org_id') ?? undefined,
-    subjectId: cookies.get('identity_user_id') ?? undefined,
-  };
+  const tenantContext = isBuildRequest
+    ? {
+        tenantId: request.headers.get('x-org-id') ?? cookies.get('identity_org_id') ?? undefined,
+        subjectId: undefined,
+      }
+    : {
+        tenantId: cookies.get('identity_org_id') ?? undefined,
+        subjectId: cookies.get('identity_user_id') ?? undefined,
+      };
   const screenNames = createScreenNameBackend(env, tenantContext);
 
   if (url.pathname === '/api/component-schemas') {

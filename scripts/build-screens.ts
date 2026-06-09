@@ -41,13 +41,14 @@ const buildHeaders = (): HeadersInit => {
 
   if (BUILD_TOKEN) {
     headers['x-build-token'] = BUILD_TOKEN;
-  }
-
-  const cookieParts: string[] = [];
-  if (IDENTITY_ORG_ID) cookieParts.push(`identity_org_id=${encodeURIComponent(IDENTITY_ORG_ID)}`);
-  if (IDENTITY_USER_ID) cookieParts.push(`identity_user_id=${encodeURIComponent(IDENTITY_USER_ID)}`);
-  if (cookieParts.length > 0) {
-    headers['Cookie'] = cookieParts.join('; ');
+    // Send org ID as header when using build token auth
+    if (IDENTITY_ORG_ID) headers['x-org-id'] = IDENTITY_ORG_ID;
+  } else {
+    // Fallback: cookie-based auth
+    const cookieParts: string[] = [];
+    if (IDENTITY_ORG_ID) cookieParts.push(`identity_org_id=${encodeURIComponent(IDENTITY_ORG_ID)}`);
+    if (IDENTITY_USER_ID) cookieParts.push(`identity_user_id=${encodeURIComponent(IDENTITY_USER_ID)}`);
+    if (cookieParts.length > 0) headers['Cookie'] = cookieParts.join('; ');
   }
 
   return headers;
