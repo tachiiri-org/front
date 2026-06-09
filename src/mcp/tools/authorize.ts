@@ -3,6 +3,7 @@ import {
   buildGitHubLoginUrl,
   buildGitHubConnectUrl,
   buildGoogleLoginUrl,
+  buildMicrosoftLoginUrl,
   readGitHubSession,
   readGitHubConnectSession,
   readGoogleSession,
@@ -41,6 +42,15 @@ export const TOOLS: Tool[] = [
     name: "authorize_google_login",
     description:
       "Generate the public front Google login URL (scope: openid email profile). Open the URL in a browser to authenticate with Google identity.",
+    inputSchema: {
+      type: "object",
+      properties: {},
+    },
+  },
+  {
+    name: "authorize_microsoft_login",
+    description:
+      "Generate the public front Microsoft login URL (OIDC — openid email profile). Open the URL in a browser to authenticate with a Microsoft account.",
     inputSchema: {
       type: "object",
       properties: {},
@@ -179,6 +189,22 @@ export async function callTool(
           {
             type: "text",
             text: `Open this URL in your browser to authenticate with Google:\n${url}`,
+          },
+        ],
+      };
+    } catch (error) {
+      return { content: [{ type: "text", text: String(error) }], isError: true };
+    }
+  }
+
+  if (name === "authorize_microsoft_login") {
+    try {
+      const url = buildMicrosoftLoginUrl(env);
+      return {
+        content: [
+          {
+            type: "text",
+            text: `Open this URL in your browser to authenticate with Microsoft:\n${url}`,
           },
         ],
       };

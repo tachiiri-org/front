@@ -155,11 +155,11 @@ const renderNav = async (screenId: string): Promise<void> => {
   try {
     if (authResult.status === 'fulfilled' && authResult.value.ok) {
       const authStatus = (await authResult.value.json()) as AuthStatus;
-      if (authStatus.github.authenticated || authStatus.google.authenticated) {
+      if (authStatus.github.authenticated || authStatus.google.authenticated || authStatus.microsoft?.authenticated) {
         const userEl = document.createElement('span');
         userEl.textContent = authStatus.github.login
           ? `@${authStatus.github.login}`
-          : (authStatus.google.email ?? '');
+          : (authStatus.google.email ?? authStatus.microsoft?.email ?? '');
         Object.assign(userEl.style, { color: '#9ca3af', fontSize: '12px' });
         nav.appendChild(userEl);
 
@@ -167,6 +167,8 @@ const renderNav = async (screenId: string): Promise<void> => {
         logoutLink.textContent = 'Logout';
         logoutLink.href = authStatus.github.authenticated
           ? '/oauth/github/logout'
+          : authStatus.microsoft?.authenticated
+          ? '/oauth/microsoft/logout'
           : '/oauth/google/logout';
         Object.assign(logoutLink.style, { color: '#6b7280', fontSize: '12px', textDecoration: 'none' });
         nav.appendChild(logoutLink);
@@ -180,7 +182,7 @@ const renderNav = async (screenId: string): Promise<void> => {
         placeholder.disabled = true;
         placeholder.selected = true;
         loginSelect.appendChild(placeholder);
-        [['GitHub', '/oauth/github/start'], ['Google', '/oauth/google/start']].forEach(([label, href]) => {
+        [['GitHub', '/oauth/github/start'], ['Google', '/oauth/google/start'], ['Microsoft', '/oauth/microsoft/start']].forEach(([label, href]) => {
           const opt = document.createElement('option');
           opt.value = href;
           opt.textContent = label;
@@ -337,6 +339,7 @@ const loadEditor = async (screenId: string): Promise<void> => {
 type AuthStatus = {
   github: { authenticated: boolean; login: string | null };
   google: { authenticated: boolean; email: string | null; name: string | null };
+  microsoft: { authenticated: boolean; email: string | null; name: string | null };
 };
 
 type IdentityStatus = {

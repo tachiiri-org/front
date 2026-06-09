@@ -28,9 +28,18 @@ export type IdentifyGoogleSession = {
   sub: string;
 };
 
+// Microsoft login session (OIDC — openid email profile)
+export type IdentifyMicrosoftSession = {
+  authenticated: true;
+  email: string;
+  name: string | null;
+  sub: string;
+};
+
 const GITHUB_SESSION_COOKIE = "github_session";
 const GITHUB_CONNECT_SESSION_COOKIE = "github_connect_session";
 const GOOGLE_SESSION_COOKIE = "google_session";
+const MICROSOFT_SESSION_COOKIE = "microsoft_session";
 const SESSION_TTL = 60 * 10;
 
 // ---- GitHub login ----
@@ -393,4 +402,104 @@ export async function setDefaultGroup(env: AuthorizeEnv, userId: string, groupId
     method: "PUT",
     body: JSON.stringify({ group_id: groupId }),
   });
+}
+
+// ---- Microsoft login ----
+
+export function buildMicrosoftLoginUrl(env: Pick<AuthorizeEnv, "FRONTEND_ORIGIN">): string {
+  return new URL("/oauth/microsoft/start", env.FRONTEND_ORIGIN ?? "http://localhost:8787").toString();
+}
+
+export async function exchangeMicrosoftOAuthCode(
+  env: AuthorizeEnv,
+  code: string,
+  redirectUri: string,
+): Promise<IdentifyMicrosoftSession> {
+  const response = await authorizeFetch(env, {
+    path: "/api/v1/identify/session/microsoft/oauth/callback",
+    method: "POST",
+    body: JSON.stringify({ code, redirectUri }),
+  });
+  if (!response.ok) {
+    const body = await response.text().catch(() => "");
+    throw new Error(`identify_microsoft_oauth_exchange_failed:${response.status}:${body}`);
+  }
+  return (await response.json()) as IdentifyMicrosoftSession;
+}
+
+export async function serializeMicrosoftSessionCookie(
+  session: IdentifyMicrosoftSession,
+  env: AuthorizeEnv,
+  request: Request,
+): Promise<string> {
+  const token = await issueSessionToken(env, { ...session }, SESSION_TTL);
+  return serializeCookie(MICROSOFT_SESSION_COOKIE, token, {
+    maxAge: SESSION_TTL,
+    path: "/",
+    secure: new URL(request.url).protocol === "https:",
+    httpOnly: true,
+    sameSite: "Lax",
+  });
+}
+
+export async function readMicrosoftSession(
+  request: Request | null,
+  env: AuthorizeEnv,
+): Promise<IdentifyMicrosoftSession | null> {
+  if (!request) return null;
+  const cookies = parseCookies(request);
+  const token = cookies.get(MICROSOFT_SESSION_COOKIE);
+  if (!token) return null;
+  const data = await readSessionToken<IdentifyMicrosoftSession>(env, token);
+  return data?.authenticated ? data : null;
+}
+
+export function clearMicrosoftSessionCookies(request: Request): string[] {
+  return [clearCookie(MICROSOFT_SESSION_COOKIE, request)];
+}
+
+async function linkMicrosoftToUser(env: AuthorizeEnv, userId: string, microsoftSub: string): Promise<void> {
+  await authorizeFetch(env, {
+    path: `/api/v1/identity/users/${encodeURIComponent(userId)}/link-microsoft`,
+    method: "POST",
+    body: JSON.stringify({ microsoft_id: microsoftSub }),
+  });
+}
+
+export async function findOrCreateUserByMicrosoft(
+  env: AuthorizeEnv,
+  microsoftSub: string,
+  email?: string,
+): Promise<string> {
+  const findRes = await authorizeFetch(env, {
+    path: `/api/v1/identity/users/by-microsoft/${encodeURIComponent(microsoftSub)}`,
+    method: "GET",
+  });
+  if (findRes.ok) {
+    const userId = ((await findRes.json()) as IdentityUser).user_id;
+    if (email) await linkEmailToUser(env, userId, email).catch(() => null);
+    return userId;
+  }
+  if (findRes.status !== 404) throw new Error(`identity_find_microsoft_failed:${findRes.status}`);
+
+  if (email) {
+    try {
+      const userId = await findUserByEmail(env, email);
+      if (userId) {
+        await linkMicrosoftToUser(env, userId, microsoftSub);
+        await linkEmailToUser(env, userId, email).catch(() => null);
+        return userId;
+      }
+    } catch { /* non-fatal */ }
+  }
+
+  const createRes = await authorizeFetch(env, {
+    path: "/api/v1/identity/users",
+    method: "POST",
+    body: JSON.stringify({ microsoft_id: microsoftSub }),
+  });
+  if (!createRes.ok) throw new Error(`identity_create_user_failed:${createRes.status}`);
+  const userId = ((await createRes.json()) as IdentityUser).user_id;
+  if (email) await linkEmailToUser(env, userId, email).catch(() => null);
+  return userId;
 }

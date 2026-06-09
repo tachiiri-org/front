@@ -21,6 +21,7 @@ export type AuthorizeEnv = {
   readonly FRONTEND_ORIGIN?: string;
   readonly GITHUB_OAUTH_CLIENT_ID?: string;
   readonly GOOGLE_OAUTH_CLIENT_ID?: string;
+  readonly MICROSOFT_OAUTH_CLIENT_ID?: string;
 };
 
 export function hasAuthorizeConfig(env: AuthorizeEnv): boolean {

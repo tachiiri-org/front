@@ -24,6 +24,7 @@ LOG_LEVEL = "info"
 FRONTEND_ORIGIN = "https://front-stage.tachiiri.workers.dev"
 GITHUB_OAUTH_CLIENT_ID = "Ov23lihhhvT7GB1IGasP"
 GOOGLE_OAUTH_CLIENT_ID = "804252639051-hdkilk1189bomeiv9opnsu0h2basdtr8.apps.googleusercontent.com"
+MICROSOFT_OAUTH_CLIENT_ID = ""
 LAYOUTS_BUCKET_ID = "bucket-stage"
 
 [[env.stage.services]]
@@ -47,6 +48,7 @@ LOG_LEVEL = "warn"
 FRONTEND_ORIGIN = "https://front-production.tachiiri.workers.dev"
 GITHUB_OAUTH_CLIENT_ID = "Ov23li098QXLtF5UbEg5"
 GOOGLE_OAUTH_CLIENT_ID = "804252639051-hdkilk1189bomeiv9opnsu0h2basdtr8.apps.googleusercontent.com"
+MICROSOFT_OAUTH_CLIENT_ID = ""
 LAYOUTS_BUCKET_ID = "bucket-production"
 
 [[env.production.services]]
@@ -75,5 +77,6 @@ LOG_LEVEL = "debug"
 FRONT_TO_BACKEND_TOKEN = "b109b22738647033f1ef4ad11426c8a8a05aae7c3ec3da9f88e0ad4dbd768781"
 GITHUB_OAUTH_CLIENT_ID = "Ov23litfbD8WRrXkM4iR"
 GOOGLE_OAUTH_CLIENT_ID = "804252639051-hdkilk1189bomeiv9opnsu0h2basdtr8.apps.googleusercontent.com"
+MICROSOFT_OAUTH_CLIENT_ID = ""
 LAYOUTS_BUCKET_ID = "bucket-dev"
 

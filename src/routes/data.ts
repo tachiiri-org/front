@@ -1,6 +1,6 @@
 import type { SpecDocument } from '../shared/spec-document';
 import type { UiShellSettings } from '../shared/ui-shell-settings';
-import { readGitHubSession, readGitHubConnectSession, readGoogleSession, listUserOrganizations, createOrganization, resolveOrgUser, getDefaultGroup } from '../identify';
+import { readGitHubSession, readGitHubConnectSession, readGoogleSession, readMicrosoftSession, listUserOrganizations, createOrganization, resolveOrgUser, getDefaultGroup } from '../identify';
 import { parseCookies } from '../session/cookies';
 import { authorizeFetch } from '../session/fetch';
 import type { AuthorizeEnv } from '../session';
@@ -139,15 +139,17 @@ export async function handleAuthStatus(
     return null;
   }
 
-  const [githubResult, githubConnectResult, googleResult] = await Promise.allSettled([
+  const [githubResult, githubConnectResult, googleResult, microsoftResult] = await Promise.allSettled([
     readGitHubSession(request, env),
     readGitHubConnectSession(request, env),
     readGoogleSession(request, env),
+    readMicrosoftSession(request, env),
   ]);
 
   const githubSession = githubResult.status === 'fulfilled' ? githubResult.value : null;
   const githubConnectSession = githubConnectResult.status === 'fulfilled' ? githubConnectResult.value : null;
   const googleSession = googleResult.status === 'fulfilled' ? googleResult.value : null;
+  const microsoftSession = microsoftResult.status === 'fulfilled' ? microsoftResult.value : null;
 
   return json(
     {
@@ -163,6 +165,11 @@ export async function handleAuthStatus(
         authenticated: Boolean(googleSession),
         email: googleSession?.email ?? null,
         name: googleSession?.name ?? null,
+      },
+      microsoft: {
+        authenticated: Boolean(microsoftSession),
+        email: microsoftSession?.email ?? null,
+        name: microsoftSession?.name ?? null,
       },
     },
     { status: 200 },

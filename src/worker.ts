@@ -6,6 +6,7 @@ import {
   handleGitHubConnectCallback,
 } from './session/github';
 import { handleGoogleLoginStart, handleGoogleLoginCallback } from './session/google';
+import { handleMicrosoftLoginStart, handleMicrosoftLoginCallback } from './session/microsoft';
 import type { AuthorizeEnv } from './session';
 import { handleApiRequest as handleDataApiRequest, handleGitHubAuthStatus, handleAuthStatus, handleIdentityStatus, handleOrgCreate, handleSelectOrg, handleOrgMembers, handleAutoSelectOrg } from './routes/data';
 import { handleApiRequest as handleLayoutApiRequest } from './routes/layout';
@@ -19,7 +20,7 @@ import {
   handleMcpCreateOrg,
   handleMcpToken,
 } from './mcp/oauth';
-import { clearGitHubSessionCookies, clearGitHubConnectSessionCookies, clearGoogleSessionCookies } from './identify';
+import { clearGitHubSessionCookies, clearGitHubConnectSessionCookies, clearGoogleSessionCookies, clearMicrosoftSessionCookies } from './identify';
 
 type AssetsEnv = {
   readonly ASSETS: {
@@ -101,7 +102,7 @@ export default {
     }
     if (pathname === '/api/auth/logout' && request.method === 'POST') {
       const headers = new Headers();
-      for (const c of [...clearGitHubSessionCookies(request), ...clearGitHubConnectSessionCookies(request), ...clearGoogleSessionCookies(request)]) {
+      for (const c of [...clearGitHubSessionCookies(request), ...clearGitHubConnectSessionCookies(request), ...clearGoogleSessionCookies(request), ...clearMicrosoftSessionCookies(request)]) {
         headers.append('Set-Cookie', c);
       }
       return new Response(null, { status: 204, headers });
@@ -118,6 +119,11 @@ export default {
       for (const c of clearGoogleSessionCookies(request)) headers.append('Set-Cookie', c);
       return new Response(null, { status: 204, headers });
     }
+    if (pathname === '/api/auth/microsoft/logout' && request.method === 'POST') {
+      const headers = new Headers();
+      for (const c of clearMicrosoftSessionCookies(request)) headers.append('Set-Cookie', c);
+      return new Response(null, { status: 204, headers });
+    }
     if (pathname === '/identify-viewer') {
       return new Response(null, { status: 302, headers: new Headers({ Location: '/' }) });
     }
@@ -131,6 +137,11 @@ export default {
     if (pathname === '/oauth/google/logout' && request.method === 'GET') {
       const headers = new Headers({ Location: '/' });
       for (const c of clearGoogleSessionCookies(request)) headers.append('Set-Cookie', c);
+      return new Response(null, { status: 302, headers });
+    }
+    if (pathname === '/oauth/microsoft/logout' && request.method === 'GET') {
+      const headers = new Headers({ Location: '/' });
+      for (const c of clearMicrosoftSessionCookies(request)) headers.append('Set-Cookie', c);
       return new Response(null, { status: 302, headers });
     }
     // GitHub login (read:user scope — identity only)
@@ -153,6 +164,13 @@ export default {
     }
     if (pathname === '/oauth/google/callback') {
       return handleGoogleLoginCallback({ request, env });
+    }
+    // Microsoft login (OIDC — openid email profile)
+    if (pathname === '/oauth/microsoft/start') {
+      return handleMicrosoftLoginStart({ request, env });
+    }
+    if (pathname === '/oauth/microsoft/callback') {
+      return handleMicrosoftLoginCallback({ request, env });
     }
 
     if (pathname === '/.well-known/oauth-authorization-server') {
@@ -226,6 +244,7 @@ export default {
   <h1>Login</h1>
   <a class="btn" href="/oauth/github/start">Login with GitHub</a>
   <a class="btn" href="/oauth/google/start">Login with Google</a>
+  <a class="btn" href="/oauth/microsoft/start">Login with Microsoft</a>
 </div>
 </body>
 </html>`,
