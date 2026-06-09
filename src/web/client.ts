@@ -228,14 +228,29 @@ const showLoadError = (message: string): void => {
   root.appendChild(pre);
 };
 
-const renderScreen = async (screenId: string): Promise<void> => {
-  const response = await fetch(`/api/layouts/${screenId}`);
-  if (!response.ok) {
-    showLoadError(`Failed to load screen "${screenId}" (${response.status} ${response.statusText}).`);
-    return;
+const readInlineScreenData = (): unknown | null => {
+  try {
+    const el = document.getElementById('__screen_data__');
+    if (!el || !el.textContent) return null;
+    return JSON.parse(el.textContent) as unknown;
+  } catch {
+    return null;
   }
+};
 
-  const value = (await response.json()) as unknown;
+const renderScreen = async (screenId: string): Promise<void> => {
+  const inlineData = readInlineScreenData();
+  let value: unknown;
+  if (inlineData !== null) {
+    value = inlineData;
+  } else {
+    const response = await fetch(`/api/layouts/${screenId}`);
+    if (!response.ok) {
+      showLoadError(`Failed to load screen "${screenId}" (${response.status} ${response.statusText}).`);
+      return;
+    }
+    value = (await response.json()) as unknown;
+  }
   if (!isScreen(value)) {
     showLoadError(`Invalid screen payload for "${screenId}".`);
     return;
