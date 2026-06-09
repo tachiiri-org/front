@@ -170,7 +170,7 @@ const renderNav = async (screenId: string): Promise<void> => {
           : '/oauth/google/logout';
         Object.assign(logoutLink.style, { color: '#6b7280', fontSize: '12px', textDecoration: 'none' });
         nav.appendChild(logoutLink);
-      } else if (!hasIdentitySession) {
+      } else {
         const loginSelect = document.createElement('select');
         loginSelect.style.cssText =
           'background:#1f2937;color:#d1d5db;border:1px solid #374151;padding:2px 8px;font-size:12px;font-family:monospace;border-radius:4px;cursor:pointer;height:24px;';
