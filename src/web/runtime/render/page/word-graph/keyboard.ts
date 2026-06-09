@@ -279,21 +279,6 @@ export const createKeydownHandler = (
       }
     }
 
-    // Shift+Tab in text column: move current lang text to other lang
-    if (e.key === 'Tab' && e.shiftKey && !e.ctrlKey && !e.altKey && isTextCol) {
-      const currentText = state.lang === 'en' ? (item.en ?? '') : (item.ja ?? '');
-      if (currentText) {
-        e.preventDefault();
-        ctx.pushHistory();
-        const otherLang = state.lang === 'en' ? 'ja' : 'en';
-        setLangText(item, otherLang, currentText);
-        setLangText(item, state.lang, '');
-        ctx.scheduleSave();
-        ctx.render();
-        return;
-      }
-    }
-
     // Enter: create new item after current
     if (e.key === 'Enter' && !e.shiftKey && !e.ctrlKey && !e.altKey) {
       e.preventDefault();
