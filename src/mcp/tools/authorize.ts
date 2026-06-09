@@ -92,7 +92,7 @@ export const TOOLS: Tool[] = [
   },
   {
     name: "authorize_d1",
-    description: "Proxy a request to the D1 adapter via authorize (/api/v1/d1/*). Handles Cloudflare D1 database operations.",
+    description: "Proxy a request to the D1 adapter via authorize (/api/v1/d1/*). Handles Cloudflare D1 database operations. WARNING: D1 stores some fields encrypted (enc:v1:... prefix). Use authorize_backend instead when you need decrypted values (e.g. screen names).",
     inputSchema: {
       type: "object",
       properties: {
@@ -226,6 +226,14 @@ export async function callTool(
     const text = await response.text();
     if (!response.ok) {
       return { content: [{ type: "text", text: `Error ${response.status}: ${text}` }], isError: true };
+    }
+    if (name === "authorize_d1" && text.includes("enc:v1:")) {
+      return {
+        content: [{
+          type: "text",
+          text: text + "\n\n[Note: Some fields above contain encrypted values (enc:v1:...). Use authorize_backend to fetch the same data with values already decrypted.]",
+        }],
+      };
     }
     return { content: [{ type: "text", text }] };
   } catch (e) {

@@ -370,6 +370,9 @@ const loadEditorBootstrap = async (): Promise<void> => {
       }
       window.location.href = '/org-select';
       return;
+    } else {
+      window.location.href = '/login';
+      return;
     }
   }
 
