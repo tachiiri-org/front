@@ -49,6 +49,23 @@ type AssetsEnv = {
 
 type Env = AssetsEnv & AuthorizeEnv;
 
+const getNavCookies = (request: Request): { userId: string | null; orgId: string | null } => {
+  const header = request.headers.get('Cookie') ?? '';
+  const get = (name: string): string | null => {
+    const m = header.match(new RegExp('(?:^|;\\s*)' + name + '=([^;]*)'));
+    return m ? decodeURIComponent(m[1]) : null;
+  };
+  return { userId: get('identity_user_id'), orgId: get('identity_org_id') };
+};
+
+const isPublicPath = (pathname: string): boolean =>
+  pathname === '/login' ||
+  pathname.startsWith('/oauth/') ||
+  pathname.startsWith('/github/oauth/') ||
+  pathname.startsWith('/.well-known/') ||
+  pathname.startsWith('/mcp') ||
+  pathname.startsWith('/api/');
+
 const isNavigationRequest = (request: Request): boolean => {
   if (request.method !== 'GET' && request.method !== 'HEAD') {
     return false;
@@ -204,6 +221,17 @@ export default {
       } catch (e) {
         const msg = e instanceof Error ? e.message : String(e);
         return new Response(msg, { status: 500 });
+      }
+    }
+
+    // Auth gate: check session before serving any HTML
+    if (isNavigationRequest(request) && !isPublicPath(pathname)) {
+      const { userId, orgId } = getNavCookies(request);
+      if (!userId) {
+        return Response.redirect('/login', 302);
+      }
+      if (!orgId && pathname !== '/group-select') {
+        return Response.redirect('/group-select', 302);
       }
     }
 
