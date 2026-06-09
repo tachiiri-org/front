@@ -2,6 +2,29 @@
   { "kind": "text-field", "key": "name", "label": "name" },
   { "kind": "text-field", "key": "tag", "label": "tag" },
   { "kind": "text-field", "key": "text", "label": "text" },
+  { "kind": "text-field", "key": "href", "label": "href" },
+  { "kind": "text-field", "key": "src", "label": "src" },
+  { "kind": "text-field", "key": "alt", "label": "alt" },
+  { "kind": "text-field", "key": "placeholder", "label": "placeholder" },
+  { "kind": "text-field", "key": "type", "label": "type" },
+  { "kind": "text-field", "key": "target", "label": "target" },
+  { "kind": "text-field", "key": "value", "label": "value" },
+  {
+    "kind": "object-list",
+    "key": "children",
+    "label": "children",
+    "fields": [
+      { "kind": "text-field", "key": "tag", "label": "tag" },
+      { "kind": "text-field", "key": "text", "label": "text" },
+      { "kind": "text-field", "key": "href", "label": "href" },
+      { "kind": "text-field", "key": "src", "label": "src" },
+      { "kind": "text-field", "key": "alt", "label": "alt" },
+      { "kind": "text-field", "key": "placeholder", "label": "placeholder" },
+      { "kind": "text-field", "key": "type", "label": "type" },
+      { "kind": "text-field", "key": "target", "label": "target" },
+      { "kind": "text-field", "key": "value", "label": "value" }
+    ]
+  },
   {
     "kind": "style",
     "key": "padding",

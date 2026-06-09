@@ -15,6 +15,13 @@ export type ElementComponent = {
   tag?: string;
   text?: string;
   href?: string;
+  src?: string;
+  alt?: string;
+  placeholder?: string;
+  type?: string;
+  target?: string;
+  value?: string;
+  children?: ElementComponent[];
   source?: ElementEndpointSource;
 } & CssStyleProps;
 
@@ -43,6 +50,13 @@ export const isElementComponent = (value: unknown): value is ElementComponent =>
     (c.text === undefined || typeof c.text === 'string') &&
     (c.href === undefined || typeof c.href === 'string') &&
     (c.source === undefined || isElementEndpointSource(c.source)) &&
+    (c.src === undefined || typeof c.src === 'string') &&
+    (c.alt === undefined || typeof c.alt === 'string') &&
+    (c.placeholder === undefined || typeof c.placeholder === 'string') &&
+    (c.type === undefined || typeof c.type === 'string') &&
+    (c.target === undefined || typeof c.target === 'string') &&
+    (c.value === undefined || typeof c.value === 'string') &&
+    (c.children === undefined || (Array.isArray(c.children) && c.children.every(isElementComponent))) &&
     ALL_CSS_PROP_KEYS.every((k) => c[k] === undefined || typeof c[k] === 'string')
   );
 };

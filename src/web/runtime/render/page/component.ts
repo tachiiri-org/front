@@ -58,6 +58,28 @@ type RenderOptions = {
   screenId?: string;
 };
 
+function renderElementNode(c: Record<string, unknown>): HTMLElement {
+  const tag = typeof c.tag === 'string' && c.tag ? c.tag : 'div';
+  const el = document.createElement(tag as keyof HTMLElementTagNameMap);
+  if (typeof c.href === 'string') el.setAttribute('href', c.href);
+  if (typeof c.src === 'string') el.setAttribute('src', c.src);
+  if (typeof c.alt === 'string') el.setAttribute('alt', c.alt);
+  if (typeof c.placeholder === 'string') el.setAttribute('placeholder', c.placeholder);
+  if (typeof c.type === 'string') el.setAttribute('type', c.type);
+  if (typeof c.target === 'string') el.setAttribute('target', c.target);
+  if (typeof c.value === 'string') el.setAttribute('value', c.value);
+  applyCssProps(el, c);
+  const children = Array.isArray(c.children) ? c.children as Record<string, unknown>[] : null;
+  if (children && children.length > 0) {
+    for (const child of children) {
+      el.appendChild(renderElementNode(child));
+    }
+  } else if (typeof c.text === 'string') {
+    el.textContent = c.text;
+  }
+  return el;
+}
+
 const renderResolved = (
   id: string,
   component: Record<string, unknown>,
@@ -74,11 +96,8 @@ const renderResolved = (
   }
 
   if (c.kind === 'element' && typeof c.tag === 'string') {
-    const el = document.createElement(c.tag as keyof HTMLElementTagNameMap);
+    const el = renderElementNode(c);
     el.dataset.frameId = id;
-    if (typeof c.text === 'string') el.textContent = c.text;
-    if (typeof c.href === 'string' && el instanceof HTMLAnchorElement) el.href = c.href;
-    applyCssProps(el, c);
     return el;
   }
 
