@@ -238,6 +238,34 @@ export const createKeydownHandler = (
         }
         return;
       }
+      // No selection: move ghost text (other lang) into current lang
+      const otherLang = state.lang === 'en' ? 'ja' : 'en';
+      const currentText = state.lang === 'en' ? (item.en ?? '') : (item.ja ?? '');
+      const otherText = otherLang === 'en' ? (item.en ?? '') : (item.ja ?? '');
+      if (!currentText && otherText) {
+        e.preventDefault();
+        ctx.pushHistory();
+        setLangText(item, state.lang, otherText);
+        setLangText(item, otherLang, '');
+        ctx.scheduleSave();
+        ctx.render();
+        return;
+      }
+    }
+
+    // Shift+Tab in text column: move current lang text to other lang
+    if (e.key === 'Tab' && e.shiftKey && !e.ctrlKey && !e.altKey && isTextCol) {
+      const currentText = state.lang === 'en' ? (item.en ?? '') : (item.ja ?? '');
+      if (currentText) {
+        e.preventDefault();
+        ctx.pushHistory();
+        const otherLang = state.lang === 'en' ? 'ja' : 'en';
+        setLangText(item, otherLang, currentText);
+        setLangText(item, state.lang, '');
+        ctx.scheduleSave();
+        ctx.render();
+        return;
+      }
     }
 
     // Enter: create new item after current
