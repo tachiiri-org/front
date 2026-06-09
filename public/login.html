@@ -1,0 +1,24 @@
+<!doctype html>
+<html lang="ja">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Login</title>
+<style>
+  * { box-sizing: border-box; margin: 0; padding: 0; }
+  body { background: #111827; color: #d1d5db; font-family: monospace; display: flex; align-items: center; justify-content: center; min-height: 100vh; }
+  .card { background: #1f2937; border: 1px solid #374151; border-radius: 8px; padding: 40px; width: 320px; }
+  h1 { font-size: 18px; font-weight: 600; color: #f9fafb; margin-bottom: 32px; text-align: center; }
+  .btn { display: block; width: 100%; padding: 10px 16px; margin-bottom: 12px; border: 1px solid #374151; border-radius: 6px; background: #374151; color: #f9fafb; font-family: monospace; font-size: 13px; text-decoration: none; text-align: center; cursor: pointer; }
+  .btn:hover { background: #4b5563; }
+</style>
+</head>
+<body>
+<div class="card">
+  <h1>Login</h1>
+  <a class="btn" href="/oauth/github/start">Login with GitHub</a>
+  <a class="btn" href="/oauth/google/start">Login with Google</a>
+  <a class="btn" href="/oauth/microsoft/start">Login with Microsoft</a>
+</div>
+</body>
+</html>
