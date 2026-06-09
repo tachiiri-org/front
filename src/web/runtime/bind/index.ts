@@ -575,6 +575,7 @@ export const hydrateEditor = async (
 
   await hydrateSelectTableBindings(onFrameRerender);
   await hydrateMigrationComponents();
+  await hydrateOrgSelectComponents();
 };
 
 const hydrateMigrationComponents = async (): Promise<void> => {
@@ -735,6 +736,33 @@ const hydrateMigrationComponents = async (): Promise<void> => {
     }
   };
 
+  const runUserDbOnlyMigration = async (target: string, btn: HTMLButtonElement): Promise<void> => {
+    progressEl.replaceChildren();
+    btn.disabled = true;
+    try {
+      log(`=== D1 User DB 移行開始: prod → ${target} ===`);
+      log('テナント DB 移行中...');
+      const res = await fetch('/api/admin/migration/user-databases', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ target }),
+      });
+      if (!res.ok) { await logErr(res, 'テナントDB移行失敗'); return; }
+      const data = await res.json() as {
+        tenants: Array<{ groupId: string; newDbId: string; tables: string[]; totalRows: number }>;
+        deleted: number;
+      };
+      for (const t of data.tenants) {
+        log(`[${t.groupId}] ✓ ${t.totalRows} 行 / ${t.tables.length} テーブル → ${t.newDbId}`, false, 1);
+      }
+      log(`=== D1 User DB 移行完了 (${data.tenants.length} テナント) ===`);
+    } catch (e) {
+      log(`予期しないエラー: ${String(e)}`, true);
+    } finally {
+      btn.disabled = false;
+    }
+  };
+
   const runD1IdentityMigration = async (target: string, btn: HTMLButtonElement): Promise<void> => {
     progressEl.replaceChildren();
     btn.disabled = true;
@@ -782,7 +810,7 @@ const hydrateMigrationComponents = async (): Promise<void> => {
 
   if (d1IdentityFrame || d1UserFrame || r2LayoutsFrame || r2TenantFrame) {
     wireBtn(d1IdentityFrame, runD1IdentityMigration);
-    wireBtn(d1UserFrame, runD1Migration);
+    wireBtn(d1UserFrame, runUserDbOnlyMigration);
     wireBtn(r2LayoutsFrame, runR2LayoutsMigration);
     wireBtn(r2TenantFrame, runR2TenantMigration);
   } else {
@@ -796,5 +824,60 @@ const hydrateMigrationComponents = async (): Promise<void> => {
       // Legacy: single migration-start button → D1 migration
       wireBtn(frames.find((f) => f.name === 'migration-start'), runD1Migration);
     }
+  }
+};
+
+const hydrateOrgSelectComponents = async (): Promise<void> => {
+  if (!store.screen) return;
+  const frames = store.screen.frames as Array<Record<string, unknown>>;
+
+  const pickerFrame = frames.find((f) => f.name === 'org-picker');
+  const selectBtnFrame = frames.find((f) => f.name === 'org-select-btn');
+  const nameFrame = frames.find((f) => f.name === 'org-name');
+  const createBtnFrame = frames.find((f) => f.name === 'org-create-btn');
+
+  if (!pickerFrame && !selectBtnFrame && !nameFrame && !createBtnFrame) return;
+
+  const pickerEl = pickerFrame?.id ? domMap.get(pickerFrame.id as string) : null;
+  const selectBtnEl = selectBtnFrame?.id ? domMap.get(selectBtnFrame.id as string) : null;
+  const nameEl = nameFrame?.id ? domMap.get(nameFrame.id as string) : null;
+  const createBtnEl = createBtnFrame?.id ? domMap.get(createBtnFrame.id as string) : null;
+
+  const updateSelectBtnHref = (): void => {
+    if (!(pickerEl instanceof HTMLSelectElement) || !(selectBtnEl instanceof HTMLAnchorElement)) return;
+    const orgId = pickerEl.value;
+    selectBtnEl.href = orgId ? `/api/auth/select-org?org_id=${encodeURIComponent(orgId)}` : '#';
+  };
+
+  if (pickerEl instanceof HTMLSelectElement) {
+    await populateSelectFromEndpoint(pickerEl, '/api/auth/identity-status', {
+      itemsPath: 'organizations',
+      labelKey: 'name',
+      valueKey: 'id',
+    });
+    updateSelectBtnHref();
+    pickerEl.addEventListener('change', updateSelectBtnHref);
+  }
+
+  if (createBtnEl instanceof HTMLButtonElement) {
+    createBtnEl.addEventListener('click', () => {
+      void (async () => {
+        const name = nameEl instanceof HTMLInputElement ? nameEl.value.trim() : '';
+        if (!name) return;
+        createBtnEl.disabled = true;
+        try {
+          const res = await fetch('/api/auth/organizations', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ name }),
+          });
+          if (!res.ok) return;
+          const org = await res.json() as { id: string };
+          window.location.href = `/api/auth/select-org?org_id=${encodeURIComponent(org.id)}`;
+        } finally {
+          createBtnEl.disabled = false;
+        }
+      })();
+    });
   }
 };
