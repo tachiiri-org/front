@@ -23,6 +23,9 @@ jobs:
       - name: Install dependencies
         run: bun install
 
+      - name: Build
+        run: bun run build
+
       - name: Build screens
         continue-on-error: true
         env:
@@ -31,7 +34,7 @@ jobs:
         run: bun run build-screens
 
       - name: Deploy to stage
-        run: bun run deploy:stage
+        run: bunx wrangler deploy --env stage
         env:
           CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_DEPLOYMENT_TOKEN }}
           CLOUDFLARE_ACCOUNT_ID: ${{ vars.CLOUDFLARE_ACCOUNT_ID }}

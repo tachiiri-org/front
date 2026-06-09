@@ -128,8 +128,10 @@ const main = async (): Promise<void> => {
   const clientJsPath = resolveClientJsPath();
   console.log(`Client JS path: ${clientJsPath}`);
 
-  const publicDir = resolve('public');
-  mkdirSync(publicDir, { recursive: true });
+  // Output to dist/ (the Cloudflare Assets directory) so files are included in the deployment.
+  // Vite copies public/ to dist/ during build, so we write directly to dist/ after the build.
+  const outputDir = resolve('dist');
+  mkdirSync(outputDir, { recursive: true });
 
   console.log(`Fetching screen list from ${BASE_URL} …`);
   const screenNames = await fetchScreenList();
@@ -142,9 +144,9 @@ const main = async (): Promise<void> => {
     try {
       const screenJson = await fetchScreenData(screenName);
       const html = generateHtml(screenName, screenJson, clientJsPath);
-      const outputPath = resolve(publicDir, `${screenName}.html`);
+      const outputPath = resolve(outputDir, `${screenName}.html`);
       writeFileSync(outputPath, html, 'utf-8');
-      console.log(`  wrote public/${screenName}.html`);
+      console.log(`  wrote dist/${screenName}.html`);
       succeeded++;
     } catch (err) {
       console.error(`  ERROR for screen "${screenName}":`, err);
