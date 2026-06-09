@@ -102,7 +102,7 @@ export const TOOLS: Tool[] = [
   },
   {
     name: "authorize_d1",
-    description: "Proxy a request to the D1 adapter via authorize (/api/v1/d1/*). Handles Cloudflare D1 database operations. WARNING: D1 stores some fields encrypted (enc:v1:... prefix). Use authorize_backend instead when you need decrypted values (e.g. screen names).",
+    description: "Proxy a request to the D1 adapter via authorize (/api/v1/d1/*). Handles Cloudflare D1 database operations. Encrypted fields (enc:v1:... prefix) are automatically decrypted when IDENTITY_ENCRYPTION_KEY is configured.",
     inputSchema: {
       type: "object",
       properties: {
@@ -127,6 +127,62 @@ export const TOOLS: Tool[] = [
     },
   },
 ];
+
+function hexToBytes(hex: string): Uint8Array {
+  const bytes = new Uint8Array(hex.length / 2);
+  for (let i = 0; i < hex.length; i += 2) {
+    bytes[i / 2] = parseInt(hex.slice(i, i + 2), 16);
+  }
+  return bytes;
+}
+
+function fromBase64Url(s: string): Uint8Array {
+  const padded = s.replace(/-/g, '+').replace(/_/g, '/').padEnd(Math.ceil(s.length / 4) * 4, '=');
+  const binary = atob(padded);
+  const bytes = new Uint8Array(binary.length);
+  for (let i = 0; i < binary.length; i++) bytes[i] = binary.charCodeAt(i);
+  return bytes;
+}
+
+async function resolveSecret(value: string | { get(): Promise<string> } | undefined): Promise<string | undefined> {
+  if (!value) return undefined;
+  if (typeof value === 'string') return value;
+  return value.get();
+}
+
+async function loadDecryptKey(encKeySecret: string | { get(): Promise<string> } | undefined): Promise<CryptoKey | null> {
+  const hex = await resolveSecret(encKeySecret);
+  if (!hex) return null;
+  return crypto.subtle.importKey('raw', hexToBytes(hex), { name: 'AES-GCM' }, false, ['decrypt']);
+}
+
+async function decryptValue(encoded: string, key: CryptoKey): Promise<string> {
+  const combined = fromBase64Url(encoded.slice(7)); // strip "enc:v1:"
+  const plaintext = await crypto.subtle.decrypt(
+    { name: 'AES-GCM', iv: combined.slice(0, 12) }, key, combined.slice(12),
+  );
+  return new TextDecoder().decode(plaintext);
+}
+
+async function decryptJsonValues(text: string, key: CryptoKey): Promise<string> {
+  let parsed: unknown;
+  try { parsed = JSON.parse(text); } catch { return text; }
+  async function walk(val: unknown): Promise<unknown> {
+    if (typeof val === 'string' && val.startsWith('enc:v1:')) {
+      try { return await decryptValue(val, key); } catch { return val; }
+    }
+    if (Array.isArray(val)) return Promise.all(val.map(walk));
+    if (val && typeof val === 'object') {
+      const result: Record<string, unknown> = {};
+      for (const [k, v] of Object.entries(val as Record<string, unknown>)) {
+        result[k] = await walk(v);
+      }
+      return result;
+    }
+    return val;
+  }
+  return JSON.stringify(await walk(parsed), null, 2);
+}
 
 const BASE_PATHS: Record<string, string> = {
   authorize_health: "/health",
@@ -254,12 +310,11 @@ export async function callTool(
       return { content: [{ type: "text", text: `Error ${response.status}: ${text}` }], isError: true };
     }
     if (name === "authorize_d1" && text.includes("enc:v1:")) {
-      return {
-        content: [{
-          type: "text",
-          text: text + "\n\n[Note: Some fields above contain encrypted values (enc:v1:...). Use authorize_backend to fetch the same data with values already decrypted.]",
-        }],
-      };
+      const decKey = await loadDecryptKey(env.IDENTITY_ENCRYPTION_KEY);
+      if (decKey) {
+        const decrypted = await decryptJsonValues(text, decKey);
+        return { content: [{ type: "text", text: decrypted }] };
+      }
     }
     return { content: [{ type: "text", text }] };
   } catch (e) {
