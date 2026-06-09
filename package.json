@@ -13,6 +13,7 @@
     "deploy:stage": "bun run build && bun run gen-client-path && wrangler deploy --env stage",
     "deploy:dev": "bun run build && bun run gen-client-path && wrangler deploy --env dev",
     "deploy": "bun run build && bun run gen-client-path && wrangler deploy --env production",
+    "build-screens": "bun scripts/build-screens.ts",
     "e2e": "playwright test",
     "e2e:stage": "BASE_URL=https://front-stage.tachiiri.workers.dev playwright test",
     "e2e:prod": "BASE_URL=https://front-production.tachiiri.workers.dev playwright test"

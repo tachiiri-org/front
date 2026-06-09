@@ -23,6 +23,13 @@ jobs:
       - name: Install dependencies
         run: bun install
 
+      - name: Build screens
+        continue-on-error: true
+        env:
+          BASE_URL: https://front-stage.tachiiri.workers.dev
+          BUILD_TOKEN: ${{ secrets.BUILD_SCREENS_TOKEN }}
+        run: bun run build-screens
+
       - name: Deploy to stage
         run: bun run deploy:stage
         env:
