@@ -153,7 +153,9 @@ async function resolveSecret(value: string | { get(): Promise<string> } | undefi
 async function loadDecryptKey(encKeySecret: string | { get(): Promise<string> } | undefined): Promise<CryptoKey | null> {
   const hex = await resolveSecret(encKeySecret);
   if (!hex) return null;
-  return crypto.subtle.importKey('raw', hexToBytes(hex), { name: 'AES-GCM' }, false, ['decrypt']);
+  const keyBytes = hexToBytes(hex);
+  const keyBuffer = new Uint8Array(keyBytes).buffer as ArrayBuffer;
+  return crypto.subtle.importKey('raw', keyBuffer, { name: 'AES-GCM' }, false, ['decrypt']);
 }
 
 async function decryptValue(encoded: string, key: CryptoKey): Promise<string> {

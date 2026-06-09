@@ -414,7 +414,7 @@ export const handleApiRequest = async (request: Request, env: Env): Promise<Resp
   const url = new URL(request.url);
   const backend = createLayoutsBackend(env);
 
-  // Build-token auth: x-build-token header + x-org-id header (for CI screen generation)
+  // Build-token auth: x-build-token header (for CI screen generation); org resolved from DEFAULT_ORG_ID
   const buildToken = request.headers.get('x-build-token');
   const expectedToken = await resolveSecretValue(env.BUILD_SCREENS_TOKEN);
   const isBuildRequest = buildToken && expectedToken && buildToken === expectedToken;
@@ -422,7 +422,7 @@ export const handleApiRequest = async (request: Request, env: Env): Promise<Resp
   const cookies = parseCookies(request);
   const tenantContext = isBuildRequest
     ? {
-        tenantId: request.headers.get('x-org-id') ?? cookies.get('identity_org_id') ?? undefined,
+        tenantId: request.headers.get('x-org-id') ?? env.DEFAULT_ORG_ID ?? cookies.get('identity_org_id') ?? undefined,
         subjectId: undefined,
       }
     : {

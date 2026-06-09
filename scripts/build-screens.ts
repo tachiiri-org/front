@@ -6,10 +6,9 @@
  * so that screen pages become static assets baked into the Worker deployment.
  *
  * Environment variables:
- *   BASE_URL            — deployed worker origin, e.g. https://front-dev.tachiiri.workers.dev
- *   BUILD_TOKEN         — pre-shared token sent as x-build-token header (set as worker secret BUILD_SCREENS_TOKEN)
- *   IDENTITY_ORG_ID     — org ID cookie value (alternative auth: cookie-based)
- *   IDENTITY_USER_ID    — user ID cookie value (alternative auth: cookie-based)
+ *   BASE_URL      — deployed worker origin, e.g. https://front-dev.tachiiri.workers.dev
+ *   BUILD_TOKEN   — pre-shared token sent as x-build-token header (set as worker secret BUILD_SCREENS_TOKEN)
+ *                   The worker uses DEFAULT_ORG_ID automatically when BUILD_TOKEN is valid.
  */
 
 import { mkdirSync, writeFileSync } from 'node:fs';
@@ -27,8 +26,6 @@ if (!BASE_URL) {
 }
 
 const BUILD_TOKEN = process.env.BUILD_TOKEN ?? '';
-const IDENTITY_ORG_ID = process.env.IDENTITY_ORG_ID ?? '';
-const IDENTITY_USER_ID = process.env.IDENTITY_USER_ID ?? '';
 
 // ---------------------------------------------------------------------------
 // Auth headers
@@ -41,14 +38,6 @@ const buildHeaders = (): HeadersInit => {
 
   if (BUILD_TOKEN) {
     headers['x-build-token'] = BUILD_TOKEN;
-    // Send org ID as header when using build token auth
-    if (IDENTITY_ORG_ID) headers['x-org-id'] = IDENTITY_ORG_ID;
-  } else {
-    // Fallback: cookie-based auth
-    const cookieParts: string[] = [];
-    if (IDENTITY_ORG_ID) cookieParts.push(`identity_org_id=${encodeURIComponent(IDENTITY_ORG_ID)}`);
-    if (IDENTITY_USER_ID) cookieParts.push(`identity_user_id=${encodeURIComponent(IDENTITY_USER_ID)}`);
-    if (cookieParts.length > 0) headers['Cookie'] = cookieParts.join('; ');
   }
 
   return headers;

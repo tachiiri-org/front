@@ -26,6 +26,7 @@ GITHUB_OAUTH_CLIENT_ID = "Ov23lihhhvT7GB1IGasP"
 GOOGLE_OAUTH_CLIENT_ID = "804252639051-hdkilk1189bomeiv9opnsu0h2basdtr8.apps.googleusercontent.com"
 MICROSOFT_OAUTH_CLIENT_ID = "9350aec4-f659-4c8d-a48b-58c195844b09"
 LAYOUTS_BUCKET_ID = "bucket-stage"
+DEFAULT_ORG_ID = "9c95aa5e-5943-4dd0-9579-ed3725821979"
 
 [[env.stage.services]]
 binding = "BACKEND"
@@ -50,6 +51,7 @@ GITHUB_OAUTH_CLIENT_ID = "Ov23li098QXLtF5UbEg5"
 GOOGLE_OAUTH_CLIENT_ID = "804252639051-hdkilk1189bomeiv9opnsu0h2basdtr8.apps.googleusercontent.com"
 MICROSOFT_OAUTH_CLIENT_ID = "296697e1-f362-44d6-9895-df430f68c55c"
 LAYOUTS_BUCKET_ID = "bucket-production"
+DEFAULT_ORG_ID = "9c95aa5e-5943-4dd0-9579-ed3725821979"
 
 [[env.production.services]]
 binding = "BACKEND"
@@ -81,4 +83,5 @@ GITHUB_OAUTH_CLIENT_ID = "Ov23litfbD8WRrXkM4iR"
 GOOGLE_OAUTH_CLIENT_ID = "804252639051-hdkilk1189bomeiv9opnsu0h2basdtr8.apps.googleusercontent.com"
 MICROSOFT_OAUTH_CLIENT_ID = "0398ec75-5040-4d01-8508-7aa813f2857c"
 LAYOUTS_BUCKET_ID = "bucket-dev"
+DEFAULT_ORG_ID = "9c95aa5e-5943-4dd0-9579-ed3725821979"
 
