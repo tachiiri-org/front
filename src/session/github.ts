@@ -121,7 +121,7 @@ export async function handleGitHubLoginCallback(context: RouteContext): Promise<
   const cookies2 = parseCookies(context.request);
   const dest = cookies2.has(MCP_OAUTH_PARAMS_COOKIE)
     ? `${resolveFrontendOrigin(context.request, context.env)}/oauth/mcp/select-org`
-    : `${resolveFrontendOrigin(context.request, context.env)}/org-select`;
+    : `${resolveFrontendOrigin(context.request, context.env)}/group-select`;
   headers.set("Location", dest);
   return new Response(null, { status: 302, headers });
 }
