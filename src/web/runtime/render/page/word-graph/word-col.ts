@@ -388,7 +388,7 @@ const buildWordColContent = (
     inp.dataset.columnIndex = String(COL_INDEX);
     inp.style.background = 'transparent';
     inp.style.color = wordColor ?? (isLinked ? (hasPrimary ? 'inherit' : theme.textDim) : theme.textDim);
-    inp.style.fontStyle = hasPrimary ? 'normal' : 'italic';
+    inp.style.fontStyle = 'normal';
     inp.style.borderRadius = '0';
 
     const linkedTextCount = state.texts.filter((t) => t.wordIds.includes(item.id)).length;

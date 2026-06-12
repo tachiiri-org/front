@@ -226,7 +226,7 @@ const buildColumn = (
     inp.dataset.columnIndex = String(colIndex);
     inp.style.background = accentColor ? withAlpha(accentColor, 0.10) : 'transparent';
     inp.style.color = accentColor ?? (hasPrimary ? 'inherit' : theme.textDim);
-    inp.style.fontStyle = hasPrimary ? 'normal' : 'italic';
+    inp.style.fontStyle = 'normal';
     inp.style.borderRadius = accentColor ? '3px' : '0';
 
     const markerColor = accentColor ? withAlpha(accentColor, 0.70) : theme.markerDefault;

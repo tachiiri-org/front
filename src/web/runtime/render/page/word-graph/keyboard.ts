@@ -210,32 +210,6 @@ export const createKeydownHandler = (
       return;
     }
 
-    // Shift key alone in text column: move text bidirectionally
-    if (e.key === 'Shift' && !e.ctrlKey && !e.altKey && isTextCol) {
-      const otherLang = state.lang === 'en' ? 'ja' : 'en';
-      const currentText = state.lang === 'en' ? (item.en ?? '') : (item.ja ?? '');
-      const otherText = otherLang === 'en' ? (item.en ?? '') : (item.ja ?? '');
-      if (!currentText && otherText) {
-        // other lang → current lang
-        e.preventDefault();
-        ctx.pushHistory();
-        setLangText(item, state.lang, otherText);
-        setLangText(item, otherLang, '');
-        ctx.scheduleSave();
-        ctx.render();
-        return;
-      } else if (currentText && !otherText) {
-        // current lang → other lang
-        e.preventDefault();
-        ctx.pushHistory();
-        setLangText(item, otherLang, currentText);
-        setLangText(item, state.lang, '');
-        ctx.scheduleSave();
-        ctx.render();
-        return;
-      }
-    }
-
     // Tab in text column with selection: extract selected text as word
     if (e.key === 'Tab' && !e.shiftKey && !e.ctrlKey && !e.altKey && isTextCol) {
       const selStart = input.selectionStart ?? 0;
@@ -264,15 +238,25 @@ export const createKeydownHandler = (
         }
         return;
       }
-      // No selection: move ghost text (other lang) into current lang
+      // No selection: move text bidirectionally between languages
       const otherLang = state.lang === 'en' ? 'ja' : 'en';
       const currentText = state.lang === 'en' ? (item.en ?? '') : (item.ja ?? '');
       const otherText = otherLang === 'en' ? (item.en ?? '') : (item.ja ?? '');
       if (!currentText && otherText) {
+        // other lang → current lang
         e.preventDefault();
         ctx.pushHistory();
         setLangText(item, state.lang, otherText);
         setLangText(item, otherLang, '');
+        ctx.scheduleSave();
+        ctx.render();
+        return;
+      } else if (currentText && !otherText) {
+        // current lang → other lang
+        e.preventDefault();
+        ctx.pushHistory();
+        setLangText(item, otherLang, currentText);
+        setLangText(item, state.lang, '');
         ctx.scheduleSave();
         ctx.render();
         return;

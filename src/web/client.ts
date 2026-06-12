@@ -34,6 +34,7 @@ const applyViewportLayout = (): void => {
 };
 
 const renderNav = async (screenId: string): Promise<void> => {
+  const gen = ++navRenderGen;
   nav.replaceChildren();
   Object.assign(nav.style, {
     display: 'flex',
@@ -65,6 +66,7 @@ const renderNav = async (screenId: string): Promise<void> => {
 
   try {
     const res = await fetch('/api/layouts/json-files');
+    if (gen !== navRenderGen) return;
     if (res.ok) {
       const data = (await res.json()) as { items: { value: string; label: string }[] };
       for (const item of data.items) {
@@ -115,6 +117,7 @@ const renderNav = async (screenId: string): Promise<void> => {
     fetch('/api/auth/status'),
     fetch('/api/auth/identity-status'),
   ]);
+  if (gen !== navRenderGen) return;
 
   let hasIdentitySession = false;
 
@@ -340,6 +343,7 @@ export const rerender = (id: string): void => {
 };
 
 let currentEditorScreenId: string | null = null;
+let navRenderGen = 0;
 
 const reloadEditor = (): void => {
   if (currentEditorScreenId) void loadEditor(currentEditorScreenId);

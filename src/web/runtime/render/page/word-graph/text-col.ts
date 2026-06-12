@@ -207,7 +207,7 @@ const buildTextColContent = (
     inp.dataset.columnIndex = String(colIndex);
     inp.style.background = 'transparent';
     inp.style.color = textColor ?? (hasPrimary ? 'inherit' : theme.textDim);
-    inp.style.fontStyle = hasPrimary ? 'normal' : 'italic';
+    inp.style.fontStyle = 'normal';
     inp.style.borderRadius = '0';
 
     const wordCount = (item as GraphText).wordIds?.length ?? 0;
