@@ -238,7 +238,7 @@ export const renderOutliner = (
         lineHeight: 'inherit',
         padding: '2px 4px',
         color: isProposed ? 'rgba(160, 80, 0, 0.85)' : 'inherit',
-        fontStyle: isProposed ? 'italic' : 'normal',
+        fontStyle: 'normal',
         borderRadius: isProposed ? '3px' : '0',
       });
 
