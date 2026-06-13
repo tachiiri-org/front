@@ -306,7 +306,7 @@ export async function callTool(
   }
 
   try {
-    const response = await authorizeFetch(env, { path, method, body, headers });
+    const response = await authorizeFetch(env, { path, method, body, headers, ...(name === 'authorize_backend' ? { actorType: 'ops' } : {}) });
     const text = await response.text();
     if (!response.ok) {
       return { content: [{ type: "text", text: `Error ${response.status}: ${text}` }], isError: true };
