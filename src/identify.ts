@@ -233,23 +233,6 @@ export type IdentityOrg = {
   name: string;
 };
 
-async function findUserByEmail(env: AuthorizeEnv, email: string): Promise<string | null> {
-  const res = await authorizeFetch(env, {
-    path: `/api/v1/identity/users/by-email/${encodeURIComponent(email.toLowerCase())}`,
-    method: "GET",
-  });
-  if (res.ok) return ((await res.json()) as { user_id: string }).user_id;
-  return null;
-}
-
-async function linkEmailToUser(env: AuthorizeEnv, userId: string, email: string): Promise<void> {
-  await authorizeFetch(env, {
-    path: `/api/v1/identity/users/${encodeURIComponent(userId)}/link-email`,
-    method: "POST",
-    body: JSON.stringify({ email }),
-  });
-}
-
 async function linkGitHubToUser(env: AuthorizeEnv, userId: string, githubId: string): Promise<void> {
   await authorizeFetch(env, {
     path: `/api/v1/identity/users/${encodeURIComponent(userId)}/link-github`,
@@ -269,29 +252,13 @@ async function linkGoogleToUser(env: AuthorizeEnv, userId: string, googleSub: st
 export async function findOrCreateUserByGitHub(
   env: AuthorizeEnv,
   githubId: string,
-  email?: string | null,
 ): Promise<string> {
   const findRes = await authorizeFetch(env, {
     path: `/api/v1/identity/users/by-github/${encodeURIComponent(githubId)}`,
     method: "GET",
   });
-  if (findRes.ok) {
-    const userId = ((await findRes.json()) as IdentityUser).user_id;
-    if (email) await linkEmailToUser(env, userId, email).catch(() => null);
-    return userId;
-  }
+  if (findRes.ok) return ((await findRes.json()) as IdentityUser).user_id;
   if (findRes.status !== 404) throw new Error(`identity_find_github_failed:${findRes.status}`);
-
-  if (email) {
-    try {
-      const userId = await findUserByEmail(env, email);
-      if (userId) {
-        await linkGitHubToUser(env, userId, githubId);
-        await linkEmailToUser(env, userId, email).catch(() => null);
-        return userId;
-      }
-    } catch { /* non-fatal */ }
-  }
 
   const createRes = await authorizeFetch(env, {
     path: "/api/v1/identity/users",
@@ -299,37 +266,19 @@ export async function findOrCreateUserByGitHub(
     body: JSON.stringify({ github_id: githubId }),
   });
   if (!createRes.ok) throw new Error(`identity_create_user_failed:${createRes.status}`);
-  const userId = ((await createRes.json()) as IdentityUser).user_id;
-  if (email) await linkEmailToUser(env, userId, email).catch(() => null);
-  return userId;
+  return ((await createRes.json()) as IdentityUser).user_id;
 }
 
 export async function findOrCreateUserByGoogle(
   env: AuthorizeEnv,
   googleSub: string,
-  email?: string,
 ): Promise<string> {
   const findRes = await authorizeFetch(env, {
     path: `/api/v1/identity/users/by-google/${encodeURIComponent(googleSub)}`,
     method: "GET",
   });
-  if (findRes.ok) {
-    const userId = ((await findRes.json()) as IdentityUser).user_id;
-    if (email) await linkEmailToUser(env, userId, email).catch(() => null);
-    return userId;
-  }
+  if (findRes.ok) return ((await findRes.json()) as IdentityUser).user_id;
   if (findRes.status !== 404) throw new Error(`identity_find_google_failed:${findRes.status}`);
-
-  if (email) {
-    try {
-      const userId = await findUserByEmail(env, email);
-      if (userId) {
-        await linkGoogleToUser(env, userId, googleSub);
-        await linkEmailToUser(env, userId, email).catch(() => null);
-        return userId;
-      }
-    } catch { /* non-fatal */ }
-  }
 
   const createRes = await authorizeFetch(env, {
     path: "/api/v1/identity/users",
@@ -337,9 +286,7 @@ export async function findOrCreateUserByGoogle(
     body: JSON.stringify({ google_id: googleSub }),
   });
   if (!createRes.ok) throw new Error(`identity_create_user_failed:${createRes.status}`);
-  const userId = ((await createRes.json()) as IdentityUser).user_id;
-  if (email) await linkEmailToUser(env, userId, email).catch(() => null);
-  return userId;
+  return ((await createRes.json()) as IdentityUser).user_id;
 }
 
 export type OrgUser = {
@@ -469,29 +416,13 @@ async function linkMicrosoftToUser(env: AuthorizeEnv, userId: string, microsoftS
 export async function findOrCreateUserByMicrosoft(
   env: AuthorizeEnv,
   microsoftSub: string,
-  email?: string,
 ): Promise<string> {
   const findRes = await authorizeFetch(env, {
     path: `/api/v1/identity/users/by-microsoft/${encodeURIComponent(microsoftSub)}`,
     method: "GET",
   });
-  if (findRes.ok) {
-    const userId = ((await findRes.json()) as IdentityUser).user_id;
-    if (email) await linkEmailToUser(env, userId, email).catch(() => null);
-    return userId;
-  }
+  if (findRes.ok) return ((await findRes.json()) as IdentityUser).user_id;
   if (findRes.status !== 404) throw new Error(`identity_find_microsoft_failed:${findRes.status}`);
-
-  if (email) {
-    try {
-      const userId = await findUserByEmail(env, email);
-      if (userId) {
-        await linkMicrosoftToUser(env, userId, microsoftSub);
-        await linkEmailToUser(env, userId, email).catch(() => null);
-        return userId;
-      }
-    } catch { /* non-fatal */ }
-  }
 
   const createRes = await authorizeFetch(env, {
     path: "/api/v1/identity/users",
@@ -499,7 +430,5 @@ export async function findOrCreateUserByMicrosoft(
     body: JSON.stringify({ microsoft_id: microsoftSub }),
   });
   if (!createRes.ok) throw new Error(`identity_create_user_failed:${createRes.status}`);
-  const userId = ((await createRes.json()) as IdentityUser).user_id;
-  if (email) await linkEmailToUser(env, userId, email).catch(() => null);
-  return userId;
+  return ((await createRes.json()) as IdentityUser).user_id;
 }

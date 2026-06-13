@@ -89,7 +89,7 @@ export async function handleMicrosoftLoginCallback(context: RouteContext): Promi
 
   try {
     headers.append("Set-Cookie", await serializeMicrosoftSessionCookie(microsoftSession, context.env, context.request));
-    const userId = await findOrCreateUserByMicrosoft(context.env, microsoftSession.sub, microsoftSession.email);
+    const userId = await findOrCreateUserByMicrosoft(context.env, microsoftSession.sub);
     headers.append(
       "Set-Cookie",
       serializeCookie(IDENTITY_USER_ID_COOKIE, userId, {

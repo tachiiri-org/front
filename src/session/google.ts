@@ -88,7 +88,7 @@ export async function handleGoogleLoginCallback(context: RouteContext): Promise<
 
   try {
     headers.append("Set-Cookie", await serializeGoogleSessionCookie(googleSession, context.env, context.request));
-    const userId = await findOrCreateUserByGoogle(context.env, googleSession.sub, googleSession.email);
+    const userId = await findOrCreateUserByGoogle(context.env, googleSession.sub);
     headers.append(
       "Set-Cookie",
       serializeCookie(IDENTITY_USER_ID_COOKIE, userId, {
