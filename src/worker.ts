@@ -228,10 +228,10 @@ export default {
     if (isNavigationRequest(request) && !isPublicPath(pathname)) {
       const { userId, orgId } = getNavCookies(request);
       if (!userId) {
-        return Response.redirect('/login', 302);
+        return Response.redirect(new URL('/login', request.url).href, 302);
       }
       if (!orgId && pathname !== '/group-select') {
-        return Response.redirect('/group-select', 302);
+        return Response.redirect(new URL('/group-select', request.url).href, 302);
       }
     }
 
