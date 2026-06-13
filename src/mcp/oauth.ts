@@ -425,18 +425,41 @@ export async function handleMcpToken(request: Request, env: AuthorizeEnv): Promi
 
   await env.IDENTITY_DB.prepare("UPDATE t_oauth_authorization_code SET used = 1 WHERE code = ?").bind(code).run();
 
-  const scopes = row.scopes.split(" ").filter(Boolean);
+  const requestedScopes = row.scopes.split(" ").filter(Boolean);
+  let effectiveScopes = requestedScopes;
+  let provider: string | undefined;
+
+  try {
+    const agentRes = await authorizeFetch(env, {
+      path: "/api/v1/agent/by-client-id?client_id=" + encodeURIComponent(row.client_id),
+      method: "GET",
+      actorType: "service",
+      tenantContext: { tenantId: row.group_id },
+    });
+    if (agentRes.ok) {
+      const agentData = await agentRes.json() as { provider?: string; scopes?: string[] };
+      if (agentData.provider) provider = agentData.provider;
+      if (Array.isArray(agentData.scopes)) {
+        const agentScopeSet = new Set(agentData.scopes);
+        effectiveScopes = requestedScopes.filter(s => agentScopeSet.has(s));
+      }
+    }
+  } catch {
+    // best-effort: fall back to requestedScopes with no provider
+  }
+
   const accessToken = await issueMcpToken(env, {
     orgId: row.group_id,
     userId: row.user_id,
-    scopes,
+    scopes: effectiveScopes,
     clientId: row.client_id,
+    provider,
   });
 
   return Response.json({
     access_token: accessToken,
     token_type: "bearer",
     expires_in: 7776000,
-    scope: row.scopes,
+    scope: effectiveScopes.join(" "),
   });
 }

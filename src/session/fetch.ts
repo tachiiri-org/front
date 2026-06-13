@@ -28,6 +28,7 @@ export async function authorizeFetch(
     tenantContext?: { tenantId?: string; subjectId?: string };
     actorType?: 'human' | 'service' | 'ops' | 'ai';
     roles?: string[];
+    scopes?: string[];
   },
 ): Promise<Response> {
   const hasBackend = Boolean((env.BACKEND || env.BACKEND_ORIGIN) && env.FRONT_TO_BACKEND_TOKEN);
@@ -55,6 +56,7 @@ export async function authorizeFetch(
       subjectId: input.tenantContext?.subjectId,
       actorType: input.actorType,
       roles: input.roles,
+      scopes: input.scopes,
     })}`,
   );
 

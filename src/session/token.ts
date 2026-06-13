@@ -16,6 +16,7 @@ type InternalTokenClaims = {
   scope?: string[] | string;
   scopes?: string[] | string;
   roles?: string[];
+  provider?: string;
 };
 
 function toBase64Url(data: Uint8Array): string {
@@ -84,7 +85,7 @@ export async function verifyInternalToken(
 
 export async function issueMcpToken(
   env: { INTERNAL_AUTH_SIGNING_KEY?: SecretValue; INTERNAL_AUTH_TOKEN_ISSUER?: string },
-  input: { orgId: string; userId: string; scopes: string[]; clientId: string },
+  input: { orgId: string; userId: string; scopes: string[]; clientId: string; provider?: string },
 ): Promise<string> {
   const signingKey = await resolveSecret(env.INTERNAL_AUTH_SIGNING_KEY);
   if (!signingKey) throw new Error("missing_internal_auth_signing_key");
@@ -102,6 +103,7 @@ export async function issueMcpToken(
     tenant_id: input.orgId,
     subject_id: input.userId,
     scopes: input.scopes,
+    ...(input.provider ? { provider: input.provider } : {}),
   };
   const header = { alg: "ES256", typ: "JWT" };
   const signingInput = `${toBase64Url(encoder.encode(JSON.stringify(header)))}.${toBase64Url(encoder.encode(JSON.stringify(payload)))}`;
@@ -118,7 +120,7 @@ async function resolveSecret(value: SecretValue | undefined): Promise<string | u
 
 export async function issueInternalToken(
   env: { INTERNAL_AUTH_SIGNING_KEY?: SecretValue; INTERNAL_AUTH_TOKEN_ISSUER?: string },
-  input: { audience: string; tenantId?: string; subjectId?: string; actorType?: InternalTokenClaims['actor_type']; roles?: string[] },
+  input: { audience: string; tenantId?: string; subjectId?: string; actorType?: InternalTokenClaims['actor_type']; roles?: string[]; scopes?: string[] },
 ): Promise<string> {
   const signingKey = await resolveSecret(env.INTERNAL_AUTH_SIGNING_KEY);
   if (!signingKey) {
@@ -132,6 +134,7 @@ export async function issueInternalToken(
     actor_id: "front-local",
     actor_type: input.actorType ?? "service",
     ...(input.roles ? { roles: input.roles } : {}),
+    ...(input.scopes ? { scopes: input.scopes } : {}),
     iss: env.INTERNAL_AUTH_TOKEN_ISSUER ?? "front",
     aud: input.audience,
     exp: now + 300,

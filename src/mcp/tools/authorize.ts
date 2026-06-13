@@ -306,7 +306,16 @@ export async function callTool(
   }
 
   try {
-    const response = await authorizeFetch(env, { path, method, body, headers, ...(name === 'authorize_backend' ? { actorType: 'ops' } : {}) });
+    const backendOpts = name === 'authorize_backend'
+      ? env.actor
+        ? {
+            actorType: 'ai' as const,
+            tenantContext: { tenantId: env.actor.tenant, subjectId: env.actor.userId },
+            scopes: env.actor.scopes,
+          }
+        : { actorType: 'ops' as const }
+      : {};
+    const response = await authorizeFetch(env, { path, method, body, headers, ...backendOpts });
     const text = await response.text();
     if (!response.ok) {
       return { content: [{ type: "text", text: `Error ${response.status}: ${text}` }], isError: true };
