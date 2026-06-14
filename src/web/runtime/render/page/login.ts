@@ -68,7 +68,7 @@ function wire(
 
   // group_name field: show only in org_create mode
   if (groupNameInput) {
-    groupNameInput.style.display = isOrgCreate ? '' : 'none';
+    groupNameInput.style.display = isOrgCreate ? 'block' : 'none';
   }
 
   const purpose = isOrgCreate ? 'org_create' : 'login';
