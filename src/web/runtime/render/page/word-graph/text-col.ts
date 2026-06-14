@@ -1,5 +1,5 @@
 import type { WordGraphTextColComponent } from '../../../../schema/component/kind/word-graph-col';
-import { applyCssProps, cloneData, migrateGraphData, getLangText, hasPrimaryLang, setLangText } from './ops';
+import { applyCssProps, cloneData, migrateGraphData, getLangText, hasPrimaryLang, setLangText, graphFetch } from './ops';
 import { getOrCreateGraphState } from './store';
 import type { ColContext } from './types';
 import { findWord, randomId, findText } from './ops';
@@ -323,7 +323,7 @@ export const renderWordGraphTextCol = (
     if (state.saveTimer) clearTimeout(state.saveTimer);
     state.saveTimer = setTimeout(() => {
       state.saveTimer = null;
-      void fetch(`/api/graph/${encodeURIComponent(component.graphId)}`, {
+      void graphFetch(`/api/graph/${encodeURIComponent(component.graphId)}`, {
         method: 'PUT',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ texts: state.texts, words: state.words }),
@@ -431,8 +431,8 @@ export const renderWordGraphTextCol = (
     shared.loaded = true;
     const base = `/api/graph/${encodeURIComponent(component.graphId)}`;
     void Promise.all([
-      fetch(`${base}/words`).then((r) => r.ok ? r.json() as Promise<unknown> : { words: [] }),
-      fetch(`${base}/texts`).then((r) => r.ok ? r.json() as Promise<unknown> : { texts: [] }),
+      graphFetch(`${base}/words`).then((r) => r.ok ? r.json() as Promise<unknown> : { words: [] }),
+      graphFetch(`${base}/texts`).then((r) => r.ok ? r.json() as Promise<unknown> : { texts: [] }),
     ])
       .then(([wordsData, textsData]) => {
         const wd = wordsData as Record<string, unknown>;

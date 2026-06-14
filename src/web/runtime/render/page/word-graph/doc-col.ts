@@ -1,5 +1,5 @@
 import type { WordGraphDocColComponent } from '../../../../schema/component/kind/word-graph-col';
-import { applyCssProps } from './ops';
+import { applyCssProps, graphFetch } from './ops';
 import { getOrCreateGraphState } from './store';
 import type { GraphDocument } from '../../../../schema/component/kind/word-graph';
 import { theme } from '../theme';
@@ -34,7 +34,7 @@ export const renderWordGraphDocCol = (
 
   const createDocument = (content: string, textId: string): void => {
     const lang = shared.lang === 'ja' ? 'ja' : 'en';
-    void fetch(`/api/graph/${encodeURIComponent(graphId)}/document`, {
+    void graphFetch(`/api/graph/${encodeURIComponent(graphId)}/document`, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({ [lang]: content, textIds: [textId] }),
@@ -50,7 +50,7 @@ export const renderWordGraphDocCol = (
 
   const saveDocument = (docId: string, content: string): void => {
     const lang = shared.lang === 'ja' ? 'ja' : 'en';
-    void fetch(`/api/graph/${encodeURIComponent(graphId)}/document/${encodeURIComponent(docId)}`, {
+    void graphFetch(`/api/graph/${encodeURIComponent(graphId)}/document/${encodeURIComponent(docId)}`, {
       method: 'PUT',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({ [lang]: content }),
@@ -58,7 +58,7 @@ export const renderWordGraphDocCol = (
   };
 
   const deleteDocument = (docId: string): void => {
-    void fetch(`/api/graph/${encodeURIComponent(graphId)}/document/${encodeURIComponent(docId)}`, {
+    void graphFetch(`/api/graph/${encodeURIComponent(graphId)}/document/${encodeURIComponent(docId)}`, {
       method: 'DELETE',
     });
     shared.documents = shared.documents.filter((d) => d.id !== docId);
@@ -265,7 +265,7 @@ export const renderWordGraphDocCol = (
       loadedForTextId = selectedTextId;
       shared.documents = [];
       if (selectedTextId) {
-        void fetch(`/api/graph/${encodeURIComponent(graphId)}/documents?text_id=${encodeURIComponent(selectedTextId)}`)
+        void graphFetch(`/api/graph/${encodeURIComponent(graphId)}/documents?text_id=${encodeURIComponent(selectedTextId)}`)
           .then((r) => r.ok ? r.json() as Promise<unknown> : { documents: [] })
           .then((data) => {
             const d = data as Record<string, unknown>;

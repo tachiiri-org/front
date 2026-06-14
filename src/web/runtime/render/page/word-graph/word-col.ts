@@ -1,5 +1,5 @@
 import type { WordGraphWordColComponent } from '../../../../schema/component/kind/word-graph-col';
-import { applyCssProps, cloneData, findText, findWord, randomId, migrateGraphData, getLangText, hasPrimaryLang, setLangText, findWordByText, wordMatchesQuery } from './ops';
+import { applyCssProps, cloneData, findText, findWord, randomId, migrateGraphData, getLangText, hasPrimaryLang, setLangText, findWordByText, wordMatchesQuery, graphFetch } from './ops';
 import { getOrCreateGraphState } from './store';
 import type { ColContext } from './types';
 import { createInput } from './input';
@@ -592,8 +592,8 @@ export const renderWordGraphWordCol = (
       shared.loaded = true;
       const base = `/api/graph/${encodeURIComponent(newGraphId)}`;
       void Promise.all([
-        fetch(`${base}/words`).then((r) => r.ok ? r.json() as Promise<unknown> : { words: [] }),
-        fetch(`${base}/texts`).then((r) => r.ok ? r.json() as Promise<unknown> : { texts: [] }),
+        graphFetch(`${base}/words`).then((r) => r.ok ? r.json() as Promise<unknown> : { words: [] }),
+        graphFetch(`${base}/texts`).then((r) => r.ok ? r.json() as Promise<unknown> : { texts: [] }),
       ])
         .then(([wordsData, textsData]) => {
           const wd = wordsData as Record<string, unknown>;
@@ -617,7 +617,7 @@ export const renderWordGraphWordCol = (
     const name = window.prompt('New graph name:');
     if (!name || !name.trim()) return;
     const newId = randomId();
-    void fetch('/api/graph/', {
+    void graphFetch('/api/graph/', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({ id: newId, name: name.trim() }),
@@ -637,7 +637,7 @@ export const renderWordGraphWordCol = (
     const current = graphList.find((g) => g.id === currentGraphId);
     const newName = window.prompt('Rename graph:', current?.name ?? currentGraphId);
     if (!newName || !newName.trim()) return;
-    void fetch(`/api/graph/${encodeURIComponent(currentGraphId)}`, {
+    void graphFetch(`/api/graph/${encodeURIComponent(currentGraphId)}`, {
       method: 'PATCH',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({ name: newName.trim() }),
@@ -656,7 +656,7 @@ export const renderWordGraphWordCol = (
     e.preventDefault();
     const current = graphList.find((g) => g.id === currentGraphId);
     if (!window.confirm(`Hide graph "${current?.name ?? currentGraphId}"?`)) return;
-    void fetch(`/api/graph/${encodeURIComponent(currentGraphId)}`, { method: 'DELETE' })
+    void graphFetch(`/api/graph/${encodeURIComponent(currentGraphId)}`, { method: 'DELETE' })
       .then((r) => {
         if (r.ok) {
           graphList = graphList.filter((g) => g.id !== currentGraphId);
@@ -676,7 +676,7 @@ export const renderWordGraphWordCol = (
   graphSelectorEl.appendChild(deleteBtn);
 
   // Fetch graph list on mount
-  void fetch('/api/graph/')
+  void graphFetch('/api/graph/')
     .then((r) => r.ok ? r.json() as Promise<unknown> : { graphs: [] })
     .then((data) => {
       const d = data as Record<string, unknown>;
@@ -695,7 +695,7 @@ export const renderWordGraphWordCol = (
     if (state.saveTimer) clearTimeout(state.saveTimer);
     state.saveTimer = setTimeout(() => {
       state.saveTimer = null;
-      void fetch(`/api/graph/${encodeURIComponent(currentGraphId)}`, {
+      void graphFetch(`/api/graph/${encodeURIComponent(currentGraphId)}`, {
         method: 'PUT',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ texts: state.texts, words: state.words }),
@@ -797,8 +797,8 @@ export const renderWordGraphWordCol = (
     shared.loaded = true;
     const base = `/api/graph/${encodeURIComponent(currentGraphId)}`;
     void Promise.all([
-      fetch(`${base}/words`).then((r) => r.ok ? r.json() as Promise<unknown> : { words: [] }),
-      fetch(`${base}/texts`).then((r) => r.ok ? r.json() as Promise<unknown> : { texts: [] }),
+      graphFetch(`${base}/words`).then((r) => r.ok ? r.json() as Promise<unknown> : { words: [] }),
+      graphFetch(`${base}/texts`).then((r) => r.ok ? r.json() as Promise<unknown> : { texts: [] }),
     ])
       .then(([wordsData, textsData]) => {
         const wd = wordsData as Record<string, unknown>;

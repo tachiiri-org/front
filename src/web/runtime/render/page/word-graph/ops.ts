@@ -42,6 +42,12 @@ export const cloneData = (
 ): { texts: GraphText[]; words: GraphWord[] } =>
   JSON.parse(JSON.stringify({ texts, words })) as { texts: GraphText[]; words: GraphWord[] };
 
+export const graphFetch = (input: RequestInfo | URL, init?: RequestInit): Promise<Response> =>
+  fetch(input, init).then((r) => {
+    if (r.status === 401) { window.location.href = '/login'; }
+    return r;
+  });
+
 export const applyCssProps = (el: HTMLElement, c: Record<string, unknown>): void => {
   for (const k of ALL_CSS_PROP_KEYS) {
     const v = c[k];
