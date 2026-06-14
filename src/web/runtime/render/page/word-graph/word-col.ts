@@ -535,7 +535,8 @@ export const renderWordGraphWordCol = (
   });
 
   const deleteBtn = document.createElement('button');
-  deleteBtn.textContent = '×';
+  deleteBtn.textContent = '–';
+  deleteBtn.title = 'Hide graph';
   Object.assign(deleteBtn.style, {
     fontSize: '13px',
     lineHeight: '1',
@@ -654,7 +655,7 @@ export const renderWordGraphWordCol = (
   deleteBtn.addEventListener('mousedown', (e) => {
     e.preventDefault();
     const current = graphList.find((g) => g.id === currentGraphId);
-    if (!window.confirm(`Delete graph "${current?.name ?? currentGraphId}"?`)) return;
+    if (!window.confirm(`Hide graph "${current?.name ?? currentGraphId}"?`)) return;
     void fetch(`/api/graph/${encodeURIComponent(currentGraphId)}`, { method: 'DELETE' })
       .then((r) => {
         if (r.ok) {
