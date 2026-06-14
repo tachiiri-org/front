@@ -16,13 +16,6 @@ const buildColumn = (
 
   const col = document.createElement('div');
   col.dataset.colIndex = String(colIndex);
-  if (isTextCol) {
-    col.style.width = '30vw';
-    col.style.minWidth = '180px';
-  } else {
-    col.style.width = '15vw';
-    col.style.minWidth = '120px';
-  }
   col.style.borderRight = `1px solid ${theme.borderStrong}`;
   col.style.overflowY = 'auto';
   col.style.overflowX = 'hidden';
@@ -271,13 +264,11 @@ const buildColumn = (
   return col;
 };
 
-const buildDocumentColumn = (selectedTextId: string, ctx: WordGraphContext): HTMLElement => {
+const buildDocumentColumn = (selectedTextId: string | null, ctx: WordGraphContext): HTMLElement => {
   const { state } = ctx;
 
   const col = document.createElement('div');
   col.dataset.colIndex = '3';
-  col.style.width = '35vw';
-  col.style.minWidth = '250px';
   col.style.borderRight = `1px solid ${theme.borderStrong}`;
   col.style.overflowY = 'auto';
   col.style.overflowX = 'hidden';
@@ -305,6 +296,19 @@ const buildDocumentColumn = (selectedTextId: string, ctx: WordGraphContext): HTM
   typeLabel.textContent = 'documents';
   headerRow.appendChild(typeLabel);
   col.appendChild(headerRow);
+
+  if (!selectedTextId) {
+    const placeholder = document.createElement('div');
+    Object.assign(placeholder.style, {
+      padding: '8px 12px',
+      color: theme.textFaint,
+      fontSize: '12px',
+      userSelect: 'none',
+    });
+    placeholder.textContent = '← select a text';
+    col.appendChild(placeholder);
+    return col;
+  }
 
   const draftRow = document.createElement('div');
   draftRow.style.display = 'flex';
@@ -523,28 +527,30 @@ export const buildColumns = (ctx: WordGraphContext): HTMLElement => {
       wrapper.appendChild(col);
     }
   } else {
-    wrapper.style.overflowX = 'auto';
+    wrapper.style.overflowX = 'hidden';
 
-    // PC: Column 0 (display): all words — colIndex=1 preserves the odd/even convention
-    wrapper.appendChild(buildColumn([...state.words], 1, null, ctx));
+    // Words column — flex 2
+    const col1 = buildColumn([...state.words], 1, null, ctx);
+    col1.style.flex = '2';
+    col1.style.minWidth = '100px';
+    wrapper.appendChild(col1);
 
-    // PC: Column 1 (display): texts linked to the selected word (path[1])
-    if (selectedWord) {
-      const col2Items = state.texts.filter(t => t.wordIds.includes(state.path[1]));
-      wrapper.appendChild(buildColumn(col2Items, 2, null, ctx));
-    }
+    // Texts column — flex 4 (filtered by selected word, or all if none)
+    const col2Items = selectedWord
+      ? state.texts.filter(t => t.wordIds.includes(state.path[1]))
+      : [...state.texts];
+    const col2 = buildColumn(col2Items, 2, null, ctx);
+    col2.style.flex = '4';
+    col2.style.minWidth = '150px';
+    wrapper.appendChild(col2);
 
-    // PC: Column 2 (display): documents for selected text (path[2])
+    // Documents column — flex 4 (always visible; shows placeholder when no text selected)
     const selectedTextId = (state.path[2] as string | undefined) ?? null;
-    if (selectedTextId) {
-      wrapper.appendChild(buildDocumentColumn(selectedTextId, ctx));
-    }
-
-    const spacer = document.createElement('div');
-    spacer.dataset.columnsSpacer = 'true';
-    spacer.style.flexShrink = '0';
-    spacer.style.width = '0';
-    wrapper.appendChild(spacer);
+    const col3 = buildDocumentColumn(selectedTextId, ctx);
+    col3.style.flex = '4';
+    col3.style.minWidth = '150px';
+    col3.style.borderRight = 'none';
+    wrapper.appendChild(col3);
   }
 
   // Breadcrumb
