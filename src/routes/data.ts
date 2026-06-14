@@ -326,3 +326,20 @@ export async function handleOrgMembers(request: Request, env: AuthorizeEnv): Pro
     headers: { 'Content-Type': 'application/json; charset=utf-8' },
   });
 }
+
+export async function handleMagicLinkRequest(
+  request: Request,
+  env: AuthorizeEnv,
+): Promise<Response | null> {
+  const url = new URL(request.url);
+  if (url.pathname !== '/api/auth/magic-link' || request.method !== 'POST') return null;
+
+  const body = (await request.json()) as { email?: string; purpose?: string; org_id?: string };
+  const res = await authorizeFetch(env, {
+    path: '/api/v1/identity/magic-link/request',
+    method: 'POST',
+    body: JSON.stringify(body),
+  });
+  const text = await res.text();
+  return new Response(text, { status: res.status, headers: { 'Content-Type': 'application/json; charset=utf-8' } });
+}
