@@ -4,6 +4,9 @@ import { ALL_CSS_PROP_KEYS } from './schema/component/style';
 import { renderComponent, fetchFrameComponent, findEditorScreenId, hydrateEditor, store, domMap } from './runtime';
 import { clearGraphStore } from './runtime/render/page/word-graph/store';
 import type { FrameState } from './state';
+import { renderLoginPage } from './runtime/render/page/login';
+import { renderGroupSelectPage } from './runtime/render/page/group-select';
+import { renderSettingsPage } from './runtime/render/page/settings';
 
 const HEADER_HEIGHT = 36;
 
@@ -165,6 +168,12 @@ const renderNav = async (screenId: string): Promise<void> => {
           : (authStatus.google.email ?? authStatus.microsoft?.email ?? '');
         Object.assign(userEl.style, { color: '#9ca3af', fontSize: '12px' });
         nav.appendChild(userEl);
+
+        const settingsLink = document.createElement('a');
+        settingsLink.textContent = '設定';
+        settingsLink.href = '/settings';
+        Object.assign(settingsLink.style, { color: '#6b7280', fontSize: '12px', textDecoration: 'none' });
+        nav.appendChild(settingsLink);
 
         const logoutLink = document.createElement('a');
         logoutLink.textContent = 'Logout';
@@ -375,13 +384,31 @@ const getCookie = (name: string): string | null => {
 const loadEditorBootstrap = async (): Promise<void> => {
   const pathnameScreenId = getScreenIdFromPathname();
   const screenId = pathnameScreenId ?? await findEditorScreenId();
+
+  // Auth pages: render inline without the editor chrome
+  if (screenId === 'login') {
+    document.body.style.overflow = 'auto';
+    renderLoginPage(root);
+    return;
+  }
+  if (screenId === 'group-select') {
+    document.body.style.overflow = 'auto';
+    await renderGroupSelectPage(root);
+    return;
+  }
+  if (screenId === 'settings') {
+    document.body.style.overflow = 'auto';
+    await renderSettingsPage(root);
+    return;
+  }
+
   if (!screenId) {
     applyViewportLayout();
     void renderNav('');
     return;
   }
 
-  if (screenId !== 'group-select' && !getCookie('identity_org_id')) {
+  if (!getCookie('identity_org_id')) {
     const res = await fetch('/api/auth/identity-status').catch(() => null);
     const status = res?.ok ? (await res.json() as { user_id: string | null }) : null;
     if (status?.user_id) {

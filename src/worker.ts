@@ -60,6 +60,7 @@ const getNavCookies = (request: Request): { userId: string | null; orgId: string
 
 const isPublicPath = (pathname: string): boolean =>
   pathname === '/login' ||
+  pathname === '/auth/magic' ||
   pathname.startsWith('/oauth/') ||
   pathname.startsWith('/github/oauth/') ||
   pathname.startsWith('/.well-known/') ||

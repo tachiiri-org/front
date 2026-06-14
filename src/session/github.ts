@@ -1,4 +1,4 @@
-import { exchangeGitHubOAuthCode, exchangeGitHubConnectCode, serializeGitHubSessionCookie, serializeGitHubConnectSessionCookie, findOrCreateUserByGitHub } from "../identify";
+import { exchangeGitHubOAuthCode, exchangeGitHubConnectCode, serializeGitHubSessionCookie, serializeGitHubConnectSessionCookie, findOrCreateUserByGitHub, linkGitHubToUser } from "../identify";
 import { clearCookie, parseCookies, serializeCookie } from "./cookies";
 import type { AuthorizeEnv } from "./index";
 
@@ -102,24 +102,34 @@ export async function handleGitHubLoginCallback(context: RouteContext): Promise<
   const headers = new Headers();
   headers.append("Set-Cookie", clearCookie(LOGIN_STATE_COOKIE_NAME, context.request));
 
+  const cookies2 = parseCookies(context.request);
+  const linkMode = cookies2.get(IDENTITY_LINK_MODE_COOKIE);
+  const existingUserId = linkMode ? cookies2.get(IDENTITY_USER_ID_COOKIE) : null;
+
   try {
     headers.append("Set-Cookie", await serializeGitHubSessionCookie(session, context.env, context.request));
-    const userId = await findOrCreateUserByGitHub(context.env, session.viewer.login);
-    headers.append(
-      "Set-Cookie",
-      serializeCookie(IDENTITY_USER_ID_COOKIE, userId, {
-        maxAge: 60 * 10,
-        path: "/",
-        secure: isSecureRequest(context.request),
-        httpOnly: true,
-      }),
-    );
+    if (linkMode && existingUserId) {
+      await linkGitHubToUser(context.env, existingUserId, session.viewer.login);
+      headers.append("Set-Cookie", `${IDENTITY_LINK_MODE_COOKIE}=; Path=/; Max-Age=0`);
+    } else {
+      const userId = await findOrCreateUserByGitHub(context.env, session.viewer.login);
+      headers.append(
+        "Set-Cookie",
+        serializeCookie(IDENTITY_USER_ID_COOKIE, userId, {
+          maxAge: 60 * 10,
+          path: "/",
+          secure: isSecureRequest(context.request),
+          httpOnly: true,
+        }),
+      );
+    }
   } catch {
     // identity lookup failure is non-fatal; org-select page will handle the missing state
   }
 
-  const cookies2 = parseCookies(context.request);
-  const dest = cookies2.has(MCP_OAUTH_PARAMS_COOKIE)
+  const dest = linkMode && existingUserId
+    ? `${resolveFrontendOrigin(context.request, context.env)}/settings`
+    : cookies2.has(MCP_OAUTH_PARAMS_COOKIE)
     ? `${resolveFrontendOrigin(context.request, context.env)}/oauth/mcp/select-org`
     : `${resolveFrontendOrigin(context.request, context.env)}/group-select`;
   headers.set("Location", dest);
@@ -210,6 +220,7 @@ const LOGIN_STATE_COOKIE_NAME = "github_login_oauth_state";
 const CONNECT_STATE_COOKIE_NAME = "github_connect_oauth_state";
 const CONNECT_RETURN_TO_COOKIE = "github_connect_return_to";
 export const IDENTITY_USER_ID_COOKIE = "identity_user_id";
+export const IDENTITY_LINK_MODE_COOKIE = "identity_link_mode";
 export const MCP_OAUTH_PARAMS_COOKIE = "mcp_oauth_params";
 /** @deprecated Use LOGIN_STATE_COOKIE_NAME or CONNECT_STATE_COOKIE_NAME */
 const STATE_COOKIE_NAME = LOGIN_STATE_COOKIE_NAME;

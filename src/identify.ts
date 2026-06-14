@@ -233,7 +233,7 @@ export type IdentityOrg = {
   name: string;
 };
 
-async function linkGitHubToUser(env: AuthorizeEnv, userId: string, githubId: string): Promise<void> {
+export async function linkGitHubToUser(env: AuthorizeEnv, userId: string, githubId: string): Promise<void> {
   await authorizeFetch(env, {
     path: `/api/v1/identity/users/${encodeURIComponent(userId)}/link-github`,
     method: "POST",
@@ -241,7 +241,7 @@ async function linkGitHubToUser(env: AuthorizeEnv, userId: string, githubId: str
   });
 }
 
-async function linkGoogleToUser(env: AuthorizeEnv, userId: string, googleSub: string): Promise<void> {
+export async function linkGoogleToUser(env: AuthorizeEnv, userId: string, googleSub: string): Promise<void> {
   await authorizeFetch(env, {
     path: `/api/v1/identity/users/${encodeURIComponent(userId)}/link-google`,
     method: "POST",
@@ -426,7 +426,7 @@ export function clearMicrosoftSessionCookies(request: Request): string[] {
   return [clearCookie(MICROSOFT_SESSION_COOKIE, request)];
 }
 
-async function linkMicrosoftToUser(env: AuthorizeEnv, userId: string, microsoftSub: string): Promise<void> {
+export async function linkMicrosoftToUser(env: AuthorizeEnv, userId: string, microsoftSub: string): Promise<void> {
   await authorizeFetch(env, {
     path: `/api/v1/identity/users/${encodeURIComponent(userId)}/link-microsoft`,
     method: "POST",

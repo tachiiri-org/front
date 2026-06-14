@@ -1,4 +1,4 @@
-import { exchangeMicrosoftOAuthCode, serializeMicrosoftSessionCookie, findOrCreateUserByMicrosoft } from "../identify";
+import { exchangeMicrosoftOAuthCode, serializeMicrosoftSessionCookie, findOrCreateUserByMicrosoft, linkMicrosoftToUser } from "../identify";
 import { clearCookie, parseCookies, serializeCookie } from "./cookies";
 import type { AuthorizeEnv } from "./index";
 import { MCP_OAUTH_PARAMS_COOKIE } from "./google";
@@ -87,24 +87,34 @@ export async function handleMicrosoftLoginCallback(context: RouteContext): Promi
   const headers = new Headers();
   headers.append("Set-Cookie", clearCookie(LOGIN_STATE_COOKIE_NAME, context.request));
 
+  const cookies2 = parseCookies(context.request);
+  const linkMode = cookies2.get(IDENTITY_LINK_MODE_COOKIE);
+  const existingUserId = linkMode ? cookies2.get(IDENTITY_USER_ID_COOKIE) : null;
+
   try {
     headers.append("Set-Cookie", await serializeMicrosoftSessionCookie(microsoftSession, context.env, context.request));
-    const userId = await findOrCreateUserByMicrosoft(context.env, microsoftSession.sub);
-    headers.append(
-      "Set-Cookie",
-      serializeCookie(IDENTITY_USER_ID_COOKIE, userId, {
-        maxAge: 60 * 10,
-        path: "/",
-        secure: isSecureRequest(context.request),
-        httpOnly: true,
-      }),
-    );
+    if (linkMode && existingUserId) {
+      await linkMicrosoftToUser(context.env, existingUserId, microsoftSession.sub);
+      headers.append("Set-Cookie", `${IDENTITY_LINK_MODE_COOKIE}=; Path=/; Max-Age=0`);
+    } else {
+      const userId = await findOrCreateUserByMicrosoft(context.env, microsoftSession.sub);
+      headers.append(
+        "Set-Cookie",
+        serializeCookie(IDENTITY_USER_ID_COOKIE, userId, {
+          maxAge: 60 * 10,
+          path: "/",
+          secure: isSecureRequest(context.request),
+          httpOnly: true,
+        }),
+      );
+    }
   } catch {
     // identity lookup failure is non-fatal; org-select page will handle the missing state
   }
 
-  const cookies2 = parseCookies(context.request);
-  const dest = cookies2.has(MCP_OAUTH_PARAMS_COOKIE)
+  const dest = linkMode && existingUserId
+    ? `${resolveFrontendOrigin(context.request, context.env)}/settings`
+    : cookies2.has(MCP_OAUTH_PARAMS_COOKIE)
     ? `${resolveFrontendOrigin(context.request, context.env)}/oauth/mcp/select-org`
     : `${resolveFrontendOrigin(context.request, context.env)}/group-select`;
   headers.set("Location", dest);
@@ -118,4 +128,5 @@ export function clearMicrosoftSessionCookies(request: Request): string[] {
 export const MICROSOFT_SESSION_COOKIE = "microsoft_session";
 const LOGIN_STATE_COOKIE_NAME = "microsoft_login_oauth_state";
 const IDENTITY_USER_ID_COOKIE = "identity_user_id";
+const IDENTITY_LINK_MODE_COOKIE = "identity_link_mode";
 const STATE_TTL_SECONDS = 60 * 10;

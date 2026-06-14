@@ -211,7 +211,8 @@ export async function handleAutoSelectOrg(request: Request, env: AuthorizeEnv): 
     return json({ error: 'not_authenticated' }, { status: 401 });
   }
 
-  const groupId = await getDefaultGroup(env, userId).catch(() => null);
+  const magicOrgId = cookies.get('magic_org_id') ? decodeURIComponent(cookies.get('magic_org_id')!) : null;
+  const groupId = magicOrgId ?? (await getDefaultGroup(env, userId).catch(() => null));
   if (!groupId) {
     return json({ group_id: null }, { status: 404 });
   }
@@ -235,7 +236,7 @@ export async function handleAutoSelectOrg(request: Request, env: AuthorizeEnv): 
       headers.append('Set-Cookie', `org_user_id=${encodeURIComponent(orgUser.orgUserId)}; Path=/; Max-Age=${60 * 60 * 24}${isSecure ? '; Secure' : ''}; SameSite=Lax; HttpOnly`);
     }
   }
-  if (magicEmail) {
+  if (magicEmail || magicOrgId) {
     headers.append('Set-Cookie', `magic_email=; Path=/; Max-Age=0`);
     headers.append('Set-Cookie', `magic_org_id=; Path=/; Max-Age=0`);
   }
