@@ -333,6 +333,27 @@ export async function createOrganization(env: AuthorizeEnv, userId: string, name
   return (await res.json()) as IdentityOrg;
 }
 
+export async function searchOrganizationsByName(env: AuthorizeEnv, name: string): Promise<{ id: string }[]> {
+  const res = await authorizeFetch(env, {
+    path: `/api/v1/identity/organizations/search?name=${encodeURIComponent(name)}`,
+    method: "GET",
+  });
+  if (!res.ok) return [];
+  return ((await res.json()) as { organizations: { id: string }[] }).organizations;
+}
+
+export async function verifyMagicLinkToken(
+  env: AuthorizeEnv,
+  token: string,
+): Promise<{ email: string; purpose: string; org_id: string | null } | null> {
+  const res = await authorizeFetch(env, {
+    path: `/api/v1/identity/magic-link/${encodeURIComponent(token)}`,
+    method: "GET",
+  });
+  if (!res.ok) return null;
+  return (await res.json()) as { email: string; purpose: string; org_id: string | null };
+}
+
 export async function getDefaultGroup(env: AuthorizeEnv, userId: string): Promise<string | null> {
   const res = await authorizeFetch(env, {
     path: `/api/v1/identity/users/${encodeURIComponent(userId)}/default-group`,

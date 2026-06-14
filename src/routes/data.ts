@@ -1,6 +1,6 @@
 import type { SpecDocument } from '../shared/spec-document';
 import type { UiShellSettings } from '../shared/ui-shell-settings';
-import { readGitHubSession, readGitHubConnectSession, readGoogleSession, readMicrosoftSession, listUserOrganizations, createOrganization, resolveOrgUser, getDefaultGroup } from '../identify';
+import { readGitHubSession, readGitHubConnectSession, readGoogleSession, readMicrosoftSession, listUserOrganizations, createOrganization, resolveOrgUser, getDefaultGroup, verifyMagicLinkToken } from '../identify';
 import { parseCookies } from '../session/cookies';
 import { authorizeFetch } from '../session/fetch';
 import type { AuthorizeEnv } from '../session';
@@ -220,11 +220,12 @@ export async function handleAutoSelectOrg(request: Request, env: AuthorizeEnv): 
   const headers = new Headers({ 'Content-Type': 'application/json; charset=utf-8' });
   headers.append('Set-Cookie', `identity_org_id=${encodeURIComponent(groupId)}; Path=/; Max-Age=${60 * 60 * 24}${isSecure ? '; Secure' : ''}; SameSite=Lax`);
 
+  const magicEmail = cookies.get('magic_email') ? decodeURIComponent(cookies.get('magic_email')!) : null;
   const [githubSession, googleSession] = await Promise.allSettled([
     readGitHubSession(request, env),
     readGoogleSession(request, env),
   ]);
-  const email =
+  const email = magicEmail ??
     (githubSession.status === 'fulfilled' ? githubSession.value?.email : null) ??
     (googleSession.status === 'fulfilled' ? googleSession.value?.email : null);
 
@@ -233,6 +234,10 @@ export async function handleAutoSelectOrg(request: Request, env: AuthorizeEnv): 
     if (orgUser) {
       headers.append('Set-Cookie', `org_user_id=${encodeURIComponent(orgUser.orgUserId)}; Path=/; Max-Age=${60 * 60 * 24}${isSecure ? '; Secure' : ''}; SameSite=Lax; HttpOnly`);
     }
+  }
+  if (magicEmail) {
+    headers.append('Set-Cookie', `magic_email=; Path=/; Max-Age=0`);
+    headers.append('Set-Cookie', `magic_org_id=; Path=/; Max-Age=0`);
   }
 
   return new Response(JSON.stringify({ group_id: groupId }), { status: 200, headers });
@@ -257,11 +262,12 @@ export async function handleSelectOrg(request: Request, env: AuthorizeEnv): Prom
   headers.append('Set-Cookie', `identity_org_id=${encodeURIComponent(orgId)}; Path=/; Max-Age=${60 * 60 * 24}${isSecure ? '; Secure' : ''}; SameSite=Lax`);
 
   if (identityUserId) {
+    const magicEmail = cookies.get('magic_email') ? decodeURIComponent(cookies.get('magic_email')!) : null;
     const [githubSession, googleSession] = await Promise.allSettled([
       readGitHubSession(request, env),
       readGoogleSession(request, env),
     ]);
-    const email =
+    const email = magicEmail ??
       (githubSession.status === 'fulfilled' ? githubSession.value?.email : null) ??
       (googleSession.status === 'fulfilled' ? googleSession.value?.email : null);
 
@@ -270,6 +276,10 @@ export async function handleSelectOrg(request: Request, env: AuthorizeEnv): Prom
       if (orgUser) {
         headers.append('Set-Cookie', `org_user_id=${encodeURIComponent(orgUser.orgUserId)}; Path=/; Max-Age=${60 * 60 * 24}${isSecure ? '; Secure' : ''}; SameSite=Lax; HttpOnly`);
       }
+    }
+    if (magicEmail) {
+      headers.append('Set-Cookie', `magic_email=; Path=/; Max-Age=0`);
+      headers.append('Set-Cookie', `magic_org_id=; Path=/; Max-Age=0`);
     }
   }
 
@@ -342,4 +352,35 @@ export async function handleMagicLinkRequest(
   });
   const text = await res.text();
   return new Response(text, { status: res.status, headers: { 'Content-Type': 'application/json; charset=utf-8' } });
+}
+
+// GET /auth/magic?token=xxx
+// Verifies magic link token, sets short-lived cookies, redirects to OAuth
+export async function handleMagicLinkVerify(
+  request: Request,
+  env: AuthorizeEnv,
+): Promise<Response | null> {
+  const url = new URL(request.url);
+  if (url.pathname !== '/auth/magic') return null;
+
+  const token = url.searchParams.get('token');
+  if (!token) return new Response('Missing token', { status: 400 });
+
+  const result = await verifyMagicLinkToken(env, token);
+  if (!result) {
+    return new Response(null, { status: 302, headers: { Location: '/login?error=invalid_magic_link' } });
+  }
+
+  const isSecure = url.protocol === 'https:';
+  const cookieOpts = `Path=/; Max-Age=600; SameSite=Lax; HttpOnly${isSecure ? '; Secure' : ''}`;
+  const headers = new Headers();
+  headers.append('Set-Cookie', `magic_email=${encodeURIComponent(result.email)}; ${cookieOpts}`);
+  if (result.org_id) {
+    headers.append('Set-Cookie', `magic_org_id=${encodeURIComponent(result.org_id)}; ${cookieOpts}`);
+  }
+
+  // Redirect to login page so the user can choose an OAuth provider
+  const redirectTo = result.purpose === 'org_create' ? '/login?next=org_create' : '/login';
+  headers.set('Location', redirectTo);
+  return new Response(null, { status: 302, headers });
 }

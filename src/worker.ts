@@ -8,7 +8,7 @@ import {
 import { handleGoogleLoginStart, handleGoogleLoginCallback } from './session/google';
 import { handleMicrosoftLoginStart, handleMicrosoftLoginCallback } from './session/microsoft';
 import type { AuthorizeEnv } from './session';
-import { handleApiRequest as handleDataApiRequest, handleGitHubAuthStatus, handleAuthStatus, handleIdentityStatus, handleOrgCreate, handleSelectOrg, handleOrgMembers, handleAutoSelectOrg, handleMagicLinkRequest } from './routes/data';
+import { handleApiRequest as handleDataApiRequest, handleGitHubAuthStatus, handleAuthStatus, handleIdentityStatus, handleOrgCreate, handleSelectOrg, handleOrgMembers, handleAutoSelectOrg, handleMagicLinkRequest, handleMagicLinkVerify } from './routes/data';
 import { handleApiRequest as handleLayoutApiRequest } from './routes/layout';
 import { handleMcp } from './mcp/handler';
 import {
@@ -103,6 +103,10 @@ export default {
     }
     if (pathname === '/api/auth/magic-link' && request.method === 'POST') {
       const res = await handleMagicLinkRequest(request, env);
+      if (res) return res;
+    }
+    if (pathname === '/auth/magic') {
+      const res = await handleMagicLinkVerify(request, env);
       if (res) return res;
     }
     if (pathname === '/api/auth/organizations' && request.method === 'POST') {
