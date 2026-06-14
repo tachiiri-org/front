@@ -134,31 +134,45 @@ const generateLoginHtml = (clientJsPath: string): string => `<!doctype html>
 *{box-sizing:border-box;margin:0;padding:0}
 body{background:#0f172a;color:#cbd5e1;font-family:monospace;display:flex;align-items:center;justify-content:center;min-height:100vh}
 .lc{background:#1e293b;border:1px solid #334155;border-radius:12px;padding:32px;width:100%;max-width:360px}
-h1{color:#f1f5f9;font-size:24px;font-weight:700;margin-bottom:24px;text-align:center}
+h1{color:#f1f5f9;font-size:24px;font-weight:700;margin-bottom:20px;text-align:center}
 .ob{display:block;padding:10px 16px;border-radius:6px;border:1px solid #334155;background:#0f172a;color:#cbd5e1;font-size:14px;cursor:pointer;width:100%;font-family:monospace;text-decoration:none;text-align:center}
 .ob+.ob{margin-top:8px}
-.dv{display:flex;align-items:center;gap:12px;margin:20px 0;color:#64748b;font-size:12px}
+#l-tabs{display:flex;border-bottom:1px solid #334155;margin-bottom:20px}
+.ltab{background:none;border:none;border-bottom:2px solid transparent;cursor:pointer;font-family:monospace;font-size:13px;padding:8px 16px;margin-bottom:-1px;color:#64748b}
+.ltab.active{color:#f1f5f9;border-bottom-color:#3b82f6;font-weight:600}
+#l-panel-new-group{display:none}
+.linput{width:100%;padding:10px 12px;background:#0f172a;border:1px solid #334155;border-radius:6px;color:#cbd5e1;font-size:14px;font-family:monospace;outline:none;display:block;margin-bottom:8px}
+.lbtn{width:100%;padding:10px 16px;background:#3b82f6;border:none;border-radius:6px;color:#fff;font-size:14px;font-family:monospace;cursor:pointer;font-weight:600}
+#l-ml-section{display:none}
+.dv{display:flex;align-items:center;gap:12px;margin:16px 0;color:#64748b;font-size:12px}
 .dv::before,.dv::after{content:'';flex:1;height:1px;background:#334155}
-#l-email{width:100%;padding:10px 12px;background:#0f172a;border:1px solid #334155;border-radius:6px;color:#cbd5e1;font-size:14px;font-family:monospace;outline:none;display:block;margin-bottom:8px}
-#l-btn{width:100%;padding:10px 16px;background:#3b82f6;border:none;border-radius:6px;color:#fff;font-size:14px;font-family:monospace;cursor:pointer;font-weight:600}
 #l-status{margin-top:12px;font-size:13px;text-align:center;min-height:20px}
-#l-ctx{color:#64748b;font-size:13px;text-align:center;margin-bottom:16px;display:none}
 #l-err{background:#1f0a0a;border:1px solid #7f1d1d;border-radius:6px;color:#f87171;font-size:13px;padding:10px 12px;margin-bottom:16px;display:none}
-#l-group-name{width:100%;padding:10px 12px;background:#0f172a;border:1px solid #334155;border-radius:6px;color:#cbd5e1;font-size:14px;font-family:monospace;outline:none;display:none;margin-bottom:8px}
 </style>
 </head>
 <body>
 <div class="lc">
   <h1>Tempri</h1>
   <div id="l-err">マジックリンクが無効または期限切れです</div>
-  <div id="l-ctx"></div>
-  <a class="ob" href="/oauth/github/start">GitHub でログイン</a>
-  <a class="ob" href="/oauth/google/start">Google でログイン</a>
-  <a class="ob" href="/oauth/microsoft/start">Microsoft でログイン</a>
-  <div class="dv">または</div>
-  <input type="text" id="l-group-name" placeholder="組織名">
-  <input type="email" id="l-email" placeholder="メールアドレス">
-  <button id="l-btn">マジックリンクを送信</button>
+  <div id="l-tabs">
+    <button id="l-tab-login" class="ltab active">ログイン</button>
+    <button id="l-tab-new-group" class="ltab">新規グループ作成</button>
+  </div>
+  <div id="l-panel-login">
+    <a class="ob" href="/oauth/github/start">GitHub でログイン</a>
+    <a class="ob" href="/oauth/google/start">Google でログイン</a>
+    <a class="ob" href="/oauth/microsoft/start">Microsoft でログイン</a>
+    <div id="l-ml-section">
+      <div class="dv">または</div>
+      <input type="email" id="l-email-login" class="linput" placeholder="メールアドレス">
+      <button id="l-btn-login" class="lbtn">マジックリンクを送信</button>
+    </div>
+  </div>
+  <div id="l-panel-new-group">
+    <input type="text" id="l-group-name" class="linput" placeholder="グループ名">
+    <input type="email" id="l-email" class="linput" placeholder="メールアドレス">
+    <button id="l-btn" class="lbtn">マジックリンクを送信</button>
+  </div>
   <div id="l-status"></div>
 </div>
 <script type="module" src="${escapeHtml(clientJsPath)}"></script>

@@ -345,13 +345,13 @@ export async function searchOrganizationsByName(env: AuthorizeEnv, name: string)
 export async function verifyMagicLinkToken(
   env: AuthorizeEnv,
   token: string,
-): Promise<{ email: string; purpose: string; org_id: string | null; group_name: string | null } | null> {
+): Promise<{ email: string; purpose: string; group_id: string | null; group_name: string | null } | null> {
   const res = await authorizeFetch(env, {
     path: `/api/v1/identity/magic-link/${encodeURIComponent(token)}`,
     method: "GET",
   });
   if (!res.ok) return null;
-  return (await res.json()) as { email: string; purpose: string; org_id: string | null; group_name: string | null };
+  return (await res.json()) as { email: string; purpose: string; group_id: string | null; group_name: string | null };
 }
 
 export async function createBareUser(env: AuthorizeEnv): Promise<string> {

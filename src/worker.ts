@@ -55,7 +55,7 @@ const getNavCookies = (request: Request): { userId: string | null; orgId: string
     const m = header.match(new RegExp('(?:^|;\\s*)' + name + '=([^;]*)'));
     return m ? decodeURIComponent(m[1]) : null;
   };
-  return { userId: get('identity_user_id'), orgId: get('identity_org_id') };
+  return { userId: get('identity_user_id'), orgId: get('identity_group_id') };
 };
 
 const isPublicPath = (pathname: string): boolean =>

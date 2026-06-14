@@ -846,7 +846,7 @@ const hydrateOrgSelectComponents = async (): Promise<void> => {
   const updateSelectBtnHref = (): void => {
     if (!(pickerEl instanceof HTMLSelectElement) || !(selectBtnEl instanceof HTMLAnchorElement)) return;
     const orgId = pickerEl.value;
-    selectBtnEl.href = orgId ? `/api/auth/select-org?org_id=${encodeURIComponent(orgId)}` : '#';
+    selectBtnEl.href = orgId ? `/api/auth/select-org?group_id=${encodeURIComponent(orgId)}` : '#';
   };
 
   if (pickerEl instanceof HTMLSelectElement) {
@@ -873,7 +873,7 @@ const hydrateOrgSelectComponents = async (): Promise<void> => {
           });
           if (!res.ok) return;
           const org = await res.json() as { id: string };
-          window.location.href = `/api/auth/select-org?org_id=${encodeURIComponent(org.id)}`;
+          window.location.href = `/api/auth/select-org?group_id=${encodeURIComponent(org.id)}`;
         } finally {
           createBtnEl.disabled = false;
         }

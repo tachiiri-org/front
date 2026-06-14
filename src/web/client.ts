@@ -129,7 +129,7 @@ const renderNav = async (screenId: string): Promise<void> => {
       const identity = (await identityResult.value.json()) as IdentityStatus;
       if (identity.user_id) {
         hasIdentitySession = true;
-        const rawOrgId = document.cookie.match(/(?:^|; )identity_org_id=([^;]*)/)?.[1];
+        const rawOrgId = document.cookie.match(/(?:^|; )identity_group_id=([^;]*)/)?.[1];
         const currentOrgId = rawOrgId ? decodeURIComponent(rawOrgId) : null;
         const orgSelect = document.createElement('select');
         orgSelect.style.cssText =
@@ -150,7 +150,7 @@ const renderNav = async (screenId: string): Promise<void> => {
         orgSelect.addEventListener('change', async () => {
           const orgId = orgSelect.value;
           if (!orgId) return;
-          await fetch(`/api/auth/select-org?org_id=${encodeURIComponent(orgId)}`, { redirect: 'manual' });
+          await fetch(`/api/auth/select-org?group_id=${encodeURIComponent(orgId)}`, { redirect: 'manual' });
           window.location.reload();
         });
         nav.appendChild(orgSelect);
@@ -408,7 +408,7 @@ const loadEditorBootstrap = async (): Promise<void> => {
     return;
   }
 
-  if (!getCookie('identity_org_id')) {
+  if (!getCookie('identity_group_id')) {
     const res = await fetch('/api/auth/identity-status').catch(() => null);
     const status = res?.ok ? (await res.json() as { user_id: string | null }) : null;
     if (status?.user_id) {

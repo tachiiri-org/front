@@ -21,184 +21,219 @@ function el<K extends keyof HTMLElementTagNameMap>(
   return e;
 }
 
-function divider(): HTMLElement {
+const inputStyle: Partial<CSSStyleDeclaration> = {
+  width: '100%', padding: '10px 12px', background: '#0f172a',
+  border: `1px solid ${C.border}`, borderRadius: '6px', color: C.text,
+  fontSize: '14px', fontFamily: 'monospace', boxSizing: 'border-box',
+  marginBottom: '8px', outline: 'none', display: 'block',
+};
+
+function divider(text = 'または'): HTMLElement {
   const wrap = el('div', {
     display: 'flex', alignItems: 'center', gap: '12px',
-    margin: '20px 0', color: C.dim, fontSize: '12px',
+    margin: '16px 0', color: C.dim, fontSize: '12px',
   });
   const line = () => el('div', { flex: '1', height: '1px', background: C.border });
   wrap.appendChild(line());
-  wrap.appendChild(el('span', {}, 'または'));
+  wrap.appendChild(el('span', {}, text));
   wrap.appendChild(line());
   return wrap;
 }
 
-// Wire up interactivity given references to the required DOM elements.
+const tabActiveStyle: Partial<CSSStyleDeclaration> = {
+  color: C.bright, borderBottomColor: C.accent, fontWeight: '600',
+};
+const tabInactiveStyle: Partial<CSSStyleDeclaration> = {
+  color: C.dim, borderBottomColor: 'transparent', fontWeight: '400',
+};
+
 function wire(
-  emailInput: HTMLInputElement,
-  sendBtn: HTMLButtonElement,
-  statusEl: HTMLElement,
+  tabLoginEl: HTMLButtonElement,
+  tabNewGroupEl: HTMLButtonElement,
+  panelLoginEl: HTMLElement,
+  panelNewGroupEl: HTMLElement,
   errEl: HTMLElement | null,
-  ctxEl: HTMLElement | null,
-  groupNameInput: HTMLInputElement | null,
-  isOrgCreate: boolean,
-  orgParam: string | null,
+  statusEl: HTMLElement,
+  isGroupCreate: boolean,
+  groupParam: string | null,
   errorParam: string | null,
 ): void {
-  // Show/hide static sections based on URL params
+  // Error message
   if (errEl) {
     errEl.style.display =
       errorParam === 'invalid_magic_link' ? '' :
       errorParam === 'not_a_member' ? '' : 'none';
     if (errorParam === 'not_a_member') {
-      errEl.textContent = 'このメールアドレスはこの組織に登録されていません';
-    }
-  }
-  if (ctxEl) {
-    if (isOrgCreate) {
-      ctxEl.textContent = '新しい組織を作成します';
-      ctxEl.style.display = '';
-    } else if (orgParam) {
-      ctxEl.textContent = '組織専用ログイン';
-      ctxEl.style.display = '';
-    } else {
-      ctxEl.style.display = 'none';
+      errEl.textContent = 'このメールアドレスはこのグループに登録されていません';
     }
   }
 
-  // group_name field: show only in org_create mode
-  if (groupNameInput) {
-    groupNameInput.style.display = isOrgCreate ? 'block' : 'none';
+  const setTab = (tab: 'login' | 'new-group'): void => {
+    Object.assign(tabLoginEl.style, tab === 'login' ? tabActiveStyle : tabInactiveStyle);
+    Object.assign(tabNewGroupEl.style, tab === 'new-group' ? tabActiveStyle : tabInactiveStyle);
+    panelLoginEl.style.display = tab === 'login' ? 'block' : 'none';
+    panelNewGroupEl.style.display = tab === 'new-group' ? 'block' : 'none';
+  };
+
+  setTab(isGroupCreate ? 'new-group' : 'login');
+  tabLoginEl.addEventListener('click', () => { setTab('login'); statusEl.textContent = ''; });
+  tabNewGroupEl.addEventListener('click', () => { setTab('new-group'); statusEl.textContent = ''; });
+
+  // Login panel: magic link section (only for group-specific URL)
+  const mlSection = panelLoginEl.querySelector<HTMLElement>('#l-ml-section');
+  if (mlSection) {
+    mlSection.style.display = groupParam ? 'block' : 'none';
   }
 
-  const purpose = isOrgCreate ? 'org_create' : 'login';
-
-  const send = async (): Promise<void> => {
-    const email = emailInput.value.trim();
-    if (!email) {
-      statusEl.textContent = 'メールアドレスを入力してください';
-      statusEl.style.color = C.error;
-      return;
-    }
-    if (isOrgCreate && groupNameInput) {
-      const groupName = groupNameInput.value.trim();
-      if (!groupName) {
-        statusEl.textContent = '組織名を入力してください';
+  // Login panel: group-specific magic link send
+  const emailLoginInput = panelLoginEl.querySelector<HTMLInputElement>('#l-email-login');
+  const btnLogin = panelLoginEl.querySelector<HTMLButtonElement>('#l-btn-login');
+  if (groupParam && emailLoginInput && btnLogin) {
+    const sendGroupLogin = async (): Promise<void> => {
+      const email = emailLoginInput.value.trim();
+      if (!email) {
+        statusEl.textContent = 'メールアドレスを入力してください';
         statusEl.style.color = C.error;
         return;
       }
-    }
-
-    // For org-specific login: validate email membership before sending
-    if (orgParam && !isOrgCreate) {
-      sendBtn.disabled = true;
-      sendBtn.textContent = '確認中...';
+      btnLogin.disabled = true;
+      btnLogin.textContent = '確認中...';
       statusEl.textContent = '';
       try {
         const checkRes = await fetch(
-          `/api/auth/member-check?group_id=${encodeURIComponent(orgParam)}&email=${encodeURIComponent(email)}`,
+          `/api/auth/member-check?group_id=${encodeURIComponent(groupParam)}&email=${encodeURIComponent(email)}`,
         );
         if (checkRes.status === 404) {
-          statusEl.textContent = 'このメールアドレスはこの組織に登録されていません';
+          statusEl.textContent = 'このメールアドレスはこのグループに登録されていません';
           statusEl.style.color = C.error;
-          sendBtn.disabled = false;
-          sendBtn.textContent = 'マジックリンクを送信';
+          btnLogin.disabled = false;
+          btnLogin.textContent = 'マジックリンクを送信';
           return;
         }
         if (!checkRes.ok) {
           statusEl.textContent = 'エラーが発生しました。もう一度お試しください。';
           statusEl.style.color = C.error;
-          sendBtn.disabled = false;
-          sendBtn.textContent = 'マジックリンクを送信';
+          btnLogin.disabled = false;
+          btnLogin.textContent = 'マジックリンクを送信';
           return;
         }
       } catch {
         statusEl.textContent = 'ネットワークエラーが発生しました。';
         statusEl.style.color = C.error;
-        sendBtn.disabled = false;
-        sendBtn.textContent = 'マジックリンクを送信';
+        btnLogin.disabled = false;
+        btnLogin.textContent = 'マジックリンクを送信';
         return;
       }
-    }
-
-    sendBtn.disabled = true;
-    sendBtn.textContent = '送信中...';
-    statusEl.textContent = '';
-    try {
-      const body: Record<string, string> = { email, purpose };
-      if (orgParam) body.org_id = orgParam;
-      if (isOrgCreate && groupNameInput) {
-        const groupName = groupNameInput.value.trim();
-        if (groupName) body.group_name = groupName;
-      }
-      const res = await fetch('/api/auth/magic-link', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify(body),
-      });
-      if (res.ok) {
-        statusEl.textContent = 'メールを送信しました。リンクをクリックしてログインしてください。';
-        statusEl.style.color = C.success;
-        emailInput.disabled = true;
-        if (groupNameInput) groupNameInput.disabled = true;
-        sendBtn.textContent = '送信済み';
-      } else {
-        statusEl.textContent = 'エラーが発生しました。もう一度お試しください。';
+      btnLogin.textContent = '送信中...';
+      try {
+        const res = await fetch('/api/auth/magic-link', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ email, purpose: 'login', group_id: groupParam }),
+        });
+        if (res.ok) {
+          statusEl.textContent = 'メールを送信しました。リンクをクリックしてログインしてください。';
+          statusEl.style.color = C.success;
+          emailLoginInput.disabled = true;
+          btnLogin.textContent = '送信済み';
+        } else {
+          statusEl.textContent = 'エラーが発生しました。もう一度お試しください。';
+          statusEl.style.color = C.error;
+          btnLogin.disabled = false;
+          btnLogin.textContent = 'マジックリンクを送信';
+        }
+      } catch {
+        statusEl.textContent = 'ネットワークエラーが発生しました。';
         statusEl.style.color = C.error;
-        sendBtn.disabled = false;
-        sendBtn.textContent = 'マジックリンクを送信';
+        btnLogin.disabled = false;
+        btnLogin.textContent = 'マジックリンクを送信';
       }
-    } catch {
-      statusEl.textContent = 'ネットワークエラーが発生しました。';
-      statusEl.style.color = C.error;
-      sendBtn.disabled = false;
-      sendBtn.textContent = 'マジックリンクを送信';
-    }
-  };
+    };
+    btnLogin.addEventListener('click', () => void sendGroupLogin());
+    emailLoginInput.addEventListener('keydown', (e) => { if (e.key === 'Enter') void sendGroupLogin(); });
+  }
 
-  sendBtn.addEventListener('click', () => void send());
-  emailInput.addEventListener('keydown', (e) => { if (e.key === 'Enter') void send(); });
-  if (groupNameInput) {
-    groupNameInput.addEventListener('keydown', (e) => { if (e.key === 'Enter') void send(); });
+  // New group panel: group_create magic link send
+  const groupNameInput = panelNewGroupEl.querySelector<HTMLInputElement>('#l-group-name');
+  const emailNewInput = panelNewGroupEl.querySelector<HTMLInputElement>('#l-email');
+  const btnNew = panelNewGroupEl.querySelector<HTMLButtonElement>('#l-btn');
+  if (groupNameInput && emailNewInput && btnNew) {
+    const sendNewGroup = async (): Promise<void> => {
+      const groupName = groupNameInput.value.trim();
+      const email = emailNewInput.value.trim();
+      if (!groupName) {
+        statusEl.textContent = 'グループ名を入力してください';
+        statusEl.style.color = C.error;
+        return;
+      }
+      if (!email) {
+        statusEl.textContent = 'メールアドレスを入力してください';
+        statusEl.style.color = C.error;
+        return;
+      }
+      btnNew.disabled = true;
+      btnNew.textContent = '送信中...';
+      statusEl.textContent = '';
+      try {
+        const res = await fetch('/api/auth/magic-link', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ email, purpose: 'group_create', group_name: groupName }),
+        });
+        if (res.ok) {
+          statusEl.textContent = 'メールを送信しました。リンクをクリックしてグループを作成してください。';
+          statusEl.style.color = C.success;
+          groupNameInput.disabled = true;
+          emailNewInput.disabled = true;
+          btnNew.textContent = '送信済み';
+        } else {
+          statusEl.textContent = 'エラーが発生しました。もう一度お試しください。';
+          statusEl.style.color = C.error;
+          btnNew.disabled = false;
+          btnNew.textContent = 'マジックリンクを送信';
+        }
+      } catch {
+        statusEl.textContent = 'ネットワークエラーが発生しました。';
+        statusEl.style.color = C.error;
+        btnNew.disabled = false;
+        btnNew.textContent = 'マジックリンクを送信';
+      }
+    };
+    btnNew.addEventListener('click', () => void sendNewGroup());
+    groupNameInput.addEventListener('keydown', (e) => { if (e.key === 'Enter') void sendNewGroup(); });
+    emailNewInput.addEventListener('keydown', (e) => { if (e.key === 'Enter') void sendNewGroup(); });
   }
 }
 
 export const renderLoginPage = (root: HTMLElement): void => {
   const params = new URLSearchParams(window.location.search);
   const nextParam = params.get('next');
-  const orgParam = params.get('org');
+  const groupParam = params.get('group');
   const errorParam = params.get('error');
-  const isOrgCreate = nextParam === 'org_create';
+  const isGroupCreate = nextParam === 'group_create';
 
-  if (orgParam) {
-    document.cookie = `magic_org_id=${encodeURIComponent(orgParam)}; Path=/; Max-Age=600; SameSite=Lax`;
+  if (groupParam) {
+    document.cookie = `magic_group_id=${encodeURIComponent(groupParam)}; Path=/; Max-Age=600; SameSite=Lax`;
   }
-  if (isOrgCreate) {
-    document.cookie = `login_intent=org_create; Path=/; Max-Age=600; SameSite=Lax`;
+  if (isGroupCreate) {
+    document.cookie = `login_intent=group_create; Path=/; Max-Age=600; SameSite=Lax`;
   }
 
   document.body.style.cssText =
     `background:${C.bg};margin:0;display:flex;align-items:center;justify-content:center;min-height:100vh;font-family:monospace;`;
 
-  const inputStyle: Partial<CSSStyleDeclaration> = {
-    width: '100%', padding: '10px 12px', background: '#0f172a',
-    border: `1px solid ${C.border}`, borderRadius: '6px', color: C.text,
-    fontSize: '14px', fontFamily: 'monospace', boxSizing: 'border-box',
-    marginBottom: '8px', outline: 'none',
-  };
-
-  // Hydrate pre-rendered static HTML if elements are already in the DOM
-  const emailInput = document.getElementById('l-email') as HTMLInputElement | null;
-  const sendBtn = document.getElementById('l-btn') as HTMLButtonElement | null;
+  // Hydrate pre-rendered static HTML if tab elements are already in the DOM
+  const tabLoginEl = document.getElementById('l-tab-login') as HTMLButtonElement | null;
+  const tabNewGroupEl = document.getElementById('l-tab-new-group') as HTMLButtonElement | null;
+  const panelLoginEl = document.getElementById('l-panel-login') as HTMLElement | null;
+  const panelNewGroupEl = document.getElementById('l-panel-new-group') as HTMLElement | null;
   const statusEl = document.getElementById('l-status') as HTMLElement | null;
-  if (emailInput && sendBtn && statusEl) {
-    const groupNameInput = document.getElementById('l-group-name') as HTMLInputElement | null;
+  if (tabLoginEl && tabNewGroupEl && panelLoginEl && panelNewGroupEl && statusEl) {
     wire(
-      emailInput, sendBtn, statusEl,
+      tabLoginEl, tabNewGroupEl, panelLoginEl, panelNewGroupEl,
       document.getElementById('l-err'),
-      document.getElementById('l-ctx'),
-      groupNameInput,
-      isOrgCreate, orgParam, errorParam,
+      statusEl,
+      isGroupCreate, groupParam, errorParam,
     );
     return;
   }
@@ -215,7 +250,7 @@ export const renderLoginPage = (root: HTMLElement): void => {
   });
 
   card.appendChild(el('h1', {
-    color: C.bright, fontSize: '24px', fontWeight: '700', margin: '0 0 24px 0', textAlign: 'center',
+    color: C.bright, fontSize: '24px', fontWeight: '700', margin: '0 0 20px 0', textAlign: 'center',
   }, 'Tempri'));
 
   const errEl = el('div', {
@@ -226,17 +261,33 @@ export const renderLoginPage = (root: HTMLElement): void => {
   errEl.id = 'l-err';
   card.appendChild(errEl);
 
-  const ctxEl = el('div', { color: C.dim, fontSize: '13px', marginBottom: '16px', textAlign: 'center', display: 'none' });
-  ctxEl.id = 'l-ctx';
-  card.appendChild(ctxEl);
+  // Tab bar
+  const tabBar = el('div', {
+    display: 'flex', borderBottom: `1px solid ${C.border}`, marginBottom: '20px',
+  });
+  const tabStyle: Partial<CSSStyleDeclaration> = {
+    background: 'none', border: 'none', borderBottom: '2px solid transparent',
+    cursor: 'pointer', fontFamily: 'monospace', fontSize: '13px',
+    padding: '8px 16px', marginBottom: '-1px',
+  };
+  const newTabLogin = el('button', { ...tabStyle }, 'ログイン') as HTMLButtonElement;
+  newTabLogin.id = 'l-tab-login';
+  const newTabNewGroup = el('button', { ...tabStyle }, '新規グループ作成') as HTMLButtonElement;
+  newTabNewGroup.id = 'l-tab-new-group';
+  tabBar.appendChild(newTabLogin);
+  tabBar.appendChild(newTabNewGroup);
+  card.appendChild(tabBar);
 
+  // Login panel
+  const newPanelLogin = el('div');
+  newPanelLogin.id = 'l-panel-login';
+  const oauthSection = el('div', { display: 'flex', flexDirection: 'column', gap: '8px' });
   const btnBase: Partial<CSSStyleDeclaration> = {
     display: 'block', padding: '10px 16px', borderRadius: '6px',
     border: `1px solid ${C.border}`, background: '#0f172a', color: C.text,
     fontSize: '14px', cursor: 'pointer', width: '100%', fontFamily: 'monospace',
     textDecoration: 'none', boxSizing: 'border-box', textAlign: 'center',
   };
-  const oauthSection = el('div', { display: 'flex', flexDirection: 'column', gap: '8px' });
   for (const [label, href] of [
     ['GitHub でログイン', '/oauth/github/start'],
     ['Google でログイン', '/oauth/google/start'],
@@ -246,30 +297,50 @@ export const renderLoginPage = (root: HTMLElement): void => {
     btn.href = href;
     oauthSection.appendChild(btn);
   }
-  card.appendChild(oauthSection);
-  card.appendChild(divider());
-
-  const newGroupNameInput = el('input') as HTMLInputElement;
-  newGroupNameInput.id = 'l-group-name';
-  Object.assign(newGroupNameInput.style, { ...inputStyle, display: 'none' });
-  newGroupNameInput.type = 'text';
-  newGroupNameInput.placeholder = '組織名';
-  card.appendChild(newGroupNameInput);
-
-  const newEmailInput = el('input') as HTMLInputElement;
-  newEmailInput.id = 'l-email';
-  Object.assign(newEmailInput.style, inputStyle);
-  newEmailInput.type = 'email';
-  newEmailInput.placeholder = 'メールアドレス';
-  card.appendChild(newEmailInput);
-
-  const newSendBtn = el('button', {
+  newPanelLogin.appendChild(oauthSection);
+  // Group-specific magic link section
+  const mlSection = el('div', { display: 'none' });
+  mlSection.id = 'l-ml-section';
+  mlSection.appendChild(divider());
+  const emailLoginInput = el('input') as HTMLInputElement;
+  emailLoginInput.id = 'l-email-login';
+  Object.assign(emailLoginInput.style, inputStyle);
+  emailLoginInput.type = 'email';
+  emailLoginInput.placeholder = 'メールアドレス';
+  mlSection.appendChild(emailLoginInput);
+  const btnLoginSend = el('button', {
     width: '100%', padding: '10px 16px', background: C.accent, border: 'none',
     borderRadius: '6px', color: '#fff', fontSize: '14px', fontFamily: 'monospace',
     cursor: 'pointer', fontWeight: '600',
   }, 'マジックリンクを送信') as HTMLButtonElement;
-  newSendBtn.id = 'l-btn';
-  card.appendChild(newSendBtn);
+  btnLoginSend.id = 'l-btn-login';
+  mlSection.appendChild(btnLoginSend);
+  newPanelLogin.appendChild(mlSection);
+  card.appendChild(newPanelLogin);
+
+  // New group panel
+  const newPanelNewGroup = el('div', { display: 'none' });
+  newPanelNewGroup.id = 'l-panel-new-group';
+  const groupNameInput = el('input') as HTMLInputElement;
+  groupNameInput.id = 'l-group-name';
+  Object.assign(groupNameInput.style, inputStyle);
+  groupNameInput.type = 'text';
+  groupNameInput.placeholder = 'グループ名';
+  newPanelNewGroup.appendChild(groupNameInput);
+  const emailNewInput = el('input') as HTMLInputElement;
+  emailNewInput.id = 'l-email';
+  Object.assign(emailNewInput.style, inputStyle);
+  emailNewInput.type = 'email';
+  emailNewInput.placeholder = 'メールアドレス';
+  newPanelNewGroup.appendChild(emailNewInput);
+  const btnNewSend = el('button', {
+    width: '100%', padding: '10px 16px', background: C.accent, border: 'none',
+    borderRadius: '6px', color: '#fff', fontSize: '14px', fontFamily: 'monospace',
+    cursor: 'pointer', fontWeight: '600',
+  }, 'マジックリンクを送信') as HTMLButtonElement;
+  btnNewSend.id = 'l-btn';
+  newPanelNewGroup.appendChild(btnNewSend);
+  card.appendChild(newPanelNewGroup);
 
   const newStatusEl = el('div', { marginTop: '12px', fontSize: '13px', textAlign: 'center', minHeight: '20px' });
   newStatusEl.id = 'l-status';
@@ -277,5 +348,5 @@ export const renderLoginPage = (root: HTMLElement): void => {
 
   root.replaceChildren(card);
 
-  wire(newEmailInput, newSendBtn, newStatusEl, errEl, ctxEl, newGroupNameInput, isOrgCreate, orgParam, errorParam);
+  wire(newTabLogin, newTabNewGroup, newPanelLogin, newPanelNewGroup, errEl, newStatusEl, isGroupCreate, groupParam, errorParam);
 };

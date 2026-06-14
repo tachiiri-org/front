@@ -268,7 +268,7 @@ export async function handleMcpSelectOrg(request: Request, env: AuthorizeEnv): P
   <div class="scope">Scopes: ${params.scope}</div>
   ${organizations.length > 0
     ? `<form method="POST" action="/oauth/mcp/approve">
-         <select name="org_id" required>${options}</select>
+         <select name="group_id" required>${options}</select>
          <button type="submit">Authorize</button>
        </form>
        <hr>`
@@ -304,8 +304,8 @@ export async function handleMcpApprove(request: Request, env: AuthorizeEnv): Pro
   }
 
   const formData = await request.formData();
-  const groupId = formData.get("org_id") as string | null;
-  if (!groupId) return new Response("org_id required", { status: 400 });
+  const groupId = formData.get("group_id") as string | null;
+  if (!groupId) return new Response("group_id required", { status: 400 });
 
   const code = crypto.randomUUID();
   const expiresAt = Math.floor(Date.now() / 1000) + CODE_TTL;

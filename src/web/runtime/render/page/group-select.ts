@@ -55,7 +55,7 @@ export const renderGroupSelectPage = async (root: HTMLElement): Promise<void> =>
   }
 
   const loginIntent = getCookie('login_intent');
-  const isOrgCreate = loginIntent === 'org_create';
+  const isOrgCreate = loginIntent === 'group_create';
 
   // Try auto-select unless we're in org-create mode
   if (!isOrgCreate) {
@@ -73,7 +73,7 @@ export const renderGroupSelectPage = async (root: HTMLElement): Promise<void> =>
     padding: '32px', width: '100%', maxWidth: '400px', boxSizing: 'border-box',
   });
 
-  const title = isOrgCreate ? '新しい組織を作成' : 'グループを選択';
+  const title = isOrgCreate ? '新しいグループを作成' : 'グループを選択';
   card.appendChild(el('h1', {
     color: C.bright, fontSize: '22px', fontWeight: '700',
     margin: '0 0 24px 0', textAlign: 'center',
@@ -95,7 +95,7 @@ export const renderGroupSelectPage = async (root: HTMLElement): Promise<void> =>
       row.appendChild(el('span', { color: C.bright }, org.name));
       row.appendChild(el('span', { color: C.dim }, '→'));
       row.addEventListener('click', () => {
-        window.location.href = `/api/auth/select-org?org_id=${encodeURIComponent(org.id)}`;
+        window.location.href = `/api/auth/select-org?group_id=${encodeURIComponent(org.id)}`;
       });
       listSection.appendChild(row);
     }
@@ -107,7 +107,7 @@ export const renderGroupSelectPage = async (root: HTMLElement): Promise<void> =>
     });
     const line = () => el('div', { flex: '1', height: '1px', background: C.border });
     sep.appendChild(line());
-    sep.appendChild(el('span', {}, '新しい組織を作成'));
+    sep.appendChild(el('span', {}, '新しいグループを作成'));
     sep.appendChild(line());
     card.appendChild(sep);
   }
@@ -121,7 +121,7 @@ export const renderGroupSelectPage = async (root: HTMLElement): Promise<void> =>
     marginBottom: '8px', outline: 'none',
   });
   nameInput.type = 'text';
-  nameInput.placeholder = '組織名';
+  nameInput.placeholder = 'グループ名';
   card.appendChild(nameInput);
 
   const createBtn = el('button', {
@@ -135,7 +135,7 @@ export const renderGroupSelectPage = async (root: HTMLElement): Promise<void> =>
   const create = async (): Promise<void> => {
     const name = nameInput.value.trim();
     if (!name) {
-      status.textContent = '組織名を入力してください';
+      status.textContent = 'グループ名を入力してください';
       status.style.color = C.error;
       return;
     }
@@ -151,10 +151,10 @@ export const renderGroupSelectPage = async (root: HTMLElement): Promise<void> =>
       if (res.ok) {
         const org = (await res.json()) as { id: string; name: string };
         clearCookieClient('login_intent');
-        window.location.href = `/api/auth/select-org?org_id=${encodeURIComponent(org.id)}`;
+        window.location.href = `/api/auth/select-org?group_id=${encodeURIComponent(org.id)}`;
       } else {
         const data = (await res.json().catch(() => ({}))) as { error?: string };
-        status.textContent = data.error === 'name_required' ? '組織名を入力してください' : 'エラーが発生しました';
+        status.textContent = data.error === 'name_required' ? 'グループ名を入力してください' : 'エラーが発生しました';
         status.style.color = C.error;
         createBtn.disabled = false;
         createBtn.textContent = '作成';

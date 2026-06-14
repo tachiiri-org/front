@@ -422,11 +422,11 @@ export const handleApiRequest = async (request: Request, env: Env): Promise<Resp
   const cookies = parseCookies(request);
   const tenantContext = isBuildRequest
     ? {
-        tenantId: request.headers.get('x-org-id') ?? env.DEFAULT_ORG_ID ?? cookies.get('identity_org_id') ?? undefined,
+        tenantId: request.headers.get('x-org-id') ?? env.DEFAULT_ORG_ID ?? cookies.get('identity_group_id') ?? undefined,
         subjectId: undefined,
       }
     : {
-        tenantId: cookies.get('identity_org_id') ?? undefined,
+        tenantId: cookies.get('identity_group_id') ?? undefined,
         subjectId: cookies.get('identity_user_id') ?? undefined,
       };
   const screenNames = createScreenNameBackend(env, tenantContext);
@@ -552,7 +552,7 @@ export const handleApiRequest = async (request: Request, env: Env): Promise<Resp
   if (url.pathname === '/api/viewer/d1/databases' && request.method === 'GET') {
     const cookies = parseCookies(request);
     const tenantContext = {
-      tenantId: cookies.get('identity_org_id') ?? undefined,
+      tenantId: cookies.get('identity_group_id') ?? undefined,
       subjectId: cookies.get('identity_user_id') ?? undefined,
     };
     return authorizeFetch(env, { path: '/api/v1/d1/v4/databases', method: 'GET', tenantContext });
@@ -564,7 +564,7 @@ export const handleApiRequest = async (request: Request, env: Env): Promise<Resp
     const body = await request.text();
     const cookies = parseCookies(request);
     const tenantContext = {
-      tenantId: cookies.get('identity_org_id') ?? undefined,
+      tenantId: cookies.get('identity_group_id') ?? undefined,
       subjectId: cookies.get('identity_user_id') ?? undefined,
     };
     return authorizeFetch(env, {
@@ -579,7 +579,7 @@ export const handleApiRequest = async (request: Request, env: Env): Promise<Resp
   if (url.pathname === '/api/viewer/r2/buckets' && request.method === 'GET') {
     const cookies = parseCookies(request);
     const tenantContext = {
-      tenantId: cookies.get('identity_org_id') ?? undefined,
+      tenantId: cookies.get('identity_group_id') ?? undefined,
       subjectId: cookies.get('identity_user_id') ?? undefined,
     };
     return authorizeFetch(env, {
@@ -594,7 +594,7 @@ export const handleApiRequest = async (request: Request, env: Env): Promise<Resp
     const body = await request.text();
     const cookies = parseCookies(request);
     const tenantContext = {
-      tenantId: cookies.get('identity_org_id') ?? undefined,
+      tenantId: cookies.get('identity_group_id') ?? undefined,
       subjectId: cookies.get('identity_user_id') ?? undefined,
     };
     return authorizeFetch(env, {
@@ -609,7 +609,7 @@ export const handleApiRequest = async (request: Request, env: Env): Promise<Resp
     const body = await request.text();
     const cookies = parseCookies(request);
     const tenantContext = {
-      tenantId: cookies.get('identity_org_id') ?? undefined,
+      tenantId: cookies.get('identity_group_id') ?? undefined,
       subjectId: cookies.get('identity_user_id') ?? undefined,
     };
     return authorizeFetch(env, {
@@ -628,7 +628,7 @@ export const handleApiRequest = async (request: Request, env: Env): Promise<Resp
     const body = request.method !== 'GET' && request.method !== 'HEAD' ? await request.text() : undefined;
     const cookies = parseCookies(request);
     const tenantContext = {
-      tenantId: cookies.get('identity_org_id') ?? undefined,
+      tenantId: cookies.get('identity_group_id') ?? undefined,
       subjectId: cookies.get('identity_user_id') ?? undefined,
     };
     try {

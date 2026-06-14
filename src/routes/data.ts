@@ -211,15 +211,15 @@ export async function handleAutoSelectOrg(request: Request, env: AuthorizeEnv): 
     return json({ error: 'not_authenticated' }, { status: 401 });
   }
 
-  const magicOrgId = cookies.get('magic_org_id') ? decodeURIComponent(cookies.get('magic_org_id')!) : null;
-  const groupId = magicOrgId ?? (await getDefaultGroup(env, userId).catch(() => null));
+  const magicGroupId = cookies.get('magic_group_id') ? decodeURIComponent(cookies.get('magic_group_id')!) : null;
+  const groupId = magicGroupId ?? (await getDefaultGroup(env, userId).catch(() => null));
   if (!groupId) {
     return json({ group_id: null }, { status: 404 });
   }
 
   const isSecure = url.protocol === 'https:';
   const headers = new Headers({ 'Content-Type': 'application/json; charset=utf-8' });
-  headers.append('Set-Cookie', `identity_org_id=${encodeURIComponent(groupId)}; Path=/; Max-Age=${60 * 60 * 24}${isSecure ? '; Secure' : ''}; SameSite=Lax`);
+  headers.append('Set-Cookie', `identity_group_id=${encodeURIComponent(groupId)}; Path=/; Max-Age=${60 * 60 * 24}${isSecure ? '; Secure' : ''}; SameSite=Lax`);
 
   const magicEmail = cookies.get('magic_email') ? decodeURIComponent(cookies.get('magic_email')!) : null;
   const [githubSession, googleSession] = await Promise.allSettled([
@@ -236,9 +236,9 @@ export async function handleAutoSelectOrg(request: Request, env: AuthorizeEnv): 
       headers.append('Set-Cookie', `org_user_id=${encodeURIComponent(orgUser.orgUserId)}; Path=/; Max-Age=${60 * 60 * 24}${isSecure ? '; Secure' : ''}; SameSite=Lax; HttpOnly`);
     }
   }
-  if (magicEmail || magicOrgId) {
+  if (magicEmail || magicGroupId) {
     headers.append('Set-Cookie', `magic_email=; Path=/; Max-Age=0`);
-    headers.append('Set-Cookie', `magic_org_id=; Path=/; Max-Age=0`);
+    headers.append('Set-Cookie', `magic_group_id=; Path=/; Max-Age=0`);
   }
 
   return new Response(JSON.stringify({ group_id: groupId }), { status: 200, headers });
@@ -250,9 +250,9 @@ export async function handleSelectOrg(request: Request, env: AuthorizeEnv): Prom
     return null;
   }
 
-  const orgId = url.searchParams.get('org_id');
+  const orgId = url.searchParams.get('group_id');
   if (!orgId) {
-    return json({ error: 'org_id_required' }, { status: 400 });
+    return json({ error: 'group_id_required' }, { status: 400 });
   }
 
   const cookies = parseCookies(request);
@@ -260,7 +260,7 @@ export async function handleSelectOrg(request: Request, env: AuthorizeEnv): Prom
   const isSecure = url.protocol === 'https:';
   const headers = new Headers();
   headers.set('Location', '/');
-  headers.append('Set-Cookie', `identity_org_id=${encodeURIComponent(orgId)}; Path=/; Max-Age=${60 * 60 * 24}${isSecure ? '; Secure' : ''}; SameSite=Lax`);
+  headers.append('Set-Cookie', `identity_group_id=${encodeURIComponent(orgId)}; Path=/; Max-Age=${60 * 60 * 24}${isSecure ? '; Secure' : ''}; SameSite=Lax`);
 
   if (identityUserId) {
     const magicEmail = cookies.get('magic_email') ? decodeURIComponent(cookies.get('magic_email')!) : null;
@@ -280,7 +280,7 @@ export async function handleSelectOrg(request: Request, env: AuthorizeEnv): Prom
     }
     if (magicEmail) {
       headers.append('Set-Cookie', `magic_email=; Path=/; Max-Age=0`);
-      headers.append('Set-Cookie', `magic_org_id=; Path=/; Max-Age=0`);
+      headers.append('Set-Cookie', `magic_group_id=; Path=/; Max-Age=0`);
     }
   }
 
@@ -345,7 +345,7 @@ export async function handleMagicLinkRequest(
   const url = new URL(request.url);
   if (url.pathname !== '/api/auth/magic-link' || request.method !== 'POST') return null;
 
-  const body = (await request.json()) as { email?: string; purpose?: string; org_id?: string; group_name?: string };
+  const body = (await request.json()) as { email?: string; purpose?: string; group_id?: string; group_name?: string };
   const res = await authorizeFetch(env, {
     path: '/api/v1/identity/magic-link/request',
     method: 'POST',
@@ -378,7 +378,7 @@ export async function handleMagicLinkVerify(
   const headers = new Headers();
 
   try {
-    if (result.purpose === 'org_create' && result.group_name) {
+    if (result.purpose === 'group_create' && result.group_name) {
       // Create user + group, register email in group DB
       const userId = await createBareUser(env);
       const org = await createOrganization(env, userId, result.group_name);
@@ -386,22 +386,22 @@ export async function handleMagicLinkVerify(
 
       headers.append('Set-Cookie', `identity_user_id=${encodeURIComponent(userId)}; ${longCookieOpts}; HttpOnly`);
       headers.append('Set-Cookie', `magic_email=${encodeURIComponent(result.email)}; ${shortCookieOpts}`);
-      headers.append('Set-Cookie', `magic_org_id=${encodeURIComponent(org.id)}; ${shortCookieOpts}`);
+      headers.append('Set-Cookie', `magic_group_id=${encodeURIComponent(org.id)}; ${shortCookieOpts}`);
       headers.append('Set-Cookie', `login_intent=; Path=/; Max-Age=0`);
       headers.set('Location', '/group-select');
       return new Response(null, { status: 302, headers });
     }
 
-    if (result.purpose === 'login' && result.org_id) {
+    if (result.purpose === 'login' && result.group_id) {
       // Look up identity_user_id from group's member list
-      const userId = await findMemberByEmail(env, result.org_id, result.email);
+      const userId = await findMemberByEmail(env, result.group_id, result.email);
       if (!userId) {
         return new Response(null, { status: 302, headers: { Location: '/login?error=not_a_member' } });
       }
 
       headers.append('Set-Cookie', `identity_user_id=${encodeURIComponent(userId)}; ${longCookieOpts}; HttpOnly`);
       headers.append('Set-Cookie', `magic_email=${encodeURIComponent(result.email)}; ${shortCookieOpts}`);
-      headers.append('Set-Cookie', `magic_org_id=${encodeURIComponent(result.org_id)}; ${shortCookieOpts}`);
+      headers.append('Set-Cookie', `magic_group_id=${encodeURIComponent(result.group_id)}; ${shortCookieOpts}`);
       headers.set('Location', '/group-select');
       return new Response(null, { status: 302, headers });
     }
