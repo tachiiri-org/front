@@ -1,6 +1,6 @@
 import type { SpecDocument } from '../shared/spec-document';
 import type { UiShellSettings } from '../shared/ui-shell-settings';
-import { readGitHubSession, readGitHubConnectSession, readGoogleSession, readMicrosoftSession, listUserOrganizations, createOrganization, resolveOrgUser, getDefaultGroup, verifyMagicLinkToken, createBareUser, findMemberByEmail, registerGroupMember } from '../identify';
+import { readGitHubSession, readGitHubConnectSession, readGoogleSession, readMicrosoftSession, listUserOrganizations, createOrganization, resolveOrgUser, getDefaultGroup, verifyMagicLinkToken, createBareUser, findMemberByEmail, registerGroupMember, fetchGroupInfo } from '../identify';
 import { parseCookies } from '../session/cookies';
 import { authorizeFetch } from '../session/fetch';
 import type { AuthorizeEnv } from '../session';
@@ -447,4 +447,42 @@ export async function handleMemberCheck(
       status: 500, headers: { 'Content-Type': 'application/json' },
     });
   }
+}
+
+const escHtml = (s: string): string =>
+  s.replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;').replace(/"/g, '&quot;');
+
+// GET /login/:groupId — server-renders group-specific login page with injected group info
+export async function handleGroupLoginPage(
+  request: Request,
+  env: AuthorizeEnv,
+  clientJsPath: string,
+): Promise<Response | null> {
+  const url = new URL(request.url);
+  const match = url.pathname.match(/^\/login\/([0-9a-f-]{36})$/i);
+  if (!match || request.method !== 'GET') return null;
+
+  const groupId = match[1];
+  const info = await fetchGroupInfo(env, groupId).catch(() => null);
+
+  const payload = JSON.stringify({ id: groupId, name: info?.name ?? null });
+  const safeJson = payload.replace(/<\/script>/gi, '<\\/script>');
+  const title = info?.name ? `${escHtml(info.name)} - Tempri` : 'Tempri';
+
+  const html = `<!doctype html>
+<html lang="ja">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>${title}</title>
+</head>
+<body>
+<script id="__group_data__" type="application/json">
+${safeJson}
+</script>
+<script type="module" src="${escHtml(clientJsPath)}"></script>
+</body>
+</html>`;
+
+  return new Response(html, { headers: { 'Content-Type': 'text/html; charset=UTF-8' } });
 }

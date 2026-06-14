@@ -5,6 +5,7 @@ import { renderComponent, fetchFrameComponent, findEditorScreenId, hydrateEditor
 import { clearGraphStore } from './runtime/render/page/word-graph/store';
 import type { FrameState } from './state';
 import { renderLoginPage } from './runtime/render/page/login';
+import { renderLoginGroupPage } from './runtime/render/page/login-group';
 import { renderGroupSelectPage } from './runtime/render/page/group-select';
 import { renderSettingsPage } from './runtime/render/page/settings';
 
@@ -384,6 +385,13 @@ const getCookie = (name: string): string | null => {
 const loadEditorBootstrap = async (): Promise<void> => {
   const pathnameScreenId = getScreenIdFromPathname();
   const screenId = pathnameScreenId ?? await findEditorScreenId();
+
+  // Group-specific login page: /login/<uuid>
+  if (/^\/login\/[0-9a-f-]{36}$/i.test(window.location.pathname)) {
+    document.body.style.overflow = 'auto';
+    renderLoginGroupPage(root);
+    return;
+  }
 
   // Auth pages: render inline without the editor chrome
   if (screenId === 'login') {

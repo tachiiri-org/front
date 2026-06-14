@@ -354,6 +354,15 @@ export async function verifyMagicLinkToken(
   return (await res.json()) as { email: string; purpose: string; group_id: string | null; group_name: string | null };
 }
 
+export async function fetchGroupInfo(env: AuthorizeEnv, groupId: string): Promise<{ id: string; name: string } | null> {
+  const res = await authorizeFetch(env, {
+    path: `/api/v1/identity/groups/${encodeURIComponent(groupId)}`,
+    method: "GET",
+  });
+  if (!res.ok) return null;
+  return (await res.json()) as { id: string; name: string };
+}
+
 export async function createBareUser(env: AuthorizeEnv): Promise<string> {
   const res = await authorizeFetch(env, {
     path: "/api/v1/identity/users/bare",
