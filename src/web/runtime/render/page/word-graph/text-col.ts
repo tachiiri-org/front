@@ -127,9 +127,7 @@ const buildTextColContent = (
   (draftInput.style as unknown as Record<string, string>)['field-sizing'] = 'content';
   if (colIndex > 0 && !contextWordId) {
     draftInput.placeholder = 'select a word first';
-    draftInput.disabled = true;
     draftInput.style.opacity = '0.35';
-    draftInput.style.cursor = 'default';
   }
 
   draftInput.addEventListener('input', () => {
