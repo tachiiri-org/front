@@ -387,6 +387,7 @@ export async function handleMagicLinkVerify(
       headers.append('Set-Cookie', `identity_user_id=${encodeURIComponent(userId)}; ${longCookieOpts}; HttpOnly`);
       headers.append('Set-Cookie', `magic_email=${encodeURIComponent(result.email)}; ${shortCookieOpts}`);
       headers.append('Set-Cookie', `magic_org_id=${encodeURIComponent(org.id)}; ${shortCookieOpts}`);
+      headers.append('Set-Cookie', `login_intent=; Path=/; Max-Age=0`);
       headers.set('Location', '/group-select');
       return new Response(null, { status: 302, headers });
     }
