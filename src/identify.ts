@@ -345,13 +345,53 @@ export async function searchOrganizationsByName(env: AuthorizeEnv, name: string)
 export async function verifyMagicLinkToken(
   env: AuthorizeEnv,
   token: string,
-): Promise<{ email: string; purpose: string; org_id: string | null } | null> {
+): Promise<{ email: string; purpose: string; org_id: string | null; group_name: string | null } | null> {
   const res = await authorizeFetch(env, {
     path: `/api/v1/identity/magic-link/${encodeURIComponent(token)}`,
     method: "GET",
   });
   if (!res.ok) return null;
-  return (await res.json()) as { email: string; purpose: string; org_id: string | null };
+  return (await res.json()) as { email: string; purpose: string; org_id: string | null; group_name: string | null };
+}
+
+export async function createBareUser(env: AuthorizeEnv): Promise<string> {
+  const res = await authorizeFetch(env, {
+    path: "/api/v1/identity/users/bare",
+    method: "POST",
+    body: "{}",
+  });
+  if (!res.ok) throw new Error(`identity_create_bare_user_failed:${res.status}`);
+  return ((await res.json()) as { user_id: string }).user_id;
+}
+
+export async function findMemberByEmail(
+  env: AuthorizeEnv,
+  groupId: string,
+  email: string,
+): Promise<string | null> {
+  const res = await authorizeFetch(env, {
+    path: `/api/v1/graph/members/by-email?email=${encodeURIComponent(email)}`,
+    method: "GET",
+    tenantContext: { tenantId: groupId },
+  });
+  if (res.status === 404) return null;
+  if (!res.ok) throw new Error(`find_member_by_email_failed:${res.status}`);
+  return ((await res.json()) as { user_id: string }).user_id;
+}
+
+export async function registerGroupMember(
+  env: AuthorizeEnv,
+  groupId: string,
+  email: string,
+  userId: string,
+): Promise<void> {
+  const res = await authorizeFetch(env, {
+    path: "/api/v1/graph/members",
+    method: "POST",
+    body: JSON.stringify({ email, userId }),
+    tenantContext: { tenantId: groupId },
+  });
+  if (!res.ok) throw new Error(`register_group_member_failed:${res.status}`);
 }
 
 export async function getDefaultGroup(env: AuthorizeEnv, userId: string): Promise<string | null> {

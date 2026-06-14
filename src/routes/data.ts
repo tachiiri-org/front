@@ -1,6 +1,6 @@
 import type { SpecDocument } from '../shared/spec-document';
 import type { UiShellSettings } from '../shared/ui-shell-settings';
-import { readGitHubSession, readGitHubConnectSession, readGoogleSession, readMicrosoftSession, listUserOrganizations, createOrganization, resolveOrgUser, getDefaultGroup, verifyMagicLinkToken } from '../identify';
+import { readGitHubSession, readGitHubConnectSession, readGoogleSession, readMicrosoftSession, listUserOrganizations, createOrganization, resolveOrgUser, getDefaultGroup, verifyMagicLinkToken, createBareUser, findMemberByEmail, registerGroupMember } from '../identify';
 import { parseCookies } from '../session/cookies';
 import { authorizeFetch } from '../session/fetch';
 import type { AuthorizeEnv } from '../session';
@@ -345,7 +345,7 @@ export async function handleMagicLinkRequest(
   const url = new URL(request.url);
   if (url.pathname !== '/api/auth/magic-link' || request.method !== 'POST') return null;
 
-  const body = (await request.json()) as { email?: string; purpose?: string; org_id?: string };
+  const body = (await request.json()) as { email?: string; purpose?: string; org_id?: string; group_name?: string };
   const res = await authorizeFetch(env, {
     path: '/api/v1/identity/magic-link/request',
     method: 'POST',
@@ -356,7 +356,7 @@ export async function handleMagicLinkRequest(
 }
 
 // GET /auth/magic?token=xxx
-// Verifies magic link token, sets short-lived cookies, redirects to OAuth
+// Verifies magic link token, issues identity_user_id, and redirects directly into the app.
 export async function handleMagicLinkVerify(
   request: Request,
   env: AuthorizeEnv,
@@ -373,15 +373,77 @@ export async function handleMagicLinkVerify(
   }
 
   const isSecure = url.protocol === 'https:';
-  const cookieOpts = `Path=/; Max-Age=600; SameSite=Lax; HttpOnly${isSecure ? '; Secure' : ''}`;
+  const shortCookieOpts = `Path=/; Max-Age=600; SameSite=Lax; HttpOnly${isSecure ? '; Secure' : ''}`;
+  const longCookieOpts = `Path=/; Max-Age=${60 * 60 * 24}; SameSite=Lax${isSecure ? '; Secure' : ''}`;
   const headers = new Headers();
-  headers.append('Set-Cookie', `magic_email=${encodeURIComponent(result.email)}; ${cookieOpts}`);
-  if (result.org_id) {
-    headers.append('Set-Cookie', `magic_org_id=${encodeURIComponent(result.org_id)}; ${cookieOpts}`);
+
+  try {
+    if (result.purpose === 'org_create' && result.group_name) {
+      // Create user + group, register email in group DB
+      const userId = await createBareUser(env);
+      const org = await createOrganization(env, userId, result.group_name);
+      await registerGroupMember(env, org.id, result.email, userId);
+
+      headers.append('Set-Cookie', `identity_user_id=${encodeURIComponent(userId)}; ${longCookieOpts}; HttpOnly`);
+      headers.append('Set-Cookie', `magic_email=${encodeURIComponent(result.email)}; ${shortCookieOpts}`);
+      headers.append('Set-Cookie', `magic_org_id=${encodeURIComponent(org.id)}; ${shortCookieOpts}`);
+      headers.set('Location', '/group-select');
+      return new Response(null, { status: 302, headers });
+    }
+
+    if (result.purpose === 'login' && result.org_id) {
+      // Look up identity_user_id from group's member list
+      const userId = await findMemberByEmail(env, result.org_id, result.email);
+      if (!userId) {
+        return new Response(null, { status: 302, headers: { Location: '/login?error=not_a_member' } });
+      }
+
+      headers.append('Set-Cookie', `identity_user_id=${encodeURIComponent(userId)}; ${longCookieOpts}; HttpOnly`);
+      headers.append('Set-Cookie', `magic_email=${encodeURIComponent(result.email)}; ${shortCookieOpts}`);
+      headers.append('Set-Cookie', `magic_org_id=${encodeURIComponent(result.org_id)}; ${shortCookieOpts}`);
+      headers.set('Location', '/group-select');
+      return new Response(null, { status: 302, headers });
+    }
+  } catch {
+    return new Response(null, { status: 302, headers: { Location: '/login?error=invalid_magic_link' } });
   }
 
-  // Redirect to login page so the user can choose an OAuth provider
-  const redirectTo = result.purpose === 'org_create' ? '/login?next=org_create' : '/login';
-  headers.set('Location', redirectTo);
+  // General login (no org context): set magic_email and return to login for OAuth
+  headers.append('Set-Cookie', `magic_email=${encodeURIComponent(result.email)}; ${shortCookieOpts}`);
+  headers.set('Location', '/login');
   return new Response(null, { status: 302, headers });
+}
+
+// GET /api/auth/member-check?group_id=xxx&email=yyy
+// Pre-login check: is this email registered in the group? Returns { user_id } or 404.
+export async function handleMemberCheck(
+  request: Request,
+  env: AuthorizeEnv,
+): Promise<Response | null> {
+  const url = new URL(request.url);
+  if (url.pathname !== '/api/auth/member-check' || request.method !== 'GET') return null;
+
+  const groupId = url.searchParams.get('group_id');
+  const email = url.searchParams.get('email');
+  if (!groupId || !email) {
+    return new Response(JSON.stringify({ error: 'group_id_and_email_required' }), {
+      status: 400, headers: { 'Content-Type': 'application/json' },
+    });
+  }
+
+  try {
+    const userId = await findMemberByEmail(env, groupId, email);
+    if (!userId) {
+      return new Response(JSON.stringify({ error: 'not_found' }), {
+        status: 404, headers: { 'Content-Type': 'application/json' },
+      });
+    }
+    return new Response(JSON.stringify({ user_id: userId }), {
+      status: 200, headers: { 'Content-Type': 'application/json' },
+    });
+  } catch {
+    return new Response(JSON.stringify({ error: 'internal_error' }), {
+      status: 500, headers: { 'Content-Type': 'application/json' },
+    });
+  }
 }

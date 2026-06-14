@@ -144,6 +144,7 @@ h1{color:#f1f5f9;font-size:24px;font-weight:700;margin-bottom:24px;text-align:ce
 #l-status{margin-top:12px;font-size:13px;text-align:center;min-height:20px}
 #l-ctx{color:#64748b;font-size:13px;text-align:center;margin-bottom:16px;display:none}
 #l-err{background:#1f0a0a;border:1px solid #7f1d1d;border-radius:6px;color:#f87171;font-size:13px;padding:10px 12px;margin-bottom:16px;display:none}
+#l-group-name{width:100%;padding:10px 12px;background:#0f172a;border:1px solid #334155;border-radius:6px;color:#cbd5e1;font-size:14px;font-family:monospace;outline:none;display:none;margin-bottom:8px}
 </style>
 </head>
 <body>
@@ -155,6 +156,7 @@ h1{color:#f1f5f9;font-size:24px;font-weight:700;margin-bottom:24px;text-align:ce
   <a class="ob" href="/oauth/google/start">Google でログイン</a>
   <a class="ob" href="/oauth/microsoft/start">Microsoft でログイン</a>
   <div class="dv">または</div>
+  <input type="text" id="l-group-name" placeholder="組織名">
   <input type="email" id="l-email" placeholder="メールアドレス">
   <button id="l-btn">マジックリンクを送信</button>
   <div id="l-status"></div>

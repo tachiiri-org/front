@@ -8,7 +8,7 @@ import {
 import { handleGoogleLoginStart, handleGoogleLoginCallback } from './session/google';
 import { handleMicrosoftLoginStart, handleMicrosoftLoginCallback } from './session/microsoft';
 import type { AuthorizeEnv } from './session';
-import { handleApiRequest as handleDataApiRequest, handleGitHubAuthStatus, handleAuthStatus, handleIdentityStatus, handleOrgCreate, handleSelectOrg, handleOrgMembers, handleAutoSelectOrg, handleMagicLinkRequest, handleMagicLinkVerify } from './routes/data';
+import { handleApiRequest as handleDataApiRequest, handleGitHubAuthStatus, handleAuthStatus, handleIdentityStatus, handleOrgCreate, handleSelectOrg, handleOrgMembers, handleAutoSelectOrg, handleMagicLinkRequest, handleMagicLinkVerify, handleMemberCheck } from './routes/data';
 import { handleApiRequest as handleLayoutApiRequest } from './routes/layout';
 import { handleMcp } from './mcp/handler';
 import {
@@ -61,6 +61,7 @@ const getNavCookies = (request: Request): { userId: string | null; orgId: string
 const isPublicPath = (pathname: string): boolean =>
   pathname === '/login' ||
   pathname === '/auth/magic' ||
+  pathname === '/api/auth/member-check' ||
   pathname.startsWith('/oauth/') ||
   pathname.startsWith('/github/oauth/') ||
   pathname.startsWith('/.well-known/') ||
@@ -104,6 +105,10 @@ export default {
     }
     if (pathname === '/api/auth/magic-link' && request.method === 'POST') {
       const res = await handleMagicLinkRequest(request, env);
+      if (res) return res;
+    }
+    if (pathname === '/api/auth/member-check' && request.method === 'GET') {
+      const res = await handleMemberCheck(request, env);
       if (res) return res;
     }
     if (pathname === '/auth/magic') {

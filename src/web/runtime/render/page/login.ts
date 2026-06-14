@@ -40,15 +40,23 @@ function wire(
   statusEl: HTMLElement,
   errEl: HTMLElement | null,
   ctxEl: HTMLElement | null,
+  groupNameInput: HTMLInputElement | null,
   isOrgCreate: boolean,
   orgParam: string | null,
   errorParam: string | null,
 ): void {
   // Show/hide static sections based on URL params
-  if (errEl) errEl.style.display = errorParam === 'invalid_magic_link' ? '' : 'none';
+  if (errEl) {
+    errEl.style.display =
+      errorParam === 'invalid_magic_link' ? '' :
+      errorParam === 'not_a_member' ? '' : 'none';
+    if (errorParam === 'not_a_member') {
+      errEl.textContent = 'このメールアドレスはこの組織に登録されていません';
+    }
+  }
   if (ctxEl) {
     if (isOrgCreate) {
-      ctxEl.textContent = '新しい組織を作成するためにログインしてください';
+      ctxEl.textContent = '新しい組織を作成します';
       ctxEl.style.display = '';
     } else if (orgParam) {
       ctxEl.textContent = '組織専用ログイン';
@@ -56,6 +64,11 @@ function wire(
     } else {
       ctxEl.style.display = 'none';
     }
+  }
+
+  // group_name field: show only in org_create mode
+  if (groupNameInput) {
+    groupNameInput.style.display = isOrgCreate ? '' : 'none';
   }
 
   const purpose = isOrgCreate ? 'org_create' : 'login';
@@ -67,12 +80,57 @@ function wire(
       statusEl.style.color = C.error;
       return;
     }
+    if (isOrgCreate && groupNameInput) {
+      const groupName = groupNameInput.value.trim();
+      if (!groupName) {
+        statusEl.textContent = '組織名を入力してください';
+        statusEl.style.color = C.error;
+        return;
+      }
+    }
+
+    // For org-specific login: validate email membership before sending
+    if (orgParam && !isOrgCreate) {
+      sendBtn.disabled = true;
+      sendBtn.textContent = '確認中...';
+      statusEl.textContent = '';
+      try {
+        const checkRes = await fetch(
+          `/api/auth/member-check?group_id=${encodeURIComponent(orgParam)}&email=${encodeURIComponent(email)}`,
+        );
+        if (checkRes.status === 404) {
+          statusEl.textContent = 'このメールアドレスはこの組織に登録されていません';
+          statusEl.style.color = C.error;
+          sendBtn.disabled = false;
+          sendBtn.textContent = 'マジックリンクを送信';
+          return;
+        }
+        if (!checkRes.ok) {
+          statusEl.textContent = 'エラーが発生しました。もう一度お試しください。';
+          statusEl.style.color = C.error;
+          sendBtn.disabled = false;
+          sendBtn.textContent = 'マジックリンクを送信';
+          return;
+        }
+      } catch {
+        statusEl.textContent = 'ネットワークエラーが発生しました。';
+        statusEl.style.color = C.error;
+        sendBtn.disabled = false;
+        sendBtn.textContent = 'マジックリンクを送信';
+        return;
+      }
+    }
+
     sendBtn.disabled = true;
     sendBtn.textContent = '送信中...';
     statusEl.textContent = '';
     try {
       const body: Record<string, string> = { email, purpose };
       if (orgParam) body.org_id = orgParam;
+      if (isOrgCreate && groupNameInput) {
+        const groupName = groupNameInput.value.trim();
+        if (groupName) body.group_name = groupName;
+      }
       const res = await fetch('/api/auth/magic-link', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
@@ -82,6 +140,7 @@ function wire(
         statusEl.textContent = 'メールを送信しました。リンクをクリックしてログインしてください。';
         statusEl.style.color = C.success;
         emailInput.disabled = true;
+        if (groupNameInput) groupNameInput.disabled = true;
         sendBtn.textContent = '送信済み';
       } else {
         statusEl.textContent = 'エラーが発生しました。もう一度お試しください。';
@@ -99,6 +158,9 @@ function wire(
 
   sendBtn.addEventListener('click', () => void send());
   emailInput.addEventListener('keydown', (e) => { if (e.key === 'Enter') void send(); });
+  if (groupNameInput) {
+    groupNameInput.addEventListener('keydown', (e) => { if (e.key === 'Enter') void send(); });
+  }
 }
 
 export const renderLoginPage = (root: HTMLElement): void => {
@@ -118,15 +180,24 @@ export const renderLoginPage = (root: HTMLElement): void => {
   document.body.style.cssText =
     `background:${C.bg};margin:0;display:flex;align-items:center;justify-content:center;min-height:100vh;font-family:monospace;`;
 
+  const inputStyle: Partial<CSSStyleDeclaration> = {
+    width: '100%', padding: '10px 12px', background: '#0f172a',
+    border: `1px solid ${C.border}`, borderRadius: '6px', color: C.text,
+    fontSize: '14px', fontFamily: 'monospace', boxSizing: 'border-box',
+    marginBottom: '8px', outline: 'none',
+  };
+
   // Hydrate pre-rendered static HTML if elements are already in the DOM
   const emailInput = document.getElementById('l-email') as HTMLInputElement | null;
   const sendBtn = document.getElementById('l-btn') as HTMLButtonElement | null;
   const statusEl = document.getElementById('l-status') as HTMLElement | null;
   if (emailInput && sendBtn && statusEl) {
+    const groupNameInput = document.getElementById('l-group-name') as HTMLInputElement | null;
     wire(
       emailInput, sendBtn, statusEl,
       document.getElementById('l-err'),
       document.getElementById('l-ctx'),
+      groupNameInput,
       isOrgCreate, orgParam, errorParam,
     );
     return;
@@ -178,14 +249,16 @@ export const renderLoginPage = (root: HTMLElement): void => {
   card.appendChild(oauthSection);
   card.appendChild(divider());
 
+  const newGroupNameInput = el('input') as HTMLInputElement;
+  newGroupNameInput.id = 'l-group-name';
+  Object.assign(newGroupNameInput.style, { ...inputStyle, display: 'none' });
+  newGroupNameInput.type = 'text';
+  newGroupNameInput.placeholder = '組織名';
+  card.appendChild(newGroupNameInput);
+
   const newEmailInput = el('input') as HTMLInputElement;
   newEmailInput.id = 'l-email';
-  Object.assign(newEmailInput.style, {
-    width: '100%', padding: '10px 12px', background: '#0f172a',
-    border: `1px solid ${C.border}`, borderRadius: '6px', color: C.text,
-    fontSize: '14px', fontFamily: 'monospace', boxSizing: 'border-box',
-    marginBottom: '8px', outline: 'none',
-  });
+  Object.assign(newEmailInput.style, inputStyle);
   newEmailInput.type = 'email';
   newEmailInput.placeholder = 'メールアドレス';
   card.appendChild(newEmailInput);
@@ -204,5 +277,5 @@ export const renderLoginPage = (root: HTMLElement): void => {
 
   root.replaceChildren(card);
 
-  wire(newEmailInput, newSendBtn, newStatusEl, errEl, ctxEl, isOrgCreate, orgParam, errorParam);
+  wire(newEmailInput, newSendBtn, newStatusEl, errEl, ctxEl, newGroupNameInput, isOrgCreate, orgParam, errorParam);
 };
