@@ -349,7 +349,7 @@ export async function handleMagicLinkRequest(
   const res = await authorizeFetch(env, {
     path: '/api/v1/identity/magic-link/request',
     method: 'POST',
-    body: JSON.stringify(body),
+    body: JSON.stringify({ ...body, frontend_origin: url.origin }),
   });
   const text = await res.text();
   return new Response(text, { status: res.status, headers: { 'Content-Type': 'application/json; charset=utf-8' } });
