@@ -10,6 +10,7 @@ import {
   isWordGraphComponent,
   isWordGraphTextColComponent,
   isWordGraphWordColComponent,
+  isWordGraphDocColComponent,
   isStorageExplorerComponent,
   isDbApplyComponent,
   ALL_CSS_PROP_KEYS,
@@ -22,6 +23,7 @@ import {
   type WordGraphComponent,
   type WordGraphTextColComponent,
   type WordGraphWordColComponent,
+  type WordGraphDocColComponent,
   type StorageExplorerComponent,
   type DbApplyComponent,
   type Component,
@@ -38,6 +40,7 @@ import { renderDefinitionEditor } from './definition-editor';
 import { renderWordGraph } from './word-graph';
 import { renderWordGraphTextCol } from './word-graph/text-col';
 import { renderWordGraphWordCol } from './word-graph/word-col';
+import { renderWordGraphDocCol } from './word-graph/doc-col';
 import { renderStorageExplorer } from './storage-explorer';
 import { renderDbApply } from './db-apply';
 
@@ -322,6 +325,9 @@ export const renderComponent = (
   }
   if (isWordGraphWordColComponent(frame)) {
     return renderWordGraphWordCol(id, frame as WordGraphWordColComponent);
+  }
+  if (isWordGraphDocColComponent(frame)) {
+    return renderWordGraphDocCol(id, frame as WordGraphDocColComponent);
   }
   if (isWordGraphComponent(frame)) {
     const graphId = typeof (frame as Record<string, unknown>).graphId === 'string'

@@ -55,3 +55,28 @@ export const isWordGraphWordColComponent = (value: unknown): value is WordGraphW
     ALL_CSS_PROP_KEYS.every((k) => c[k] === undefined || typeof c[k] === 'string')
   );
 };
+
+export type WordGraphDocColComponent = {
+  kind: 'word-graph-doc-col';
+  graphId: string;
+  name?: string;
+} & CssStyleProps;
+
+export const wordGraphDocColDefaults: WordGraphDocColComponent = {
+  kind: 'word-graph-doc-col',
+  graphId: '',
+};
+
+export const wordGraphDocColSchema: SchemaField[] = [
+  { kind: 'text-field', key: 'graphId', label: 'graphId' },
+];
+
+export const isWordGraphDocColComponent = (value: unknown): value is WordGraphDocColComponent => {
+  if (typeof value !== 'object' || value === null || Array.isArray(value)) return false;
+  const c = value as Record<string, unknown>;
+  return (
+    c.kind === 'word-graph-doc-col' &&
+    typeof c.graphId === 'string' &&
+    ALL_CSS_PROP_KEYS.every((k) => c[k] === undefined || typeof c[k] === 'string')
+  );
+};
