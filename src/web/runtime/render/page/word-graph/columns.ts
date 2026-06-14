@@ -298,15 +298,6 @@ const buildDocumentColumn = (selectedTextId: string | null, ctx: WordGraphContex
   col.appendChild(headerRow);
 
   if (!selectedTextId) {
-    const placeholder = document.createElement('div');
-    Object.assign(placeholder.style, {
-      padding: '8px 12px',
-      color: theme.textFaint,
-      fontSize: '12px',
-      userSelect: 'none',
-    });
-    placeholder.textContent = '← select a text';
-    col.appendChild(placeholder);
     return col;
   }
 

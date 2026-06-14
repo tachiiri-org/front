@@ -97,16 +97,6 @@ export const renderWordGraphDocCol = (
     col.appendChild(headerRow);
 
     if (!selectedTextId) {
-      const placeholder = document.createElement('div');
-      Object.assign(placeholder.style, {
-        padding: '8px 12px',
-        color: theme.textFaint,
-        fontSize: '12px',
-        userSelect: 'none',
-        flexShrink: '0',
-      });
-      placeholder.textContent = '← select a text';
-      col.appendChild(placeholder);
       return col;
     }
 
