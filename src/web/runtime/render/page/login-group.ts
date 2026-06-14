@@ -81,17 +81,16 @@ export const renderLoginGroupPage = (root: HTMLElement): void => {
     boxSizing: 'border-box',
   });
 
-  // Header: group name + subtitle
+  // Header: group name
   const headerWrap = el('div', { marginBottom: '24px', textAlign: 'center' });
+  headerWrap.appendChild(el('h1', {
+    color: C.bright, fontSize: '22px', fontWeight: '700', margin: '0',
+  }, groupName ?? 'Tempri'));
   if (groupName) {
     headerWrap.appendChild(el('div', {
-      color: C.accent, fontSize: '12px', fontWeight: '600',
-      letterSpacing: '0.05em', textTransform: 'uppercase', marginBottom: '4px',
-    }, `《${groupName}》`));
+      color: C.dim, fontSize: '12px', marginTop: '4px',
+    }, 'グループにログイン'));
   }
-  headerWrap.appendChild(el('h1', {
-    color: C.bright, fontSize: '20px', fontWeight: '700', margin: '0',
-  }, groupName ? 'グループにログイン' : 'Tempri'));
   card.appendChild(headerWrap);
 
   // Error message

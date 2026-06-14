@@ -235,6 +235,8 @@ export async function handleAutoSelectOrg(request: Request, env: AuthorizeEnv): 
     if (orgUser) {
       headers.append('Set-Cookie', `org_user_id=${encodeURIComponent(orgUser.orgUserId)}; Path=/; Max-Age=${60 * 60 * 24}${isSecure ? '; Secure' : ''}; SameSite=Lax; HttpOnly`);
     }
+    // Ensure email is registered in group DB so magic link lookup works
+    await registerGroupMember(env, groupId, email, userId).catch(() => null);
   }
   if (magicEmail || magicGroupId) {
     headers.append('Set-Cookie', `magic_email=; Path=/; Max-Age=0`);
@@ -277,6 +279,8 @@ export async function handleSelectOrg(request: Request, env: AuthorizeEnv): Prom
       if (orgUser) {
         headers.append('Set-Cookie', `org_user_id=${encodeURIComponent(orgUser.orgUserId)}; Path=/; Max-Age=${60 * 60 * 24}${isSecure ? '; Secure' : ''}; SameSite=Lax; HttpOnly`);
       }
+      // Ensure email is registered in group DB so magic link lookup works
+      await registerGroupMember(env, orgId, email, identityUserId).catch(() => null);
     }
     if (magicEmail) {
       headers.append('Set-Cookie', `magic_email=; Path=/; Max-Age=0`);
