@@ -34,6 +34,8 @@ export const renderWordGraph = (
     focusedId: null,
     focusedColumn: null,
     saveTimer: null,
+    documents: [],
+    documentsTextId: null,
     history: [],
     inputCache: new Map(),
     lang: 'en',
@@ -63,6 +65,42 @@ export const renderWordGraph = (
   const pushHistory = (): void => {
     state.history.push(cloneData(state.texts, state.words));
     if (state.history.length > 50) state.history.shift();
+  };
+
+  const createDocument = (content: string, textId: string): void => {
+    if (!resolvedGraphId) return;
+    const lang = state.lang === 'ja' ? 'ja' : 'en';
+    void fetch(`/api/graph/${encodeURIComponent(resolvedGraphId!)}/document`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ [lang]: content, textIds: [textId] }),
+    })
+      .then((r) => r.ok ? r.json() as Promise<unknown> : null)
+      .then((data) => {
+        if (!data) return;
+        const d = data as { id: string; en?: string; ja?: string };
+        state.documents.push({ id: d.id, ...(d.en ? { en: d.en } : {}), ...(d.ja ? { ja: d.ja } : {}) });
+        render();
+      });
+  };
+
+  const saveDocument = (docId: string, content: string): void => {
+    if (!resolvedGraphId) return;
+    const lang = state.lang === 'ja' ? 'ja' : 'en';
+    void fetch(`/api/graph/${encodeURIComponent(resolvedGraphId!)}/document/${encodeURIComponent(docId)}`, {
+      method: 'PUT',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ [lang]: content }),
+    });
+  };
+
+  const deleteDocument = (docId: string): void => {
+    if (!resolvedGraphId) return;
+    void fetch(`/api/graph/${encodeURIComponent(resolvedGraphId!)}/document/${encodeURIComponent(docId)}`, {
+      method: 'DELETE',
+    });
+    state.documents = state.documents.filter((d) => d.id !== docId);
+    render();
   };
 
   const scrollToEnd = (): void => {
@@ -99,6 +137,22 @@ export const renderWordGraph = (
   };
 
   const render = (): void => {
+    const selectedTextId = (state.path[2] as string | undefined) ?? null;
+    if (selectedTextId !== state.documentsTextId) {
+      state.documentsTextId = selectedTextId;
+      state.documents = [];
+      if (selectedTextId && resolvedGraphId) {
+        void fetch(`/api/graph/${encodeURIComponent(resolvedGraphId)}/documents?text_id=${encodeURIComponent(selectedTextId)}`)
+          .then((r) => r.ok ? r.json() as Promise<unknown> : { documents: [] })
+          .then((data) => {
+            const d = data as Record<string, unknown>;
+            state.documents = Array.isArray(d.documents) ? (d.documents as typeof state.documents) : [];
+            render();
+          })
+          .catch(() => {});
+      }
+    }
+
     const scrollTops = new Map<number, number>();
     outer.querySelectorAll<HTMLElement>('[data-col-index]').forEach(col => {
       scrollTops.set(parseInt(col.dataset.colIndex ?? '0', 10), col.scrollTop);
@@ -127,7 +181,7 @@ export const renderWordGraph = (
     requestAnimationFrame(() => render());
   };
 
-  ctx = { id, outer, state, scheduleSave, pushHistory, render, scheduleRender };
+  ctx = { id, outer, state, scheduleSave, pushHistory, render, scheduleRender, createDocument, saveDocument, deleteDocument };
 
   // Re-render when viewport crosses the mobile breakpoint so columns switch correctly.
   const mq = window.matchMedia('(max-width: 768px)');

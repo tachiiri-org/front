@@ -16,6 +16,12 @@ export type GraphText = {
   wordIds: string[];
 };
 
+export type GraphDocument = {
+  id: string;
+  en?: string;
+  ja?: string;
+};
+
 export type WordGraphComponent = {
   kind: 'word-graph';
   name?: string;

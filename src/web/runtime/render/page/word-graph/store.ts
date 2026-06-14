@@ -1,4 +1,4 @@
-import type { GraphText, GraphWord } from '../../../../schema/component/kind/word-graph';
+import type { GraphDocument, GraphText, GraphWord } from '../../../../schema/component/kind/word-graph';
 
 export interface GraphSharedState {
   graphId: string;
@@ -11,6 +11,8 @@ export interface GraphSharedState {
   focusedId: string | null;
   focusedColumn: number | null;
   saveTimer: ReturnType<typeof setTimeout> | null;
+  documents: GraphDocument[];
+  documentsTextId: string | null;
   history: { texts: GraphText[]; words: GraphWord[] }[];
   inputCache: Map<string, HTMLTextAreaElement>;
   loaded: boolean;
@@ -35,6 +37,8 @@ export const getOrCreateGraphState = (graphId: string): GraphSharedState => {
       focusedId: null,
       focusedColumn: null,
       saveTimer: null,
+      documents: [],
+      documentsTextId: null,
       history: [],
       inputCache: new Map(),
       loaded: false,

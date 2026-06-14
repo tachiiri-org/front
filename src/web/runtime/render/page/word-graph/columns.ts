@@ -271,6 +271,200 @@ const buildColumn = (
   return col;
 };
 
+const buildDocumentColumn = (selectedTextId: string, ctx: WordGraphContext): HTMLElement => {
+  const { state } = ctx;
+
+  const col = document.createElement('div');
+  col.dataset.colIndex = '3';
+  col.style.width = '35vw';
+  col.style.minWidth = '250px';
+  col.style.borderRight = `1px solid ${theme.borderStrong}`;
+  col.style.overflowY = 'auto';
+  col.style.overflowX = 'hidden';
+  col.style.flexShrink = '0';
+  col.style.boxSizing = 'border-box';
+  col.style.padding = '4px 0';
+
+  const headerRow = document.createElement('div');
+  Object.assign(headerRow.style, {
+    display: 'flex',
+    alignItems: 'center',
+    padding: '0 8px 2px 12px',
+    gap: '6px',
+  });
+
+  const typeLabel = document.createElement('div');
+  Object.assign(typeLabel.style, {
+    fontSize: '10px',
+    color: theme.textFaint,
+    userSelect: 'none',
+    textTransform: 'uppercase',
+    letterSpacing: '0.5px',
+    flex: '1',
+  });
+  typeLabel.textContent = 'documents';
+  headerRow.appendChild(typeLabel);
+  col.appendChild(headerRow);
+
+  const draftRow = document.createElement('div');
+  draftRow.style.display = 'flex';
+  draftRow.style.alignItems = 'flex-start';
+  draftRow.style.gap = '4px';
+  draftRow.style.padding = '1px 8px 1px 12px';
+
+  const draftMarker = document.createElement('span');
+  Object.assign(draftMarker.style, {
+    width: '6px',
+    height: '6px',
+    flexShrink: '0',
+    alignSelf: 'center',
+    borderRadius: '1px',
+    boxSizing: 'border-box',
+    background: 'transparent',
+    border: `1.5px solid ${theme.borderStrong}`,
+  });
+
+  const draftInput = document.createElement('textarea');
+  draftInput.rows = 1;
+  draftInput.dataset.navInput = 'draft';
+  draftInput.dataset.columnIndex = '3';
+  Object.assign(draftInput.style, {
+    display: 'block',
+    width: '100%',
+    border: 'none',
+    outline: 'none',
+    resize: 'none',
+    overflow: 'hidden',
+    whiteSpace: 'pre-wrap',
+    wordBreak: 'break-word',
+    fontFamily: 'inherit',
+    fontSize: 'inherit',
+    lineHeight: 'inherit',
+    padding: '2px 4px',
+    boxSizing: 'border-box',
+    background: 'transparent',
+    color: theme.textDim,
+  });
+  (draftInput.style as unknown as Record<string, string>)['field-sizing'] = 'content';
+
+  draftInput.addEventListener('input', () => {
+    draftInput.style.height = 'auto';
+    draftInput.style.height = `${draftInput.scrollHeight}px`;
+  });
+
+  draftInput.addEventListener('keydown', (e: KeyboardEvent) => {
+    if (e.key === 'Enter' && !e.shiftKey) {
+      e.preventDefault();
+      const text = draftInput.value.trim();
+      if (!text) return;
+      ctx.createDocument(text, selectedTextId);
+      draftInput.value = '';
+      draftInput.style.height = 'auto';
+    }
+  });
+
+  draftRow.appendChild(draftMarker);
+  draftRow.appendChild(draftInput);
+  col.appendChild(draftRow);
+
+  const saveTimers = new Map<string, ReturnType<typeof setTimeout>>();
+
+  for (const doc of state.documents) {
+    const row = document.createElement('div');
+    row.style.display = 'flex';
+    row.style.alignItems = 'flex-start';
+    row.style.gap = '4px';
+    row.style.padding = '1px 8px 1px 12px';
+
+    const marker = document.createElement('span');
+    Object.assign(marker.style, {
+      width: '6px',
+      height: '6px',
+      flexShrink: '0',
+      alignSelf: 'flex-start',
+      marginTop: '6px',
+      borderRadius: '1px',
+      boxSizing: 'border-box',
+      background: 'transparent',
+      border: `1.5px solid ${theme.markerDefault}`,
+    });
+
+    const docInput = document.createElement('textarea');
+    docInput.rows = 4;
+    const content = state.lang === 'ja' ? (doc.ja ?? doc.en ?? '') : (doc.en ?? doc.ja ?? '');
+    docInput.value = content;
+    Object.assign(docInput.style, {
+      display: 'block',
+      width: '100%',
+      border: 'none',
+      outline: 'none',
+      resize: 'none',
+      overflow: 'hidden',
+      whiteSpace: 'pre-wrap',
+      wordBreak: 'break-word',
+      fontFamily: 'inherit',
+      fontSize: 'inherit',
+      lineHeight: 'inherit',
+      padding: '2px 4px',
+      boxSizing: 'border-box',
+      background: 'transparent',
+      color: 'inherit',
+      minHeight: '6em',
+    });
+    (docInput.style as unknown as Record<string, string>)['field-sizing'] = 'content';
+
+    const originalContent = content;
+
+    docInput.addEventListener('input', () => {
+      if (!CSS.supports('field-sizing', 'content')) {
+        docInput.style.height = 'auto';
+        docInput.style.height = `${docInput.scrollHeight}px`;
+      }
+      const existing = saveTimers.get(doc.id);
+      if (existing) clearTimeout(existing);
+      saveTimers.set(doc.id, setTimeout(() => {
+        saveTimers.delete(doc.id);
+        ctx.saveDocument(doc.id, docInput.value);
+      }, 500));
+    });
+
+    docInput.addEventListener('blur', () => {
+      if (docInput.value !== originalContent) {
+        const existing = saveTimers.get(doc.id);
+        if (existing) {
+          clearTimeout(existing);
+          saveTimers.delete(doc.id);
+        }
+        ctx.saveDocument(doc.id, docInput.value);
+      }
+    });
+
+    const deleteBtn = document.createElement('button');
+    deleteBtn.textContent = '×';
+    Object.assign(deleteBtn.style, {
+      flexShrink: '0',
+      border: 'none',
+      background: 'transparent',
+      color: theme.textFaint,
+      cursor: 'pointer',
+      fontSize: '14px',
+      padding: '0 2px',
+      lineHeight: '1.5',
+      alignSelf: 'flex-start',
+    });
+    deleteBtn.addEventListener('click', () => {
+      ctx.deleteDocument(doc.id);
+    });
+
+    row.appendChild(marker);
+    row.appendChild(docInput);
+    row.appendChild(deleteBtn);
+    col.appendChild(row);
+  }
+
+  return col;
+};
+
 export const buildColumns = (ctx: WordGraphContext): HTMLElement => {
   const { state } = ctx;
   const isMobile = window.matchMedia('(max-width: 768px)').matches;
@@ -338,6 +532,12 @@ export const buildColumns = (ctx: WordGraphContext): HTMLElement => {
     if (selectedWord) {
       const col2Items = state.texts.filter(t => t.wordIds.includes(state.path[1]));
       wrapper.appendChild(buildColumn(col2Items, 2, null, ctx));
+    }
+
+    // PC: Column 2 (display): documents for selected text (path[2])
+    const selectedTextId = (state.path[2] as string | undefined) ?? null;
+    if (selectedTextId) {
+      wrapper.appendChild(buildDocumentColumn(selectedTextId, ctx));
     }
 
     const spacer = document.createElement('div');

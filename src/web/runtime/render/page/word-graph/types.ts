@@ -1,4 +1,4 @@
-import type { GraphText, GraphWord } from '../../../../schema/component/kind/word-graph';
+import type { GraphDocument, GraphText, GraphWord } from '../../../../schema/component/kind/word-graph';
 import type { GraphSharedState } from './store';
 
 export type { GraphSharedState };
@@ -14,6 +14,8 @@ export interface WordGraphState {
   focusedId: string | null;
   focusedColumn: number | null;
   saveTimer: ReturnType<typeof setTimeout> | null;
+  documents: GraphDocument[];
+  documentsTextId: string | null;
   history: { texts: GraphText[]; words: GraphWord[] }[];
   inputCache: Map<string, HTMLTextAreaElement>;
   lang: 'en' | 'ja';
@@ -27,6 +29,9 @@ export interface WordGraphContext {
   pushHistory: () => void;
   render: () => void;
   scheduleRender: () => void;
+  createDocument: (content: string, textId: string) => void;
+  saveDocument: (docId: string, content: string) => void;
+  deleteDocument: (docId: string) => void;
 }
 
 // ColContext is structurally compatible with WordGraphContext

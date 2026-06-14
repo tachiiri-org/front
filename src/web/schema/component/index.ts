@@ -10,7 +10,6 @@ import type { TableComponent } from './kind/table';
 import type { TreeEditorComponent } from './kind/tree-editor';
 import type { OutlinerComponent } from './kind/outliner';
 import type { TextEditorComponent } from './kind/text-editor';
-import type { DocumentEditorComponent } from './kind/document-editor';
 import type { DefinitionEditorComponent } from './kind/definition-editor';
 import type { WordGraphComponent } from './kind/word-graph';
 import type { WordGraphTextColComponent, WordGraphWordColComponent } from './kind/word-graph-col';
@@ -28,7 +27,6 @@ import { isTableComponent, tableDefaults, tableSchema } from './kind/table';
 import { isTreeEditorComponent, treeEditorDefaults, treeEditorSchema } from './kind/tree-editor';
 import { isOutlinerComponent, outlinerDefaults, outlinerSchema } from './kind/outliner';
 import { isTextEditorComponent, textEditorDefaults, textEditorSchema } from './kind/text-editor';
-import { isDocumentEditorComponent, documentEditorDefaults, documentEditorSchema } from './kind/document-editor';
 import { isDefinitionEditorComponent, definitionEditorDefaults, definitionEditorSchema } from './kind/definition-editor';
 import { isWordGraphComponent, wordGraphDefaults, wordGraphSchema } from './kind/word-graph';
 import { isWordGraphTextColComponent, isWordGraphWordColComponent, wordGraphTextColDefaults, wordGraphWordColDefaults, wordGraphTextColSchema, wordGraphWordColSchema } from './kind/word-graph-col';
@@ -75,12 +73,6 @@ export {
   textEditorDefaults,
   textEditorSchema,
 } from './kind/text-editor';
-export {
-  type DocumentEditorComponent,
-  isDocumentEditorComponent,
-  documentEditorDefaults,
-  documentEditorSchema,
-} from './kind/document-editor';
 export {
   type DefinitionEditorComponent,
   isDefinitionEditorComponent,
@@ -151,7 +143,6 @@ export type Component =
   | TreeEditorComponent
   | OutlinerComponent
   | TextEditorComponent
-  | DocumentEditorComponent
   | DefinitionEditorComponent
   | WordGraphComponent
   | WordGraphTextColComponent
@@ -172,7 +163,6 @@ export const isComponent = (value: unknown): value is Component =>
   isTreeEditorComponent(value) ||
   isOutlinerComponent(value) ||
   isTextEditorComponent(value) ||
-  isDocumentEditorComponent(value) ||
   isDefinitionEditorComponent(value) ||
   isWordGraphComponent(value) ||
   isWordGraphTextColComponent(value) ||
@@ -193,7 +183,6 @@ export const componentDefaults: Record<string, Record<string, unknown>> = {
   'tree-editor': treeEditorDefaults as Record<string, unknown>,
   outliner: outlinerDefaults as Record<string, unknown>,
   'text-editor': textEditorDefaults as Record<string, unknown>,
-  'document-editor': documentEditorDefaults as Record<string, unknown>,
   'definition-editor': definitionEditorDefaults as Record<string, unknown>,
   'word-graph': wordGraphDefaults as Record<string, unknown>,
   'word-graph-text-col': wordGraphTextColDefaults as Record<string, unknown>,
@@ -215,7 +204,6 @@ export const componentSchemas: Record<string, SchemaField[]> = {
   'tree-editor': treeEditorSchema,
   outliner: outlinerSchema,
   'text-editor': textEditorSchema,
-  'document-editor': documentEditorSchema,
   'definition-editor': definitionEditorSchema,
   'word-graph': wordGraphSchema,
   'word-graph-text-col': wordGraphTextColSchema,

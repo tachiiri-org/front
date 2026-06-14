@@ -45,6 +45,15 @@ async function getTexts(env: AuthorizeEnv, graphId: string, wordId?: string, wor
   return data.texts;
 }
 
+type ApiDocument = { id: string; en?: string | null; ja?: string | null };
+
+async function getDocuments(env: AuthorizeEnv, graphId: string, textId: string): Promise<ApiDocument[]> {
+  const res = await graphFetch(env, graphId, `documents?text_id=${encodeURIComponent(textId)}`);
+  if (!res.ok) throw new Error(`get_documents_failed:${res.status}`);
+  const data = (await res.json()) as { documents: ApiDocument[] };
+  return data.documents;
+}
+
 // --- Tool definitions ---
 
 export const GRAPH_TOOLS = [
@@ -93,6 +102,18 @@ export const GRAPH_TOOLS = [
         text: { type: "string", description: "Text content to look up" },
       },
       required: ["graph_id", "text"],
+    },
+  },
+  {
+    name: "graph_read_documents_by_text",
+    description: "Read all documents (decision logs, context, rationale) linked to a specific text entry in the word graph.",
+    inputSchema: {
+      type: "object",
+      properties: {
+        graph_id: { type: "string", description: "Word graph ID (e.g. 'word-graph-1')" },
+        text_id: { type: "string", description: "Text ID whose documents to retrieve" },
+      },
+      required: ["graph_id", "text_id"],
     },
   },
   {
@@ -184,6 +205,13 @@ export async function callGraphTool(
       return {
         content: [{ type: "text", text: `Updated: "${[result.en, result.ja].filter(Boolean).join(" / ")}" linked to [${wordNames.join(", ")}]` }],
       };
+    }
+
+    if (name === "graph_read_documents_by_text") {
+      const textId = String(args.text_id);
+      const docs = await getDocuments(env, graphId, textId);
+      const docLabel = (d: ApiDocument): string => [d.en, d.ja].filter(Boolean).join(" / ");
+      return { content: [{ type: "text", text: docs.map(docLabel).filter(Boolean).join("\n\n---\n\n") || "(no documents)" }] };
     }
 
     return { content: [{ type: "text", text: `Unknown graph tool: ${name}` }], isError: true };
