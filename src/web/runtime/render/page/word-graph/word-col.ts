@@ -596,8 +596,8 @@ export const renderWordGraphWordCol = (
       .then((r) => {
         if (r.ok) {
           graphList.push({ id: newId, name: name.trim() });
-          populateSelect();
           switchToGraph(newId);
+          populateSelect();
         }
       })
       .catch(() => {});
