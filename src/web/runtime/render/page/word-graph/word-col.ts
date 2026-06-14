@@ -89,11 +89,17 @@ const showColorPicker = (
   setTimeout(() => document.addEventListener('mousedown', dismiss), 0);
 };
 
+interface GraphListItem {
+  id: string;
+  name?: string;
+}
+
 const buildWordColContent = (
   items: GraphWord[],
   contextTextId: string | null,
   linkedIds: Set<string> | null,
   ctx: ColContext,
+  graphSelectorEl: HTMLElement,
 ): HTMLElement => {
   const { state } = ctx;
 
@@ -104,6 +110,8 @@ const buildWordColContent = (
   col.style.minHeight = '0';
   col.style.overflowY = 'auto';
   col.style.padding = '4px 0';
+
+  col.appendChild(graphSelectorEl);
 
   const headerRow = document.createElement('div');
   Object.assign(headerRow.style, {
@@ -466,14 +474,159 @@ export const renderWordGraphWordCol = (
   outer.style.borderRight = `1px solid ${theme.borderStrong}`;
   applyCssProps(outer, component as unknown as Record<string, unknown>);
 
-  const shared = getOrCreateGraphState(component.graphId);
-  const state = shared;
+  let currentGraphId = component.graphId;
+  let shared = getOrCreateGraphState(currentGraphId);
+  let state = shared;
+
+  // Graph selector state
+  let graphList: GraphListItem[] = [];
+  let graphListLoaded = false;
+
+  const graphSelectorEl = document.createElement('div');
+  Object.assign(graphSelectorEl.style, {
+    display: 'flex',
+    alignItems: 'center',
+    padding: '4px 8px 4px 12px',
+    flexShrink: '0',
+    gap: '4px',
+    borderBottom: `1px solid ${theme.borderFaint}`,
+  });
+
+  const select = document.createElement('select');
+  Object.assign(select.style, {
+    flex: '1',
+    minWidth: '0',
+    fontSize: '11px',
+    background: theme.bg,
+    color: theme.textMid,
+    border: `1px solid ${theme.borderFaint}`,
+    borderRadius: '3px',
+    padding: '1px 4px',
+    outline: 'none',
+    cursor: 'pointer',
+  });
+
+  const addBtn = document.createElement('button');
+  addBtn.textContent = '+';
+  Object.assign(addBtn.style, {
+    fontSize: '13px',
+    lineHeight: '1',
+    padding: '0 5px',
+    border: `1px solid ${theme.borderFaint}`,
+    borderRadius: '3px',
+    background: 'transparent',
+    color: theme.textFaint,
+    cursor: 'pointer',
+    flexShrink: '0',
+  });
+
+  const populateSelect = (): void => {
+    select.replaceChildren();
+    if (!graphListLoaded) {
+      const opt = document.createElement('option');
+      opt.textContent = 'loading...';
+      opt.disabled = true;
+      select.appendChild(opt);
+      return;
+    }
+    for (const g of graphList) {
+      const opt = document.createElement('option');
+      opt.value = g.id;
+      opt.textContent = g.name ?? g.id;
+      if (g.id === currentGraphId) opt.selected = true;
+      select.appendChild(opt);
+    }
+    // If current graph not in list, add it
+    if (!graphList.find((g) => g.id === currentGraphId)) {
+      const opt = document.createElement('option');
+      opt.value = currentGraphId;
+      opt.textContent = currentGraphId;
+      opt.selected = true;
+      select.insertBefore(opt, select.firstChild);
+    }
+  };
+
+  const switchToGraph = (newGraphId: string): void => {
+    if (newGraphId === currentGraphId) return;
+
+    shared.subscribers.delete(render);
+
+    currentGraphId = newGraphId;
+    outer.dataset.graphId = newGraphId;
+
+    shared = getOrCreateGraphState(newGraphId);
+    state = shared;
+
+    shared.subscribers.add(render);
+
+    if (!shared.loaded) {
+      shared.loaded = true;
+      const base = `/api/graph/${encodeURIComponent(newGraphId)}`;
+      void Promise.all([
+        fetch(`${base}/words`).then((r) => r.ok ? r.json() as Promise<unknown> : { words: [] }),
+        fetch(`${base}/texts`).then((r) => r.ok ? r.json() as Promise<unknown> : { texts: [] }),
+      ])
+        .then(([wordsData, textsData]) => {
+          const wd = wordsData as Record<string, unknown>;
+          const td = textsData as Record<string, unknown>;
+          shared.words = Array.isArray(wd.words) ? (wd.words as typeof shared.words) : [];
+          shared.texts = Array.isArray(td.texts) ? (td.texts as typeof shared.texts) : [];
+          notify();
+        })
+        .catch(() => notify());
+    } else {
+      notify();
+    }
+  };
+
+  select.addEventListener('change', () => {
+    switchToGraph(select.value);
+  });
+
+  addBtn.addEventListener('mousedown', (e) => {
+    e.preventDefault();
+    const name = window.prompt('New graph name:');
+    if (!name || !name.trim()) return;
+    const newId = randomId();
+    void fetch('/api/graph/', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ id: newId, name: name.trim() }),
+    })
+      .then((r) => {
+        if (r.ok) {
+          graphList.push({ id: newId, name: name.trim() });
+          populateSelect();
+          switchToGraph(newId);
+        }
+      })
+      .catch(() => {});
+  });
+
+  graphSelectorEl.appendChild(select);
+  graphSelectorEl.appendChild(addBtn);
+
+  // Fetch graph list on mount
+  void fetch('/api/graph/')
+    .then((r) => r.ok ? r.json() as Promise<unknown> : { graphs: [] })
+    .then((data) => {
+      const d = data as Record<string, unknown>;
+      graphList = Array.isArray(d.graphs) ? (d.graphs as GraphListItem[]) : [];
+      graphListLoaded = true;
+      populateSelect();
+    })
+    .catch(() => {
+      graphListLoaded = true;
+      populateSelect();
+    });
+
+  populateSelect();
 
   const scheduleSave = (): void => {
     if (state.saveTimer) clearTimeout(state.saveTimer);
     state.saveTimer = setTimeout(() => {
       state.saveTimer = null;
-      void fetch(`/api/graph/${encodeURIComponent(component.graphId)}`, {
+      void fetch(`/api/graph/${encodeURIComponent(currentGraphId)}`, {
         method: 'PUT',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ texts: state.texts, words: state.words }),
@@ -495,10 +648,6 @@ export const renderWordGraphWordCol = (
     const fid = state.pendingFocusId;
     const fcol = state.pendingFocusColumn;
     const cursorPos = state.pendingFocusCursorPos;
-    // Search only within this column's own container so that a sibling column's
-    // focusPending call does not consume the pending focus for a different column
-    // (which would focus a stale DOM element that gets removed when the target
-    // column re-renders, causing the cursor to vanish).
     const selector = fcol !== null
       ? `[data-node-id="${CSS.escape(fid)}"][data-column-index="${fcol}"]`
       : `[data-node-id="${CSS.escape(fid)}"]`;
@@ -522,7 +671,6 @@ export const renderWordGraphWordCol = (
       ? state.path[0]
       : null;
 
-    // When a related text (col2) is selected, highlight its words rather than col0's.
     const col3TextId = state.path[2] && findText(state.texts, state.path[2])
       ? state.path[2]
       : null;
@@ -543,7 +691,7 @@ export const renderWordGraphWordCol = (
       scheduleRender: () => requestAnimationFrame(notify),
     };
 
-    outer.replaceChildren(buildWordColContent(items, contextTextId, linkedIds, ctx));
+    outer.replaceChildren(buildWordColContent(items, contextTextId, linkedIds, ctx, graphSelectorEl));
 
     if (!supportsFieldSizing) {
       const tas = Array.from(outer.querySelectorAll<HTMLTextAreaElement>('textarea[data-nav-input]'));
@@ -562,7 +710,7 @@ export const renderWordGraphWordCol = (
 
   if (!shared.loaded) {
     shared.loaded = true;
-    const base = `/api/graph/${encodeURIComponent(component.graphId)}`;
+    const base = `/api/graph/${encodeURIComponent(currentGraphId)}`;
     void Promise.all([
       fetch(`${base}/words`).then((r) => r.ok ? r.json() as Promise<unknown> : { words: [] }),
       fetch(`${base}/texts`).then((r) => r.ok ? r.json() as Promise<unknown> : { texts: [] }),
