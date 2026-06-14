@@ -129,6 +129,10 @@ export const renderWordGraph = (
 
   ctx = { id, outer, state, scheduleSave, pushHistory, render, scheduleRender };
 
+  // Re-render when viewport crosses the mobile breakpoint so columns switch correctly.
+  const mq = window.matchMedia('(max-width: 768px)');
+  mq.addEventListener('change', scheduleRender);
+
   if (resolvedGraphId) {
     const base = `/api/graph/${encodeURIComponent(resolvedGraphId)}`;
     void Promise.all([

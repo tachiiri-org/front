@@ -273,29 +273,79 @@ const buildColumn = (
 
 export const buildColumns = (ctx: WordGraphContext): HTMLElement => {
   const { state } = ctx;
+  const isMobile = window.matchMedia('(max-width: 768px)').matches;
+
+  const selectedWord = state.path.length >= 2 ? findWord(state.words, state.path[1]) : null;
 
   const wrapper = document.createElement('div');
   wrapper.dataset.columnsWrapper = 'true';
   wrapper.style.display = 'flex';
   wrapper.style.flex = '1';
   wrapper.style.minHeight = '0';
-  wrapper.style.overflowX = 'auto';
   wrapper.style.position = 'relative';
 
-  // Column 0 (display): all words — colIndex=1 preserves the odd/even convention
-  wrapper.appendChild(buildColumn([...state.words], 1, null, ctx));
+  if (isMobile) {
+    wrapper.style.overflowX = 'hidden';
 
-  // Column 1 (display): texts linked to the selected word (path[1])
-  if (state.path.length >= 2 && findWord(state.words, state.path[1])) {
-    const col2Items = state.texts.filter(t => t.wordIds.includes(state.path[1]));
-    wrapper.appendChild(buildColumn(col2Items, 2, null, ctx));
+    if (selectedWord) {
+      // Mobile: show col2 (texts) full-screen with a back button
+      const col2Items = state.texts.filter(t => t.wordIds.includes(state.path[1]));
+      const col = buildColumn(col2Items, 2, null, ctx);
+      col.style.width = '100%';
+      col.style.minWidth = '0';
+      col.style.borderRight = 'none';
+
+      const backBtn = document.createElement('button');
+      const wordLabel = getLangText(selectedWord, state.lang);
+      backBtn.textContent = `‹ ${wordLabel.length > 20 ? wordLabel.slice(0, 20) + '…' : wordLabel}`;
+      Object.assign(backBtn.style, {
+        display: 'block',
+        width: '100%',
+        textAlign: 'left',
+        padding: '6px 12px',
+        border: 'none',
+        borderBottom: `1px solid ${theme.borderFaint}`,
+        background: 'transparent',
+        color: theme.textLow,
+        fontSize: '12px',
+        cursor: 'pointer',
+        userSelect: 'none',
+      });
+      backBtn.addEventListener('click', () => {
+        state.path = state.path.slice(0, 1);
+        state.focusedId = null;
+        state.focusedColumn = null;
+        ctx.render();
+      });
+      col.prepend(backBtn);
+
+      wrapper.appendChild(col);
+    } else {
+      // Mobile: show col1 (words) full-screen
+      const col = buildColumn([...state.words], 1, null, ctx);
+      col.style.width = '100%';
+      col.style.minWidth = '0';
+      col.style.borderRight = 'none';
+      wrapper.appendChild(col);
+    }
+  } else {
+    wrapper.style.overflowX = 'auto';
+
+    // PC: Column 0 (display): all words — colIndex=1 preserves the odd/even convention
+    wrapper.appendChild(buildColumn([...state.words], 1, null, ctx));
+
+    // PC: Column 1 (display): texts linked to the selected word (path[1])
+    if (selectedWord) {
+      const col2Items = state.texts.filter(t => t.wordIds.includes(state.path[1]));
+      wrapper.appendChild(buildColumn(col2Items, 2, null, ctx));
+    }
+
+    const spacer = document.createElement('div');
+    spacer.dataset.columnsSpacer = 'true';
+    spacer.style.flexShrink = '0';
+    spacer.style.width = '0';
+    wrapper.appendChild(spacer);
   }
-
-  const spacer = document.createElement('div');
-  spacer.dataset.columnsSpacer = 'true';
-  spacer.style.flexShrink = '0';
-  spacer.style.width = '0';
-  wrapper.appendChild(spacer);
 
   // Breadcrumb
   const breadcrumb = document.createElement('div');
