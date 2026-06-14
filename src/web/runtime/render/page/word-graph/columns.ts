@@ -137,11 +137,12 @@ const buildColumn = (
       if (!text) return;
       ctx.pushHistory();
       if (isTextCol) {
+        const contextWordId = colIndex > 0 ? (state.path[colIndex - 1] ?? '') : '';
+        if (colIndex > 0 && !contextWordId) return;
         const newText: GraphText = { id: randomId(), wordIds: [] };
         setLangText(newText, state.lang, text);
-        if (colIndex > 0) {
-          const contextWordId = state.path[colIndex - 1];
-          if (contextWordId) newText.wordIds.push(contextWordId);
+        if (colIndex > 0 && contextWordId) {
+          newText.wordIds.push(contextWordId);
         }
         state.texts.unshift(newText);
         state.path = [...state.path.slice(0, colIndex), newText.id];

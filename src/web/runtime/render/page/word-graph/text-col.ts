@@ -15,6 +15,7 @@ const buildTextColContent = (
   ctx: ColContext,
 ): HTMLElement => {
   const { state } = ctx;
+  const contextWordId = colIndex > 0 ? (state.path[colIndex - 1] ?? '') : '';
 
   const col = document.createElement('div');
   col.style.display = 'flex';
@@ -124,6 +125,12 @@ const buildTextColContent = (
     color: theme.textDim,
   });
   (draftInput.style as unknown as Record<string, string>)['field-sizing'] = 'content';
+  if (colIndex > 0 && !contextWordId) {
+    draftInput.placeholder = 'select a word first';
+    draftInput.disabled = true;
+    draftInput.style.opacity = '0.35';
+    draftInput.style.cursor = 'default';
+  }
 
   draftInput.addEventListener('input', () => {
     draftInput.style.height = 'auto';
@@ -135,12 +142,12 @@ const buildTextColContent = (
       e.preventDefault();
       const text = draftInput.value.trim();
       if (!text) return;
+      if (colIndex > 0 && !contextWordId) return;
       ctx.pushHistory();
       const newText: GraphText = { id: randomId(), wordIds: [] };
       setLangText(newText, state.lang, text);
-      if (colIndex > 0) {
-        const contextWordId = state.path[colIndex - 1];
-        if (contextWordId) newText.wordIds.push(contextWordId);
+      if (colIndex > 0 && contextWordId) {
+        newText.wordIds.push(contextWordId);
       }
       state.texts.unshift(newText);
       state.path = [...state.path.slice(0, colIndex), newText.id];
