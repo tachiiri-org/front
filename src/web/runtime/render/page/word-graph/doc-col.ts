@@ -27,12 +27,13 @@ export const renderWordGraphDocCol = (
   const shared = getOrCreateGraphState(graphId);
 
   let loadedForTextId: string | null = null;
+  let pendingDocFocus: { docId: string; cursorPos?: number } | null = null;
 
   const notify = (): void => {
     shared.subscribers.forEach((fn) => fn());
   };
 
-  const createDocument = (content: string, textId: string): void => {
+  const createDocumentAt = (content: string, textId: string, insertAfterIndex: number): void => {
     const lang = shared.lang === 'ja' ? 'ja' : 'en';
     void graphFetch(`/api/graph/${encodeURIComponent(graphId)}/document`, {
       method: 'POST',
@@ -43,7 +44,9 @@ export const renderWordGraphDocCol = (
       .then((data) => {
         if (!data) return;
         const d = data as { id: string; en?: string; ja?: string };
-        shared.documents.push({ id: d.id, ...(d.en ? { en: d.en } : {}), ...(d.ja ? { ja: d.ja } : {}) });
+        const newDoc = { id: d.id, ...(d.en ? { en: d.en } : {}), ...(d.ja ? { ja: d.ja } : {}) };
+        shared.documents.splice(insertAfterIndex + 1, 0, newDoc);
+        pendingDocFocus = { docId: d.id, cursorPos: 0 };
         notify();
       });
   };
@@ -153,7 +156,7 @@ export const renderWordGraphDocCol = (
         e.preventDefault();
         const text = draftInput.value.trim();
         if (!text) return;
-        createDocument(text, selectedTextId);
+        createDocumentAt(text, selectedTextId, shared.documents.length - 1);
         draftInput.value = '';
         if (!supportsFieldSizing) draftInput.style.height = 'auto';
       }
@@ -191,6 +194,7 @@ export const renderWordGraphDocCol = (
       const docInput = document.createElement('textarea');
       docInput.rows = 4;
       docInput.value = content;
+      docInput.dataset.docId = doc.id;
       Object.assign(docInput.style, {
         display: 'block',
         width: '100%',
@@ -231,6 +235,58 @@ export const renderWordGraphDocCol = (
           const existing = saveTimers.get(doc.id);
           if (existing) { clearTimeout(existing); saveTimers.delete(doc.id); }
           saveDocument(doc.id, docInput.value);
+        }
+      });
+
+      docInput.addEventListener('keydown', (e: KeyboardEvent) => {
+        // Shift+Alt+Up: reorder doc up
+        if (e.key === 'ArrowUp' && e.shiftKey && e.altKey) {
+          e.preventDefault();
+          const idx = shared.documents.findIndex((d) => d.id === doc.id);
+          if (idx > 0) {
+            [shared.documents[idx - 1], shared.documents[idx]] = [shared.documents[idx], shared.documents[idx - 1]];
+            pendingDocFocus = { docId: doc.id };
+            notify();
+          }
+          return;
+        }
+        // Shift+Alt+Down: reorder doc down
+        if (e.key === 'ArrowDown' && e.shiftKey && e.altKey) {
+          e.preventDefault();
+          const idx = shared.documents.findIndex((d) => d.id === doc.id);
+          if (idx < shared.documents.length - 1) {
+            [shared.documents[idx], shared.documents[idx + 1]] = [shared.documents[idx + 1], shared.documents[idx]];
+            pendingDocFocus = { docId: doc.id };
+            notify();
+          }
+          return;
+        }
+        // Ctrl+Shift+Backspace: delete doc
+        if (e.key === 'Backspace' && e.ctrlKey && e.shiftKey) {
+          e.preventDefault();
+          const idx = shared.documents.findIndex((d) => d.id === doc.id);
+          const focusDoc = idx > 0 ? shared.documents[idx - 1] : shared.documents[idx + 1];
+          deleteDocument(doc.id);
+          if (focusDoc) pendingDocFocus = { docId: focusDoc.id };
+          return;
+        }
+        // Enter: create new doc after current (split at cursor)
+        if (e.key === 'Enter' && !e.shiftKey && !e.ctrlKey && !e.altKey) {
+          e.preventDefault();
+          const cursorPos = docInput.selectionStart ?? docInput.value.length;
+          const before = docInput.value.slice(0, cursorPos);
+          const after = docInput.value.slice(cursorPos);
+          const langKey = shared.lang === 'ja' ? 'ja' : 'en';
+          (doc as Record<string, string | undefined>)[langKey] = before;
+          docInput.value = before;
+          const existing = saveTimers.get(doc.id);
+          if (existing) { clearTimeout(existing); saveTimers.delete(doc.id); }
+          saveDocument(doc.id, before);
+          if (selectedTextId) {
+            const idx = shared.documents.findIndex((d) => d.id === doc.id);
+            createDocumentAt(after, selectedTextId, idx);
+          }
+          return;
         }
       });
 
@@ -290,6 +346,18 @@ export const renderWordGraphDocCol = (
 
     const newCol = outer.firstElementChild as HTMLElement | null;
     if (newCol) newCol.scrollTop = scrollTop;
+
+    if (pendingDocFocus) {
+      const { docId, cursorPos } = pendingDocFocus;
+      pendingDocFocus = null;
+      requestAnimationFrame(() => {
+        const target = outer.querySelector<HTMLTextAreaElement>(`[data-doc-id="${CSS.escape(docId)}"]`);
+        if (target) {
+          target.focus({ preventScroll: true });
+          if (cursorPos !== undefined) target.setSelectionRange(cursorPos, cursorPos);
+        }
+      });
+    }
   };
 
   shared.subscribers.add(render);
