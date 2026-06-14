@@ -520,6 +520,34 @@ export const renderWordGraphWordCol = (
     flexShrink: '0',
   });
 
+  const renameBtn = document.createElement('button');
+  renameBtn.textContent = '✎';
+  Object.assign(renameBtn.style, {
+    fontSize: '12px',
+    lineHeight: '1',
+    padding: '0 5px',
+    border: `1px solid ${theme.borderFaint}`,
+    borderRadius: '3px',
+    background: 'transparent',
+    color: theme.textFaint,
+    cursor: 'pointer',
+    flexShrink: '0',
+  });
+
+  const deleteBtn = document.createElement('button');
+  deleteBtn.textContent = '×';
+  Object.assign(deleteBtn.style, {
+    fontSize: '13px',
+    lineHeight: '1',
+    padding: '0 5px',
+    border: `1px solid ${theme.borderFaint}`,
+    borderRadius: '3px',
+    background: 'transparent',
+    color: theme.textFaint,
+    cursor: 'pointer',
+    flexShrink: '0',
+  });
+
   const populateSelect = (): void => {
     select.replaceChildren();
     if (!graphListLoaded) {
@@ -603,8 +631,48 @@ export const renderWordGraphWordCol = (
       .catch(() => {});
   });
 
+  renameBtn.addEventListener('mousedown', (e) => {
+    e.preventDefault();
+    const current = graphList.find((g) => g.id === currentGraphId);
+    const newName = window.prompt('Rename graph:', current?.name ?? currentGraphId);
+    if (!newName || !newName.trim()) return;
+    void fetch(`/api/graph/${encodeURIComponent(currentGraphId)}`, {
+      method: 'PATCH',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ name: newName.trim() }),
+    })
+      .then((r) => {
+        if (r.ok) {
+          const g = graphList.find((x) => x.id === currentGraphId);
+          if (g) g.name = newName.trim();
+          populateSelect();
+        }
+      })
+      .catch(() => {});
+  });
+
+  deleteBtn.addEventListener('mousedown', (e) => {
+    e.preventDefault();
+    const current = graphList.find((g) => g.id === currentGraphId);
+    if (!window.confirm(`Delete graph "${current?.name ?? currentGraphId}"?`)) return;
+    void fetch(`/api/graph/${encodeURIComponent(currentGraphId)}`, { method: 'DELETE' })
+      .then((r) => {
+        if (r.ok) {
+          graphList = graphList.filter((g) => g.id !== currentGraphId);
+          const next = graphList[0];
+          if (next) {
+            switchToGraph(next.id);
+            populateSelect();
+          }
+        }
+      })
+      .catch(() => {});
+  });
+
   graphSelectorEl.appendChild(select);
+  graphSelectorEl.appendChild(renameBtn);
   graphSelectorEl.appendChild(addBtn);
+  graphSelectorEl.appendChild(deleteBtn);
 
   // Fetch graph list on mount
   void fetch('/api/graph/')
