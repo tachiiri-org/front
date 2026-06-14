@@ -621,10 +621,10 @@ export const handleApiRequest = async (request: Request, env: Env): Promise<Resp
   }
 
   // D1-backed graph API — proxy to backend /api/v1/graph/*
-  const graphApiMatch = url.pathname.match(/^\/api\/graph\/(.+)$/);
+  const graphApiMatch = url.pathname.match(/^\/api\/graph(\/.*)?$/);
   if (graphApiMatch) {
-    const suffix = graphApiMatch[1];
-    const backendPath = `/api/v1/graph/${suffix}${url.search}`;
+    const suffix = graphApiMatch[1] ?? '/';
+    const backendPath = `/api/v1/graph${suffix}${url.search}`;
     const body = request.method !== 'GET' && request.method !== 'HEAD' ? await request.text() : undefined;
     const cookies = parseCookies(request);
     const tenantContext = {
