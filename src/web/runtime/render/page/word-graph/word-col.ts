@@ -773,9 +773,25 @@ export const renderWordGraphWordCol = (
     if (newCol) newCol.scrollTop = scrollTop;
 
     focusPending();
+
+    // Mobile: full-screen overlay when active (no word selected), hidden when text-col is active.
+    const isMobile = window.matchMedia('(max-width: 768px)').matches;
+    const wordSelected = !!findWord(state.words, state.path[COL_INDEX] ?? '');
+    if (isMobile) {
+      if (wordSelected) {
+        outer.style.display = 'none';
+      } else {
+        Object.assign(outer.style, { display: 'flex', position: 'fixed', top: '0', right: '0', bottom: '0', left: '0', zIndex: '100' });
+      }
+    } else {
+      Object.assign(outer.style, { display: 'flex', position: '', top: '', right: '', bottom: '', left: '', zIndex: '' });
+    }
   };
 
   shared.subscribers.add(render);
+
+  // Re-render when viewport crosses the mobile breakpoint.
+  window.matchMedia('(max-width: 768px)').addEventListener('change', () => notify());
 
   if (!shared.loaded) {
     shared.loaded = true;

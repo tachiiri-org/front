@@ -13,6 +13,7 @@ const buildTextColContent = (
   items: GraphText[],
   colIndex: number,
   ctx: ColContext,
+  isMobile: boolean,
 ): HTMLElement => {
   const { state } = ctx;
   const contextWordId = colIndex > 0 ? (state.path[colIndex - 1] ?? '') : '';
@@ -24,6 +25,37 @@ const buildTextColContent = (
   col.style.minHeight = '0';
   col.style.overflowY = 'auto';
   col.style.padding = '4px 0';
+
+  // Mobile back button: shown when this is the related-texts column (colIndex=2) and a word is selected.
+  if (isMobile && colIndex === 2 && contextWordId) {
+    const word = findWord(state.words, contextWordId);
+    if (word) {
+      const label = getLangText(word, state.lang);
+      const backBtn = document.createElement('button');
+      backBtn.textContent = `‹ ${label.length > 24 ? label.slice(0, 24) + '…' : label}`;
+      Object.assign(backBtn.style, {
+        display: 'block',
+        width: '100%',
+        textAlign: 'left',
+        padding: '6px 12px',
+        border: 'none',
+        borderBottom: `1px solid ${theme.borderFaint}`,
+        background: 'transparent',
+        color: theme.textLow,
+        fontSize: '12px',
+        cursor: 'pointer',
+        userSelect: 'none',
+        flexShrink: '0',
+      });
+      backBtn.addEventListener('click', () => {
+        state.path = state.path.slice(0, colIndex - 1);
+        state.focusedId = null;
+        state.focusedColumn = null;
+        ctx.render();
+      });
+      col.appendChild(backBtn);
+    }
+  }
 
   // Column header: type label + lang toggle (col0 only)
   const headerRow = document.createElement('div');
@@ -336,18 +368,21 @@ export const renderWordGraphTextCol = (
     const prevCol = outer.firstElementChild as HTMLElement | null;
     const scrollTop = prevCol ? prevCol.scrollTop : 0;
 
+    const isMobile = window.matchMedia('(max-width: 768px)').matches;
+
     let items: GraphText[];
+    let activeWordId: string | null = null;
     if (colIndex === 0) {
       items = state.texts;
     } else {
       // colIndex === 2: texts linked to the word selected in path[1]
       // or if path[0] is a word (all-words view), texts linked to that word
-      const wordId = state.path[1]
+      activeWordId = state.path[1]
         ? (findWord(state.words, state.path[1]) ? state.path[1] : null)
         : (!findText(state.texts, state.path[0] ?? '') && state.path[0] && findWord(state.words, state.path[0])
           ? state.path[0]
           : null);
-      items = wordId ? state.texts.filter((t) => t.wordIds.includes(wordId)) : [];
+      items = activeWordId ? state.texts.filter((t) => t.wordIds.includes(activeWordId!)) : [];
     }
 
     const ctx: ColContext = {
@@ -360,7 +395,7 @@ export const renderWordGraphTextCol = (
       scheduleRender: () => requestAnimationFrame(notify),
     };
 
-    outer.replaceChildren(buildTextColContent(items, colIndex, ctx));
+    outer.replaceChildren(buildTextColContent(items, colIndex, ctx, isMobile));
 
     if (!supportsFieldSizing) {
       const tas = Array.from(outer.querySelectorAll<HTMLTextAreaElement>('textarea[data-nav-input]'));
@@ -373,9 +408,23 @@ export const renderWordGraphTextCol = (
     if (newCol) newCol.scrollTop = scrollTop;
 
     focusPending();
+
+    // Mobile: full-screen overlay when a word is selected (colIndex=2 only), hidden otherwise.
+    if (colIndex === 2 && isMobile) {
+      if (activeWordId) {
+        Object.assign(outer.style, { display: 'flex', position: 'fixed', top: '0', right: '0', bottom: '0', left: '0', zIndex: '100' });
+      } else {
+        outer.style.display = 'none';
+      }
+    } else {
+      Object.assign(outer.style, { display: 'flex', position: '', top: '', right: '', bottom: '', left: '', zIndex: '' });
+    }
   };
 
   shared.subscribers.add(render);
+
+  // Re-render when viewport crosses the mobile breakpoint.
+  window.matchMedia('(max-width: 768px)').addEventListener('change', () => notify());
 
   // Load data once per graphId
   if (!shared.loaded) {
