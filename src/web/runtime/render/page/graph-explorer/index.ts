@@ -24,7 +24,6 @@ const TEXT_MID = '#aaa';
 const TEXT_DIM = '#555';
 const SELECT_STRONG = '#3a6ea8';
 const SELECT_SUBTLE = '#1e2f42';
-const COL_WIDTH = 260;
 
 function getLabel(node: ExplorerNode, lang: 'en' | 'ja'): string {
   if (lang === 'en') return node.en || node.ja || node.id.slice(0, 8);
@@ -97,11 +96,18 @@ export function renderGraphExplorer(
   columnsEl.style.cssText = `display:flex;flex:1;overflow-x:auto;overflow-y:hidden;`;
   outer.appendChild(columnsEl);
 
+  const restoreFocus = () => {
+    if (!state.editingId) return;
+    const input = columnsEl.querySelector<HTMLInputElement>(`[data-node-id="${state.editingId}"] input`);
+    if (input) { input.focus(); input.select(); }
+  };
+
   const render = () => {
     columnsEl.innerHTML = '';
     for (let i = 0; i < state.columns.length; i++) {
       columnsEl.appendChild(buildColumn(i));
     }
+    restoreFocus();
   };
 
   const loadColumn = async (parentId: string, colIndex: number) => {
@@ -120,6 +126,7 @@ export function renderGraphExplorer(
     if (state.columns[colIndex]) {
       state.columns[colIndex].selectedId = nodeId;
     }
+    state.editingId = nodeId;
     loadColumn(nodeId, colIndex + 1);
   };
 
@@ -133,6 +140,7 @@ export function renderGraphExplorer(
         state.columns = state.columns.slice(0, colIndex + 1);
       }
     }
+    state.editingId = null;
     render();
   };
 
@@ -141,14 +149,14 @@ export function renderGraphExplorer(
 
     const colEl = document.createElement('div');
     colEl.style.cssText = `
-      min-width:${COL_WIDTH}px;width:${COL_WIDTH}px;
+      width:40%;min-width:200px;max-width:40%;
       display:flex;flex-direction:column;
       border-right:1px solid ${BORDER};
       flex-shrink:0;
       overflow:hidden;
     `;
 
-    // Header: show parent node label
+    // Header
     const header = document.createElement('div');
     if (colIndex === 0) {
       header.textContent = 'ルート';
@@ -192,9 +200,7 @@ export function renderGraphExplorer(
     }
     colEl.appendChild(list);
 
-    // Footer: new node input
     colEl.appendChild(buildNewNodeInput(colIndex, col.parentId));
-
     return colEl;
   };
 
@@ -202,7 +208,7 @@ export function renderGraphExplorer(
     const item = document.createElement('div');
     item.dataset.nodeId = node.id;
     item.style.cssText = `
-      display:flex;align-items:center;gap:6px;
+      display:flex;align-items:flex-start;gap:6px;
       padding:7px 10px 7px 12px;
       cursor:pointer;
       background:${selected ? SELECT_SUBTLE : 'transparent'};
@@ -222,13 +228,14 @@ export function renderGraphExplorer(
         flex:1;background:transparent;border:none;
         border-bottom:1px solid ${SELECT_STRONG};
         color:${TEXT_HIGH};font-size:14px;outline:none;padding:0;
+        min-width:0;
       `;
       let saved = false;
       const save = async () => {
         if (saved) return;
         saved = true;
         const val = input.value.trim();
-        if (val) {
+        if (val && val !== getLabel(node, lang)) {
           await apiUpdateNode(gId, node.id, lang, val);
           if (lang === 'en') node.en = val; else node.ja = val;
         }
@@ -242,55 +249,61 @@ export function renderGraphExplorer(
       input.addEventListener('blur', () => { void save(); });
       item.appendChild(input);
       setTimeout(() => { input.focus(); input.select(); }, 0);
+
+      // Delete button still available in edit mode
+      const delBtn = document.createElement('button');
+      delBtn.textContent = '×';
+      delBtn.title = '削除';
+      delBtn.style.cssText = `
+        background:none;border:none;color:${TEXT_DIM};
+        cursor:pointer;font-size:14px;padding:0 2px;line-height:1;flex-shrink:0;margin-top:1px;
+      `;
+      delBtn.addEventListener('mousedown', (e) => {
+        e.preventDefault(); // prevent blur on input
+        void deleteNode(colIndex, node.id);
+      });
+      item.appendChild(delBtn);
     } else {
-      // Color dot if any
       if (node.color) {
         const dot = document.createElement('span');
         dot.style.cssText = `
           width:8px;height:8px;border-radius:50%;
-          background:${node.color};flex-shrink:0;
+          background:${node.color};flex-shrink:0;margin-top:4px;
         `;
         item.appendChild(dot);
       }
 
       const label = document.createElement('span');
       label.textContent = getLabel(node, lang);
-      label.style.cssText = `flex:1;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;`;
+      label.style.cssText = `flex:1;white-space:pre-wrap;word-break:break-word;line-height:1.4;`;
       item.appendChild(label);
 
-      // Delete button (visible on hover)
       const delBtn = document.createElement('button');
       delBtn.textContent = '×';
       delBtn.title = '削除';
       delBtn.style.cssText = `
         display:none;background:none;border:none;color:${TEXT_DIM};
-        cursor:pointer;font-size:14px;padding:0 2px;line-height:1;flex-shrink:0;
+        cursor:pointer;font-size:14px;padding:0 2px;line-height:1;flex-shrink:0;margin-top:2px;
       `;
       delBtn.addEventListener('click', (e) => { e.stopPropagation(); void deleteNode(colIndex, node.id); });
       item.appendChild(delBtn);
 
-      // Arrow: shows when selected
       const arrow = document.createElement('span');
       arrow.textContent = '›';
       arrow.style.cssText = `
         color:${selected ? SELECT_STRONG : TEXT_DIM};
-        font-size:16px;line-height:1;flex-shrink:0;
+        font-size:16px;line-height:1.3;flex-shrink:0;
         ${selected ? '' : 'opacity:0.4;'}
       `;
       item.appendChild(arrow);
 
       item.addEventListener('mouseenter', () => { delBtn.style.display = 'block'; });
       item.addEventListener('mouseleave', () => { delBtn.style.display = 'none'; });
-    }
 
-    item.addEventListener('click', () => {
-      if (state.editingId === node.id) return;
-      selectNode(colIndex, node.id);
-    });
-    item.addEventListener('dblclick', () => {
-      state.editingId = node.id;
-      render();
-    });
+      item.addEventListener('click', () => {
+        selectNode(colIndex, node.id);
+      });
+    }
 
     return item;
   };
@@ -334,7 +347,6 @@ export function renderGraphExplorer(
     return footer;
   };
 
-  // Initial load: root column shows children of the graph node
   void loadColumn(gId, 0);
 
   return outer;
