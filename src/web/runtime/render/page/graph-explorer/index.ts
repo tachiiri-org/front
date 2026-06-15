@@ -17,6 +17,7 @@ type ExplorerState = {
   limit: number;
   columns: ExplorerColumn[];
   bookmarks: Set<string>;
+  showFallback: boolean; // show nodes that have no text in current lang but have text in other lang
 };
 
 const BG = '#1e1e1e';
@@ -148,6 +149,7 @@ export function renderGraphExplorer(
     limit,
     columns: [],
     bookmarks: loadBookmarks(gId),
+    showFallback: true,
   };
 
   // In-memory cache: null key = all-nodes (col 0), string key = children of nodeId
@@ -173,7 +175,7 @@ export function renderGraphExplorer(
   const topBar = document.createElement('div');
   topBar.style.cssText = `display:flex;justify-content:flex-end;align-items:center;padding:3px 8px;border-bottom:1px solid ${BORDER};flex-shrink:0;gap:4px;`;
 
-  const makeBtnStyle = (l: 'en' | 'ja') => {
+  const makeLangBtnStyle = (l: 'en' | 'ja') => {
     const active = state.lang === l;
     return `background:${active ? SELECT_STRONG : 'transparent'};border:1px solid ${active ? SELECT_STRONG : BORDER};color:${active ? TEXT_HIGH : TEXT_MID};cursor:pointer;font-size:11px;padding:1px 7px;border-radius:3px;line-height:1.5;`;
   };
@@ -184,8 +186,8 @@ export function renderGraphExplorer(
   enBtn.textContent = 'EN';
 
   const refreshLangBtns = () => {
-    jaBtn.style.cssText = makeBtnStyle('ja');
-    enBtn.style.cssText = makeBtnStyle('en');
+    jaBtn.style.cssText = makeLangBtnStyle('ja');
+    enBtn.style.cssText = makeLangBtnStyle('en');
   };
   refreshLangBtns();
 
@@ -197,6 +199,23 @@ export function renderGraphExplorer(
   };
   jaBtn.addEventListener('click', () => switchLang('ja'));
   enBtn.addEventListener('click', () => switchLang('en'));
+
+  // Toggle: show/hide nodes that only exist in the other language
+  const makeFallbackBtnStyle = () => {
+    const active = state.showFallback;
+    return `background:${active ? SELECT_STRONG : 'transparent'};border:1px solid ${active ? SELECT_STRONG : BORDER};color:${active ? TEXT_HIGH : TEXT_MID};cursor:pointer;font-size:11px;padding:1px 7px;border-radius:3px;line-height:1.5;`;
+  };
+  const fallbackBtn = document.createElement('button');
+  fallbackBtn.textContent = '他言語';
+  fallbackBtn.title = '現在の言語にテキストがなく他言語にのみあるノードの表示切り替え';
+  fallbackBtn.style.cssText = makeFallbackBtnStyle();
+  fallbackBtn.addEventListener('click', () => {
+    state.showFallback = !state.showFallback;
+    fallbackBtn.style.cssText = makeFallbackBtnStyle();
+    rebuildAll();
+  });
+
+  topBar.appendChild(fallbackBtn);
   topBar.appendChild(jaBtn);
   topBar.appendChild(enBtn);
   outer.appendChild(topBar);
@@ -449,13 +468,17 @@ export function renderGraphExplorer(
       msg.style.cssText = `padding:4px 12px;color:${TEXT_DIM};font-size:13px;`;
       list.appendChild(msg);
     } else {
+      // Filter out nodes that have no text in current lang but have text in other lang (when showFallback=false)
+      const visibleNodes = state.showFallback
+        ? col.nodes
+        : col.nodes.filter((n) => primaryLabel(n, state.lang) != null);
       // Bookmarked nodes pinned to top in column 0
       const nodes = colIndex === 0
         ? [
-            ...col.nodes.filter((n) => state.bookmarks.has(n.id)),
-            ...col.nodes.filter((n) => !state.bookmarks.has(n.id)),
+            ...visibleNodes.filter((n) => state.bookmarks.has(n.id)),
+            ...visibleNodes.filter((n) => !state.bookmarks.has(n.id)),
           ]
-        : col.nodes;
+        : visibleNodes;
       for (const node of nodes) {
         list.appendChild(buildNodeRow(node, colIndex));
       }
@@ -548,10 +571,19 @@ export function renderGraphExplorer(
       star.textContent = nowBookmarked ? '★' : '☆';
       star.style.color = nowBookmarked ? 'rgba(255,190,60,0.9)' : TEXT_DIM;
       star.title = nowBookmarked ? 'ブックマーク解除' : 'ブックマーク';
-      // Rebuild column 0 to reorder pinned nodes
+      // Blur cursor so focus doesn't follow the moved row
+      (document.activeElement as HTMLElement | null)?.blur();
+      // Rebuild column 0, preserving scroll position
       if (state.columns[0]) {
         const col0El = columnsEl.children[0] as HTMLElement | undefined;
-        if (col0El) columnsEl.replaceChild(buildColumnEl(0), col0El);
+        if (col0El) {
+          const listEl = col0El.querySelector<HTMLElement>('[data-list]');
+          const scrollTop = listEl?.scrollTop ?? 0;
+          const newCol0El = buildColumnEl(0);
+          columnsEl.replaceChild(newCol0El, col0El);
+          const newListEl = newCol0El.querySelector<HTMLElement>('[data-list]');
+          if (newListEl) newListEl.scrollTop = scrollTop;
+        }
       }
     });
     row.appendChild(star);
