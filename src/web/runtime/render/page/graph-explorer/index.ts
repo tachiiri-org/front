@@ -49,8 +49,10 @@ async function apiFetch(input: string, init?: RequestInit): Promise<Response> {
   return r;
 }
 
-async function fetchAllNodes(graphId: string): Promise<ExplorerNode[]> {
-  const r = await apiFetch(`/api/graph/${graphId}/nodes?limit=20`);
+async function fetchAllNodes(graphId: string, includeIds: string[] = []): Promise<ExplorerNode[]> {
+  const params = new URLSearchParams({ limit: '20' });
+  if (includeIds.length > 0) params.set('include', includeIds.join(','));
+  const r = await apiFetch(`/api/graph/${graphId}/nodes?${params}`);
   if (!r.ok) return [];
   const data = await r.json() as { nodes: ExplorerNode[] };
   return data.nodes ?? [];
@@ -243,7 +245,7 @@ export function renderGraphExplorer(
   const fetchCached = async (parentId: string | null): Promise<ExplorerNode[]> => {
     if (childrenCache.has(parentId)) return childrenCache.get(parentId)!;
     const nodes = parentId === null
-      ? await fetchAllNodes(gId)
+      ? await fetchAllNodes(gId, [...state.bookmarks])
       : await fetchChildren(gId, parentId, limit);
     childrenCache.set(parentId, nodes);
     return nodes;
@@ -391,6 +393,12 @@ export function renderGraphExplorer(
     const draftRow = document.createElement('div');
     draftRow.style.cssText = `display:flex;align-items:flex-start;gap:4px;padding:4px 8px 1px 12px;flex-shrink:0;`;
 
+    // Spacer matching star width so marker aligns with node rows
+    const draftStarSpacer = document.createElement('span');
+    draftStarSpacer.textContent = '☆';
+    draftStarSpacer.style.cssText = `flex-shrink:0;align-self:center;font-size:10px;line-height:1;visibility:hidden;margin-top:1px;`;
+    draftRow.appendChild(draftStarSpacer);
+
     const draftMarker = document.createElement('span');
     draftMarker.style.cssText = `
       width:6px;height:6px;flex-shrink:0;align-self:center;
@@ -503,10 +511,16 @@ export function renderGraphExplorer(
       const nowBookmarked = !state.bookmarks.has(node.id);
       if (nowBookmarked) {
         state.bookmarks.add(node.id);
+        // Inject into col0 nodes if not already present
+        if (state.columns[0] && !state.columns[0].nodes.some((n) => n.id === node.id)) {
+          state.columns[0].nodes.unshift(node);
+        }
       } else {
         state.bookmarks.delete(node.id);
       }
       saveBookmarks(gId, state.bookmarks);
+      // Invalidate col0 cache so next full reload reflects bookmark changes
+      childrenCache.delete(null);
       // Update this star's appearance
       star.textContent = nowBookmarked ? '★' : '☆';
       star.style.color = nowBookmarked ? 'rgba(255,190,60,0.9)' : TEXT_DIM;
