@@ -15,6 +15,7 @@ import type { WordGraphComponent } from './kind/word-graph';
 import type { WordGraphTextColComponent, WordGraphWordColComponent, WordGraphDocColComponent } from './kind/word-graph-col';
 import type { StorageExplorerComponent } from './kind/storage-explorer';
 import type { DbApplyComponent } from './kind/db-apply';
+import type { GraphExplorerComponent } from './kind/graph-explorer';
 import { isElementComponent, elementDefaults, elementSchema } from './kind/element';
 import { isHeadingComponent, headingDefaults, headingSchema } from './kind/heading';
 import { isButtonComponent, buttonDefaults, buttonSchema } from './kind/button';
@@ -32,6 +33,7 @@ import { isWordGraphComponent, wordGraphDefaults, wordGraphSchema } from './kind
 import { isWordGraphTextColComponent, isWordGraphWordColComponent, isWordGraphDocColComponent, wordGraphTextColDefaults, wordGraphWordColDefaults, wordGraphDocColDefaults, wordGraphTextColSchema, wordGraphWordColSchema, wordGraphDocColSchema } from './kind/word-graph-col';
 import { isStorageExplorerComponent, storageExplorerDefaults, storageExplorerSchema } from './kind/storage-explorer';
 import { isDbApplyComponent, dbApplyDefaults, dbApplySchema } from './kind/db-apply';
+import { isGraphExplorerComponent, graphExplorerDefaults, graphExplorerSchema } from './kind/graph-explorer';
 import type { FormField, SchemaField } from './kind/form/field';
 
 export { type ElementComponent, isElementComponent, elementDefaults, elementSchema } from './kind/element';
@@ -114,6 +116,12 @@ export {
   dbApplySchema,
 } from './kind/db-apply';
 export {
+  type GraphExplorerComponent,
+  isGraphExplorerComponent,
+  graphExplorerDefaults,
+  graphExplorerSchema,
+} from './kind/graph-explorer';
+export {
   type TableComponent,
   type TableSchema,
   type TableData,
@@ -153,7 +161,8 @@ export type Component =
   | WordGraphWordColComponent
   | WordGraphDocColComponent
   | StorageExplorerComponent
-  | DbApplyComponent;
+  | DbApplyComponent
+  | GraphExplorerComponent;
 
 export const isComponent = (value: unknown): value is Component =>
   isElementComponent(value) ||
@@ -174,7 +183,8 @@ export const isComponent = (value: unknown): value is Component =>
   isWordGraphWordColComponent(value) ||
   isWordGraphDocColComponent(value) ||
   isStorageExplorerComponent(value) ||
-  isDbApplyComponent(value);
+  isDbApplyComponent(value) ||
+  isGraphExplorerComponent(value);
 
 export const componentDefaults: Record<string, Record<string, unknown>> = {
   element: elementDefaults as Record<string, unknown>,
@@ -196,6 +206,7 @@ export const componentDefaults: Record<string, Record<string, unknown>> = {
   'word-graph-doc-col': wordGraphDocColDefaults as Record<string, unknown>,
   'storage-explorer': storageExplorerDefaults as Record<string, unknown>,
   'db-apply': dbApplyDefaults as Record<string, unknown>,
+  'graph-explorer': graphExplorerDefaults as Record<string, unknown>,
 };
 
 export const componentSchemas: Record<string, SchemaField[]> = {
@@ -218,6 +229,7 @@ export const componentSchemas: Record<string, SchemaField[]> = {
   'word-graph-doc-col': wordGraphDocColSchema,
   'storage-explorer': storageExplorerSchema,
   'db-apply': dbApplySchema,
+  'graph-explorer': graphExplorerSchema,
 };
 
 export const COMPONENT_KINDS = Object.keys(componentDefaults);

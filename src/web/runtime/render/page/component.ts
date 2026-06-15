@@ -13,6 +13,7 @@ import {
   isWordGraphDocColComponent,
   isStorageExplorerComponent,
   isDbApplyComponent,
+  isGraphExplorerComponent,
   ALL_CSS_PROP_KEYS,
   applyDefaults,
   type TableComponent,
@@ -26,6 +27,7 @@ import {
   type WordGraphDocColComponent,
   type StorageExplorerComponent,
   type DbApplyComponent,
+  type GraphExplorerComponent,
   type Component,
 } from '../../../schema/component';
 import { type Frame, type FrameRef, isFrameRef } from '../../../schema/screen/screen';
@@ -43,6 +45,7 @@ import { renderWordGraphWordCol } from './word-graph/word-col';
 import { renderWordGraphDocCol } from './word-graph/doc-col';
 import { renderStorageExplorer } from './storage-explorer';
 import { renderDbApply } from './db-apply';
+import { renderGraphExplorer } from './graph-explorer';
 
 const applyCssProps = (el: HTMLElement, c: Record<string, unknown>): void => {
   for (const propKey of ALL_CSS_PROP_KEYS) {
@@ -340,6 +343,12 @@ export const renderComponent = (
   }
   if (isDbApplyComponent(frame)) {
     return renderDbApply(id, frame as DbApplyComponent);
+  }
+  if (isGraphExplorerComponent(frame)) {
+    const gId = typeof (frame as Record<string, unknown>).graphId === 'string'
+      ? (frame as Record<string, unknown>).graphId as string
+      : undefined;
+    return renderGraphExplorer(id, frame as GraphExplorerComponent, gId);
   }
   if (isTableComponent(frame) && options?.screenId) {
     return renderEditableTable(
