@@ -38,7 +38,7 @@ async function apiFetch(input: string, init?: RequestInit): Promise<Response> {
 }
 
 async function fetchChildren(graphId: string, nodeId: string, limit: number): Promise<ExplorerNode[]> {
-  const r = await apiFetch(`/api/v1/graph/${graphId}/node/${nodeId}/children?limit=${limit}`);
+  const r = await apiFetch(`/api/graph/${graphId}/node/${nodeId}/children?limit=${limit}`);
   if (!r.ok) return [];
   const data = await r.json() as { nodes: ExplorerNode[] };
   return data.nodes ?? [];
@@ -48,7 +48,7 @@ async function apiCreateNode(
   graphId: string, parentId: string, lang: 'en' | 'ja', label: string,
 ): Promise<ExplorerNode | null> {
   const body = lang === 'en' ? { parentId, en: label } : { parentId, ja: label };
-  const r = await apiFetch(`/api/v1/graph/${graphId}/node`, {
+  const r = await apiFetch(`/api/graph/${graphId}/node`, {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
     body: JSON.stringify(body),
@@ -61,7 +61,7 @@ async function apiUpdateNode(
   graphId: string, nodeId: string, lang: 'en' | 'ja', label: string,
 ): Promise<void> {
   const body = lang === 'en' ? { en: label || null } : { ja: label || null };
-  await apiFetch(`/api/v1/graph/${graphId}/node/${nodeId}`, {
+  await apiFetch(`/api/graph/${graphId}/node/${nodeId}`, {
     method: 'PATCH',
     headers: { 'Content-Type': 'application/json' },
     body: JSON.stringify(body),
@@ -69,7 +69,7 @@ async function apiUpdateNode(
 }
 
 async function apiDeleteNode(graphId: string, nodeId: string): Promise<void> {
-  await apiFetch(`/api/v1/graph/${graphId}/node/${nodeId}`, { method: 'DELETE' });
+  await apiFetch(`/api/graph/${graphId}/node/${nodeId}`, { method: 'DELETE' });
 }
 
 export function renderGraphExplorer(
