@@ -49,8 +49,8 @@ async function apiFetch(input: string, init?: RequestInit): Promise<Response> {
   return r;
 }
 
-async function fetchAllNodes(graphId: string, limit: number): Promise<ExplorerNode[]> {
-  const r = await apiFetch(`/api/graph/${graphId}/nodes?limit=${limit}`);
+async function fetchAllNodes(graphId: string): Promise<ExplorerNode[]> {
+  const r = await apiFetch(`/api/graph/${graphId}/nodes?limit=20`);
   if (!r.ok) return [];
   const data = await r.json() as { nodes: ExplorerNode[] };
   return data.nodes ?? [];
@@ -243,7 +243,7 @@ export function renderGraphExplorer(
   const fetchCached = async (parentId: string | null): Promise<ExplorerNode[]> => {
     if (childrenCache.has(parentId)) return childrenCache.get(parentId)!;
     const nodes = parentId === null
-      ? await fetchAllNodes(gId, limit)
+      ? await fetchAllNodes(gId)
       : await fetchChildren(gId, parentId, limit);
     childrenCache.set(parentId, nodes);
     return nodes;
@@ -452,11 +452,6 @@ export function renderGraphExplorer(
     if (col.loading) {
       const msg = document.createElement('div');
       msg.textContent = '読み込み中...';
-      msg.style.cssText = `padding:4px 12px;color:${TEXT_DIM};font-size:13px;`;
-      list.appendChild(msg);
-    } else if (col.nodes.length === 0) {
-      const msg = document.createElement('div');
-      msg.textContent = 'ノードなし';
       msg.style.cssText = `padding:4px 12px;color:${TEXT_DIM};font-size:13px;`;
       list.appendChild(msg);
     } else {
