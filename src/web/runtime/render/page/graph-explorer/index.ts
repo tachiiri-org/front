@@ -3,7 +3,7 @@ import type { GraphExplorerComponent } from '../../../../schema/component/kind/g
 type ExplorerNode = { id: string; en?: string; ja?: string; color?: string };
 
 type ExplorerColumn = {
-  parentId: string;
+  parentId: string | null; // null for column 0 (all-nodes view)
   nodes: ExplorerNode[];
   loading: boolean;
   selectedId: string | null;
@@ -49,6 +49,13 @@ async function apiFetch(input: string, init?: RequestInit): Promise<Response> {
   return r;
 }
 
+async function fetchAllNodes(graphId: string, limit: number): Promise<ExplorerNode[]> {
+  const r = await apiFetch(`/api/graph/${graphId}/nodes?limit=${limit}`);
+  if (!r.ok) return [];
+  const data = await r.json() as { nodes: ExplorerNode[] };
+  return data.nodes ?? [];
+}
+
 async function fetchChildren(graphId: string, nodeId: string, limit: number): Promise<ExplorerNode[]> {
   const r = await apiFetch(`/api/graph/${graphId}/node/${nodeId}/children?limit=${limit}`);
   if (!r.ok) return [];
@@ -57,9 +64,11 @@ async function fetchChildren(graphId: string, nodeId: string, limit: number): Pr
 }
 
 async function apiCreateNode(
-  graphId: string, parentId: string, lang: 'en' | 'ja', label: string,
+  graphId: string, parentId: string | null, lang: 'en' | 'ja', label: string,
 ): Promise<ExplorerNode | null> {
-  const body = lang === 'en' ? { parentId, en: label } : { parentId, ja: label };
+  const body = lang === 'en'
+    ? (parentId ? { parentId, en: label } : { en: label })
+    : (parentId ? { parentId, ja: label } : { ja: label });
   const r = await apiFetch(`/api/graph/${graphId}/node`, {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
@@ -132,10 +141,9 @@ export function renderGraphExplorer(
     columns: [],
     bookmarks: loadBookmarks(gId),
   };
-  console.log('[graph-explorer] init gId=%s bookmarks=%d', gId, state.bookmarks.size);
 
-  // In-memory children cache keyed by nodeId
-  const childrenCache = new Map<string, ExplorerNode[]>();
+  // In-memory cache: null key = all-nodes (col 0), string key = children of nodeId
+  const childrenCache = new Map<string | null, ExplorerNode[]>();
 
   let columnVersion = 0;
 
@@ -232,14 +240,17 @@ export function renderGraphExplorer(
     columnsEl.appendChild(buildColumnEl(colIndex));
   };
 
-  const fetchChildrenCached = async (nodeId: string): Promise<ExplorerNode[]> => {
-    if (childrenCache.has(nodeId)) return childrenCache.get(nodeId)!;
-    const nodes = await fetchChildren(gId, nodeId, limit);
-    childrenCache.set(nodeId, nodes);
+  const fetchCached = async (parentId: string | null): Promise<ExplorerNode[]> => {
+    if (childrenCache.has(parentId)) return childrenCache.get(parentId)!;
+    const nodes = parentId === null
+      ? await fetchAllNodes(gId, limit)
+      : await fetchChildren(gId, parentId, limit);
+    childrenCache.set(parentId, nodes);
     return nodes;
   };
 
-  const loadColumn = async (parentId: string, colIndex: number) => {
+  // parentId=null means "load all nodes" (column 0)
+  const loadColumn = async (parentId: string | null, colIndex: number) => {
     const version = ++columnVersion;
     state.columns = state.columns.slice(0, colIndex);
 
@@ -255,7 +266,7 @@ export function renderGraphExplorer(
     state.columns.push({ parentId, nodes: [], loading: true, selectedId: null });
     appendColumn(colIndex);
 
-    const nodes = await fetchChildrenCached(parentId);
+    const nodes = await fetchCached(parentId);
     if (version !== columnVersion) return;
     if (state.columns[colIndex]) {
       state.columns[colIndex].nodes = nodes;
@@ -340,10 +351,10 @@ export function renderGraphExplorer(
   };
 
   const deleteNode = (node: ExplorerNode, colIndex: number, focusNodeId?: string) => {
-    const parentId = state.columns[colIndex]?.parentId;
+    const parentId = state.columns[colIndex]?.parentId ?? null;
     void apiDeleteNode(gId, node.id).then(() => {
-      // Invalidate parent's children cache since child list changed
-      if (parentId) childrenCache.delete(parentId);
+      // Invalidate cache for this column's source
+      childrenCache.delete(parentId);
       if (state.columns[colIndex]) {
         state.columns[colIndex].nodes = state.columns[colIndex].nodes.filter((n) => n.id !== node.id);
         if (state.columns[colIndex].selectedId === node.id) {
@@ -418,7 +429,7 @@ export function renderGraphExplorer(
       const val = draftInput.value.trim();
       if (!val) return;
       draftInput.value = '';
-      // Invalidate cache since we're adding a child to this parent
+      // Invalidate cache for this column's source (null = all-nodes)
       childrenCache.delete(col.parentId);
       const newNode = await apiCreateNode(gId, col.parentId, state.lang, val);
       if (newNode && state.columns[colIndex]) {
@@ -649,7 +660,7 @@ export function renderGraphExplorer(
     return row;
   };
 
-  void loadColumn(gId, 0);
+  void loadColumn(null, 0);
 
   return outer;
 }
