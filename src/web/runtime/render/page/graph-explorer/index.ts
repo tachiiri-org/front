@@ -25,9 +25,14 @@ const TEXT_DIM = '#555';
 const SELECT_STRONG = '#3a6ea8';
 const SELECT_SUBTLE = '#1e2f42';
 
+// No language fallback: return label only if it exists for the selected lang
 function getLabel(node: ExplorerNode, lang: 'en' | 'ja'): string {
-  if (lang === 'en') return node.en || node.ja || node.id.slice(0, 8);
-  return node.ja || node.en || node.id.slice(0, 8);
+  if (lang === 'en') return node.en ?? node.id.slice(0, 8);
+  return node.ja ?? node.id.slice(0, 8);
+}
+
+function hasLabel(node: ExplorerNode, lang: 'en' | 'ja'): boolean {
+  return lang === 'en' ? node.en != null : node.ja != null;
 }
 
 async function apiFetch(input: string, init?: RequestInit): Promise<Response> {
@@ -95,43 +100,29 @@ export function renderGraphExplorer(
   const topBar = document.createElement('div');
   topBar.style.cssText = `display:flex;justify-content:flex-end;align-items:center;padding:4px 8px;border-bottom:1px solid ${BORDER};flex-shrink:0;gap:4px;`;
 
-  const makeLangBtn = (l: 'en' | 'ja'): HTMLButtonElement => {
-    const btn = document.createElement('button');
-    btn.textContent = l.toUpperCase();
-    const active = () => state.lang === l;
-    const applyStyle = () => {
-      btn.style.cssText = `
-        background:${active() ? SELECT_STRONG : 'transparent'};
-        border:1px solid ${active() ? SELECT_STRONG : BORDER};
-        color:${active() ? TEXT_HIGH : TEXT_MID};
-        cursor:pointer;font-size:11px;padding:2px 7px;
-        border-radius:3px;line-height:1.4;
-      `;
-    };
-    applyStyle();
-    btn.addEventListener('click', () => {
-      state.lang = l;
-      state.editingId = null;
-      enBtn.style.cssText = makeLangBtnStyle('en', state.lang);
-      jaBtn.style.cssText = makeLangBtnStyle('ja', state.lang);
-      render();
-    });
-    return btn;
-  };
-
   const makeLangBtnStyle = (l: 'en' | 'ja', current: 'en' | 'ja') => {
     const active = l === current;
-    return `
-      background:${active ? SELECT_STRONG : 'transparent'};
-      border:1px solid ${active ? SELECT_STRONG : BORDER};
-      color:${active ? TEXT_HIGH : TEXT_MID};
-      cursor:pointer;font-size:11px;padding:2px 7px;
-      border-radius:3px;line-height:1.4;
-    `;
+    return `background:${active ? SELECT_STRONG : 'transparent'};border:1px solid ${active ? SELECT_STRONG : BORDER};color:${active ? TEXT_HIGH : TEXT_MID};cursor:pointer;font-size:11px;padding:2px 7px;border-radius:3px;line-height:1.4;`;
   };
 
-  const jaBtn = makeLangBtn('ja');
-  const enBtn = makeLangBtn('en');
+  const jaBtn = document.createElement('button');
+  jaBtn.textContent = 'JA';
+  jaBtn.style.cssText = makeLangBtnStyle('ja', state.lang);
+
+  const enBtn = document.createElement('button');
+  enBtn.textContent = 'EN';
+  enBtn.style.cssText = makeLangBtnStyle('en', state.lang);
+
+  const switchLang = (l: 'en' | 'ja') => {
+    state.lang = l;
+    state.editingId = null;
+    jaBtn.style.cssText = makeLangBtnStyle('ja', state.lang);
+    enBtn.style.cssText = makeLangBtnStyle('en', state.lang);
+    render();
+  };
+
+  jaBtn.addEventListener('click', () => switchLang('ja'));
+  enBtn.addEventListener('click', () => switchLang('en'));
   topBar.appendChild(jaBtn);
   topBar.appendChild(enBtn);
   outer.appendChild(topBar);
@@ -167,12 +158,17 @@ export function renderGraphExplorer(
     render();
   };
 
+  // Single click: navigate (select + expand). Edit is double-click.
   const selectNode = (colIndex: number, nodeId: string) => {
     if (state.columns[colIndex]) {
       state.columns[colIndex].selectedId = nodeId;
     }
-    state.editingId = nodeId;
     loadColumn(nodeId, colIndex + 1);
+  };
+
+  const startEdit = (nodeId: string) => {
+    state.editingId = nodeId;
+    render();
   };
 
   const deleteNode = async (colIndex: number, nodeId: string) => {
@@ -193,7 +189,7 @@ export function renderGraphExplorer(
     const col = state.columns[colIndex];
 
     const colEl = document.createElement('div');
-    // fit-content: column shrinks to widest item, capped at 40% (text wraps at that point)
+    // fit-content: column width adapts to content, capped at 40%
     colEl.style.cssText = `
       width:fit-content;max-width:40%;min-width:160px;
       display:flex;flex-direction:column;
@@ -201,7 +197,7 @@ export function renderGraphExplorer(
       flex-shrink:0;overflow:hidden;
     `;
 
-    // Header
+    // ── Header ────────────────────────────────────────────────────
     const header = document.createElement('div');
     if (colIndex === 0) {
       header.textContent = 'ルート';
@@ -220,7 +216,10 @@ export function renderGraphExplorer(
     `;
     colEl.appendChild(header);
 
-    // Item list
+    // ── New node input (top, word-col style) ──────────────────────
+    colEl.appendChild(buildNewNodeInput(colIndex, col.parentId));
+
+    // ── Item list ─────────────────────────────────────────────────
     const list = document.createElement('div');
     list.style.cssText = `flex:1;overflow-y:auto;`;
 
@@ -241,7 +240,6 @@ export function renderGraphExplorer(
     }
     colEl.appendChild(list);
 
-    colEl.appendChild(buildNewNodeInput(colIndex, col.parentId));
     return colEl;
   };
 
@@ -312,28 +310,17 @@ export function renderGraphExplorer(
         item.appendChild(dot);
       }
 
-      // Dual-language display: primary lang large, secondary lang small below
-      const labelWrap = document.createElement('div');
-      labelWrap.style.cssText = `flex:1;min-width:0;`;
-
-      const primary = document.createElement('div');
-      primary.textContent = getLabel(node, state.lang);
-      primary.style.cssText = `white-space:normal;word-break:break-word;line-height:1.4;`;
-      labelWrap.appendChild(primary);
-
-      // Show secondary language if available and different
-      const secondary = state.lang === 'ja' ? node.en : node.ja;
-      if (secondary && secondary !== primary.textContent) {
-        const sec = document.createElement('div');
-        sec.textContent = secondary;
-        sec.style.cssText = `
-          font-size:11px;color:${TEXT_DIM};margin-top:1px;
-          white-space:normal;word-break:break-word;line-height:1.3;
-        `;
-        labelWrap.appendChild(sec);
+      const label = document.createElement('span');
+      label.style.cssText = `flex:1;white-space:normal;word-break:break-word;line-height:1.4;`;
+      if (hasLabel(node, state.lang)) {
+        label.textContent = getLabel(node, state.lang);
+      } else {
+        // No label for this language: show short ID with dim style
+        label.textContent = node.id.slice(0, 8);
+        label.style.color = TEXT_DIM;
+        label.style.fontStyle = 'italic';
       }
-
-      item.appendChild(labelWrap);
+      item.appendChild(label);
 
       const delBtn = document.createElement('button');
       delBtn.textContent = '×';
@@ -357,35 +344,32 @@ export function renderGraphExplorer(
       item.addEventListener('mouseenter', () => { delBtn.style.display = 'block'; });
       item.addEventListener('mouseleave', () => { delBtn.style.display = 'none'; });
 
-      item.addEventListener('click', () => {
-        selectNode(colIndex, node.id);
-      });
+      // Single click: navigate; double-click: edit
+      item.addEventListener('click', () => { selectNode(colIndex, node.id); });
+      item.addEventListener('dblclick', () => { startEdit(node.id); });
     }
 
     return item;
   };
 
   const buildNewNodeInput = (colIndex: number, parentId: string): HTMLElement => {
-    const footer = document.createElement('div');
-    footer.style.cssText = `border-top:1px solid ${BORDER};padding:8px 12px;flex-shrink:0;`;
+    const row = document.createElement('div');
+    row.style.cssText = `display:flex;align-items:center;gap:4px;padding:4px 10px 4px 12px;border-bottom:1px solid ${BORDER};flex-shrink:0;`;
+
+    const plus = document.createElement('span');
+    plus.textContent = '+';
+    plus.style.cssText = `color:${TEXT_DIM};font-size:13px;flex-shrink:0;line-height:1;`;
+    row.appendChild(plus);
 
     const input = document.createElement('input');
     input.type = 'text';
-    input.placeholder = '+ 新しいノード';
+    input.placeholder = '新しいノード';
     input.style.cssText = `
-      width:100%;box-sizing:border-box;
-      background:transparent;border:none;
-      border-bottom:1px solid transparent;
-      color:${TEXT_MID};font-size:13px;outline:none;padding:2px 0;
+      flex:1;background:transparent;border:none;outline:none;
+      color:${TEXT_MID};font-size:13px;padding:2px 0;min-width:0;
     `;
-    input.addEventListener('focus', () => {
-      input.style.borderBottomColor = SELECT_STRONG;
-      input.style.color = TEXT_HIGH;
-    });
-    input.addEventListener('blur', () => {
-      input.style.borderBottomColor = 'transparent';
-      input.style.color = TEXT_MID;
-    });
+    input.addEventListener('focus', () => { input.style.color = TEXT_HIGH; plus.style.color = SELECT_STRONG; });
+    input.addEventListener('blur', () => { input.style.color = TEXT_MID; plus.style.color = TEXT_DIM; });
     input.addEventListener('keydown', async (e) => {
       if (e.key !== 'Enter') return;
       e.preventDefault();
@@ -400,8 +384,8 @@ export function renderGraphExplorer(
       }
     });
 
-    footer.appendChild(input);
-    return footer;
+    row.appendChild(input);
+    return row;
   };
 
   void loadColumn(gId, 0);
