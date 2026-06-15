@@ -292,7 +292,7 @@ export function renderGraphExplorer(
     const colEl = columnsEl.children[colIndex];
     if (!colEl) return;
     const selectedId = state.columns[colIndex]?.selectedId;
-    colEl.querySelectorAll<HTMLElement>('[data-node-id]').forEach((row) => {
+    colEl.querySelectorAll<HTMLElement>('[data-node-id]:not(textarea)').forEach((row) => {
       const isSelected = row.dataset.nodeId === selectedId;
       row.style.background = 'transparent';
       row.style.borderLeft = `2px solid ${isSelected ? SELECT_STRONG : 'transparent'}`;
