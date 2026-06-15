@@ -23,7 +23,6 @@ const TEXT_HIGH = '#e0e0e0';
 const TEXT_MID = '#aaa';
 const TEXT_DIM = '#555';
 const SELECT_STRONG = '#3a6ea8';
-const SELECT_SUBTLE = '#1e2f42';
 
 const PRESET_COLORS: Array<string | null> = [
   'rgba(255,190,60,0.90)',
@@ -100,15 +99,22 @@ const BOOKMARK_KEY_PREFIX = 'ge-bookmarks:';
 function loadBookmarks(graphId: string): Set<string> {
   try {
     const raw = localStorage.getItem(BOOKMARK_KEY_PREFIX + graphId);
-    if (raw) return new Set(JSON.parse(raw) as string[]);
-  } catch { /* ignore */ }
+    if (raw) {
+      const ids = JSON.parse(raw) as unknown;
+      if (Array.isArray(ids)) return new Set(ids.filter((v) => typeof v === 'string') as string[]);
+    }
+  } catch (err) {
+    console.error('[graph-explorer] loadBookmarks error', err);
+  }
   return new Set();
 }
 
 function saveBookmarks(graphId: string, bookmarks: Set<string>): void {
   try {
-    localStorage.setItem(BOOKMARK_KEY_PREFIX + graphId, JSON.stringify([...bookmarks]));
-  } catch { /* ignore */ }
+    localStorage.setItem(BOOKMARK_KEY_PREFIX + graphId, JSON.stringify(Array.from(bookmarks)));
+  } catch (err) {
+    console.error('[graph-explorer] saveBookmarks error', err);
+  }
 }
 
 export function renderGraphExplorer(
@@ -126,6 +132,10 @@ export function renderGraphExplorer(
     columns: [],
     bookmarks: loadBookmarks(gId),
   };
+  console.log('[graph-explorer] init gId=%s bookmarks=%d', gId, state.bookmarks.size);
+
+  // In-memory children cache keyed by nodeId
+  const childrenCache = new Map<string, ExplorerNode[]>();
 
   let columnVersion = 0;
 
@@ -167,12 +177,40 @@ export function renderGraphExplorer(
     state.lang = l;
     refreshLangBtns();
     rebuildAll();
+    refreshBreadcrumb();
   };
   jaBtn.addEventListener('click', () => switchLang('ja'));
   enBtn.addEventListener('click', () => switchLang('en'));
   topBar.appendChild(jaBtn);
   topBar.appendChild(enBtn);
   outer.appendChild(topBar);
+
+  // ── Breadcrumb ───────────────────────────────────────────────────
+  const breadcrumbEl = document.createElement('div');
+  breadcrumbEl.style.cssText = `
+    padding:4px 12px;border-bottom:1px solid ${BORDER};flex-shrink:0;
+    font-size:12px;color:${TEXT_MID};white-space:nowrap;overflow:hidden;text-overflow:ellipsis;
+  `;
+  breadcrumbEl.textContent = 'ルート';
+  outer.appendChild(breadcrumbEl);
+
+  const refreshBreadcrumb = () => {
+    breadcrumbEl.innerHTML = '';
+    const addSpan = (text: string, highlight = false) => {
+      const s = document.createElement('span');
+      s.textContent = text;
+      s.style.color = highlight ? TEXT_HIGH : TEXT_MID;
+      breadcrumbEl.appendChild(s);
+    };
+    addSpan('ルート');
+    for (const col of state.columns) {
+      if (!col.selectedId) break;
+      const node = col.nodes.find((n) => n.id === col.selectedId);
+      if (!node) break;
+      addSpan(' › ', false);
+      addSpan(primaryLabel(node, state.lang) ?? fallbackLabel(node, state.lang), true);
+    }
+  };
 
   // ── Columns area ──────────────────────────────────────────────────
   const columnsEl = document.createElement('div');
@@ -194,13 +232,30 @@ export function renderGraphExplorer(
     columnsEl.appendChild(buildColumnEl(colIndex));
   };
 
+  const fetchChildrenCached = async (nodeId: string): Promise<ExplorerNode[]> => {
+    if (childrenCache.has(nodeId)) return childrenCache.get(nodeId)!;
+    const nodes = await fetchChildren(gId, nodeId, limit);
+    childrenCache.set(nodeId, nodes);
+    return nodes;
+  };
+
   const loadColumn = async (parentId: string, colIndex: number) => {
     const version = ++columnVersion;
     state.columns = state.columns.slice(0, colIndex);
+
+    // Cache hit: render immediately without loading state
+    if (childrenCache.has(parentId)) {
+      const cached = childrenCache.get(parentId)!;
+      state.columns.push({ parentId, nodes: cached, loading: false, selectedId: null });
+      appendColumn(colIndex);
+      return;
+    }
+
+    // Cache miss: show loading spinner, then fetch
     state.columns.push({ parentId, nodes: [], loading: true, selectedId: null });
     appendColumn(colIndex);
 
-    const nodes = await fetchChildren(gId, parentId, limit);
+    const nodes = await fetchChildrenCached(parentId);
     if (version !== columnVersion) return;
     if (state.columns[colIndex]) {
       state.columns[colIndex].nodes = nodes;
@@ -217,6 +272,7 @@ export function renderGraphExplorer(
     if (state.columns[colIndex]) state.columns[colIndex].selectedId = nodeId;
     void loadColumn(nodeId, colIndex + 1);
     refreshRowStyles(colIndex);
+    refreshBreadcrumb();
   };
 
   const refreshRowStyles = (colIndex: number) => {
@@ -225,7 +281,7 @@ export function renderGraphExplorer(
     const selectedId = state.columns[colIndex]?.selectedId;
     colEl.querySelectorAll<HTMLElement>('[data-node-id]').forEach((row) => {
       const isSelected = row.dataset.nodeId === selectedId;
-      row.style.background = isSelected ? SELECT_SUBTLE : 'transparent';
+      row.style.background = 'transparent';
       row.style.borderLeft = `2px solid ${isSelected ? SELECT_STRONG : 'transparent'}`;
     });
   };
@@ -257,7 +313,6 @@ export function renderGraphExplorer(
         e.preventDefault();
         node.color = c ?? undefined;
         void apiUpdateColor(gId, node.id, c);
-        // Update marker in current column
         const colEl = columnsEl.children[colIndex];
         if (colEl) {
           const row = colEl.querySelector<HTMLElement>(`[data-node-id="${node.id}"]`);
@@ -276,13 +331,19 @@ export function renderGraphExplorer(
 
     document.body.appendChild(picker);
     const dismiss = (e: MouseEvent) => {
-      if (!picker.contains(e.target as Node)) { picker.remove(); document.removeEventListener('mousedown', dismiss); }
+      if (!picker.contains(e.target as Node)) {
+        picker.remove();
+        document.removeEventListener('mousedown', dismiss);
+      }
     };
     setTimeout(() => document.addEventListener('mousedown', dismiss), 0);
   };
 
-  const deleteNode = (node: ExplorerNode, colIndex: number) => {
+  const deleteNode = (node: ExplorerNode, colIndex: number, focusNodeId?: string) => {
+    const parentId = state.columns[colIndex]?.parentId;
     void apiDeleteNode(gId, node.id).then(() => {
+      // Invalidate parent's children cache since child list changed
+      if (parentId) childrenCache.delete(parentId);
       if (state.columns[colIndex]) {
         state.columns[colIndex].nodes = state.columns[colIndex].nodes.filter((n) => n.id !== node.id);
         if (state.columns[colIndex].selectedId === node.id) {
@@ -291,6 +352,16 @@ export function renderGraphExplorer(
         }
       }
       rebuildAll();
+      refreshBreadcrumb();
+      // Re-focus the node above (or below if it was first)
+      if (focusNodeId) {
+        const colEl = columnsEl.children[colIndex] as HTMLElement | undefined;
+        const target = colEl?.querySelector<HTMLTextAreaElement>(`textarea[data-node-id="${focusNodeId}"]`);
+        if (target) {
+          target.focus();
+          target.setSelectionRange(target.value.length, target.value.length);
+        }
+      }
     });
   };
 
@@ -305,31 +376,9 @@ export function renderGraphExplorer(
       flex-shrink:0;overflow:hidden;
     `;
 
-    // ── Header ────────────────────────────────────────────────────
-    const header = document.createElement('div');
-    if (colIndex === 0) {
-      header.textContent = 'ルート';
-    } else {
-      const prevCol = state.columns[colIndex - 1];
-      const parentNode = prevCol?.nodes.find((n) => n.id === col.parentId);
-      if (parentNode) {
-        header.textContent = primaryLabel(parentNode, state.lang) ?? fallbackLabel(parentNode, state.lang);
-      } else {
-        header.textContent = col.parentId.slice(0, 8);
-      }
-    }
-    header.title = col.parentId;
-    header.style.cssText = `
-      padding:6px 12px;font-size:11px;font-weight:600;
-      color:${TEXT_DIM};letter-spacing:0.05em;text-transform:uppercase;
-      border-bottom:1px solid ${BORDER};
-      white-space:nowrap;overflow:hidden;text-overflow:ellipsis;flex-shrink:0;
-    `;
-    colEl.appendChild(header);
-
-    // ── New node input ────────────────────────────────────────────
+    // ── New node input (no header — breadcrumb shows path instead) ──
     const draftRow = document.createElement('div');
-    draftRow.style.cssText = `display:flex;align-items:flex-start;gap:4px;padding:1px 8px 1px 12px;flex-shrink:0;`;
+    draftRow.style.cssText = `display:flex;align-items:flex-start;gap:4px;padding:4px 8px 1px 12px;flex-shrink:0;`;
 
     const draftMarker = document.createElement('span');
     draftMarker.style.cssText = `
@@ -369,6 +418,8 @@ export function renderGraphExplorer(
       const val = draftInput.value.trim();
       if (!val) return;
       draftInput.value = '';
+      // Invalidate cache since we're adding a child to this parent
+      childrenCache.delete(col.parentId);
       const newNode = await apiCreateNode(gId, col.parentId, state.lang, val);
       if (newNode && state.columns[colIndex]) {
         state.columns[colIndex].nodes.push(newNode);
@@ -398,7 +449,7 @@ export function renderGraphExplorer(
       msg.style.cssText = `padding:4px 12px;color:${TEXT_DIM};font-size:13px;`;
       list.appendChild(msg);
     } else {
-      // Bookmarked nodes first in column 0
+      // Bookmarked nodes pinned to top in column 0
       const nodes = colIndex === 0
         ? [
             ...col.nodes.filter((n) => state.bookmarks.has(n.id)),
@@ -413,44 +464,52 @@ export function renderGraphExplorer(
     return colEl;
   };
 
+  const getColumnTextareas = (colIndex: number): HTMLTextAreaElement[] => {
+    const colEl = columnsEl.children[colIndex];
+    if (!colEl) return [];
+    return Array.from(colEl.querySelectorAll<HTMLTextAreaElement>('[data-list] textarea[data-node-id]'));
+  };
+
   const buildNodeRow = (node: ExplorerNode, colIndex: number): HTMLElement => {
     const selected = state.columns[colIndex]?.selectedId === node.id;
+    const isBookmarked = state.bookmarks.has(node.id);
 
     const row = document.createElement('div');
     row.dataset.nodeId = node.id;
     row.style.cssText = `
       display:flex;align-items:flex-start;gap:4px;
       padding:1px 8px 1px 8px;flex-shrink:0;
-      background:${selected ? SELECT_SUBTLE : 'transparent'};
+      background:transparent;
       border-left:2px solid ${selected ? SELECT_STRONG : 'transparent'};
     `;
 
-    // Star bookmark (left of marker)
+    // Star bookmark (☆ unfilled / ★ filled)
     const star = document.createElement('span');
-    const isBookmarked = state.bookmarks.has(node.id);
-    star.textContent = '★';
+    star.textContent = isBookmarked ? '★' : '☆';
     star.title = isBookmarked ? 'ブックマーク解除' : 'ブックマーク';
     star.style.cssText = `
       flex-shrink:0;align-self:center;cursor:pointer;font-size:10px;line-height:1;
       color:${isBookmarked ? 'rgba(255,190,60,0.9)' : TEXT_DIM};
-      margin-top:1px;
+      margin-top:1px;user-select:none;
     `;
     star.addEventListener('mousedown', (e) => {
       e.preventDefault();
-      if (state.bookmarks.has(node.id)) {
-        state.bookmarks.delete(node.id);
-      } else {
+      const nowBookmarked = !state.bookmarks.has(node.id);
+      if (nowBookmarked) {
         state.bookmarks.add(node.id);
+      } else {
+        state.bookmarks.delete(node.id);
       }
       saveBookmarks(gId, state.bookmarks);
+      // Update this star's appearance
+      star.textContent = nowBookmarked ? '★' : '☆';
+      star.style.color = nowBookmarked ? 'rgba(255,190,60,0.9)' : TEXT_DIM;
+      star.title = nowBookmarked ? 'ブックマーク解除' : 'ブックマーク';
       // Rebuild column 0 to reorder pinned nodes
-      const col0El = columnsEl.children[0] as HTMLElement | undefined;
-      if (col0El && state.columns[0]) {
-        columnsEl.replaceChild(buildColumnEl(0), col0El);
+      if (state.columns[0]) {
+        const col0El = columnsEl.children[0] as HTMLElement | undefined;
+        if (col0El) columnsEl.replaceChild(buildColumnEl(0), col0El);
       }
-      // Update star color in current column
-      star.style.color = state.bookmarks.has(node.id) ? 'rgba(255,190,60,0.9)' : TEXT_DIM;
-      star.title = state.bookmarks.has(node.id) ? 'ブックマーク解除' : 'ブックマーク';
     });
     row.appendChild(star);
 
@@ -514,10 +573,13 @@ export function renderGraphExplorer(
     inp.addEventListener('keydown', (e) => {
       if (e.key === 'Escape') { inp.blur(); return; }
 
-      // Ctrl+Shift+Backspace → delete node
+      // Ctrl+Shift+Backspace → delete node, focus node above
       if (e.key === 'Backspace' && e.ctrlKey && e.shiftKey) {
         e.preventDefault();
-        deleteNode(node, colIndex);
+        const textareas = getColumnTextareas(colIndex);
+        const myIdx = textareas.indexOf(inp);
+        const focusTarget = textareas[myIdx > 0 ? myIdx - 1 : myIdx + 1];
+        deleteNode(node, colIndex, focusTarget?.dataset.nodeId);
         return;
       }
 
@@ -533,7 +595,6 @@ export function renderGraphExplorer(
         if (newIdx < 0 || newIdx >= col.nodes.length) return;
         col.nodes.splice(idx, 1);
         col.nodes.splice(newIdx, 0, node);
-        // Re-render the list in-place
         const colEl = columnsEl.children[colIndex] as HTMLElement | undefined;
         if (colEl) {
           const listEl = colEl.querySelector<HTMLElement>('[data-list]');
@@ -542,12 +603,45 @@ export function renderGraphExplorer(
             for (const n of col.nodes) {
               listEl.appendChild(buildNodeRow(n, colIndex));
             }
-            // Re-focus the moved node's textarea
-            const movedRow = listEl.querySelector<HTMLTextAreaElement>(`textarea[data-node-id="${node.id}"]`);
-            movedRow?.focus();
+            const movedInp = listEl.querySelector<HTMLTextAreaElement>(`textarea[data-node-id="${node.id}"]`);
+            movedInp?.focus();
           }
         }
         return;
+      }
+
+      // ArrowUp at start → focus previous node's textarea
+      if (e.key === 'ArrowUp' && !e.shiftKey && !e.altKey && !e.ctrlKey) {
+        if (inp.selectionStart === 0 && inp.selectionEnd === 0) {
+          e.preventDefault();
+          const textareas = getColumnTextareas(colIndex);
+          const myIdx = textareas.indexOf(inp);
+          const prev = textareas[myIdx - 1];
+          if (prev) {
+            prev.focus();
+            requestAnimationFrame(() => {
+              prev.setSelectionRange(prev.value.length, prev.value.length);
+            });
+          }
+          return;
+        }
+      }
+
+      // ArrowDown at end → focus next node's textarea
+      if (e.key === 'ArrowDown' && !e.shiftKey && !e.altKey && !e.ctrlKey) {
+        if (inp.selectionStart === inp.value.length && inp.selectionEnd === inp.value.length) {
+          e.preventDefault();
+          const textareas = getColumnTextareas(colIndex);
+          const myIdx = textareas.indexOf(inp);
+          const next = textareas[myIdx + 1];
+          if (next) {
+            next.focus();
+            requestAnimationFrame(() => {
+              next.setSelectionRange(0, 0);
+            });
+          }
+          return;
+        }
       }
     });
 
