@@ -393,11 +393,9 @@ export function renderGraphExplorer(
     const draftRow = document.createElement('div');
     draftRow.style.cssText = `display:flex;align-items:flex-start;gap:4px;padding:4px 8px 1px 12px;flex-shrink:0;`;
 
-    // Spacer matching star width so marker aligns with node rows
-    const draftStarSpacer = document.createElement('span');
-    draftStarSpacer.textContent = '☆';
-    draftStarSpacer.style.cssText = `flex-shrink:0;align-self:center;font-size:10px;line-height:1;visibility:hidden;margin-top:1px;`;
-    draftRow.appendChild(draftStarSpacer);
+    const draftStar = document.createElement('span');
+    draftStar.textContent = '☆';
+    draftStar.style.cssText = `flex-shrink:0;align-self:center;font-size:10px;line-height:1;color:transparent;margin-top:1px;user-select:none;`;
 
     const draftMarker = document.createElement('span');
     draftMarker.style.cssText = `
@@ -448,6 +446,7 @@ export function renderGraphExplorer(
       }
     });
 
+    draftRow.appendChild(draftStar);
     draftRow.appendChild(draftMarker);
     draftRow.appendChild(draftInput);
     colEl.appendChild(draftRow);
