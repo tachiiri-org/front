@@ -7,6 +7,8 @@ type ExplorerColumn = {
   nodes: ExplorerNode[];
   loading: boolean;
   selectedId: string | null;
+  hasMore?: boolean;   // col 0 pagination
+  nextOffset?: number; // next page offset for col 0
 };
 
 type ExplorerState = {
@@ -49,13 +51,17 @@ async function apiFetch(input: string, init?: RequestInit): Promise<Response> {
   return r;
 }
 
-async function fetchAllNodes(graphId: string, includeIds: string[] = []): Promise<ExplorerNode[]> {
-  const params = new URLSearchParams({ limit: '20' });
+async function fetchAllNodes(
+  graphId: string,
+  includeIds: string[] = [],
+  offset = 0,
+): Promise<{ nodes: ExplorerNode[]; hasMore: boolean }> {
+  const params = new URLSearchParams({ limit: '20', offset: String(offset) });
   if (includeIds.length > 0) params.set('include', includeIds.join(','));
   const r = await apiFetch(`/api/graph/${graphId}/nodes?${params}`);
-  if (!r.ok) return [];
-  const data = await r.json() as { nodes: ExplorerNode[] };
-  return data.nodes ?? [];
+  if (!r.ok) return { nodes: [], hasMore: false };
+  const data = await r.json() as { nodes: ExplorerNode[]; hasMore?: boolean };
+  return { nodes: data.nodes ?? [], hasMore: data.hasMore ?? false };
 }
 
 async function fetchChildren(graphId: string, nodeId: string, limit: number): Promise<ExplorerNode[]> {
@@ -242,13 +248,16 @@ export function renderGraphExplorer(
     columnsEl.appendChild(buildColumnEl(colIndex));
   };
 
-  const fetchCached = async (parentId: string | null): Promise<ExplorerNode[]> => {
-    if (childrenCache.has(parentId)) return childrenCache.get(parentId)!;
-    const nodes = parentId === null
-      ? await fetchAllNodes(gId, [...state.bookmarks])
-      : await fetchChildren(gId, parentId, limit);
+  const fetchCached = async (parentId: string | null): Promise<{ nodes: ExplorerNode[]; hasMore: boolean }> => {
+    if (childrenCache.has(parentId)) return { nodes: childrenCache.get(parentId)!, hasMore: false };
+    if (parentId === null) {
+      const result = await fetchAllNodes(gId, [...state.bookmarks], 0);
+      childrenCache.set(null, result.nodes);
+      return result;
+    }
+    const nodes = await fetchChildren(gId, parentId, limit);
     childrenCache.set(parentId, nodes);
-    return nodes;
+    return { nodes, hasMore: false };
   };
 
   // parentId=null means "load all nodes" (column 0)
@@ -259,20 +268,22 @@ export function renderGraphExplorer(
     // Cache hit: render immediately without loading state
     if (childrenCache.has(parentId)) {
       const cached = childrenCache.get(parentId)!;
-      state.columns.push({ parentId, nodes: cached, loading: false, selectedId: null });
+      state.columns.push({ parentId, nodes: cached, loading: false, selectedId: null, hasMore: false, nextOffset: cached.length });
       appendColumn(colIndex);
       return;
     }
 
     // Cache miss: show loading spinner, then fetch
-    state.columns.push({ parentId, nodes: [], loading: true, selectedId: null });
+    state.columns.push({ parentId, nodes: [], loading: true, selectedId: null, hasMore: false, nextOffset: 0 });
     appendColumn(colIndex);
 
-    const nodes = await fetchCached(parentId);
+    const { nodes, hasMore } = await fetchCached(parentId);
     if (version !== columnVersion) return;
     if (state.columns[colIndex]) {
       state.columns[colIndex].nodes = nodes;
       state.columns[colIndex].loading = false;
+      state.columns[colIndex].hasMore = hasMore;
+      state.columns[colIndex].nextOffset = nodes.length;
     }
     const colEl = columnsEl.children[colIndex] as HTMLElement | undefined;
     if (colEl) {
@@ -448,6 +459,43 @@ export function renderGraphExplorer(
       for (const node of nodes) {
         list.appendChild(buildNodeRow(node, colIndex));
       }
+
+      // "Load more" button for column 0 pagination
+      if (colIndex === 0 && col.hasMore) {
+        const moreBtn = document.createElement('button');
+        moreBtn.textContent = 'さらに読み込む';
+        moreBtn.style.cssText = `
+          display:block;width:100%;padding:4px 12px;
+          background:transparent;border:none;border-top:1px solid ${BORDER};
+          color:${TEXT_MID};font-size:12px;cursor:pointer;text-align:left;
+        `;
+        moreBtn.addEventListener('mouseenter', () => { moreBtn.style.color = TEXT_HIGH; });
+        moreBtn.addEventListener('mouseleave', () => { moreBtn.style.color = TEXT_MID; });
+        moreBtn.addEventListener('click', async () => {
+          moreBtn.textContent = '読み込み中...';
+          moreBtn.style.cursor = 'default';
+          const offset = col.nextOffset ?? col.nodes.length;
+          const { nodes: newNodes, hasMore: newHasMore } = await fetchAllNodes(gId, [...state.bookmarks], offset);
+          if (state.columns[colIndex]) {
+            // Append only nodes not already in the list
+            const existingIds = new Set(state.columns[colIndex].nodes.map((n) => n.id));
+            const fresh = newNodes.filter((n) => !existingIds.has(n.id));
+            state.columns[colIndex].nodes.push(...fresh);
+            state.columns[colIndex].hasMore = newHasMore;
+            state.columns[colIndex].nextOffset = offset + newNodes.length;
+            for (const n of fresh) {
+              list.insertBefore(buildNodeRow(n, colIndex), moreBtn);
+            }
+          }
+          if (newHasMore) {
+            moreBtn.textContent = 'さらに読み込む';
+            moreBtn.style.cursor = 'pointer';
+          } else {
+            moreBtn.remove();
+          }
+        });
+        list.appendChild(moreBtn);
+      }
     }
     colEl.appendChild(list);
     return colEl;
@@ -592,15 +640,10 @@ export function renderGraphExplorer(
         col.nodes.splice(newIdx, 0, node);
         const colEl = columnsEl.children[colIndex] as HTMLElement | undefined;
         if (colEl) {
-          const listEl = colEl.querySelector<HTMLElement>('[data-list]');
-          if (listEl) {
-            listEl.innerHTML = '';
-            for (const n of col.nodes) {
-              listEl.appendChild(buildNodeRow(n, colIndex));
-            }
-            const movedInp = listEl.querySelector<HTMLTextAreaElement>(`textarea[data-node-id="${node.id}"]`);
-            movedInp?.focus();
-          }
+          columnsEl.replaceChild(buildColumnEl(colIndex), colEl);
+          const newColEl = columnsEl.children[colIndex] as HTMLElement | undefined;
+          const movedInp = newColEl?.querySelector<HTMLTextAreaElement>(`textarea[data-node-id="${node.id}"]`);
+          movedInp?.focus();
         }
         return;
       }
