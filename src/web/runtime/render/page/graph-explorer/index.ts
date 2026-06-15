@@ -14,6 +14,7 @@ type ExplorerState = {
   lang: 'en' | 'ja';
   limit: number;
   columns: ExplorerColumn[];
+  bookmarks: Set<string>;
 };
 
 const BG = '#1e1e1e';
@@ -23,6 +24,16 @@ const TEXT_MID = '#aaa';
 const TEXT_DIM = '#555';
 const SELECT_STRONG = '#3a6ea8';
 const SELECT_SUBTLE = '#1e2f42';
+
+const PRESET_COLORS: Array<string | null> = [
+  'rgba(255,190,60,0.90)',
+  'rgba(200,120,255,0.90)',
+  'rgba(60,220,120,0.90)',
+  'rgba(80,160,255,0.90)',
+  'rgba(255,100,100,0.90)',
+  'rgba(60,220,220,0.90)',
+  null,
+];
 
 function primaryLabel(node: ExplorerNode, lang: 'en' | 'ja'): string | null {
   return lang === 'en' ? (node.en ?? null) : (node.ja ?? null);
@@ -70,8 +81,34 @@ async function apiUpdateNode(
   });
 }
 
+async function apiUpdateColor(
+  graphId: string, nodeId: string, color: string | null,
+): Promise<void> {
+  await apiFetch(`/api/graph/${graphId}/node/${nodeId}`, {
+    method: 'PATCH',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ color }),
+  });
+}
+
 async function apiDeleteNode(graphId: string, nodeId: string): Promise<void> {
   await apiFetch(`/api/graph/${graphId}/node/${nodeId}`, { method: 'DELETE' });
+}
+
+const BOOKMARK_KEY_PREFIX = 'ge-bookmarks:';
+
+function loadBookmarks(graphId: string): Set<string> {
+  try {
+    const raw = localStorage.getItem(BOOKMARK_KEY_PREFIX + graphId);
+    if (raw) return new Set(JSON.parse(raw) as string[]);
+  } catch { /* ignore */ }
+  return new Set();
+}
+
+function saveBookmarks(graphId: string, bookmarks: Set<string>): void {
+  try {
+    localStorage.setItem(BOOKMARK_KEY_PREFIX + graphId, JSON.stringify([...bookmarks]));
+  } catch { /* ignore */ }
 }
 
 export function renderGraphExplorer(
@@ -87,14 +124,24 @@ export function renderGraphExplorer(
     lang: comp.lang ?? 'ja',
     limit,
     columns: [],
+    bookmarks: loadBookmarks(gId),
   };
 
-  // Track pending column loads to avoid races
   let columnVersion = 0;
 
   const outer = document.createElement('div');
   outer.id = id;
   outer.style.cssText = `display:flex;flex-direction:column;height:100%;background:${BG};color:${TEXT_HIGH};font-family:sans-serif;font-size:13px;line-height:1.5;overflow:hidden;`;
+
+  // Scrollbar styles
+  const style = document.createElement('style');
+  style.textContent = `
+    #${id} ::-webkit-scrollbar { width: 6px; height: 6px; }
+    #${id} ::-webkit-scrollbar-track { background: transparent; }
+    #${id} ::-webkit-scrollbar-thumb { background: #555; border-radius: 3px; }
+    #${id} * { scrollbar-width: thin; scrollbar-color: #555 transparent; }
+  `;
+  outer.appendChild(style);
 
   // ── Language switcher ─────────────────────────────────────────────
   const topBar = document.createElement('div');
@@ -132,7 +179,6 @@ export function renderGraphExplorer(
   columnsEl.style.cssText = `display:flex;flex:1;overflow-x:auto;overflow-y:hidden;`;
   outer.appendChild(columnsEl);
 
-  // Rebuild all column DOM from current state
   const rebuildAll = () => {
     columnsEl.innerHTML = '';
     for (let i = 0; i < state.columns.length; i++) {
@@ -140,9 +186,7 @@ export function renderGraphExplorer(
     }
   };
 
-  // Append or update a single column (used when a new column is added)
   const appendColumn = (colIndex: number) => {
-    // Remove columns at or beyond colIndex
     const existing = columnsEl.children;
     while (existing.length > colIndex) {
       columnsEl.removeChild(existing[existing.length - 1]);
@@ -157,12 +201,11 @@ export function renderGraphExplorer(
     appendColumn(colIndex);
 
     const nodes = await fetchChildren(gId, parentId, limit);
-    if (version !== columnVersion) return; // superseded
+    if (version !== columnVersion) return;
     if (state.columns[colIndex]) {
       state.columns[colIndex].nodes = nodes;
       state.columns[colIndex].loading = false;
     }
-    // Replace the loading column with the loaded one
     const colEl = columnsEl.children[colIndex] as HTMLElement | undefined;
     if (colEl) {
       columnsEl.replaceChild(buildColumnEl(colIndex), colEl);
@@ -173,7 +216,6 @@ export function renderGraphExplorer(
     if (state.columns[colIndex]?.selectedId === nodeId) return;
     if (state.columns[colIndex]) state.columns[colIndex].selectedId = nodeId;
     void loadColumn(nodeId, colIndex + 1);
-    // Highlight the selected row
     refreshRowStyles(colIndex);
   };
 
@@ -185,6 +227,70 @@ export function renderGraphExplorer(
       const isSelected = row.dataset.nodeId === selectedId;
       row.style.background = isSelected ? SELECT_SUBTLE : 'transparent';
       row.style.borderLeft = `2px solid ${isSelected ? SELECT_STRONG : 'transparent'}`;
+    });
+  };
+
+  const showColorPicker = (anchor: HTMLElement, node: ExplorerNode, colIndex: number) => {
+    document.querySelector('.ge-color-picker')?.remove();
+    const picker = document.createElement('div');
+    picker.className = 'ge-color-picker';
+    picker.style.cssText = `
+      position:fixed;display:flex;align-items:center;gap:6px;
+      background:#2a2a2a;border:1px solid ${BORDER};border-radius:6px;
+      padding:6px 8px;z-index:9999;box-shadow:0 4px 12px rgba(0,0,0,0.5);
+    `;
+    const rect = anchor.getBoundingClientRect();
+    picker.style.left = `${rect.left}px`;
+    picker.style.top = `${rect.bottom + 4}px`;
+
+    for (const c of PRESET_COLORS) {
+      const swatch = document.createElement('div');
+      swatch.style.cssText = `
+        width:16px;height:16px;border-radius:3px;cursor:pointer;box-sizing:border-box;
+        background:${c ?? 'transparent'};
+        border:${c ? 'none' : `1.5px solid ${TEXT_DIM}`};
+        display:flex;align-items:center;justify-content:center;
+        color:${TEXT_DIM};font-size:11px;
+      `;
+      if (!c) swatch.textContent = '×';
+      swatch.addEventListener('mousedown', (e) => {
+        e.preventDefault();
+        node.color = c ?? undefined;
+        void apiUpdateColor(gId, node.id, c);
+        // Update marker in current column
+        const colEl = columnsEl.children[colIndex];
+        if (colEl) {
+          const row = colEl.querySelector<HTMLElement>(`[data-node-id="${node.id}"]`);
+          if (row) {
+            const markerEl = row.querySelector<HTMLElement>('[data-marker]');
+            if (markerEl) {
+              markerEl.style.background = node.color ?? 'transparent';
+              markerEl.style.border = node.color ? 'none' : `1.5px solid ${TEXT_DIM}`;
+            }
+          }
+        }
+        picker.remove();
+      });
+      picker.appendChild(swatch);
+    }
+
+    document.body.appendChild(picker);
+    const dismiss = (e: MouseEvent) => {
+      if (!picker.contains(e.target as Node)) { picker.remove(); document.removeEventListener('mousedown', dismiss); }
+    };
+    setTimeout(() => document.addEventListener('mousedown', dismiss), 0);
+  };
+
+  const deleteNode = (node: ExplorerNode, colIndex: number) => {
+    void apiDeleteNode(gId, node.id).then(() => {
+      if (state.columns[colIndex]) {
+        state.columns[colIndex].nodes = state.columns[colIndex].nodes.filter((n) => n.id !== node.id);
+        if (state.columns[colIndex].selectedId === node.id) {
+          state.columns[colIndex].selectedId = null;
+          state.columns = state.columns.slice(0, colIndex + 1);
+        }
+      }
+      rebuildAll();
     });
   };
 
@@ -221,7 +327,7 @@ export function renderGraphExplorer(
     `;
     colEl.appendChild(header);
 
-    // ── New node input (top, like word-col draft) ─────────────────
+    // ── New node input ────────────────────────────────────────────
     const draftRow = document.createElement('div');
     draftRow.style.cssText = `display:flex;align-items:flex-start;gap:4px;padding:1px 8px 1px 12px;flex-shrink:0;`;
 
@@ -235,7 +341,7 @@ export function renderGraphExplorer(
 
     const draftInput = document.createElement('textarea');
     draftInput.rows = 1;
-    draftInput.placeholder = '新しいノード';
+    draftInput.placeholder = '';
     Object.assign(draftInput.style, {
       display: 'block',
       width: '100%',
@@ -266,7 +372,6 @@ export function renderGraphExplorer(
       const newNode = await apiCreateNode(gId, col.parentId, state.lang, val);
       if (newNode && state.columns[colIndex]) {
         state.columns[colIndex].nodes.push(newNode);
-        // Append the new row into the list
         const listEl = colEl.querySelector<HTMLElement>('[data-list]');
         if (listEl) listEl.appendChild(buildNodeRow(newNode, colIndex));
         void onNodeFocus(colIndex, newNode.id);
@@ -293,7 +398,14 @@ export function renderGraphExplorer(
       msg.style.cssText = `padding:4px 12px;color:${TEXT_DIM};font-size:13px;`;
       list.appendChild(msg);
     } else {
-      for (const node of col.nodes) {
+      // Bookmarked nodes first in column 0
+      const nodes = colIndex === 0
+        ? [
+            ...col.nodes.filter((n) => state.bookmarks.has(n.id)),
+            ...col.nodes.filter((n) => !state.bookmarks.has(n.id)),
+          ]
+        : col.nodes;
+      for (const node of nodes) {
         list.appendChild(buildNodeRow(node, colIndex));
       }
     }
@@ -308,23 +420,57 @@ export function renderGraphExplorer(
     row.dataset.nodeId = node.id;
     row.style.cssText = `
       display:flex;align-items:flex-start;gap:4px;
-      padding:1px 8px 1px 12px;flex-shrink:0;
+      padding:1px 8px 1px 8px;flex-shrink:0;
       background:${selected ? SELECT_SUBTLE : 'transparent'};
       border-left:2px solid ${selected ? SELECT_STRONG : 'transparent'};
     `;
 
-    // Marker dot
+    // Star bookmark (left of marker)
+    const star = document.createElement('span');
+    const isBookmarked = state.bookmarks.has(node.id);
+    star.textContent = '★';
+    star.title = isBookmarked ? 'ブックマーク解除' : 'ブックマーク';
+    star.style.cssText = `
+      flex-shrink:0;align-self:center;cursor:pointer;font-size:10px;line-height:1;
+      color:${isBookmarked ? 'rgba(255,190,60,0.9)' : TEXT_DIM};
+      margin-top:1px;
+    `;
+    star.addEventListener('mousedown', (e) => {
+      e.preventDefault();
+      if (state.bookmarks.has(node.id)) {
+        state.bookmarks.delete(node.id);
+      } else {
+        state.bookmarks.add(node.id);
+      }
+      saveBookmarks(gId, state.bookmarks);
+      // Rebuild column 0 to reorder pinned nodes
+      const col0El = columnsEl.children[0] as HTMLElement | undefined;
+      if (col0El && state.columns[0]) {
+        columnsEl.replaceChild(buildColumnEl(0), col0El);
+      }
+      // Update star color in current column
+      star.style.color = state.bookmarks.has(node.id) ? 'rgba(255,190,60,0.9)' : TEXT_DIM;
+      star.title = state.bookmarks.has(node.id) ? 'ブックマーク解除' : 'ブックマーク';
+    });
+    row.appendChild(star);
+
+    // Marker dot (right-click for color picker)
     const marker = document.createElement('span');
+    marker.dataset.marker = '1';
     marker.style.cssText = `
       width:6px;height:6px;flex-shrink:0;align-self:center;
       border-radius:1px;box-sizing:border-box;
       background:${node.color ?? 'transparent'};
       border:${node.color ? 'none' : `1.5px solid ${TEXT_DIM}`};
-      margin-top:1px;
+      margin-top:1px;cursor:context-menu;
     `;
+    marker.addEventListener('contextmenu', (e) => {
+      e.preventDefault();
+      showColorPicker(marker, node, colIndex);
+    });
     row.appendChild(marker);
 
-    // Textarea (always editable, like word-col)
+    // Textarea
     const inp = document.createElement('textarea');
     inp.rows = 1;
     const prim = primaryLabel(node, state.lang);
@@ -356,11 +502,9 @@ export function renderGraphExplorer(
 
     let saveTimer: ReturnType<typeof setTimeout> | null = null;
     inp.addEventListener('input', () => {
-      // Update in-memory label immediately
       if (state.lang === 'en') node.en = inp.value || undefined;
       else node.ja = inp.value || undefined;
       inp.style.color = inp.value ? TEXT_HIGH : TEXT_DIM;
-      // Debounce API save
       if (saveTimer) clearTimeout(saveTimer);
       saveTimer = setTimeout(() => {
         void apiUpdateNode(gId, node.id, state.lang, inp.value.trim());
@@ -368,38 +512,46 @@ export function renderGraphExplorer(
     });
 
     inp.addEventListener('keydown', (e) => {
-      if (e.key === 'Escape') { inp.blur(); }
+      if (e.key === 'Escape') { inp.blur(); return; }
+
+      // Ctrl+Shift+Backspace → delete node
+      if (e.key === 'Backspace' && e.ctrlKey && e.shiftKey) {
+        e.preventDefault();
+        deleteNode(node, colIndex);
+        return;
+      }
+
+      // Shift+Alt+Up/Down → reorder node in column
+      if ((e.key === 'ArrowUp' || e.key === 'ArrowDown') && e.shiftKey && e.altKey) {
+        e.preventDefault();
+        const col = state.columns[colIndex];
+        if (!col) return;
+        const idx = col.nodes.indexOf(node);
+        if (idx === -1) return;
+        const dir = e.key === 'ArrowUp' ? -1 : 1;
+        const newIdx = idx + dir;
+        if (newIdx < 0 || newIdx >= col.nodes.length) return;
+        col.nodes.splice(idx, 1);
+        col.nodes.splice(newIdx, 0, node);
+        // Re-render the list in-place
+        const colEl = columnsEl.children[colIndex] as HTMLElement | undefined;
+        if (colEl) {
+          const listEl = colEl.querySelector<HTMLElement>('[data-list]');
+          if (listEl) {
+            listEl.innerHTML = '';
+            for (const n of col.nodes) {
+              listEl.appendChild(buildNodeRow(n, colIndex));
+            }
+            // Re-focus the moved node's textarea
+            const movedRow = listEl.querySelector<HTMLTextAreaElement>(`textarea[data-node-id="${node.id}"]`);
+            movedRow?.focus();
+          }
+        }
+        return;
+      }
     });
 
     row.appendChild(inp);
-
-    // Delete button (shown on hover)
-    const delBtn = document.createElement('button');
-    delBtn.textContent = '×';
-    delBtn.title = '削除';
-    delBtn.style.cssText = `
-      display:none;background:none;border:none;color:${TEXT_DIM};
-      cursor:pointer;font-size:13px;padding:0 2px;line-height:1.5;flex-shrink:0;align-self:center;
-    `;
-    delBtn.addEventListener('mousedown', (e) => {
-      e.preventDefault();
-      if (!confirm('このノードを削除しますか？')) return;
-      void apiDeleteNode(gId, node.id).then(() => {
-        if (state.columns[colIndex]) {
-          state.columns[colIndex].nodes = state.columns[colIndex].nodes.filter((n) => n.id !== node.id);
-          if (state.columns[colIndex].selectedId === node.id) {
-            state.columns[colIndex].selectedId = null;
-            state.columns = state.columns.slice(0, colIndex + 1);
-          }
-        }
-        rebuildAll();
-      });
-    });
-    row.appendChild(delBtn);
-
-    row.addEventListener('mouseenter', () => { delBtn.style.display = 'block'; });
-    row.addEventListener('mouseleave', () => { delBtn.style.display = 'none'; });
-
     return row;
   };
 
