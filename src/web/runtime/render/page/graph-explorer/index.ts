@@ -56,9 +56,11 @@ async function fetchAllNodes(
   graphId: string,
   includeIds: string[] = [],
   offset = 0,
+  lang?: 'en' | 'ja',
 ): Promise<{ nodes: ExplorerNode[]; hasMore: boolean }> {
   const params = new URLSearchParams({ limit: '20', offset: String(offset) });
   if (includeIds.length > 0) params.set('include', includeIds.join(','));
+  if (lang) params.set('lang', lang);
   const r = await apiFetch(`/api/graph/${graphId}/nodes?${params}`);
   if (!r.ok) return { nodes: [], hasMore: false };
   const data = await r.json() as { nodes: ExplorerNode[]; hasMore?: boolean };
@@ -149,7 +151,7 @@ export function renderGraphExplorer(
     limit,
     columns: [],
     bookmarks: loadBookmarks(gId),
-    showFallback: true,
+    showFallback: false,
   };
 
   // In-memory cache: null key = all-nodes (col 0), string key = children of nodeId
@@ -194,7 +196,14 @@ export function renderGraphExplorer(
   const switchLang = (l: 'en' | 'ja') => {
     state.lang = l;
     refreshLangBtns();
-    rebuildAll();
+    fallbackBtn.style.cssText = makeFallbackBtnStyle();
+    if (!state.showFallback) {
+      // Re-fetch col0 with new lang filter
+      childrenCache.delete(null);
+      void loadColumn(null, 0);
+    } else {
+      rebuildAll();
+    }
     refreshBreadcrumb();
   };
   jaBtn.addEventListener('click', () => switchLang('ja'));
@@ -212,7 +221,8 @@ export function renderGraphExplorer(
   fallbackBtn.addEventListener('click', () => {
     state.showFallback = !state.showFallback;
     fallbackBtn.style.cssText = makeFallbackBtnStyle();
-    rebuildAll();
+    childrenCache.delete(null);
+    void loadColumn(null, 0);
   });
 
   topBar.appendChild(fallbackBtn);
@@ -270,7 +280,8 @@ export function renderGraphExplorer(
   const fetchCached = async (parentId: string | null): Promise<{ nodes: ExplorerNode[]; hasMore: boolean }> => {
     if (childrenCache.has(parentId)) return { nodes: childrenCache.get(parentId)!, hasMore: false };
     if (parentId === null) {
-      const result = await fetchAllNodes(gId, [...state.bookmarks], 0);
+      const lang = state.showFallback ? undefined : state.lang;
+      const result = await fetchAllNodes(gId, [...state.bookmarks], 0, lang);
       childrenCache.set(null, result.nodes);
       return result;
     }
@@ -483,22 +494,30 @@ export function renderGraphExplorer(
         list.appendChild(buildNodeRow(node, colIndex));
       }
 
-      // "Load more" button for column 0 pagination
+      // "Load more" button for column 0 pagination — same flex structure as node rows
       if (colIndex === 0 && col.hasMore) {
+        const moreBtnWrapper = document.createElement('div');
+        moreBtnWrapper.style.cssText = `display:flex;align-items:flex-start;gap:4px;padding:1px 8px 1px 8px;flex-shrink:0;border-top:1px solid ${BORDER};`;
+
+        const moreBtnStar = document.createElement('span');
+        moreBtnStar.textContent = '☆';
+        moreBtnStar.style.cssText = `flex-shrink:0;align-self:center;font-size:10px;line-height:1;color:transparent;margin-top:1px;user-select:none;`;
+
+        const moreBtnMarker = document.createElement('span');
+        moreBtnMarker.style.cssText = `width:6px;height:6px;flex-shrink:0;align-self:center;border-radius:1px;box-sizing:border-box;margin-top:1px;`;
+
         const moreBtn = document.createElement('button');
         moreBtn.textContent = 'さらに読み込む';
-        moreBtn.style.cssText = `
-          display:block;width:100%;padding:4px 12px;
-          background:transparent;border:none;border-top:1px solid ${BORDER};
-          color:${TEXT_MID};font-size:12px;cursor:pointer;text-align:left;
-        `;
+        moreBtn.style.cssText = `background:transparent;border:none;padding:2px 4px;color:${TEXT_MID};font-size:inherit;cursor:pointer;text-align:left;font-family:inherit;line-height:inherit;width:100%;`;
+
         moreBtn.addEventListener('mouseenter', () => { moreBtn.style.color = TEXT_HIGH; });
         moreBtn.addEventListener('mouseleave', () => { moreBtn.style.color = TEXT_MID; });
         moreBtn.addEventListener('click', async () => {
           moreBtn.textContent = '読み込み中...';
           moreBtn.style.cursor = 'default';
           const offset = col.nextOffset ?? col.nodes.length;
-          const { nodes: newNodes, hasMore: newHasMore } = await fetchAllNodes(gId, [...state.bookmarks], offset);
+          const lang = state.showFallback ? undefined : state.lang;
+          const { nodes: newNodes, hasMore: newHasMore } = await fetchAllNodes(gId, [...state.bookmarks], offset, lang);
           if (state.columns[colIndex]) {
             // Append only nodes not already in the list
             const existingIds = new Set(state.columns[colIndex].nodes.map((n) => n.id));
@@ -507,17 +526,21 @@ export function renderGraphExplorer(
             state.columns[colIndex].hasMore = newHasMore;
             state.columns[colIndex].nextOffset = offset + newNodes.length;
             for (const n of fresh) {
-              list.insertBefore(buildNodeRow(n, colIndex), moreBtn);
+              list.insertBefore(buildNodeRow(n, colIndex), moreBtnWrapper);
             }
           }
           if (newHasMore) {
             moreBtn.textContent = 'さらに読み込む';
             moreBtn.style.cursor = 'pointer';
           } else {
-            moreBtn.remove();
+            moreBtnWrapper.remove();
           }
         });
-        list.appendChild(moreBtn);
+
+        moreBtnWrapper.appendChild(moreBtnStar);
+        moreBtnWrapper.appendChild(moreBtnMarker);
+        moreBtnWrapper.appendChild(moreBtn);
+        list.appendChild(moreBtnWrapper);
       }
     }
     colEl.appendChild(list);
