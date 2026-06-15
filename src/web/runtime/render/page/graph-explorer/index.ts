@@ -77,12 +77,11 @@ export function renderGraphExplorer(
   graphId?: string,
 ): HTMLElement {
   const gId = graphId ?? comp.graphId;
-  const lang: 'en' | 'ja' = comp.lang ?? 'ja';
   const limit = typeof comp.limit === 'number' && comp.limit > 0 ? comp.limit : 100;
 
   const state: ExplorerState = {
     graphId: gId,
-    lang,
+    lang: comp.lang ?? 'ja',
     limit,
     columns: [],
     editingId: null,
@@ -92,6 +91,52 @@ export function renderGraphExplorer(
   outer.id = id;
   outer.style.cssText = `display:flex;flex-direction:column;height:100%;background:${BG};color:${TEXT_HIGH};font-family:sans-serif;font-size:14px;overflow:hidden;`;
 
+  // ── Language switcher ─────────────────────────────────────────────
+  const topBar = document.createElement('div');
+  topBar.style.cssText = `display:flex;justify-content:flex-end;align-items:center;padding:4px 8px;border-bottom:1px solid ${BORDER};flex-shrink:0;gap:4px;`;
+
+  const makeLangBtn = (l: 'en' | 'ja'): HTMLButtonElement => {
+    const btn = document.createElement('button');
+    btn.textContent = l.toUpperCase();
+    const active = () => state.lang === l;
+    const applyStyle = () => {
+      btn.style.cssText = `
+        background:${active() ? SELECT_STRONG : 'transparent'};
+        border:1px solid ${active() ? SELECT_STRONG : BORDER};
+        color:${active() ? TEXT_HIGH : TEXT_MID};
+        cursor:pointer;font-size:11px;padding:2px 7px;
+        border-radius:3px;line-height:1.4;
+      `;
+    };
+    applyStyle();
+    btn.addEventListener('click', () => {
+      state.lang = l;
+      state.editingId = null;
+      enBtn.style.cssText = makeLangBtnStyle('en', state.lang);
+      jaBtn.style.cssText = makeLangBtnStyle('ja', state.lang);
+      render();
+    });
+    return btn;
+  };
+
+  const makeLangBtnStyle = (l: 'en' | 'ja', current: 'en' | 'ja') => {
+    const active = l === current;
+    return `
+      background:${active ? SELECT_STRONG : 'transparent'};
+      border:1px solid ${active ? SELECT_STRONG : BORDER};
+      color:${active ? TEXT_HIGH : TEXT_MID};
+      cursor:pointer;font-size:11px;padding:2px 7px;
+      border-radius:3px;line-height:1.4;
+    `;
+  };
+
+  const jaBtn = makeLangBtn('ja');
+  const enBtn = makeLangBtn('en');
+  topBar.appendChild(jaBtn);
+  topBar.appendChild(enBtn);
+  outer.appendChild(topBar);
+
+  // ── Columns area ──────────────────────────────────────────────────
   const columnsEl = document.createElement('div');
   columnsEl.style.cssText = `display:flex;flex:1;overflow-x:auto;overflow-y:hidden;`;
   outer.appendChild(columnsEl);
@@ -148,12 +193,12 @@ export function renderGraphExplorer(
     const col = state.columns[colIndex];
 
     const colEl = document.createElement('div');
+    // fit-content: column shrinks to widest item, capped at 40% (text wraps at that point)
     colEl.style.cssText = `
-      width:40%;min-width:200px;max-width:40%;
+      width:fit-content;max-width:40%;min-width:160px;
       display:flex;flex-direction:column;
       border-right:1px solid ${BORDER};
-      flex-shrink:0;
-      overflow:hidden;
+      flex-shrink:0;overflow:hidden;
     `;
 
     // Header
@@ -163,16 +208,12 @@ export function renderGraphExplorer(
     } else {
       const prevCol = state.columns[colIndex - 1];
       const parentNode = prevCol?.nodes.find((n) => n.id === col.parentId);
-      header.textContent = parentNode ? getLabel(parentNode, lang) : col.parentId.slice(0, 8);
+      header.textContent = parentNode ? getLabel(parentNode, state.lang) : col.parentId.slice(0, 8);
     }
     header.title = col.parentId;
     header.style.cssText = `
-      padding:8px 12px;
-      font-size:11px;
-      font-weight:600;
-      color:${TEXT_DIM};
-      letter-spacing:0.05em;
-      text-transform:uppercase;
+      padding:8px 12px;font-size:11px;font-weight:600;
+      color:${TEXT_DIM};letter-spacing:0.05em;text-transform:uppercase;
       border-bottom:1px solid ${BORDER};
       white-space:nowrap;overflow:hidden;text-overflow:ellipsis;
       flex-shrink:0;
@@ -186,12 +227,12 @@ export function renderGraphExplorer(
     if (col.loading) {
       const loading = document.createElement('div');
       loading.textContent = '読み込み中...';
-      loading.style.cssText = `padding:12px;color:${TEXT_DIM};font-size:13px;`;
+      loading.style.cssText = `padding:12px;color:${TEXT_DIM};font-size:13px;white-space:nowrap;`;
       list.appendChild(loading);
     } else if (col.nodes.length === 0) {
       const empty = document.createElement('div');
       empty.textContent = 'ノードなし';
-      empty.style.cssText = `padding:12px;color:${TEXT_DIM};font-size:13px;`;
+      empty.style.cssText = `padding:12px;color:${TEXT_DIM};font-size:13px;white-space:nowrap;`;
       list.appendChild(empty);
     } else {
       for (const node of col.nodes) {
@@ -223,21 +264,20 @@ export function renderGraphExplorer(
     if (state.editingId === node.id) {
       const input = document.createElement('input');
       input.type = 'text';
-      input.value = getLabel(node, lang);
+      input.value = getLabel(node, state.lang);
       input.style.cssText = `
         flex:1;background:transparent;border:none;
         border-bottom:1px solid ${SELECT_STRONG};
-        color:${TEXT_HIGH};font-size:14px;outline:none;padding:0;
-        min-width:0;
+        color:${TEXT_HIGH};font-size:14px;outline:none;padding:0;min-width:0;
       `;
       let saved = false;
       const save = async () => {
         if (saved) return;
         saved = true;
         const val = input.value.trim();
-        if (val && val !== getLabel(node, lang)) {
-          await apiUpdateNode(gId, node.id, lang, val);
-          if (lang === 'en') node.en = val; else node.ja = val;
+        if (val && val !== getLabel(node, state.lang)) {
+          await apiUpdateNode(gId, node.id, state.lang, val);
+          if (state.lang === 'en') node.en = val; else node.ja = val;
         }
         state.editingId = null;
         render();
@@ -250,7 +290,6 @@ export function renderGraphExplorer(
       item.appendChild(input);
       setTimeout(() => { input.focus(); input.select(); }, 0);
 
-      // Delete button still available in edit mode
       const delBtn = document.createElement('button');
       delBtn.textContent = '×';
       delBtn.title = '削除';
@@ -259,7 +298,7 @@ export function renderGraphExplorer(
         cursor:pointer;font-size:14px;padding:0 2px;line-height:1;flex-shrink:0;margin-top:1px;
       `;
       delBtn.addEventListener('mousedown', (e) => {
-        e.preventDefault(); // prevent blur on input
+        e.preventDefault();
         void deleteNode(colIndex, node.id);
       });
       item.appendChild(delBtn);
@@ -273,10 +312,28 @@ export function renderGraphExplorer(
         item.appendChild(dot);
       }
 
-      const label = document.createElement('span');
-      label.textContent = getLabel(node, lang);
-      label.style.cssText = `flex:1;white-space:pre-wrap;word-break:break-word;line-height:1.4;`;
-      item.appendChild(label);
+      // Dual-language display: primary lang large, secondary lang small below
+      const labelWrap = document.createElement('div');
+      labelWrap.style.cssText = `flex:1;min-width:0;`;
+
+      const primary = document.createElement('div');
+      primary.textContent = getLabel(node, state.lang);
+      primary.style.cssText = `white-space:normal;word-break:break-word;line-height:1.4;`;
+      labelWrap.appendChild(primary);
+
+      // Show secondary language if available and different
+      const secondary = state.lang === 'ja' ? node.en : node.ja;
+      if (secondary && secondary !== primary.textContent) {
+        const sec = document.createElement('div');
+        sec.textContent = secondary;
+        sec.style.cssText = `
+          font-size:11px;color:${TEXT_DIM};margin-top:1px;
+          white-space:normal;word-break:break-word;line-height:1.3;
+        `;
+        labelWrap.appendChild(sec);
+      }
+
+      item.appendChild(labelWrap);
 
       const delBtn = document.createElement('button');
       delBtn.textContent = '×';
@@ -335,7 +392,7 @@ export function renderGraphExplorer(
       const val = input.value.trim();
       if (!val) return;
       input.value = '';
-      const newNode = await apiCreateNode(gId, parentId, lang, val);
+      const newNode = await apiCreateNode(gId, parentId, state.lang, val);
       if (newNode && state.columns[colIndex]) {
         state.columns[colIndex].nodes.push(newNode);
         render();
