@@ -25,14 +25,19 @@ const TEXT_DIM = '#555';
 const SELECT_STRONG = '#3a6ea8';
 const SELECT_SUBTLE = '#1e2f42';
 
-// No language fallback: return label only if it exists for the selected lang
-function getLabel(node: ExplorerNode, lang: 'en' | 'ja'): string {
-  if (lang === 'en') return node.en ?? node.id.slice(0, 8);
-  return node.ja ?? node.id.slice(0, 8);
+// Primary label for the selected language; null if not available
+function primaryLabel(node: ExplorerNode, lang: 'en' | 'ja'): string | null {
+  return lang === 'en' ? (node.en ?? null) : (node.ja ?? null);
 }
 
-function hasLabel(node: ExplorerNode, lang: 'en' | 'ja'): boolean {
-  return lang === 'en' ? node.en != null : node.ja != null;
+// Fallback label (other language or short ID)
+function fallbackLabel(node: ExplorerNode, lang: 'en' | 'ja'): string {
+  const other = lang === 'en' ? node.ja : node.en;
+  return other ?? node.id.slice(0, 8);
+}
+
+function getLabel(node: ExplorerNode, lang: 'en' | 'ja'): string {
+  return primaryLabel(node, lang) ?? fallbackLabel(node, lang);
 }
 
 async function apiFetch(input: string, init?: RequestInit): Promise<Response> {
@@ -134,8 +139,10 @@ export function renderGraphExplorer(
 
   const restoreFocus = () => {
     if (!state.editingId) return;
-    const input = columnsEl.querySelector<HTMLInputElement>(`[data-node-id="${state.editingId}"] input`);
-    if (input) { input.focus(); input.select(); }
+    setTimeout(() => {
+      const input = columnsEl.querySelector<HTMLInputElement>(`[data-node-id="${state.editingId}"] input`);
+      if (input) { input.focus(); input.select(); }
+    }, 0);
   };
 
   const render = () => {
@@ -158,17 +165,13 @@ export function renderGraphExplorer(
     render();
   };
 
-  // Single click: navigate (select + expand). Edit is double-click.
+  // Single click: select + expand next column + enter edit mode
   const selectNode = (colIndex: number, nodeId: string) => {
     if (state.columns[colIndex]) {
       state.columns[colIndex].selectedId = nodeId;
     }
-    loadColumn(nodeId, colIndex + 1);
-  };
-
-  const startEdit = (nodeId: string) => {
     state.editingId = nodeId;
-    render();
+    loadColumn(nodeId, colIndex + 1);
   };
 
   const deleteNode = async (colIndex: number, nodeId: string) => {
@@ -312,13 +315,13 @@ export function renderGraphExplorer(
 
       const label = document.createElement('span');
       label.style.cssText = `flex:1;white-space:normal;word-break:break-word;line-height:1.4;`;
-      if (hasLabel(node, state.lang)) {
-        label.textContent = getLabel(node, state.lang);
+      const prim = primaryLabel(node, state.lang);
+      if (prim != null) {
+        label.textContent = prim;
       } else {
-        // No label for this language: show short ID with dim style
-        label.textContent = node.id.slice(0, 8);
+        // No label for this language: show fallback (other lang or ID) in dim style
+        label.textContent = fallbackLabel(node, state.lang);
         label.style.color = TEXT_DIM;
-        label.style.fontStyle = 'italic';
       }
       item.appendChild(label);
 
@@ -344,9 +347,7 @@ export function renderGraphExplorer(
       item.addEventListener('mouseenter', () => { delBtn.style.display = 'block'; });
       item.addEventListener('mouseleave', () => { delBtn.style.display = 'none'; });
 
-      // Single click: navigate; double-click: edit
       item.addEventListener('click', () => { selectNode(colIndex, node.id); });
-      item.addEventListener('dblclick', () => { startEdit(node.id); });
     }
 
     return item;
