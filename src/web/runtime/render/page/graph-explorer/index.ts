@@ -389,44 +389,28 @@ export function renderGraphExplorer(
       flex-shrink:0;overflow:hidden;
     `;
 
-    // ── New node input (no header — breadcrumb shows path instead) ──
-    const draftRow = document.createElement('div');
-    draftRow.style.cssText = `display:flex;align-items:flex-start;gap:4px;padding:4px 8px 1px 12px;flex-shrink:0;`;
+    // ── Item list ─────────────────────────────────────────────────
+    const list = document.createElement('div');
+    list.dataset.list = '1';
+    list.style.cssText = `flex:1;overflow-y:auto;padding:4px 0;`;
 
+    // Draft row — same structure as node rows
+    const draftRow = document.createElement('div');
+    draftRow.style.cssText = `display:flex;align-items:flex-start;gap:4px;padding:1px 8px 1px 8px;flex-shrink:0;background:transparent;border-left:2px solid transparent;`;
     const draftStar = document.createElement('span');
     draftStar.textContent = '☆';
     draftStar.style.cssText = `flex-shrink:0;align-self:center;font-size:10px;line-height:1;color:transparent;margin-top:1px;user-select:none;`;
-
     const draftMarker = document.createElement('span');
-    draftMarker.style.cssText = `
-      width:6px;height:6px;flex-shrink:0;align-self:center;
-      border-radius:1px;box-sizing:border-box;
-      background:transparent;border:1.5px solid ${TEXT_DIM};
-      margin-top:1px;
-    `;
-
+    draftMarker.style.cssText = `width:6px;height:6px;flex-shrink:0;align-self:center;border-radius:1px;box-sizing:border-box;background:transparent;border:1.5px solid ${TEXT_DIM};margin-top:1px;`;
     const draftInput = document.createElement('textarea');
     draftInput.rows = 1;
-    draftInput.placeholder = '';
     Object.assign(draftInput.style, {
-      display: 'block',
-      width: '100%',
-      border: 'none',
-      outline: 'none',
-      resize: 'none',
-      overflow: 'hidden',
-      whiteSpace: 'pre-wrap',
-      wordBreak: 'break-word',
-      fontFamily: 'inherit',
-      fontSize: 'inherit',
-      lineHeight: 'inherit',
-      padding: '2px 4px',
-      boxSizing: 'border-box',
-      background: 'transparent',
-      color: TEXT_MID,
+      display: 'block', width: '100%', border: 'none', outline: 'none', resize: 'none',
+      overflow: 'hidden', whiteSpace: 'pre-wrap', wordBreak: 'break-word',
+      fontFamily: 'inherit', fontSize: 'inherit', lineHeight: 'inherit',
+      padding: '2px 4px', boxSizing: 'border-box', background: 'transparent', color: TEXT_MID,
     });
     (draftInput.style as unknown as Record<string, string>)['field-sizing'] = 'content';
-
     draftInput.addEventListener('focus', () => { draftInput.style.color = TEXT_HIGH; });
     draftInput.addEventListener('blur', () => { draftInput.style.color = TEXT_MID; });
     draftInput.addEventListener('keydown', async (e) => {
@@ -435,26 +419,18 @@ export function renderGraphExplorer(
       const val = draftInput.value.trim();
       if (!val) return;
       draftInput.value = '';
-      // Invalidate cache for this column's source (null = all-nodes)
       childrenCache.delete(col.parentId);
       const newNode = await apiCreateNode(gId, col.parentId, state.lang, val);
       if (newNode && state.columns[colIndex]) {
         state.columns[colIndex].nodes.push(newNode);
-        const listEl = colEl.querySelector<HTMLElement>('[data-list]');
-        if (listEl) listEl.appendChild(buildNodeRow(newNode, colIndex));
+        list.appendChild(buildNodeRow(newNode, colIndex));
         void onNodeFocus(colIndex, newNode.id);
       }
     });
-
     draftRow.appendChild(draftStar);
     draftRow.appendChild(draftMarker);
     draftRow.appendChild(draftInput);
-    colEl.appendChild(draftRow);
-
-    // ── Item list ─────────────────────────────────────────────────
-    const list = document.createElement('div');
-    list.dataset.list = '1';
-    list.style.cssText = `flex:1;overflow-y:auto;padding:4px 0;`;
+    list.appendChild(draftRow);
 
     if (col.loading) {
       const msg = document.createElement('div');
