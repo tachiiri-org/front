@@ -45,7 +45,7 @@ function primaryLabel(node: ExplorerNode, lang: 'en' | 'ja'): string | null {
 
 function fallbackLabel(node: ExplorerNode, lang: 'en' | 'ja'): string {
   const other = lang === 'en' ? node.ja : node.en;
-  return other ?? node.id.slice(0, 8);
+  return other ?? '';
 }
 
 async function apiFetch(input: string, init?: RequestInit): Promise<Response> {
@@ -890,6 +890,8 @@ export function renderGraphExplorer(
       if (!state.linkSourceId || state.linkSourceId === node.id) return;
       const sourceIsBookmarked = state.bookmarks.has(state.linkSourceId);
       const targetIsBookmarked = state.bookmarks.has(node.id);
+      // ソース列のインデックスを保存（API完了後も使えるよう）
+      const sourceColIdx = state.columns.findIndex((col) => col.selectedId === state.linkSourceId);
       void apiToggleLink(gId, state.linkSourceId, node.id).then((linked) => {
         if (linked) {
           state.linkedNodeIds.add(node.id);
@@ -905,6 +907,20 @@ export function renderGraphExplorer(
               targetRow?.remove();
               if (state.columns[0]) {
                 state.columns[0].nodes = state.columns[0].nodes.filter((n) => n.id !== node.id);
+              }
+            }
+          }
+          // ソースの次の列（n+1）に接続先ノードをDOMへ直接追加
+          const nextColIdx = sourceColIdx + 1;
+          if (sourceColIdx >= 0 && nextColIdx < state.columns.length) {
+            const col = state.columns[nextColIdx];
+            if (col && !col.nodes.some((n) => n.id === node.id)) {
+              col.nodes.push(node);
+              childrenCache.delete(state.linkSourceId!);
+              const nextColEl = columnsEl.children[nextColIdx] as HTMLElement | undefined;
+              const listEl = nextColEl?.querySelector<HTMLElement>('[data-list]');
+              if (listEl) {
+                listEl.appendChild(buildNodeRow(node, nextColIdx));
               }
             }
           }
