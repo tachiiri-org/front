@@ -372,20 +372,31 @@ export function renderGraphExplorer(
     return { nodes, hasMore: false };
   };
 
+  // 列が表示されたら、その列の各ノードの子を先読みしてキャッシュ
+  const prefetchChildren = (nodeIds: string[]): void => {
+    const toFetch = nodeIds.filter((id) => !childrenCache.has(id)).slice(0, 20);
+    for (const nodeId of toFetch) {
+      void fetchChildren(gId, nodeId, limit).then((nodes) => {
+        childrenCache.set(nodeId, nodes);
+      });
+    }
+  };
+
   // parentId=null means "load all nodes" (column 0)
   const loadColumn = async (parentId: string | null, colIndex: number) => {
     const version = ++columnVersion;
     state.columns = state.columns.slice(0, colIndex);
 
-    // Cache hit: render immediately without loading state
+    // Cache hit: render immediately
     if (childrenCache.has(parentId)) {
       const cached = childrenCache.get(parentId)!;
       state.columns.push({ parentId, nodes: cached, loading: false, selectedId: null, hasMore: false, nextOffset: cached.length });
       appendColumn(colIndex);
+      prefetchChildren(cached.map((n) => n.id));
       return;
     }
 
-    // Cache miss: show loading spinner, then fetch
+    // Cache miss: render empty column (loading indicator 非表示), then fetch
     state.columns.push({ parentId, nodes: [], loading: true, selectedId: null, hasMore: false, nextOffset: 0 });
     appendColumn(colIndex);
 
@@ -403,6 +414,7 @@ export function renderGraphExplorer(
       refreshAllMarkers();
       refreshAllNodeText();
     }
+    prefetchChildren(nodes.map((n) => n.id));
   };
 
   const onNodeFocus = (colIndex: number, nodeId: string) => {
@@ -563,22 +575,7 @@ export function renderGraphExplorer(
     draftRow.appendChild(draftInput);
     list.appendChild(draftRow);
 
-    if (col.loading) {
-      const loadingRow = document.createElement('div');
-      loadingRow.style.cssText = `display:flex;align-items:flex-start;gap:4px;padding:1px 8px 1px 8px;flex-shrink:0;`;
-      const loadingStar = document.createElement('span');
-      loadingStar.textContent = '☆';
-      loadingStar.style.cssText = `flex-shrink:0;align-self:center;font-size:10px;line-height:1;color:transparent;margin-top:1px;user-select:none;`;
-      const loadingMarker = document.createElement('span');
-      loadingMarker.style.cssText = `width:6px;height:6px;flex-shrink:0;align-self:center;border-radius:1px;box-sizing:border-box;margin-top:1px;`;
-      const loadingText = document.createElement('span');
-      loadingText.textContent = '読み込み中...';
-      loadingText.style.cssText = `padding:2px 4px;color:${TEXT_DIM};font-size:inherit;`;
-      loadingRow.appendChild(loadingStar);
-      loadingRow.appendChild(loadingMarker);
-      loadingRow.appendChild(loadingText);
-      list.appendChild(loadingRow);
-    } else {
+    if (!col.loading) {
       // Filter out nodes that have no text in current lang but have text in other lang (when showFallback=false)
       const base = state.showFallback
         ? col.nodes
