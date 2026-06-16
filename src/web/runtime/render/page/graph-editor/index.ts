@@ -1,4 +1,4 @@
-import type { GraphExplorerComponent } from '../../../../schema/component/kind/graph-explorer';
+import type { GraphEditorComponent } from '../../../../schema/component/kind/graph-editor';
 
 type ExplorerNode = { id: string; en?: string; ja?: string; color?: string };
 
@@ -83,7 +83,10 @@ async function fetchBookmarkedNodes(
   const r = await apiFetch(`/api/graph/${graphId}/nodes?${params}`);
   if (!r.ok) return { nodes: [], hasMore: false };
   const data = await r.json() as { nodes: ExplorerNode[]; hasMore?: boolean };
-  return { nodes: data.nodes ?? [], hasMore: false };
+  // Preserve the order returned by the bookmarks API
+  const idxMap = new Map(bookmarkIds.map((id, i) => [id, i]));
+  const nodes = (data.nodes ?? []).sort((a, b) => (idxMap.get(a.id) ?? 999) - (idxMap.get(b.id) ?? 999));
+  return { nodes, hasMore: false };
 }
 
 async function fetchChildren(graphId: string, nodeId: string, limit: number): Promise<ExplorerNode[]> {
@@ -166,9 +169,17 @@ async function apiMoveBookmark(graphId: string, nodeId: string, direction: 'up' 
   });
 }
 
-export function renderGraphExplorer(
+async function apiMoveNode(graphId: string, nodeId: string, parentId: string, direction: 'up' | 'down'): Promise<void> {
+  await apiFetch(`/api/graph/${graphId}/node/${nodeId}/move`, {
+    method: 'PATCH',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ direction, parentId }),
+  });
+}
+
+export function renderGraphEditor(
   id: string,
-  comp: GraphExplorerComponent,
+  comp: GraphEditorComponent,
   graphId?: string,
 ): HTMLElement {
   const gId = graphId ?? comp.graphId;
@@ -835,6 +846,7 @@ export function renderGraphExplorer(
           const dir = direction === 'up' ? -1 : 1;
           const newIdx = idx + dir;
           if (newIdx < 0 || newIdx >= col.nodes.length) return;
+          if (col.parentId) void apiMoveNode(gId, node.id, col.parentId, direction);
           col.nodes.splice(idx, 1);
           col.nodes.splice(newIdx, 0, node);
         }

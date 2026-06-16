@@ -7,13 +7,9 @@ import {
   isOutlinerComponent,
   isTextEditorComponent,
   isDefinitionEditorComponent,
-  isWordGraphComponent,
-  isWordGraphTextColComponent,
-  isWordGraphWordColComponent,
-  isWordGraphDocColComponent,
   isStorageExplorerComponent,
   isDbApplyComponent,
-  isGraphExplorerComponent,
+  isGraphEditorComponent,
   ALL_CSS_PROP_KEYS,
   applyDefaults,
   type TableComponent,
@@ -21,13 +17,9 @@ import {
   type OutlinerComponent,
   type TextEditorComponent,
   type DefinitionEditorComponent,
-  type WordGraphComponent,
-  type WordGraphTextColComponent,
-  type WordGraphWordColComponent,
-  type WordGraphDocColComponent,
   type StorageExplorerComponent,
   type DbApplyComponent,
-  type GraphExplorerComponent,
+  type GraphEditorComponent,
   type Component,
 } from '../../../schema/component';
 import { type Frame, type FrameRef, isFrameRef } from '../../../schema/screen/screen';
@@ -39,13 +31,9 @@ import { renderEditableTree } from './tree-editor';
 import { renderOutliner } from './outliner';
 import { renderTextEditor } from './text-editor';
 import { renderDefinitionEditor } from './definition-editor';
-import { renderWordGraph } from './word-graph';
-import { renderWordGraphTextCol } from './word-graph/text-col';
-import { renderWordGraphWordCol } from './word-graph/word-col';
-import { renderWordGraphDocCol } from './word-graph/doc-col';
 import { renderStorageExplorer } from './storage-explorer';
 import { renderDbApply } from './db-apply';
-import { renderGraphExplorer } from './graph-explorer';
+import { renderGraphEditor } from './graph-editor';
 
 const applyCssProps = (el: HTMLElement, c: Record<string, unknown>): void => {
   for (const propKey of ALL_CSS_PROP_KEYS) {
@@ -323,32 +311,17 @@ export const renderComponent = (
       : undefined;
     return renderDefinitionEditor(id, frame as DefinitionEditorComponent, treeId);
   }
-  if (isWordGraphTextColComponent(frame)) {
-    return renderWordGraphTextCol(id, frame as WordGraphTextColComponent);
-  }
-  if (isWordGraphWordColComponent(frame)) {
-    return renderWordGraphWordCol(id, frame as WordGraphWordColComponent);
-  }
-  if (isWordGraphDocColComponent(frame)) {
-    return renderWordGraphDocCol(id, frame as WordGraphDocColComponent);
-  }
-  if (isWordGraphComponent(frame)) {
-    const graphId = typeof (frame as Record<string, unknown>).graphId === 'string'
-      ? (frame as Record<string, unknown>).graphId as string
-      : undefined;
-    return renderWordGraph(id, frame as WordGraphComponent, graphId);
-  }
   if (isStorageExplorerComponent(frame)) {
     return renderStorageExplorer(id, frame as StorageExplorerComponent);
   }
   if (isDbApplyComponent(frame)) {
     return renderDbApply(id, frame as DbApplyComponent);
   }
-  if (isGraphExplorerComponent(frame)) {
+  if (isGraphEditorComponent(frame)) {
     const gId = typeof (frame as Record<string, unknown>).graphId === 'string'
       ? (frame as Record<string, unknown>).graphId as string
       : undefined;
-    return renderGraphExplorer(id, frame as GraphExplorerComponent, gId);
+    return renderGraphEditor(id, frame as GraphEditorComponent, gId);
   }
   if (isTableComponent(frame) && options?.screenId) {
     return renderEditableTable(

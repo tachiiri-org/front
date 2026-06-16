@@ -11,11 +11,9 @@ import type { TreeEditorComponent } from './kind/tree-editor';
 import type { OutlinerComponent } from './kind/outliner';
 import type { TextEditorComponent } from './kind/text-editor';
 import type { DefinitionEditorComponent } from './kind/definition-editor';
-import type { WordGraphComponent } from './kind/word-graph';
-import type { WordGraphTextColComponent, WordGraphWordColComponent, WordGraphDocColComponent } from './kind/word-graph-col';
 import type { StorageExplorerComponent } from './kind/storage-explorer';
 import type { DbApplyComponent } from './kind/db-apply';
-import type { GraphExplorerComponent } from './kind/graph-explorer';
+import type { GraphEditorComponent } from './kind/graph-editor';
 import { isElementComponent, elementDefaults, elementSchema } from './kind/element';
 import { isHeadingComponent, headingDefaults, headingSchema } from './kind/heading';
 import { isButtonComponent, buttonDefaults, buttonSchema } from './kind/button';
@@ -29,11 +27,9 @@ import { isTreeEditorComponent, treeEditorDefaults, treeEditorSchema } from './k
 import { isOutlinerComponent, outlinerDefaults, outlinerSchema } from './kind/outliner';
 import { isTextEditorComponent, textEditorDefaults, textEditorSchema } from './kind/text-editor';
 import { isDefinitionEditorComponent, definitionEditorDefaults, definitionEditorSchema } from './kind/definition-editor';
-import { isWordGraphComponent, wordGraphDefaults, wordGraphSchema } from './kind/word-graph';
-import { isWordGraphTextColComponent, isWordGraphWordColComponent, isWordGraphDocColComponent, wordGraphTextColDefaults, wordGraphWordColDefaults, wordGraphDocColDefaults, wordGraphTextColSchema, wordGraphWordColSchema, wordGraphDocColSchema } from './kind/word-graph-col';
 import { isStorageExplorerComponent, storageExplorerDefaults, storageExplorerSchema } from './kind/storage-explorer';
 import { isDbApplyComponent, dbApplyDefaults, dbApplySchema } from './kind/db-apply';
-import { isGraphExplorerComponent, graphExplorerDefaults, graphExplorerSchema } from './kind/graph-explorer';
+import { isGraphEditorComponent, graphEditorDefaults, graphEditorSchema } from './kind/graph-editor';
 import type { FormField, SchemaField } from './kind/form/field';
 
 export { type ElementComponent, isElementComponent, elementDefaults, elementSchema } from './kind/element';
@@ -82,28 +78,6 @@ export {
   definitionEditorSchema,
 } from './kind/definition-editor';
 export {
-  type WordGraphComponent,
-  type GraphText,
-  type GraphWord,
-  isWordGraphComponent,
-  wordGraphDefaults,
-  wordGraphSchema,
-} from './kind/word-graph';
-export {
-  type WordGraphTextColComponent,
-  type WordGraphWordColComponent,
-  type WordGraphDocColComponent,
-  isWordGraphTextColComponent,
-  isWordGraphWordColComponent,
-  isWordGraphDocColComponent,
-  wordGraphTextColDefaults,
-  wordGraphWordColDefaults,
-  wordGraphDocColDefaults,
-  wordGraphTextColSchema,
-  wordGraphWordColSchema,
-  wordGraphDocColSchema,
-} from './kind/word-graph-col';
-export {
   type StorageExplorerComponent,
   isStorageExplorerComponent,
   storageExplorerDefaults,
@@ -116,11 +90,11 @@ export {
   dbApplySchema,
 } from './kind/db-apply';
 export {
-  type GraphExplorerComponent,
-  isGraphExplorerComponent,
-  graphExplorerDefaults,
-  graphExplorerSchema,
-} from './kind/graph-explorer';
+  type GraphEditorComponent,
+  isGraphEditorComponent,
+  graphEditorDefaults,
+  graphEditorSchema,
+} from './kind/graph-editor';
 export {
   type TableComponent,
   type TableSchema,
@@ -156,13 +130,9 @@ export type Component =
   | OutlinerComponent
   | TextEditorComponent
   | DefinitionEditorComponent
-  | WordGraphComponent
-  | WordGraphTextColComponent
-  | WordGraphWordColComponent
-  | WordGraphDocColComponent
   | StorageExplorerComponent
   | DbApplyComponent
-  | GraphExplorerComponent;
+  | GraphEditorComponent;
 
 export const isComponent = (value: unknown): value is Component =>
   isElementComponent(value) ||
@@ -178,13 +148,9 @@ export const isComponent = (value: unknown): value is Component =>
   isOutlinerComponent(value) ||
   isTextEditorComponent(value) ||
   isDefinitionEditorComponent(value) ||
-  isWordGraphComponent(value) ||
-  isWordGraphTextColComponent(value) ||
-  isWordGraphWordColComponent(value) ||
-  isWordGraphDocColComponent(value) ||
   isStorageExplorerComponent(value) ||
   isDbApplyComponent(value) ||
-  isGraphExplorerComponent(value);
+  isGraphEditorComponent(value);
 
 export const componentDefaults: Record<string, Record<string, unknown>> = {
   element: elementDefaults as Record<string, unknown>,
@@ -200,13 +166,9 @@ export const componentDefaults: Record<string, Record<string, unknown>> = {
   outliner: outlinerDefaults as Record<string, unknown>,
   'text-editor': textEditorDefaults as Record<string, unknown>,
   'definition-editor': definitionEditorDefaults as Record<string, unknown>,
-  'word-graph': wordGraphDefaults as Record<string, unknown>,
-  'word-graph-text-col': wordGraphTextColDefaults as Record<string, unknown>,
-  'word-graph-word-col': wordGraphWordColDefaults as Record<string, unknown>,
-  'word-graph-doc-col': wordGraphDocColDefaults as Record<string, unknown>,
   'storage-explorer': storageExplorerDefaults as Record<string, unknown>,
   'db-apply': dbApplyDefaults as Record<string, unknown>,
-  'graph-explorer': graphExplorerDefaults as Record<string, unknown>,
+  'graph-editor': graphEditorDefaults as Record<string, unknown>,
 };
 
 export const componentSchemas: Record<string, SchemaField[]> = {
@@ -223,13 +185,9 @@ export const componentSchemas: Record<string, SchemaField[]> = {
   outliner: outlinerSchema,
   'text-editor': textEditorSchema,
   'definition-editor': definitionEditorSchema,
-  'word-graph': wordGraphSchema,
-  'word-graph-text-col': wordGraphTextColSchema,
-  'word-graph-word-col': wordGraphWordColSchema,
-  'word-graph-doc-col': wordGraphDocColSchema,
   'storage-explorer': storageExplorerSchema,
   'db-apply': dbApplySchema,
-  'graph-explorer': graphExplorerSchema,
+  'graph-editor': graphEditorSchema,
 };
 
 export const COMPONENT_KINDS = Object.keys(componentDefaults);

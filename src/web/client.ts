@@ -2,7 +2,6 @@ import { isScreen, isFrameRef, type Screen, type Frame } from './schema/screen/s
 import type { Component } from './schema/component';
 import { ALL_CSS_PROP_KEYS } from './schema/component/style';
 import { renderComponent, fetchFrameComponent, findEditorScreenId, hydrateEditor, store, domMap } from './runtime';
-import { clearGraphStore } from './runtime/render/page/word-graph/store';
 import type { FrameState } from './state';
 import { renderLoginPage } from './runtime/render/page/login';
 import { renderLoginGroupPage } from './runtime/render/page/login-group';
@@ -272,8 +271,6 @@ const renderScreen = async (screenId: string): Promise<void> => {
   store.screen = value;
   store.frameComponents.clear();
   domMap.clear();
-  clearGraphStore();
-
   applyViewportLayout();
   void renderNav(screenId);
 
