@@ -64,7 +64,7 @@ async function fetchAllNodes(
   const params = new URLSearchParams({ limit: '20', offset: String(offset) });
   if (includeIds.length > 0) params.set('include', includeIds.join(','));
   if (lang) params.set('lang', lang);
-  if (neighborOf && neighborOf.length > 0) params.set('neighborOf', neighborOf.join(','));
+  if (neighborOf && neighborOf.length > 0) params.set('nonNeighborOf', neighborOf.join(','));
   const r = await apiFetch(`/api/graph/${graphId}/nodes?${params}`);
   if (!r.ok) return { nodes: [], hasMore: false };
   const data = await r.json() as { nodes: ExplorerNode[]; hasMore?: boolean };
@@ -293,29 +293,15 @@ export function renderGraphExplorer(
     });
   };
 
-  // Dim text globally: selected=TEXT_HIGH, same-col/linked=TEXT_MID, other-col unlinked=TEXT_DIM
+  // Dim text globally: selected=TEXT_HIGH, linked=TEXT_MID, unlinked=TEXT_DIM
   const refreshAllNodeText = () => {
-    // Find which column index contains the linkSourceId node
-    const sourceColIndex = state.linkSourceId != null
-      ? state.columns.findIndex((col) => col.nodes.some((n) => n.id === state.linkSourceId))
-      : -1;
     columnsEl.querySelectorAll<HTMLTextAreaElement>('textarea[data-node-id]').forEach((ta) => {
       const nid = ta.dataset.nodeId!;
       const hasText = ta.value.length > 0;
       if (!state.linkSourceId) {
         ta.style.color = hasText ? TEXT_MID : TEXT_DIM;
-        return;
-      }
-      if (nid === state.linkSourceId) {
+      } else if (nid === state.linkSourceId) {
         ta.style.color = hasText ? TEXT_HIGH : TEXT_DIM;
-        return;
-      }
-      const taColIndex = parseInt(
-        ta.closest<HTMLElement>('[data-col-index]')?.dataset.colIndex ?? '-1', 10,
-      );
-      if (taColIndex === sourceColIndex) {
-        // Same column as selected node — never dim
-        ta.style.color = hasText ? TEXT_MID : TEXT_DIM;
       } else if (state.linkedNodeIds.has(nid)) {
         ta.style.color = hasText ? TEXT_MID : TEXT_DIM;
       } else {
