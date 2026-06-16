@@ -18,7 +18,6 @@ type ExplorerState = {
   columns: ExplorerColumn[];
   bookmarks: Set<string>;
   showFallback: boolean;
-  showNeighborOnly: boolean; // col0: show only bookmarks + their direct neighbors
   linkSourceId: string | null;   // last focused node — source for link operations
   linkedNodeIds: Set<string>;    // nodes currently linked to linkSourceId
 };
@@ -168,7 +167,6 @@ export function renderGraphExplorer(
     columns: [],
     bookmarks: loadBookmarks(gId),
     showFallback: false,
-    showNeighborOnly: false,
     linkSourceId: null,
     linkedNodeIds: new Set(),
   };
@@ -228,22 +226,6 @@ export function renderGraphExplorer(
   jaBtn.addEventListener('click', () => switchLang('ja'));
   enBtn.addEventListener('click', () => switchLang('en'));
 
-  // Toggle: col0 shows only bookmarks + their direct neighbors
-  const makeNeighborBtnStyle = () => {
-    const active = state.showNeighborOnly;
-    return `background:${active ? SELECT_STRONG : 'transparent'};border:1px solid ${active ? SELECT_STRONG : BORDER};color:${active ? TEXT_HIGH : TEXT_MID};cursor:pointer;font-size:11px;padding:1px 7px;border-radius:3px;line-height:1.5;`;
-  };
-  const neighborBtn = document.createElement('button');
-  neighborBtn.textContent = '隣接';
-  neighborBtn.title = 'ブックマークの直接リンク先のみ表示';
-  neighborBtn.style.cssText = makeNeighborBtnStyle();
-  neighborBtn.addEventListener('click', () => {
-    state.showNeighborOnly = !state.showNeighborOnly;
-    neighborBtn.style.cssText = makeNeighborBtnStyle();
-    childrenCache.delete(null);
-    void loadColumn(null, 0);
-  });
-
   // Toggle: show/hide nodes that only exist in the other language
   const makeFallbackBtnStyle = () => {
     const active = state.showFallback;
@@ -260,7 +242,6 @@ export function renderGraphExplorer(
     void loadColumn(null, 0);
   });
 
-  topBar.appendChild(neighborBtn);
   topBar.appendChild(fallbackBtn);
   topBar.appendChild(jaBtn);
   topBar.appendChild(enBtn);
@@ -312,15 +293,29 @@ export function renderGraphExplorer(
     });
   };
 
-  // Dim text globally: selected=TEXT_HIGH, linked=TEXT_MID, unlinked=TEXT_DIM
+  // Dim text globally: selected=TEXT_HIGH, same-col/linked=TEXT_MID, other-col unlinked=TEXT_DIM
   const refreshAllNodeText = () => {
+    // Find which column index contains the linkSourceId node
+    const sourceColIndex = state.linkSourceId != null
+      ? state.columns.findIndex((col) => col.nodes.some((n) => n.id === state.linkSourceId))
+      : -1;
     columnsEl.querySelectorAll<HTMLTextAreaElement>('textarea[data-node-id]').forEach((ta) => {
       const nid = ta.dataset.nodeId!;
       const hasText = ta.value.length > 0;
       if (!state.linkSourceId) {
         ta.style.color = hasText ? TEXT_MID : TEXT_DIM;
-      } else if (nid === state.linkSourceId) {
+        return;
+      }
+      if (nid === state.linkSourceId) {
         ta.style.color = hasText ? TEXT_HIGH : TEXT_DIM;
+        return;
+      }
+      const taColIndex = parseInt(
+        ta.closest<HTMLElement>('[data-col-index]')?.dataset.colIndex ?? '-1', 10,
+      );
+      if (taColIndex === sourceColIndex) {
+        // Same column as selected node — never dim
+        ta.style.color = hasText ? TEXT_MID : TEXT_DIM;
       } else if (state.linkedNodeIds.has(nid)) {
         ta.style.color = hasText ? TEXT_MID : TEXT_DIM;
       } else {
@@ -368,8 +363,7 @@ export function renderGraphExplorer(
     if (childrenCache.has(parentId)) return { nodes: childrenCache.get(parentId)!, hasMore: false };
     if (parentId === null) {
       const lang = state.showFallback ? undefined : state.lang;
-      const neighborOf = (state.showNeighborOnly && state.bookmarks.size > 0)
-        ? [...state.bookmarks] : undefined;
+      const neighborOf = state.bookmarks.size > 0 ? [...state.bookmarks] : undefined;
       const result = await fetchAllNodes(gId, [...state.bookmarks], 0, lang, neighborOf);
       childrenCache.set(null, result.nodes);
       return result;
@@ -515,6 +509,7 @@ export function renderGraphExplorer(
     const col = state.columns[colIndex];
 
     const colEl = document.createElement('div');
+    colEl.dataset.colIndex = String(colIndex);
     colEl.style.cssText = `
       width:fit-content;max-width:40%;min-width:160px;
       display:flex;flex-direction:column;
@@ -609,8 +604,7 @@ export function renderGraphExplorer(
           moreBtn.style.cursor = 'default';
           const offset = col.nextOffset ?? col.nodes.length;
           const lang = state.showFallback ? undefined : state.lang;
-          const neighborOf = (state.showNeighborOnly && state.bookmarks.size > 0)
-            ? [...state.bookmarks] : undefined;
+          const neighborOf = state.bookmarks.size > 0 ? [...state.bookmarks] : undefined;
           const { nodes: newNodes, hasMore: newHasMore } = await fetchAllNodes(gId, [...state.bookmarks], offset, lang, neighborOf);
           if (state.columns[colIndex]) {
             // Append only nodes not already in the list
