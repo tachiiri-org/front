@@ -17,8 +17,9 @@ type ExplorerState = {
   limit: number;
   columns: ExplorerColumn[];
   bookmarks: Set<string>;
-  showFallback: boolean; // show nodes that have no text in current lang but have text in other lang
-  linkSourceId: string | null; // last focused node — used as source when clicking another marker to link
+  showFallback: boolean;
+  linkSourceId: string | null;   // last focused node — source for link operations
+  linkedNodeIds: Set<string>;    // nodes currently linked to linkSourceId
 };
 
 const BG = '#1e1e1e';
@@ -165,6 +166,7 @@ export function renderGraphExplorer(
     bookmarks: loadBookmarks(gId),
     showFallback: false,
     linkSourceId: null,
+    linkedNodeIds: new Set(),
   };
 
   // In-memory cache: null key = all-nodes (col 0), string key = children of nodeId
@@ -275,11 +277,41 @@ export function renderGraphExplorer(
   columnsEl.style.cssText = `display:flex;flex:1;overflow-x:auto;overflow-y:hidden;`;
   outer.appendChild(columnsEl);
 
+  // Update filled/empty state of every visible marker based on linkedNodeIds
+  const refreshAllMarkers = () => {
+    columnsEl.querySelectorAll<HTMLElement>('[data-marker-node-id]').forEach((marker) => {
+      const nid = marker.dataset.markerNodeId!;
+      if (nid === state.linkSourceId) return;
+      const color = marker.dataset.markerColor || undefined;
+      if (!color) {
+        const isLinked = state.linkedNodeIds.has(nid);
+        marker.style.background = isLinked ? TEXT_MID : 'transparent';
+        marker.style.border = isLinked ? 'none' : `1.5px solid ${TEXT_DIM}`;
+      }
+    });
+  };
+
+  // Set link source and fetch its connected nodes to update marker states
+  const setLinkSource = async (nodeId: string) => {
+    if (state.linkSourceId === nodeId) return;
+    state.linkSourceId = nodeId;
+    let linked: ExplorerNode[];
+    if (childrenCache.has(nodeId)) {
+      linked = childrenCache.get(nodeId)!;
+    } else {
+      linked = await fetchChildren(gId, nodeId, 500);
+    }
+    if (state.linkSourceId !== nodeId) return; // focus changed during fetch
+    state.linkedNodeIds = new Set(linked.map((n) => n.id));
+    refreshAllMarkers();
+  };
+
   const rebuildAll = () => {
     columnsEl.innerHTML = '';
     for (let i = 0; i < state.columns.length; i++) {
       columnsEl.appendChild(buildColumnEl(i));
     }
+    refreshAllMarkers();
   };
 
   const appendColumn = (colIndex: number) => {
@@ -288,6 +320,7 @@ export function renderGraphExplorer(
       columnsEl.removeChild(existing[existing.length - 1]);
     }
     columnsEl.appendChild(buildColumnEl(colIndex));
+    refreshAllMarkers();
   };
 
   const fetchCached = async (parentId: string | null): Promise<{ nodes: ExplorerNode[]; hasMore: boolean }> => {
@@ -331,6 +364,7 @@ export function renderGraphExplorer(
     const colEl = columnsEl.children[colIndex] as HTMLElement | undefined;
     if (colEl) {
       columnsEl.replaceChild(buildColumnEl(colIndex), colEl);
+      refreshAllMarkers();
     }
   };
 
@@ -350,6 +384,11 @@ export function renderGraphExplorer(
       const isSelected = row.dataset.nodeId === selectedId;
       row.style.background = 'transparent';
       row.style.borderLeft = `2px solid ${isSelected ? SELECT_STRONG : 'transparent'}`;
+      const ta = row.querySelector<HTMLTextAreaElement>('textarea[data-node-id]');
+      if (ta) {
+        const hasText = ta.value.length > 0;
+        ta.style.color = isSelected ? (hasText ? TEXT_HIGH : TEXT_DIM) : (hasText ? TEXT_MID : TEXT_DIM);
+      }
     });
   };
 
@@ -388,6 +427,7 @@ export function renderGraphExplorer(
             if (markerEl) {
               markerEl.style.background = node.color ?? 'transparent';
               markerEl.style.border = node.color ? 'none' : `1.5px solid ${TEXT_DIM}`;
+              markerEl.dataset.markerColor = node.color ?? '';
             }
           }
         }
@@ -624,9 +664,11 @@ export function renderGraphExplorer(
     });
     row.appendChild(star);
 
-    // Marker dot (right-click for color picker)
+    // Marker dot (left-click to toggle link with selected node; right-click for color picker)
     const marker = document.createElement('span');
     marker.dataset.marker = '1';
+    marker.dataset.markerNodeId = node.id;
+    marker.dataset.markerColor = node.color ?? '';
     marker.style.cssText = `
       width:6px;height:6px;flex-shrink:0;align-self:center;
       border-radius:1px;box-sizing:border-box;
@@ -638,27 +680,15 @@ export function renderGraphExplorer(
       e.preventDefault();
       showColorPicker(marker, node, colIndex);
     });
-    marker.addEventListener('mouseenter', () => {
-      if (state.linkSourceId && state.linkSourceId !== node.id) {
-        marker.style.cursor = 'crosshair';
-        marker.title = '選択中のノードとリンク / アンリンク';
-      } else {
-        marker.style.cursor = 'context-menu';
-        marker.title = '';
-      }
-    });
     marker.addEventListener('click', async () => {
       if (!state.linkSourceId || state.linkSourceId === node.id) return;
       const linked = await apiToggleLink(gId, state.linkSourceId, node.id);
-      // Flash marker to confirm
-      const flashColor = linked ? 'rgba(60,200,100,0.9)' : 'rgba(200,80,80,0.9)';
-      marker.style.background = flashColor;
-      marker.style.border = 'none';
-      setTimeout(() => {
-        marker.style.background = node.color ?? 'transparent';
-        marker.style.border = node.color ? 'none' : `1.5px solid ${TEXT_DIM}`;
-      }, 500);
-      // Invalidate children cache for both nodes so re-navigation reflects the change
+      if (linked) {
+        state.linkedNodeIds.add(node.id);
+      } else {
+        state.linkedNodeIds.delete(node.id);
+      }
+      refreshAllMarkers();
       childrenCache.delete(state.linkSourceId);
       childrenCache.delete(node.id);
     });
@@ -686,12 +716,12 @@ export function renderGraphExplorer(
       padding: '2px 4px',
       boxSizing: 'border-box',
       background: 'transparent',
-      color: prim != null ? TEXT_HIGH : TEXT_DIM,
+      color: prim != null ? TEXT_MID : TEXT_DIM,
     });
     (inp.style as unknown as Record<string, string>)['field-sizing'] = 'content';
 
     inp.addEventListener('focus', () => {
-      state.linkSourceId = node.id;
+      void setLinkSource(node.id);
       onNodeFocus(colIndex, node.id);
     });
 
