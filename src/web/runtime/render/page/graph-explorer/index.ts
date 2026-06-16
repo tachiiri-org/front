@@ -553,16 +553,16 @@ export function renderGraphExplorer(
       list.appendChild(msg);
     } else {
       // Filter out nodes that have no text in current lang but have text in other lang (when showFallback=false)
-      const visibleNodes = state.showFallback
+      const base = state.showFallback
         ? col.nodes
         : col.nodes.filter((n) => primaryLabel(n, state.lang) != null);
-      // Bookmarked nodes pinned to top in column 0
+      // col 0: bookmarks pinned to top; col 1+: bookmarks hidden (they live in col 0 only)
       const nodes = colIndex === 0
         ? [
-            ...visibleNodes.filter((n) => state.bookmarks.has(n.id)),
-            ...visibleNodes.filter((n) => !state.bookmarks.has(n.id)),
+            ...base.filter((n) => state.bookmarks.has(n.id)),
+            ...base.filter((n) => !state.bookmarks.has(n.id)),
           ]
-        : visibleNodes;
+        : base.filter((n) => !state.bookmarks.has(n.id));
       for (const node of nodes) {
         list.appendChild(buildNodeRow(node, colIndex));
       }
