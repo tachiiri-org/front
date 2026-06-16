@@ -81,9 +81,8 @@ async function fetchChildren(graphId: string, nodeId: string, limit: number): Pr
 async function apiCreateNode(
   graphId: string, parentId: string | null, lang: 'en' | 'ja', label: string,
 ): Promise<ExplorerNode | null> {
-  const body = lang === 'en'
-    ? (parentId ? { parentId, en: label } : { en: label })
-    : (parentId ? { parentId, ja: label } : { ja: label });
+  const labelField = label ? (lang === 'en' ? { en: label } : { ja: label }) : {};
+  const body = parentId ? { parentId, ...labelField } : labelField;
   const r = await apiFetch(`/api/graph/${graphId}/node`, {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
@@ -759,8 +758,26 @@ export function renderGraphExplorer(
       }, 800);
     });
 
-    inp.addEventListener('keydown', (e) => {
+    inp.addEventListener('keydown', async (e) => {
       if (e.key === 'Escape') { inp.blur(); return; }
+
+      // Enter → add new node below; Shift+Enter → newline (default)
+      if (e.key === 'Enter' && !e.shiftKey) {
+        e.preventDefault();
+        const col = state.columns[colIndex];
+        if (!col) return;
+        if (saveTimer) { clearTimeout(saveTimer); saveTimer = null; }
+        void apiUpdateNode(gId, node.id, state.lang, inp.value.trim());
+        childrenCache.delete(col.parentId);
+        const newNode = await apiCreateNode(gId, col.parentId, state.lang, '');
+        if (!newNode || !state.columns[colIndex]) return;
+        const idx = state.columns[colIndex].nodes.indexOf(node);
+        state.columns[colIndex].nodes.splice(idx + 1, 0, newNode);
+        const newRow = buildNodeRow(newNode, colIndex);
+        row.insertAdjacentElement('afterend', newRow);
+        newRow.querySelector<HTMLTextAreaElement>('textarea')?.focus();
+        return;
+      }
 
       // Ctrl+Shift+Backspace → delete node, focus node above
       if (e.key === 'Backspace' && e.ctrlKey && e.shiftKey) {
