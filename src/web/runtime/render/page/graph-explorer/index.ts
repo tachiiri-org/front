@@ -71,6 +71,21 @@ async function fetchAllNodes(
   return { nodes: data.nodes ?? [], hasMore: data.hasMore ?? false };
 }
 
+async function fetchBookmarkedNodes(
+  graphId: string,
+  bookmarkIds: string[],
+  lang?: 'en' | 'ja',
+): Promise<{ nodes: ExplorerNode[]; hasMore: boolean }> {
+  if (bookmarkIds.length === 0) return { nodes: [], hasMore: false };
+  const params = new URLSearchParams({ offset: '0', onlyIncluded: 'true' });
+  params.set('include', bookmarkIds.join(','));
+  if (lang) params.set('lang', lang);
+  const r = await apiFetch(`/api/graph/${graphId}/nodes?${params}`);
+  if (!r.ok) return { nodes: [], hasMore: false };
+  const data = await r.json() as { nodes: ExplorerNode[]; hasMore?: boolean };
+  return { nodes: data.nodes ?? [], hasMore: false };
+}
+
 async function fetchChildren(graphId: string, nodeId: string, limit: number): Promise<ExplorerNode[]> {
   const r = await apiFetch(`/api/graph/${graphId}/node/${nodeId}/children?limit=${limit}`);
   if (!r.ok) return [];
@@ -348,8 +363,7 @@ export function renderGraphExplorer(
     if (childrenCache.has(parentId)) return { nodes: childrenCache.get(parentId)!, hasMore: false };
     if (parentId === null) {
       const lang = state.showFallback ? undefined : state.lang;
-      const neighborOf = state.bookmarks.size > 0 ? [...state.bookmarks] : undefined;
-      const result = await fetchAllNodes(gId, [...state.bookmarks], 0, lang, neighborOf);
+      const result = await fetchBookmarkedNodes(gId, [...state.bookmarks], lang);
       childrenCache.set(null, result.nodes);
       return result;
     }
@@ -496,7 +510,7 @@ export function renderGraphExplorer(
     const colEl = document.createElement('div');
     colEl.dataset.colIndex = String(colIndex);
     colEl.style.cssText = `
-      width:fit-content;max-width:40%;min-width:160px;
+      width:fit-content;max-width:40%;min-width:20vw;
       display:flex;flex-direction:column;
       border-right:1px solid ${BORDER};
       flex-shrink:0;overflow:hidden;
@@ -505,7 +519,7 @@ export function renderGraphExplorer(
     // ── Item list ─────────────────────────────────────────────────
     const list = document.createElement('div');
     list.dataset.list = '1';
-    list.style.cssText = `flex:1;overflow-y:auto;padding:4px 0;`;
+    list.style.cssText = `flex:1;overflow-y:auto;padding:4px 12px 4px 0;`;
 
     // Draft row — same structure as node rows
     const draftRow = document.createElement('div');
@@ -536,6 +550,10 @@ export function renderGraphExplorer(
       const newNode = await apiCreateNode(gId, col.parentId, state.lang, val);
       if (newNode && state.columns[colIndex]) {
         state.columns[colIndex].nodes.push(newNode);
+        if (colIndex === 0) {
+          state.bookmarks.add(newNode.id);
+          void apiAddBookmark(gId, newNode.id);
+        }
         list.appendChild(buildNodeRow(newNode, colIndex));
         void onNodeFocus(colIndex, newNode.id);
       }
@@ -565,12 +583,9 @@ export function renderGraphExplorer(
       const base = state.showFallback
         ? col.nodes
         : col.nodes.filter((n) => primaryLabel(n, state.lang) != null);
-      // col 0: bookmarks pinned to top; col 1+: bookmarks hidden (they live in col 0 only)
+      // col 0: bookmarks only; col 1+: non-bookmarks only
       const nodes = colIndex === 0
-        ? [
-            ...base.filter((n) => state.bookmarks.has(n.id)),
-            ...base.filter((n) => !state.bookmarks.has(n.id)),
-          ]
+        ? base.filter((n) => state.bookmarks.has(n.id))
         : base.filter((n) => !state.bookmarks.has(n.id));
       for (const node of nodes) {
         list.appendChild(buildNodeRow(node, colIndex));
@@ -865,6 +880,28 @@ export function renderGraphExplorer(
       }
     });
 
+    row.addEventListener('mousedown', (e: MouseEvent) => {
+      if (!e.shiftKey) return;
+      e.preventDefault();
+      if (!state.linkSourceId || state.linkSourceId === node.id) return;
+      void apiToggleLink(gId, state.linkSourceId, node.id).then((linked) => {
+        if (linked) {
+          state.linkedNodeIds.add(node.id);
+          if (state.bookmarks.has(node.id)) {
+            state.bookmarks.delete(node.id);
+            void apiRemoveBookmark(gId, node.id);
+            childrenCache.delete(null);
+            void loadColumn(null, 0);
+          }
+        } else {
+          state.linkedNodeIds.delete(node.id);
+        }
+        refreshAllMarkers();
+        refreshAllNodeText();
+        childrenCache.delete(state.linkSourceId!);
+        childrenCache.delete(node.id);
+      });
+    });
     row.appendChild(inp);
     return row;
   };
