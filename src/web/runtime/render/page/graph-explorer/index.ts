@@ -18,6 +18,7 @@ type ExplorerState = {
   columns: ExplorerColumn[];
   bookmarks: Set<string>;
   showFallback: boolean; // show nodes that have no text in current lang but have text in other lang
+  linkSourceId: string | null; // last focused node — used as source when clicking another marker to link
 };
 
 const BG = '#1e1e1e';
@@ -114,6 +115,17 @@ async function apiDeleteNode(graphId: string, nodeId: string): Promise<void> {
   await apiFetch(`/api/graph/${graphId}/node/${nodeId}`, { method: 'DELETE' });
 }
 
+async function apiToggleLink(graphId: string, sourceId: string, targetId: string): Promise<boolean> {
+  const r = await apiFetch(`/api/graph/${graphId}/node/${sourceId}/link`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ targetId }),
+  });
+  if (!r.ok) return false;
+  const data = await r.json() as { linked: boolean };
+  return data.linked;
+}
+
 const BOOKMARK_KEY_PREFIX = 'ge-bookmarks:';
 
 function loadBookmarks(graphId: string): Set<string> {
@@ -152,6 +164,7 @@ export function renderGraphExplorer(
     columns: [],
     bookmarks: loadBookmarks(gId),
     showFallback: false,
+    linkSourceId: null,
   };
 
   // In-memory cache: null key = all-nodes (col 0), string key = children of nodeId
@@ -625,6 +638,30 @@ export function renderGraphExplorer(
       e.preventDefault();
       showColorPicker(marker, node, colIndex);
     });
+    marker.addEventListener('mouseenter', () => {
+      if (state.linkSourceId && state.linkSourceId !== node.id) {
+        marker.style.cursor = 'crosshair';
+        marker.title = '選択中のノードとリンク / アンリンク';
+      } else {
+        marker.style.cursor = 'context-menu';
+        marker.title = '';
+      }
+    });
+    marker.addEventListener('click', async () => {
+      if (!state.linkSourceId || state.linkSourceId === node.id) return;
+      const linked = await apiToggleLink(gId, state.linkSourceId, node.id);
+      // Flash marker to confirm
+      const flashColor = linked ? 'rgba(60,200,100,0.9)' : 'rgba(200,80,80,0.9)';
+      marker.style.background = flashColor;
+      marker.style.border = 'none';
+      setTimeout(() => {
+        marker.style.background = node.color ?? 'transparent';
+        marker.style.border = node.color ? 'none' : `1.5px solid ${TEXT_DIM}`;
+      }, 500);
+      // Invalidate children cache for both nodes so re-navigation reflects the change
+      childrenCache.delete(state.linkSourceId);
+      childrenCache.delete(node.id);
+    });
     row.appendChild(marker);
 
     // Textarea
@@ -654,6 +691,7 @@ export function renderGraphExplorer(
     (inp.style as unknown as Record<string, string>)['field-sizing'] = 'content';
 
     inp.addEventListener('focus', () => {
+      state.linkSourceId = node.id;
       onNodeFocus(colIndex, node.id);
     });
 
