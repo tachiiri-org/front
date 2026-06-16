@@ -21,7 +21,7 @@ const buildColumn = (
   col.style.overflowX = 'hidden';
   col.style.flexShrink = '0';
   col.style.boxSizing = 'border-box';
-  col.style.padding = '4px 0';
+  col.style.padding = '4px 12px 4px 0';
 
   // Column type label (+ lang toggle for word column)
   const headerRow = document.createElement('div');
@@ -149,6 +149,7 @@ const buildColumn = (
           return w;
         })();
         if (!existing) state.words.push(newWord);
+        if (colIndex === 1) newWord.bookmarked = true;
         if (contextTextId) {
           const contextText = findText(state.texts, contextTextId);
           if (contextText) contextText.wordIds.push(newWord.id);
@@ -258,6 +259,32 @@ const buildColumn = (
       row.appendChild(arrow);
     }
 
+    // Shift+click: connect this item with the currently selected item in the other column
+    row.addEventListener('mousedown', (e: MouseEvent) => {
+      if (!e.shiftKey) return;
+      e.preventDefault();
+      let text: GraphText | undefined;
+      let word: GraphWord | undefined;
+      if (isTextCol) {
+        text = item as GraphText;
+        const wordId = state.path[1];
+        if (!wordId) return;
+        word = findWord(state.words, wordId);
+      } else {
+        word = item as GraphWord;
+        const textId = state.path[2];
+        if (!textId) return;
+        text = findText(state.texts, textId);
+      }
+      if (!text || !word) return;
+      if (text.wordIds.includes(word.id)) return;
+      ctx.pushHistory();
+      text.wordIds.push(word.id);
+      word.bookmarked = false;
+      ctx.scheduleSave();
+      ctx.render();
+    });
+
     col.appendChild(row);
   }
 
@@ -274,7 +301,7 @@ const buildDocumentColumn = (selectedTextId: string | null, ctx: WordGraphContex
   col.style.overflowX = 'hidden';
   col.style.flexShrink = '0';
   col.style.boxSizing = 'border-box';
-  col.style.padding = '4px 0';
+  col.style.padding = '4px 12px 4px 0';
 
   const headerRow = document.createElement('div');
   Object.assign(headerRow.style, {
@@ -520,10 +547,11 @@ export const buildColumns = (ctx: WordGraphContext): HTMLElement => {
   } else {
     wrapper.style.overflowX = 'hidden';
 
-    // Words column — flex 2
-    const col1 = buildColumn([...state.words], 1, null, ctx);
+    // Words column — flex 2, only show bookmarked words by default
+    const col1Items = state.words.filter(w => w.bookmarked);
+    const col1 = buildColumn(col1Items, 1, null, ctx);
     col1.style.flex = '2';
-    col1.style.minWidth = '100px';
+    col1.style.minWidth = '20vw';
     wrapper.appendChild(col1);
 
     // Texts column — flex 4 (filtered by selected word, or all if none)
@@ -532,14 +560,14 @@ export const buildColumns = (ctx: WordGraphContext): HTMLElement => {
       : [...state.texts];
     const col2 = buildColumn(col2Items, 2, null, ctx);
     col2.style.flex = '4';
-    col2.style.minWidth = '150px';
+    col2.style.minWidth = '20vw';
     wrapper.appendChild(col2);
 
     // Documents column — flex 4 (always visible; shows placeholder when no text selected)
     const selectedTextId = (state.path[2] as string | undefined) ?? null;
     const col3 = buildDocumentColumn(selectedTextId, ctx);
     col3.style.flex = '4';
-    col3.style.minWidth = '150px';
+    col3.style.minWidth = '20vw';
     col3.style.borderRight = 'none';
     wrapper.appendChild(col3);
   }

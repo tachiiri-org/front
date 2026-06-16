@@ -7,6 +7,7 @@ export type GraphWord = {
   en?: string;
   ja?: string;
   color?: string;
+  bookmarked?: boolean;
 };
 
 export type GraphText = {
@@ -45,7 +46,8 @@ const isGraphWord = (v: unknown): boolean => {
   return (
     typeof c.id === 'string' &&
     (c.en === undefined || typeof c.en === 'string') &&
-    (c.ja === undefined || typeof c.ja === 'string')
+    (c.ja === undefined || typeof c.ja === 'string') &&
+    (c.bookmarked === undefined || typeof c.bookmarked === 'boolean')
   );
 };
 

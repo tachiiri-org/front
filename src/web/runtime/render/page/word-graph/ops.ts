@@ -106,6 +106,7 @@ export const migrateGraphData = (
       ...(en ? { en } : {}),
       ...(ja ? { ja } : {}),
       ...(typeof w.color === 'string' ? { color: w.color } : {}),
+      ...(typeof w.bookmarked === 'boolean' ? { bookmarked: w.bookmarked } : {}),
     };
   });
 
