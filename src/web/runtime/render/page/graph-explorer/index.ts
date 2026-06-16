@@ -128,27 +128,27 @@ async function apiToggleLink(graphId: string, sourceId: string, targetId: string
   return data.linked;
 }
 
-const BOOKMARK_KEY_PREFIX = 'ge-bookmarks:';
-
-function loadBookmarks(graphId: string): Set<string> {
-  try {
-    const raw = localStorage.getItem(BOOKMARK_KEY_PREFIX + graphId);
-    if (raw) {
-      const ids = JSON.parse(raw) as unknown;
-      if (Array.isArray(ids)) return new Set(ids.filter((v) => typeof v === 'string') as string[]);
-    }
-  } catch (err) {
-    console.error('[graph-explorer] loadBookmarks error', err);
-  }
-  return new Set();
+async function fetchBookmarks(graphId: string): Promise<string[]> {
+  const r = await apiFetch(`/api/graph/${graphId}/bookmarks`);
+  if (!r.ok) return [];
+  const data = await r.json() as { bookmarks: string[] };
+  return data.bookmarks ?? [];
 }
 
-function saveBookmarks(graphId: string, bookmarks: Set<string>): void {
-  try {
-    localStorage.setItem(BOOKMARK_KEY_PREFIX + graphId, JSON.stringify(Array.from(bookmarks)));
-  } catch (err) {
-    console.error('[graph-explorer] saveBookmarks error', err);
-  }
+async function apiAddBookmark(graphId: string, nodeId: string): Promise<void> {
+  await apiFetch(`/api/graph/${graphId}/bookmarks/${nodeId}`, { method: 'POST' });
+}
+
+async function apiRemoveBookmark(graphId: string, nodeId: string): Promise<void> {
+  await apiFetch(`/api/graph/${graphId}/bookmarks/${nodeId}`, { method: 'DELETE' });
+}
+
+async function apiMoveBookmark(graphId: string, nodeId: string, direction: 'up' | 'down'): Promise<void> {
+  await apiFetch(`/api/graph/${graphId}/bookmarks/${nodeId}/move`, {
+    method: 'PATCH',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ direction }),
+  });
 }
 
 export function renderGraphExplorer(
@@ -164,7 +164,7 @@ export function renderGraphExplorer(
     lang: comp.lang ?? 'ja',
     limit,
     columns: [],
-    bookmarks: loadBookmarks(gId),
+    bookmarks: new Set(),
     showFallback: false,
     linkSourceId: null,
     linkedNodeIds: new Set(),
@@ -546,10 +546,20 @@ export function renderGraphExplorer(
     list.appendChild(draftRow);
 
     if (col.loading) {
-      const msg = document.createElement('div');
-      msg.textContent = '読み込み中...';
-      msg.style.cssText = `padding:4px 12px;color:${TEXT_DIM};font-size:13px;`;
-      list.appendChild(msg);
+      const loadingRow = document.createElement('div');
+      loadingRow.style.cssText = `display:flex;align-items:flex-start;gap:4px;padding:1px 8px 1px 8px;flex-shrink:0;`;
+      const loadingStar = document.createElement('span');
+      loadingStar.textContent = '☆';
+      loadingStar.style.cssText = `flex-shrink:0;align-self:center;font-size:10px;line-height:1;color:transparent;margin-top:1px;user-select:none;`;
+      const loadingMarker = document.createElement('span');
+      loadingMarker.style.cssText = `width:6px;height:6px;flex-shrink:0;align-self:center;border-radius:1px;box-sizing:border-box;margin-top:1px;`;
+      const loadingText = document.createElement('span');
+      loadingText.textContent = '読み込み中...';
+      loadingText.style.cssText = `padding:2px 4px;color:${TEXT_DIM};font-size:inherit;`;
+      loadingRow.appendChild(loadingStar);
+      loadingRow.appendChild(loadingMarker);
+      loadingRow.appendChild(loadingText);
+      list.appendChild(loadingRow);
     } else {
       // Filter out nodes that have no text in current lang but have text in other lang (when showFallback=false)
       const base = state.showFallback
@@ -653,23 +663,19 @@ export function renderGraphExplorer(
       const nowBookmarked = !state.bookmarks.has(node.id);
       if (nowBookmarked) {
         state.bookmarks.add(node.id);
-        // Inject into col0 nodes if not already present
+        void apiAddBookmark(gId, node.id);
         if (state.columns[0] && !state.columns[0].nodes.some((n) => n.id === node.id)) {
           state.columns[0].nodes.unshift(node);
         }
       } else {
         state.bookmarks.delete(node.id);
+        void apiRemoveBookmark(gId, node.id);
       }
-      saveBookmarks(gId, state.bookmarks);
-      // Invalidate col0 cache so next full reload reflects bookmark changes
       childrenCache.delete(null);
-      // Update this star's appearance
       star.textContent = nowBookmarked ? '★' : '☆';
       star.style.color = nowBookmarked ? 'rgba(255,190,60,0.9)' : TEXT_DIM;
       star.title = nowBookmarked ? 'ブックマーク解除' : 'ブックマーク';
-      // Blur cursor so focus doesn't follow the moved row
       (document.activeElement as HTMLElement | null)?.blur();
-      // Rebuild column 0, preserving scroll position
       if (state.columns[0]) {
         const col0El = columnsEl.children[0] as HTMLElement | undefined;
         if (col0El) {
@@ -796,11 +802,24 @@ export function renderGraphExplorer(
         if (!col) return;
         const idx = col.nodes.indexOf(node);
         if (idx === -1) return;
-        const dir = e.key === 'ArrowUp' ? -1 : 1;
-        const newIdx = idx + dir;
-        if (newIdx < 0 || newIdx >= col.nodes.length) return;
-        col.nodes.splice(idx, 1);
-        col.nodes.splice(newIdx, 0, node);
+        const direction = e.key === 'ArrowUp' ? 'up' : 'down';
+        if (colIndex === 0 && state.bookmarks.has(node.id)) {
+          // Bookmark reorder via API — swap with adjacent bookmark
+          const bkNodes = col.nodes.filter((n) => state.bookmarks.has(n.id));
+          const bkIdx = bkNodes.indexOf(node);
+          const targetBk = direction === 'up' ? bkNodes[bkIdx - 1] : bkNodes[bkIdx + 1];
+          if (!targetBk) return;
+          void apiMoveBookmark(gId, node.id, direction);
+          const targetIdx = col.nodes.indexOf(targetBk);
+          col.nodes.splice(idx, 1);
+          col.nodes.splice(targetIdx < idx ? targetIdx : targetIdx - 1 + (direction === 'down' ? 1 : 0), 0, node);
+        } else {
+          const dir = direction === 'up' ? -1 : 1;
+          const newIdx = idx + dir;
+          if (newIdx < 0 || newIdx >= col.nodes.length) return;
+          col.nodes.splice(idx, 1);
+          col.nodes.splice(newIdx, 0, node);
+        }
         const colEl = columnsEl.children[colIndex] as HTMLElement | undefined;
         if (colEl) {
           columnsEl.replaceChild(buildColumnEl(colIndex), colEl);
@@ -850,7 +869,10 @@ export function renderGraphExplorer(
     return row;
   };
 
-  void loadColumn(null, 0);
+  fetchBookmarks(gId).then((ids) => {
+    state.bookmarks = new Set(ids);
+    void loadColumn(null, 0);
+  });
 
   return outer;
 }
