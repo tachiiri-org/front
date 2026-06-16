@@ -18,6 +18,7 @@ type ExplorerState = {
   columns: ExplorerColumn[];
   bookmarks: Set<string>;
   showFallback: boolean;
+  showNeighborOnly: boolean; // col0: show only bookmarks + their direct neighbors
   linkSourceId: string | null;   // last focused node — source for link operations
   linkedNodeIds: Set<string>;    // nodes currently linked to linkSourceId
 };
@@ -59,10 +60,12 @@ async function fetchAllNodes(
   includeIds: string[] = [],
   offset = 0,
   lang?: 'en' | 'ja',
+  neighborOf?: string[],
 ): Promise<{ nodes: ExplorerNode[]; hasMore: boolean }> {
   const params = new URLSearchParams({ limit: '20', offset: String(offset) });
   if (includeIds.length > 0) params.set('include', includeIds.join(','));
   if (lang) params.set('lang', lang);
+  if (neighborOf && neighborOf.length > 0) params.set('neighborOf', neighborOf.join(','));
   const r = await apiFetch(`/api/graph/${graphId}/nodes?${params}`);
   if (!r.ok) return { nodes: [], hasMore: false };
   const data = await r.json() as { nodes: ExplorerNode[]; hasMore?: boolean };
@@ -165,6 +168,7 @@ export function renderGraphExplorer(
     columns: [],
     bookmarks: loadBookmarks(gId),
     showFallback: false,
+    showNeighborOnly: false,
     linkSourceId: null,
     linkedNodeIds: new Set(),
   };
@@ -224,6 +228,22 @@ export function renderGraphExplorer(
   jaBtn.addEventListener('click', () => switchLang('ja'));
   enBtn.addEventListener('click', () => switchLang('en'));
 
+  // Toggle: col0 shows only bookmarks + their direct neighbors
+  const makeNeighborBtnStyle = () => {
+    const active = state.showNeighborOnly;
+    return `background:${active ? SELECT_STRONG : 'transparent'};border:1px solid ${active ? SELECT_STRONG : BORDER};color:${active ? TEXT_HIGH : TEXT_MID};cursor:pointer;font-size:11px;padding:1px 7px;border-radius:3px;line-height:1.5;`;
+  };
+  const neighborBtn = document.createElement('button');
+  neighborBtn.textContent = '隣接';
+  neighborBtn.title = 'ブックマークの直接リンク先のみ表示';
+  neighborBtn.style.cssText = makeNeighborBtnStyle();
+  neighborBtn.addEventListener('click', () => {
+    state.showNeighborOnly = !state.showNeighborOnly;
+    neighborBtn.style.cssText = makeNeighborBtnStyle();
+    childrenCache.delete(null);
+    void loadColumn(null, 0);
+  });
+
   // Toggle: show/hide nodes that only exist in the other language
   const makeFallbackBtnStyle = () => {
     const active = state.showFallback;
@@ -240,6 +260,7 @@ export function renderGraphExplorer(
     void loadColumn(null, 0);
   });
 
+  topBar.appendChild(neighborBtn);
   topBar.appendChild(fallbackBtn);
   topBar.appendChild(jaBtn);
   topBar.appendChild(enBtn);
@@ -291,6 +312,23 @@ export function renderGraphExplorer(
     });
   };
 
+  // Dim text globally: selected=TEXT_HIGH, linked=TEXT_MID, unlinked=TEXT_DIM
+  const refreshAllNodeText = () => {
+    columnsEl.querySelectorAll<HTMLTextAreaElement>('textarea[data-node-id]').forEach((ta) => {
+      const nid = ta.dataset.nodeId!;
+      const hasText = ta.value.length > 0;
+      if (!state.linkSourceId) {
+        ta.style.color = hasText ? TEXT_MID : TEXT_DIM;
+      } else if (nid === state.linkSourceId) {
+        ta.style.color = hasText ? TEXT_HIGH : TEXT_DIM;
+      } else if (state.linkedNodeIds.has(nid)) {
+        ta.style.color = hasText ? TEXT_MID : TEXT_DIM;
+      } else {
+        ta.style.color = TEXT_DIM;
+      }
+    });
+  };
+
   // Set link source and fetch its connected nodes to update marker states
   const setLinkSource = async (nodeId: string) => {
     if (state.linkSourceId === nodeId) return;
@@ -304,6 +342,7 @@ export function renderGraphExplorer(
     if (state.linkSourceId !== nodeId) return; // focus changed during fetch
     state.linkedNodeIds = new Set(linked.map((n) => n.id));
     refreshAllMarkers();
+    refreshAllNodeText();
   };
 
   const rebuildAll = () => {
@@ -312,6 +351,7 @@ export function renderGraphExplorer(
       columnsEl.appendChild(buildColumnEl(i));
     }
     refreshAllMarkers();
+    refreshAllNodeText();
   };
 
   const appendColumn = (colIndex: number) => {
@@ -321,13 +361,16 @@ export function renderGraphExplorer(
     }
     columnsEl.appendChild(buildColumnEl(colIndex));
     refreshAllMarkers();
+    refreshAllNodeText();
   };
 
   const fetchCached = async (parentId: string | null): Promise<{ nodes: ExplorerNode[]; hasMore: boolean }> => {
     if (childrenCache.has(parentId)) return { nodes: childrenCache.get(parentId)!, hasMore: false };
     if (parentId === null) {
       const lang = state.showFallback ? undefined : state.lang;
-      const result = await fetchAllNodes(gId, [...state.bookmarks], 0, lang);
+      const neighborOf = (state.showNeighborOnly && state.bookmarks.size > 0)
+        ? [...state.bookmarks] : undefined;
+      const result = await fetchAllNodes(gId, [...state.bookmarks], 0, lang, neighborOf);
       childrenCache.set(null, result.nodes);
       return result;
     }
@@ -365,6 +408,7 @@ export function renderGraphExplorer(
     if (colEl) {
       columnsEl.replaceChild(buildColumnEl(colIndex), colEl);
       refreshAllMarkers();
+      refreshAllNodeText();
     }
   };
 
@@ -384,11 +428,6 @@ export function renderGraphExplorer(
       const isSelected = row.dataset.nodeId === selectedId;
       row.style.background = 'transparent';
       row.style.borderLeft = `2px solid ${isSelected ? SELECT_STRONG : 'transparent'}`;
-      const ta = row.querySelector<HTMLTextAreaElement>('textarea[data-node-id]');
-      if (ta) {
-        const hasText = ta.value.length > 0;
-        ta.style.color = isSelected ? (hasText ? TEXT_HIGH : TEXT_DIM) : (hasText ? TEXT_MID : TEXT_DIM);
-      }
     });
   };
 
@@ -570,7 +609,9 @@ export function renderGraphExplorer(
           moreBtn.style.cursor = 'default';
           const offset = col.nextOffset ?? col.nodes.length;
           const lang = state.showFallback ? undefined : state.lang;
-          const { nodes: newNodes, hasMore: newHasMore } = await fetchAllNodes(gId, [...state.bookmarks], offset, lang);
+          const neighborOf = (state.showNeighborOnly && state.bookmarks.size > 0)
+            ? [...state.bookmarks] : undefined;
+          const { nodes: newNodes, hasMore: newHasMore } = await fetchAllNodes(gId, [...state.bookmarks], offset, lang, neighborOf);
           if (state.columns[colIndex]) {
             // Append only nodes not already in the list
             const existingIds = new Set(state.columns[colIndex].nodes.map((n) => n.id));
@@ -689,6 +730,7 @@ export function renderGraphExplorer(
         state.linkedNodeIds.delete(node.id);
       }
       refreshAllMarkers();
+      refreshAllNodeText();
       childrenCache.delete(state.linkSourceId);
       childrenCache.delete(node.id);
     });
@@ -721,6 +763,7 @@ export function renderGraphExplorer(
     (inp.style as unknown as Record<string, string>)['field-sizing'] = 'content';
 
     inp.addEventListener('focus', () => {
+      inp.style.color = inp.value ? TEXT_HIGH : TEXT_DIM;
       void setLinkSource(node.id);
       onNodeFocus(colIndex, node.id);
     });
