@@ -510,7 +510,7 @@ export function renderGraphExplorer(
     const colEl = document.createElement('div');
     colEl.dataset.colIndex = String(colIndex);
     colEl.style.cssText = `
-      width:fit-content;max-width:40%;min-width:20vw;
+      width:fit-content;max-width:40%;min-width:15vw;
       display:flex;flex-direction:column;
       border-right:1px solid ${BORDER};
       flex-shrink:0;overflow:hidden;
@@ -792,6 +792,10 @@ export function renderGraphExplorer(
         childrenCache.delete(col.parentId);
         const newNode = await apiCreateNode(gId, col.parentId, state.lang, '');
         if (!newNode || !state.columns[colIndex]) return;
+        if (colIndex === 0) {
+          state.bookmarks.add(newNode.id);
+          void apiAddBookmark(gId, newNode.id);
+        }
         const idx = state.columns[colIndex].nodes.indexOf(node);
         state.columns[colIndex].nodes.splice(idx + 1, 0, newNode);
         const newRow = buildNodeRow(newNode, colIndex);
@@ -884,14 +888,25 @@ export function renderGraphExplorer(
       if (!e.shiftKey) return;
       e.preventDefault();
       if (!state.linkSourceId || state.linkSourceId === node.id) return;
+      const sourceIsBookmarked = state.bookmarks.has(state.linkSourceId);
+      const targetIsBookmarked = state.bookmarks.has(node.id);
       void apiToggleLink(gId, state.linkSourceId, node.id).then((linked) => {
         if (linked) {
           state.linkedNodeIds.add(node.id);
-          if (state.bookmarks.has(node.id)) {
+          // ブックマーク同士を繋いだ時のみ、繋がれた側のブックマークを解除
+          if (sourceIsBookmarked && targetIsBookmarked) {
             state.bookmarks.delete(node.id);
             void apiRemoveBookmark(gId, node.id);
             childrenCache.delete(null);
-            void loadColumn(null, 0);
+            // col0 から対象行だけをDOMで直接削除（再読み込みなし）
+            const col0El = columnsEl.children[0] as HTMLElement | undefined;
+            if (col0El) {
+              const targetRow = col0El.querySelector<HTMLElement>(`[data-node-id="${node.id}"]:not(textarea)`);
+              targetRow?.remove();
+              if (state.columns[0]) {
+                state.columns[0].nodes = state.columns[0].nodes.filter((n) => n.id !== node.id);
+              }
+            }
           }
         } else {
           state.linkedNodeIds.delete(node.id);
