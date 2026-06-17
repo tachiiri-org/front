@@ -349,11 +349,35 @@ export async function handleMagicLinkRequest(
   const url = new URL(request.url);
   if (url.pathname !== '/api/auth/magic-link' || request.method !== 'POST') return null;
 
-  const body = (await request.json()) as { email?: string; purpose?: string; group_id?: string; group_name?: string };
+  const body = (await request.json()) as {
+    email?: string; purpose?: string; group_id?: string; group_name?: string; turnstile_token?: string;
+  };
+
+  const rawSecret = env.TURNSTILE_SECRET_KEY;
+  const secretKey = rawSecret
+    ? (typeof rawSecret === 'string' ? rawSecret : await rawSecret.get())
+    : null;
+
+  if (secretKey) {
+    const token = body.turnstile_token ?? '';
+    if (!token) {
+      return new Response(JSON.stringify({ error_code: 'turnstile_required' }), {
+        status: 400, headers: { 'Content-Type': 'application/json; charset=utf-8' },
+      });
+    }
+    const valid = await verifyTurnstileToken(token, secretKey, request.headers.get('CF-Connecting-IP') ?? undefined);
+    if (!valid) {
+      return new Response(JSON.stringify({ error_code: 'turnstile_failed' }), {
+        status: 400, headers: { 'Content-Type': 'application/json; charset=utf-8' },
+      });
+    }
+  }
+
+  const { turnstile_token: _t, ...forwardBody } = body;
   const res = await authorizeFetch(env, {
     path: '/api/v1/identity/magic-link/request',
     method: 'POST',
-    body: JSON.stringify({ ...body, frontend_origin: url.origin }),
+    body: JSON.stringify({ ...forwardBody, frontend_origin: url.origin }),
   });
   const text = await res.text();
   return new Response(text, { status: res.status, headers: { 'Content-Type': 'application/json; charset=utf-8' } });
@@ -456,6 +480,54 @@ export async function handleMemberCheck(
 const escHtml = (s: string): string =>
   s.replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;').replace(/"/g, '&quot;');
 
+async function verifyTurnstileToken(token: string, secretKey: string, ip?: string): Promise<boolean> {
+  const body = new FormData();
+  body.append('secret', secretKey);
+  body.append('response', token);
+  if (ip) body.append('remoteip', ip);
+  try {
+    const res = await fetch('https://challenges.cloudflare.com/turnstile/v0/siteverify', { method: 'POST', body });
+    const data = await res.json() as { success: boolean };
+    return data.success === true;
+  } catch {
+    return false;
+  }
+}
+
+function buildLoginShellHtml(clientJsPath: string, siteKey: string, title: string, inlineScript = ''): string {
+  const turnstileScript = siteKey
+    ? `<script src="https://challenges.cloudflare.com/turnstile/v0/api.js?onload=__onTurnstileLoad&render=explicit" async defer></script>`
+    : '';
+  return `<!doctype html>
+<html lang="ja">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>${escHtml(title)}</title>
+<script>window.__TURNSTILE_SITE_KEY__=${JSON.stringify(siteKey)}</script>
+${turnstileScript}
+</head>
+<body>
+${inlineScript}
+<script type="module" src="${escHtml(clientJsPath)}"></script>
+</body>
+</html>`;
+}
+
+// GET /login — server-renders login page with Turnstile site key injected
+export function handleLoginPage(
+  request: Request,
+  env: AuthorizeEnv,
+  clientJsPath: string,
+): Response | null {
+  const url = new URL(request.url);
+  if (url.pathname !== '/login' || request.method !== 'GET') return null;
+  const siteKey = env.TURNSTILE_SITE_KEY ?? '';
+  return new Response(buildLoginShellHtml(clientJsPath, siteKey, 'Tempri'), {
+    headers: { 'Content-Type': 'text/html; charset=UTF-8' },
+  });
+}
+
 // GET /login/:groupId — server-renders group-specific login page with injected group info
 export async function handleGroupLoginPage(
   request: Request,
@@ -472,21 +544,10 @@ export async function handleGroupLoginPage(
   const payload = JSON.stringify({ id: groupId, name: info?.name ?? null });
   const safeJson = payload.replace(/<\/script>/gi, '<\\/script>');
   const title = info?.name ? `${escHtml(info.name)} - Tempri` : 'Tempri';
+  const siteKey = env.TURNSTILE_SITE_KEY ?? '';
 
-  const html = `<!doctype html>
-<html lang="ja">
-<head>
-<meta charset="UTF-8">
-<meta name="viewport" content="width=device-width, initial-scale=1.0">
-<title>${title}</title>
-</head>
-<body>
-<script id="__group_data__" type="application/json">
-${safeJson}
-</script>
-<script type="module" src="${escHtml(clientJsPath)}"></script>
-</body>
-</html>`;
-
-  return new Response(html, { headers: { 'Content-Type': 'text/html; charset=UTF-8' } });
+  const groupScript = `<script id="__group_data__" type="application/json">\n${safeJson}\n</script>`;
+  return new Response(buildLoginShellHtml(clientJsPath, siteKey, title, groupScript), {
+    headers: { 'Content-Type': 'text/html; charset=UTF-8' },
+  });
 }

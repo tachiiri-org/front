@@ -25,6 +25,8 @@ export type AuthorizeEnv = {
   readonly GITHUB_OAUTH_CLIENT_ID?: string;
   readonly GOOGLE_OAUTH_CLIENT_ID?: string;
   readonly MICROSOFT_OAUTH_CLIENT_ID?: string;
+  readonly TURNSTILE_SITE_KEY?: string;
+  readonly TURNSTILE_SECRET_KEY?: SecretValue;
 };
 
 export function hasAuthorizeConfig(env: AuthorizeEnv): boolean {

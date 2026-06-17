@@ -47,6 +47,30 @@ const tabInactiveStyle: Partial<CSSStyleDeclaration> = {
   color: C.dim, borderBottomColor: 'transparent', fontWeight: '400',
 };
 
+type TurnstileAPI = {
+  render(el: HTMLElement, opts: { sitekey: string; theme: string }): string;
+  getResponse(widgetId: string): string;
+  reset(widgetId: string): void;
+};
+
+function setupTurnstile(container: HTMLElement, siteKey: string): () => string {
+  const w = window as unknown as Record<string, unknown>;
+  let widgetId: string | undefined;
+  const render = () => {
+    const api = w.turnstile as TurnstileAPI | undefined;
+    if (api && !widgetId) widgetId = api.render(container, { sitekey: siteKey, theme: 'dark' });
+  };
+  if ((w.turnstile as TurnstileAPI | undefined)) {
+    render();
+  } else {
+    w.__onTurnstileLoad = () => { render(); };
+  }
+  return () => {
+    const api = w.turnstile as TurnstileAPI | undefined;
+    return (widgetId && api) ? api.getResponse(widgetId) : '';
+  };
+}
+
 function wire(
   tabLoginEl: HTMLButtonElement,
   tabNewGroupEl: HTMLButtonElement,
@@ -79,6 +103,8 @@ function wire(
   tabLoginEl.addEventListener('click', () => { setTab('login'); statusEl.textContent = ''; });
   tabNewGroupEl.addEventListener('click', () => { setTab('new-group'); statusEl.textContent = ''; });
 
+  const siteKey = (window as unknown as Record<string, unknown>).__TURNSTILE_SITE_KEY__ as string | undefined;
+
   // Login panel: magic link section (only for group-specific URL)
   const mlSection = panelLoginEl.querySelector<HTMLElement>('#l-ml-section');
   if (mlSection) {
@@ -88,6 +114,15 @@ function wire(
   // Login panel: group-specific magic link send
   const emailLoginInput = panelLoginEl.querySelector<HTMLInputElement>('#l-email-login');
   const btnLogin = panelLoginEl.querySelector<HTMLButtonElement>('#l-btn-login');
+
+  let getLoginToken: (() => string) | undefined;
+  if (siteKey && btnLogin) {
+    const tsContainer = document.createElement('div');
+    tsContainer.style.cssText = 'margin-bottom:8px;';
+    btnLogin.parentElement?.insertBefore(tsContainer, btnLogin);
+    getLoginToken = setupTurnstile(tsContainer, siteKey);
+  }
+
   if (groupParam && emailLoginInput && btnLogin) {
     const sendGroupLogin = async (): Promise<void> => {
       const email = emailLoginInput.value.trim();
@@ -95,6 +130,14 @@ function wire(
         statusEl.textContent = 'メールアドレスを入力してください';
         statusEl.style.color = C.error;
         return;
+      }
+      if (siteKey) {
+        const token = getLoginToken?.() ?? '';
+        if (!token) {
+          statusEl.textContent = 'ボット確認が完了していません。しばらくお待ちください。';
+          statusEl.style.color = C.error;
+          return;
+        }
       }
       btnLogin.disabled = true;
       btnLogin.textContent = '確認中...';
@@ -126,10 +169,11 @@ function wire(
       }
       btnLogin.textContent = '送信中...';
       try {
+        const turnstileToken = getLoginToken?.() || undefined;
         const res = await fetch('/api/auth/magic-link', {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({ email, purpose: 'login', group_id: groupParam }),
+          body: JSON.stringify({ email, purpose: 'login', group_id: groupParam, turnstile_token: turnstileToken }),
         });
         if (res.ok) {
           statusEl.textContent = 'メールを送信しました。リンクをクリックしてログインしてください。';
@@ -157,6 +201,15 @@ function wire(
   const groupNameInput = panelNewGroupEl.querySelector<HTMLInputElement>('#l-group-name');
   const emailNewInput = panelNewGroupEl.querySelector<HTMLInputElement>('#l-email');
   const btnNew = panelNewGroupEl.querySelector<HTMLButtonElement>('#l-btn');
+
+  let getNewToken: (() => string) | undefined;
+  if (siteKey && btnNew) {
+    const tsContainer = document.createElement('div');
+    tsContainer.style.cssText = 'margin-bottom:8px;';
+    btnNew.parentElement?.insertBefore(tsContainer, btnNew);
+    getNewToken = setupTurnstile(tsContainer, siteKey);
+  }
+
   if (groupNameInput && emailNewInput && btnNew) {
     const sendNewGroup = async (): Promise<void> => {
       const groupName = groupNameInput.value.trim();
@@ -171,14 +224,23 @@ function wire(
         statusEl.style.color = C.error;
         return;
       }
+      if (siteKey) {
+        const token = getNewToken?.() ?? '';
+        if (!token) {
+          statusEl.textContent = 'ボット確認が完了していません。しばらくお待ちください。';
+          statusEl.style.color = C.error;
+          return;
+        }
+      }
       btnNew.disabled = true;
       btnNew.textContent = '送信中...';
       statusEl.textContent = '';
       try {
+        const turnstileToken = getNewToken?.() || undefined;
         const res = await fetch('/api/auth/magic-link', {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({ email, purpose: 'group_create', group_name: groupName }),
+          body: JSON.stringify({ email, purpose: 'group_create', group_name: groupName, turnstile_token: turnstileToken }),
         });
         if (res.ok) {
           statusEl.textContent = 'メールを送信しました。リンクをクリックしてグループを作成してください。';

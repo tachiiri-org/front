@@ -8,7 +8,7 @@ import {
 import { handleGoogleLoginStart, handleGoogleLoginCallback } from './session/google';
 import { handleMicrosoftLoginStart, handleMicrosoftLoginCallback } from './session/microsoft';
 import type { AuthorizeEnv } from './session';
-import { handleApiRequest as handleDataApiRequest, handleGitHubAuthStatus, handleAuthStatus, handleIdentityStatus, handleOrgCreate, handleSelectOrg, handleOrgMembers, handleAutoSelectOrg, handleMagicLinkRequest, handleMagicLinkVerify, handleMemberCheck, handleGroupLoginPage } from './routes/data';
+import { handleApiRequest as handleDataApiRequest, handleGitHubAuthStatus, handleAuthStatus, handleIdentityStatus, handleOrgCreate, handleSelectOrg, handleOrgMembers, handleAutoSelectOrg, handleMagicLinkRequest, handleMagicLinkVerify, handleMemberCheck, handleLoginPage, handleGroupLoginPage } from './routes/data';
 import { handleApiRequest as handleLayoutApiRequest } from './routes/layout';
 import { handleMcp } from './mcp/handler';
 import {
@@ -114,6 +114,10 @@ export default {
     }
     if (pathname === '/auth/magic') {
       const res = await handleMagicLinkVerify(request, env);
+      if (res) return res;
+    }
+    if (pathname === '/login' && request.method === 'GET') {
+      const res = handleLoginPage(request, env, CLIENT_JS_PATH);
       if (res) return res;
     }
     if (/^\/login\/[0-9a-f-]{36}$/i.test(pathname) && request.method === 'GET') {
