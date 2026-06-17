@@ -210,8 +210,10 @@ export function renderGraphEditor(
   const UNDO_MS = 6000;
   type PendingDelete = {
     node: ExplorerNode;
+    colIndex: number;
+    insertIndex: number;    // original position in col.nodes
+    wasSelected: boolean;   // node was the selected id when deleted
     parentId: string | null;
-    snapshotColumns: ExplorerColumn[];
     snapshotCache: ExplorerNode[] | undefined;
     timer: ReturnType<typeof setTimeout>;
   };
@@ -556,7 +558,8 @@ export function renderGraphEditor(
     void apiDeleteNode(gId, p.node.id);
   };
 
-  // Restore the pre-delete state without ever touching the backend.
+  // Restore only the deleted node — do not overwrite the entire column state so that
+  // nodes created during the undo window are preserved.
   const undoDelete = () => {
     if (!pendingDelete) return;
     const p = pendingDelete;
@@ -564,10 +567,27 @@ export function renderGraphEditor(
     pendingDelete = null;
     pendingDeleteId = null;
     hideUndoToast();
-    state.columns = p.snapshotColumns;
+    // Re-insert the deleted node at its original position (clamped to current length)
+    if (state.columns[p.colIndex]) {
+      const idx = Math.min(p.insertIndex, state.columns[p.colIndex].nodes.length);
+      state.columns[p.colIndex].nodes.splice(idx, 0, p.node);
+    }
     if (p.snapshotCache) childrenCache.set(p.parentId, p.snapshotCache);
     else childrenCache.delete(p.parentId);
-    rebuildAll();
+    // Rebuild only the affected column
+    const colEl = columnsEl.children[p.colIndex] as HTMLElement | undefined;
+    if (colEl) {
+      columnsEl.replaceChild(buildColumnEl(p.colIndex), colEl);
+    } else {
+      rebuildAll();
+    }
+    // Restore selection and reload children if the node was selected when deleted
+    if (p.wasSelected && state.columns[p.colIndex]) {
+      state.columns[p.colIndex].selectedId = p.node.id;
+      void loadColumn(p.node.id, p.colIndex + 1);
+    }
+    refreshAllMarkers();
+    refreshAllNodeText();
     refreshBreadcrumb();
   };
 
@@ -575,15 +595,15 @@ export function renderGraphEditor(
     // Only one deletion can be pending at a time — commit any previous one first.
     if (pendingDelete) finalizeDelete();
     const parentId = state.columns[colIndex]?.parentId ?? null;
-    // Snapshot for undo (before any mutation)
-    const snapshotColumns = state.columns.map((c) => ({ ...c, nodes: [...c.nodes] }));
+    const insertIndex = state.columns[colIndex]?.nodes.indexOf(node) ?? -1;
+    const wasSelected = state.columns[colIndex]?.selectedId === node.id;
     const snapshotCache = childrenCache.get(parentId)?.slice();
     // Optimistic: update UI immediately (backend call is deferred until the undo window closes)
     pendingDeleteId = node.id;
     childrenCache.delete(parentId);
     if (state.columns[colIndex]) {
       state.columns[colIndex].nodes = state.columns[colIndex].nodes.filter((n) => n.id !== node.id);
-      if (state.columns[colIndex].selectedId === node.id) {
+      if (wasSelected) {
         state.columns[colIndex].selectedId = null;
         state.columns = state.columns.slice(0, colIndex + 1);
       }
@@ -600,7 +620,7 @@ export function renderGraphEditor(
       }
     }
     const timer = setTimeout(() => finalizeDelete(), UNDO_MS);
-    pendingDelete = { node, parentId, snapshotColumns, snapshotCache, timer };
+    pendingDelete = { node, colIndex, insertIndex, wasSelected, parentId, snapshotCache, timer };
     showUndoToast(node);
   };
 
