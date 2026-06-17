@@ -56,15 +56,15 @@ type TurnstileAPI = {
 function setupTurnstile(container: HTMLElement, siteKey: string): () => string {
   const w = window as unknown as Record<string, unknown>;
   let widgetId: string | undefined;
-  const render = () => {
+  const tryRender = () => {
     const api = w.turnstile as TurnstileAPI | undefined;
-    if (api && !widgetId) widgetId = api.render(container, { sitekey: siteKey, theme: 'dark' });
+    if (api && !widgetId) {
+      widgetId = api.render(container, { sitekey: siteKey, theme: 'dark' });
+    } else if (!api) {
+      setTimeout(tryRender, 100);
+    }
   };
-  if ((w.turnstile as TurnstileAPI | undefined)) {
-    render();
-  } else {
-    w.__onTurnstileLoad = () => { render(); };
-  }
+  tryRender();
   return () => {
     const api = w.turnstile as TurnstileAPI | undefined;
     return (widgetId && api) ? api.getResponse(widgetId) : '';

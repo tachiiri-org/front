@@ -496,7 +496,7 @@ async function verifyTurnstileToken(token: string, secretKey: string, ip?: strin
 
 function buildLoginShellHtml(clientJsPath: string, siteKey: string, title: string, inlineScript = ''): string {
   const turnstileScript = siteKey
-    ? `<script src="https://challenges.cloudflare.com/turnstile/v0/api.js?onload=__onTurnstileLoad&render=explicit" async defer></script>`
+    ? `<script src="https://challenges.cloudflare.com/turnstile/v0/api.js?render=explicit" async defer></script>`
     : '';
   return `<!doctype html>
 <html lang="ja">
