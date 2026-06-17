@@ -101,25 +101,6 @@ export const GRAPH_TOOLS = [
       required: ["graph_id", "node_id"],
     },
   },
-  {
-    name: "graph_write_text",
-    description:
-      "Create a new node in the graph with the given text and link it to the specified node IDs. Use node IDs from graph_read_words or graph_read_texts_by_word. At least one of en or ja is required.",
-    inputSchema: {
-      type: "object",
-      properties: {
-        graph_id: { type: "string", description: "Word graph ID (e.g. 'word-graph-1')" },
-        en: { type: "string", description: "English text content" },
-        ja: { type: "string", description: "Japanese text content" },
-        node_ids: {
-          type: "array",
-          items: { type: "string" },
-          description: "IDs of existing nodes to connect the new node to",
-        },
-      },
-      required: ["graph_id", "node_ids"],
-    },
-  },
 ];
 
 // --- Tool handler ---
@@ -162,31 +143,6 @@ export async function callGraphTool(
       const nodes = await getNeighbors(env, graphId, nodeId, depth);
       const text = nodes.map(nodeLine).join("\n") || "(no nodes)";
       return { content: [{ type: "text", text }] };
-    }
-
-    if (name === "graph_write_text") {
-      const en = args.en ? String(args.en).trim() : undefined;
-      const ja = args.ja ? String(args.ja).trim() : undefined;
-      const nodeIds = Array.isArray(args.node_ids) ? args.node_ids.map(String) : [];
-      if (!en && !ja) {
-        return { content: [{ type: "text", text: "en or ja is required" }], isError: true };
-      }
-
-      const [firstId, ...restIds] = nodeIds;
-      const createRes = await graphFetch(env, graphId, "node", "POST", {
-        ...(en ? { en } : {}),
-        ...(ja ? { ja } : {}),
-        ...(firstId ? { parentId: firstId } : {}),
-      });
-      if (!createRes.ok) throw new Error(`create_node_failed:${createRes.status}`);
-      const newNode = (await createRes.json()) as ApiNode;
-
-      for (const targetId of restIds) {
-        const linkRes = await graphFetch(env, graphId, `node/${encodeURIComponent(newNode.id)}/link`, "POST", { targetId });
-        if (!linkRes.ok) throw new Error(`link_node_failed:${linkRes.status}`);
-      }
-
-      return { content: [{ type: "text", text: `Created: ${nodeLine(newNode)}` }] };
     }
 
     return { content: [{ type: "text", text: `Unknown graph tool: ${name}` }], isError: true };
