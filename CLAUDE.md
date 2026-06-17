@@ -27,10 +27,10 @@ npx tsx e2e/start-session.ts
 `mcp__front-production__graph_read_words` がまだロードされていなければ、ToolSearch で以下のスキーマをロードする:
 
 ```
-select:mcp__front-production__graph_read_words,mcp__front-production__graph_read_texts_by_word
+select:mcp__front-production__graph_read_words,mcp__front-production__graph_read_texts_by_word,mcp__front-production__graph_read_nodes_from
 ```
 
-次に `mcp__front-production__graph_read_words`（graph_id: `word-graph-1`）でワード一覧を取得し、タスクに関連するワードのテキストを `mcp__front-production__graph_read_texts_by_word` で読む。
+次に `mcp__front-production__graph_read_words`（graph_id: `word-graph-1`）でワード一覧を取得し、タスクに関連するワードのテキストを `mcp__front-production__graph_read_texts_by_word`（デフォルト depth 2）で読む。ユーザーがグラフエディタからノード ID をコピーして渡した場合は `mcp__front-production__graph_read_nodes_from` を使う。
 
 ---
 

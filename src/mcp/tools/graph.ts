@@ -7,6 +7,10 @@ type ToolResult = {
 
 // --- API helpers ---
 
+function tenantCtx(env: AuthorizeEnv) {
+  return env.actor?.tenant ? { tenantId: env.actor.tenant } : undefined;
+}
+
 async function graphFetch(
   env: AuthorizeEnv,
   graphId: string,
@@ -18,59 +22,49 @@ async function graphFetch(
     path: `/api/v1/graph/${encodeURIComponent(graphId)}/${resource}`,
     method,
     body: body !== undefined ? JSON.stringify(body) : undefined,
-    tenantContext: env.actor?.tenant ? { tenantId: env.actor.tenant } : undefined,
+    tenantContext: tenantCtx(env),
   });
 }
 
-type ApiWord = { id: string; en?: string | null; ja?: string | null; color?: string | null };
-type ApiText = { id: string; en?: string | null; ja?: string | null; wordIds: string[] };
+type ApiNode = { id: string; en?: string | null; ja?: string | null; color?: string | null };
 
-async function getWords(env: AuthorizeEnv, graphId: string): Promise<ApiWord[]> {
-  const res = await graphFetch(env, graphId, "words");
-  if (!res.ok) throw new Error(`get_words_failed:${res.status}`);
-  const data = (await res.json()) as { words: ApiWord[] };
-  return data.words;
+async function getBookmarks(env: AuthorizeEnv, graphId: string): Promise<string[]> {
+  const res = await graphFetch(env, graphId, "bookmarks");
+  if (!res.ok) throw new Error(`get_bookmarks_failed:${res.status}`);
+  const data = (await res.json()) as { bookmarks: string[] };
+  return data.bookmarks ?? [];
 }
 
-async function getTexts(env: AuthorizeEnv, graphId: string, wordId?: string, wordText?: string): Promise<ApiText[]> {
-  let resource = "texts";
-  if (wordText) {
-    resource = `texts?word=${encodeURIComponent(wordText)}`;
-  } else if (wordId) {
-    resource = `texts?word_id=${encodeURIComponent(wordId)}`;
-  }
-  const res = await graphFetch(env, graphId, resource);
-  if (!res.ok) throw new Error(`get_texts_failed:${res.status}`);
-  const data = (await res.json()) as { texts: ApiText[] };
-  return data.texts;
+async function getNodesByIds(env: AuthorizeEnv, graphId: string, ids: string[]): Promise<ApiNode[]> {
+  if (ids.length === 0) return [];
+  const include = ids.slice(0, 200).join(",");
+  const res = await graphFetch(env, graphId, `nodes?include=${encodeURIComponent(include)}&onlyIncluded=true`);
+  if (!res.ok) throw new Error(`get_nodes_failed:${res.status}`);
+  const data = (await res.json()) as { nodes: ApiNode[] };
+  return data.nodes ?? [];
 }
 
-type ApiDocument = { id: string; en?: string | null; ja?: string | null };
-
-async function getDocuments(env: AuthorizeEnv, graphId: string, textId: string): Promise<ApiDocument[]> {
-  const res = await graphFetch(env, graphId, `documents?text_id=${encodeURIComponent(textId)}`);
-  if (!res.ok) throw new Error(`get_documents_failed:${res.status}`);
-  const data = (await res.json()) as { documents: ApiDocument[] };
-  return data.documents;
+async function getNeighbors(env: AuthorizeEnv, graphId: string, nodeId: string, depth: number): Promise<ApiNode[]> {
+  const res = await graphFetch(env, graphId, `node/${encodeURIComponent(nodeId)}/neighbors?depth=${depth}`);
+  if (!res.ok) throw new Error(`get_neighbors_failed:${res.status}`);
+  const data = (await res.json()) as { nodes: ApiNode[] };
+  return data.nodes ?? [];
 }
+
+function clampDepth(raw: unknown): number {
+  const n = typeof raw === "number" ? Math.floor(raw) : 2;
+  return Math.min(Math.max(Number.isFinite(n) ? n : 2, 0), 5);
+}
+
+const nodeLabel = (n: ApiNode): string => [n.en, n.ja].filter(Boolean).join(" / ");
+const nodeLine = (n: ApiNode): string => `[${n.id}] ${nodeLabel(n)}`;
 
 // --- Tool definitions ---
 
 export const GRAPH_TOOLS = [
   {
-    name: "graph_read_texts",
-    description: "Read all texts in the word graph.",
-    inputSchema: {
-      type: "object",
-      properties: {
-        graph_id: { type: "string", description: "Word graph ID (e.g. 'word-graph-1')" },
-      },
-      required: ["graph_id"],
-    },
-  },
-  {
     name: "graph_read_words",
-    description: "Read all words in the word graph.",
+    description: "Read bookmarked nodes — the entry-point concepts ('words') of the graph. Returns id and label for each bookmark.",
     inputSchema: {
       type: "object",
       properties: {
@@ -82,59 +76,53 @@ export const GRAPH_TOOLS = [
   {
     name: "graph_read_texts_by_word",
     description:
-      "Read all texts linked to a specific word. Use word='issue' to read issues, word='goal' to read goals, word='draft' to read unaccepted texts.",
+      "Traverse the graph from a bookmarked node whose label matches `word`, returning all nodes reachable within `depth` hops (default 2, max 5). Loop-safe.",
     inputSchema: {
       type: "object",
       properties: {
         graph_id: { type: "string", description: "Word graph ID (e.g. 'word-graph-1')" },
-        word: { type: "string", description: "Word text to look up" },
+        word: { type: "string", description: "en or ja label of a bookmarked node to start from" },
+        depth: { type: "number", description: "Hops to traverse (default 2, max 5)" },
       },
       required: ["graph_id", "word"],
     },
   },
   {
-    name: "graph_read_words_by_text",
-    description: "Read all words linked to a specific text.",
+    name: "graph_read_nodes_from",
+    description:
+      "Traverse the graph from any node ID, returning all nodes reachable within `depth` hops (default 2, max 5). Use this when the user provides a node ID copied from the graph editor.",
     inputSchema: {
       type: "object",
       properties: {
         graph_id: { type: "string", description: "Word graph ID (e.g. 'word-graph-1')" },
-        text: { type: "string", description: "Text content to look up" },
+        node_id: { type: "string", description: "Starting node ID" },
+        depth: { type: "number", description: "Hops to traverse (default 2, max 5)" },
       },
-      required: ["graph_id", "text"],
-    },
-  },
-  {
-    name: "graph_read_documents_by_text",
-    description: "Read all documents (decision logs, context, rationale) linked to a specific text entry in the word graph.",
-    inputSchema: {
-      type: "object",
-      properties: {
-        graph_id: { type: "string", description: "Word graph ID (e.g. 'word-graph-1')" },
-        text_id: { type: "string", description: "Text ID whose documents to retrieve" },
-      },
-      required: ["graph_id", "text_id"],
+      required: ["graph_id", "node_id"],
     },
   },
   {
     name: "graph_write_text",
     description:
-      "Update the words linked to an existing text entry. Cannot create new texts or new words — both must already exist in the graph. Use this to change tag associations (e.g. remove 'fix', add 'delete').",
+      "Create a new node in the graph with the given text and link it to the specified node IDs. Use node IDs from graph_read_words or graph_read_texts_by_word. At least one of en or ja is required.",
     inputSchema: {
       type: "object",
       properties: {
         graph_id: { type: "string", description: "Word graph ID (e.g. 'word-graph-1')" },
-        text: { type: "string", description: "Text content to update (must already exist)" },
-        words: {
+        en: { type: "string", description: "English text content" },
+        ja: { type: "string", description: "Japanese text content" },
+        node_ids: {
           type: "array",
           items: { type: "string" },
-          description: "Word names to link to this text. All words must already exist in the graph.",
+          description: "IDs of existing nodes to connect the new node to",
         },
       },
-      required: ["graph_id", "text", "words"],
+      required: ["graph_id", "node_ids"],
     },
   },
 ];
+
+// --- Tool handler ---
 
 export async function callGraphTool(
   name: string,
@@ -144,74 +132,61 @@ export async function callGraphTool(
   try {
     const graphId = String(args.graph_id);
 
-    const wordLabel = (w: ApiWord): string => [w.en, w.ja].filter(Boolean).join(" / ");
-    const textLabel = (t: ApiText): string => [t.en, t.ja].filter(Boolean).join(" / ");
-
-    if (name === "graph_read_texts") {
-      const texts = await getTexts(env, graphId);
-      return { content: [{ type: "text", text: texts.map(textLabel).filter(Boolean).join("\n") || "(no texts)" }] };
-    }
-
     if (name === "graph_read_words") {
-      const words = await getWords(env, graphId);
-      return { content: [{ type: "text", text: words.map(wordLabel).filter(Boolean).join("\n") || "(no words)" }] };
+      const ids = await getBookmarks(env, graphId);
+      if (ids.length === 0) return { content: [{ type: "text", text: "(no bookmarks)" }] };
+      const nodes = await getNodesByIds(env, graphId, ids);
+      const text = nodes.map(nodeLine).join("\n") || "(no labels)";
+      return { content: [{ type: "text", text }] };
     }
 
     if (name === "graph_read_texts_by_word") {
-      const wordText = String(args.word);
-      const texts = await getTexts(env, graphId, undefined, wordText);
-      return { content: [{ type: "text", text: texts.map(textLabel).filter(Boolean).join("\n") || "(no texts linked)" }] };
+      const word = String(args.word);
+      const depth = clampDepth(args.depth);
+
+      const ids = await getBookmarks(env, graphId);
+      const bookmarks = await getNodesByIds(env, graphId, ids);
+      const match = bookmarks.find((n) => n.en === word || n.ja === word);
+      if (!match) {
+        return { content: [{ type: "text", text: `No bookmark found matching: ${word}` }], isError: true };
+      }
+
+      const nodes = await getNeighbors(env, graphId, match.id, depth);
+      const text = nodes.map(nodeLine).join("\n") || "(no nodes)";
+      return { content: [{ type: "text", text }] };
     }
 
-    if (name === "graph_read_words_by_text") {
-      const textContent = String(args.text);
-      const [texts, words] = await Promise.all([getTexts(env, graphId), getWords(env, graphId)]);
-      const entry = texts.find((t) => t.en === textContent || t.ja === textContent);
-      if (!entry) return { content: [{ type: "text", text: `Text not found: ${textContent}` }], isError: true };
-      const wordMap = new Map(words.map((w) => [w.id, wordLabel(w)]));
-      const linked = entry.wordIds.map((id) => wordMap.get(id)).filter(Boolean) as string[];
-      return { content: [{ type: "text", text: linked.join("\n") || "(no words linked)" }] };
+    if (name === "graph_read_nodes_from") {
+      const nodeId = String(args.node_id);
+      const depth = clampDepth(args.depth);
+      const nodes = await getNeighbors(env, graphId, nodeId, depth);
+      const text = nodes.map(nodeLine).join("\n") || "(no nodes)";
+      return { content: [{ type: "text", text }] };
     }
 
     if (name === "graph_write_text") {
-      const textContent = String(args.text);
-      const wordNames = (args.words as unknown[]).map(String);
-
-      const [existingTexts, existingWords] = await Promise.all([
-        getTexts(env, graphId),
-        getWords(env, graphId),
-      ]);
-
-      const existingText = existingTexts.find((t) => t.en === textContent || t.ja === textContent);
-      if (!existingText) {
-        return {
-          content: [{ type: "text", text: `Text does not exist: "${textContent}". Cannot create new texts via MCP.` }],
-          isError: true,
-        };
+      const en = args.en ? String(args.en).trim() : undefined;
+      const ja = args.ja ? String(args.ja).trim() : undefined;
+      const nodeIds = Array.isArray(args.node_ids) ? args.node_ids.map(String) : [];
+      if (!en && !ja) {
+        return { content: [{ type: "text", text: "en or ja is required" }], isError: true };
       }
 
-      const existingWordLabels = new Set(existingWords.flatMap((w) => [w.en, w.ja].filter(Boolean) as string[]));
-      const unknownWords = wordNames.filter((w) => !existingWordLabels.has(w));
-      if (unknownWords.length > 0) {
-        return {
-          content: [{ type: "text", text: `Cannot create new words via MCP. Unknown words: ${unknownWords.join(", ")}` }],
-          isError: true,
-        };
+      const [firstId, ...restIds] = nodeIds;
+      const createRes = await graphFetch(env, graphId, "node", "POST", {
+        ...(en ? { en } : {}),
+        ...(ja ? { ja } : {}),
+        ...(firstId ? { parentId: firstId } : {}),
+      });
+      if (!createRes.ok) throw new Error(`create_node_failed:${createRes.status}`);
+      const newNode = (await createRes.json()) as ApiNode;
+
+      for (const targetId of restIds) {
+        const linkRes = await graphFetch(env, graphId, `node/${encodeURIComponent(newNode.id)}/link`, "POST", { targetId });
+        if (!linkRes.ok) throw new Error(`link_node_failed:${linkRes.status}`);
       }
 
-      const res = await graphFetch(env, graphId, "text", "POST", { text: textContent, words: wordNames });
-      if (!res.ok) throw new Error(`write_text_failed:${res.status}`);
-      const result = (await res.json()) as { id: string; en?: string; ja?: string; wordIds: string[] };
-      return {
-        content: [{ type: "text", text: `Updated: "${[result.en, result.ja].filter(Boolean).join(" / ")}" linked to [${wordNames.join(", ")}]` }],
-      };
-    }
-
-    if (name === "graph_read_documents_by_text") {
-      const textId = String(args.text_id);
-      const docs = await getDocuments(env, graphId, textId);
-      const docLabel = (d: ApiDocument): string => [d.en, d.ja].filter(Boolean).join(" / ");
-      return { content: [{ type: "text", text: docs.map(docLabel).filter(Boolean).join("\n\n---\n\n") || "(no documents)" }] };
+      return { content: [{ type: "text", text: `Created: ${nodeLine(newNode)}` }] };
     }
 
     return { content: [{ type: "text", text: `Unknown graph tool: ${name}` }], isError: true };
