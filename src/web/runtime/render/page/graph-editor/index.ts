@@ -93,7 +93,10 @@ async function fetchChildren(graphId: string, nodeId: string, limit: number): Pr
   const r = await apiFetch(`/api/graph/${graphId}/node/${nodeId}/children?limit=${limit}`);
   if (!r.ok) return [];
   const data = await r.json() as { nodes: ExplorerNode[] };
-  return data.nodes ?? [];
+  // Defensive dedup by id: legacy parallel edges can return the same node twice,
+  // which would render duplicate rows that all share one id (deleting one deletes all).
+  const seen = new Set<string>();
+  return (data.nodes ?? []).filter((n) => (seen.has(n.id) ? false : (seen.add(n.id), true)));
 }
 
 async function apiCreateNode(
@@ -202,9 +205,23 @@ export function renderGraphEditor(
   let columnVersion = 0;
   let tempNodeCounter = 0;
 
+  // ── Deferred delete + undo ────────────────────────────────────────
+  // Deletion is held for UNDO_MS before hitting the backend so it can be undone.
+  const UNDO_MS = 6000;
+  type PendingDelete = {
+    node: ExplorerNode;
+    parentId: string | null;
+    snapshotColumns: ExplorerColumn[];
+    snapshotCache: ExplorerNode[] | undefined;
+    timer: ReturnType<typeof setTimeout>;
+  };
+  let pendingDelete: PendingDelete | null = null;
+  // While set, this id is filtered out of every column so it cannot reappear via a refetch.
+  let pendingDeleteId: string | null = null;
+
   const outer = document.createElement('div');
   outer.id = id;
-  outer.style.cssText = `display:flex;flex-direction:column;height:100%;background:${BG};color:${TEXT_HIGH};font-family:sans-serif;font-size:13px;line-height:1.5;overflow:hidden;`;
+  outer.style.cssText = `position:relative;display:flex;flex-direction:column;height:100%;background:${BG};color:${TEXT_HIGH};font-family:sans-serif;font-size:13px;line-height:1.5;overflow:hidden;`;
 
   // Scrollbar styles
   const style = document.createElement('style');
@@ -502,9 +519,67 @@ export function renderGraphEditor(
     setTimeout(() => document.addEventListener('mousedown', dismiss), 0);
   };
 
+  // ── Undo toast ────────────────────────────────────────────────────
+  let undoToastEl: HTMLElement | null = null;
+  const hideUndoToast = () => { undoToastEl?.remove(); undoToastEl = null; };
+  const showUndoToast = (node: ExplorerNode) => {
+    hideUndoToast();
+    const toast = document.createElement('div');
+    toast.style.cssText = `
+      position:absolute;left:50%;bottom:16px;transform:translateX(-50%);
+      display:flex;align-items:center;gap:12px;z-index:9999;
+      background:#2a2a2a;border:1px solid ${BORDER};border-radius:6px;
+      padding:8px 14px;box-shadow:0 4px 12px rgba(0,0,0,0.5);font-size:12px;white-space:nowrap;
+    `;
+    const label = primaryLabel(node, state.lang) ?? fallbackLabel(node, state.lang);
+    const msg = document.createElement('span');
+    msg.style.color = TEXT_MID;
+    msg.textContent = label ? `「${label}」を削除しました` : 'ノードを削除しました';
+    const btn = document.createElement('button');
+    btn.textContent = '元に戻す';
+    btn.style.cssText = `background:transparent;border:1px solid ${SELECT_STRONG};color:${TEXT_HIGH};cursor:pointer;font-size:12px;padding:2px 10px;border-radius:4px;line-height:1.5;`;
+    btn.addEventListener('click', () => undoDelete());
+    toast.appendChild(msg);
+    toast.appendChild(btn);
+    outer.appendChild(toast);
+    undoToastEl = toast;
+  };
+
+  // Commit the pending deletion to the backend (called on timeout, or when a new delete starts).
+  const finalizeDelete = () => {
+    if (!pendingDelete) return;
+    const p = pendingDelete;
+    pendingDelete = null;
+    pendingDeleteId = null;
+    clearTimeout(p.timer);
+    hideUndoToast();
+    void apiDeleteNode(gId, p.node.id);
+  };
+
+  // Restore the pre-delete state without ever touching the backend.
+  const undoDelete = () => {
+    if (!pendingDelete) return;
+    const p = pendingDelete;
+    clearTimeout(p.timer);
+    pendingDelete = null;
+    pendingDeleteId = null;
+    hideUndoToast();
+    state.columns = p.snapshotColumns;
+    if (p.snapshotCache) childrenCache.set(p.parentId, p.snapshotCache);
+    else childrenCache.delete(p.parentId);
+    rebuildAll();
+    refreshBreadcrumb();
+  };
+
   const deleteNode = (node: ExplorerNode, colIndex: number, focusNodeId?: string) => {
+    // Only one deletion can be pending at a time — commit any previous one first.
+    if (pendingDelete) finalizeDelete();
     const parentId = state.columns[colIndex]?.parentId ?? null;
-    // Optimistic: update UI immediately before API call
+    // Snapshot for undo (before any mutation)
+    const snapshotColumns = state.columns.map((c) => ({ ...c, nodes: [...c.nodes] }));
+    const snapshotCache = childrenCache.get(parentId)?.slice();
+    // Optimistic: update UI immediately (backend call is deferred until the undo window closes)
+    pendingDeleteId = node.id;
     childrenCache.delete(parentId);
     if (state.columns[colIndex]) {
       state.columns[colIndex].nodes = state.columns[colIndex].nodes.filter((n) => n.id !== node.id);
@@ -524,7 +599,9 @@ export function renderGraphEditor(
         target.setSelectionRange(target.value.length, target.value.length);
       }
     }
-    void apiDeleteNode(gId, node.id);
+    const timer = setTimeout(() => finalizeDelete(), UNDO_MS);
+    pendingDelete = { node, parentId, snapshotColumns, snapshotCache, timer };
+    showUndoToast(node);
   };
 
   const buildColumnEl = (colIndex: number): HTMLElement => {
@@ -609,10 +686,12 @@ export function renderGraphEditor(
         : col.nodes.filter((n) => primaryLabel(n, state.lang) != null);
       // ナビ親（2列前の選択ノード）を除外してループを防ぐ
       const navParentId = colIndex >= 2 ? (state.columns[colIndex - 2]?.selectedId ?? null) : null;
-      // col 0: bookmarks only; col 1+: exclude nav-parent to prevent loops
-      const nodes = colIndex === 0
+      // col 0: bookmarks only; col 1+: exclude nav-parent (loop guard) and bookmarks
+      // (ブックマークは2列目以降に出さない). A node pending deletion is hidden everywhere.
+      const nodes = (colIndex === 0
         ? base.filter((n) => state.bookmarks.has(n.id))
-        : base.filter((n) => n.id !== navParentId);
+        : base.filter((n) => n.id !== navParentId && !state.bookmarks.has(n.id))
+      ).filter((n) => n.id !== pendingDeleteId);
       for (const node of nodes) {
         list.appendChild(buildNodeRow(node, colIndex));
       }
