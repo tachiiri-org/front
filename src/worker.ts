@@ -8,7 +8,7 @@ import {
 import { handleGoogleLoginStart, handleGoogleLoginCallback } from './session/google';
 import { handleMicrosoftLoginStart, handleMicrosoftLoginCallback } from './session/microsoft';
 import type { AuthorizeEnv } from './session';
-import { handleApiRequest as handleDataApiRequest, handleGitHubAuthStatus, handleAuthStatus, handleIdentityStatus, handleOrgCreate, handleSelectOrg, handleOrgMembers, handleAutoSelectOrg, handleMagicLinkRequest, handleMagicLinkVerify, handleMemberCheck, handleLoginPage, handleGroupLoginPage } from './routes/data';
+import { handleApiRequest as handleDataApiRequest, handleGitHubAuthStatus, handleAuthStatus, handleIdentityStatus, handleOrgCreate, handleSelectOrg, handleOrgMembers, handleAutoSelectOrg, handleMagicLinkRequest, handleMagicLinkVerify, handleMemberCheck, handleGroupLoginPage } from './routes/data';
 import { handleApiRequest as handleLayoutApiRequest } from './routes/layout';
 import { handleMcp } from './mcp/handler';
 import {
@@ -114,10 +114,6 @@ export default {
     }
     if (pathname === '/auth/magic') {
       const res = await handleMagicLinkVerify(request, env);
-      if (res) return res;
-    }
-    if (pathname === '/login' && request.method === 'GET') {
-      const res = handleLoginPage(request, env, CLIENT_JS_PATH);
       if (res) return res;
     }
     if (/^\/login\/[0-9a-f-]{36}$/i.test(pathname) && request.method === 'GET') {
@@ -263,6 +259,15 @@ export default {
       assetsResponse = await env.ASSETS.fetch(request);
     } catch {
       // ASSETS binding threw (Miniflare/Wrangler edge case); fall through to navigation response
+    }
+
+    // Inject Turnstile site key into /login HTML served from static assets
+    if (assetsResponse?.ok && pathname === '/login' && isNavigationRequest(request)) {
+      const siteKey = env.TURNSTILE_SITE_KEY ?? '';
+      const injection = `<script>window.__TURNSTILE_SITE_KEY__=${JSON.stringify(siteKey)}</script>`
+        + (siteKey ? `<script src="https://challenges.cloudflare.com/turnstile/v0/api.js?render=explicit" async defer></script>` : '');
+      const html = (await assetsResponse.text()).replace('</head>', `${injection}</head>`);
+      return new Response(html, { status: 200, headers: { 'Content-Type': 'text/html; charset=UTF-8' } });
     }
 
     if (assetsResponse !== null && (assetsResponse.status !== 404 || !isNavigationRequest(request))) {
