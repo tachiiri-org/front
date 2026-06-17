@@ -593,10 +593,10 @@ export function renderGraphEditor(
         : col.nodes.filter((n) => primaryLabel(n, state.lang) != null);
       // ナビ親（2列前の選択ノード）を除外してループを防ぐ
       const navParentId = colIndex >= 2 ? (state.columns[colIndex - 2]?.selectedId ?? null) : null;
-      // col 0: bookmarks only; col 1+: non-bookmarks only, excluding nav-parent
+      // col 0: bookmarks only; col 1+: exclude nav-parent to prevent loops
       const nodes = colIndex === 0
         ? base.filter((n) => state.bookmarks.has(n.id))
-        : base.filter((n) => !state.bookmarks.has(n.id) && n.id !== navParentId);
+        : base.filter((n) => n.id !== navParentId);
       for (const node of nodes) {
         list.appendChild(buildNodeRow(node, colIndex));
       }
