@@ -33,6 +33,13 @@ jobs:
           BUILD_TOKEN: ${{ secrets.BUILD_SCREENS_TOKEN }}
         run: bun run build-screens
 
+      - name: Set secrets (stage)
+        run: echo "$SECRET" | bunx wrangler secret put TURNSTILE_SECRET_KEY --env stage
+        env:
+          CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_DEPLOYMENT_TOKEN }}
+          CLOUDFLARE_ACCOUNT_ID: ${{ vars.CLOUDFLARE_ACCOUNT_ID }}
+          SECRET: ${{ secrets.TURNSTILE_SECRET_KEY_STAGE }}
+
       - name: Deploy to stage
         run: bunx wrangler deploy --env stage
         env:
