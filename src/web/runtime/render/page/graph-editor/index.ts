@@ -200,6 +200,7 @@ export function renderGraphEditor(
   const childrenCache = new Map<string | null, ExplorerNode[]>();
 
   let columnVersion = 0;
+  let tempNodeCounter = 0;
 
   const outer = document.createElement('div');
   outer.id = id;
@@ -503,28 +504,27 @@ export function renderGraphEditor(
 
   const deleteNode = (node: ExplorerNode, colIndex: number, focusNodeId?: string) => {
     const parentId = state.columns[colIndex]?.parentId ?? null;
-    void apiDeleteNode(gId, node.id).then(() => {
-      // Invalidate cache for this column's source
-      childrenCache.delete(parentId);
-      if (state.columns[colIndex]) {
-        state.columns[colIndex].nodes = state.columns[colIndex].nodes.filter((n) => n.id !== node.id);
-        if (state.columns[colIndex].selectedId === node.id) {
-          state.columns[colIndex].selectedId = null;
-          state.columns = state.columns.slice(0, colIndex + 1);
-        }
+    // Optimistic: update UI immediately before API call
+    childrenCache.delete(parentId);
+    if (state.columns[colIndex]) {
+      state.columns[colIndex].nodes = state.columns[colIndex].nodes.filter((n) => n.id !== node.id);
+      if (state.columns[colIndex].selectedId === node.id) {
+        state.columns[colIndex].selectedId = null;
+        state.columns = state.columns.slice(0, colIndex + 1);
       }
-      rebuildAll();
-      refreshBreadcrumb();
-      // Re-focus the node above (or below if it was first)
-      if (focusNodeId) {
-        const colEl = columnsEl.children[colIndex] as HTMLElement | undefined;
-        const target = colEl?.querySelector<HTMLTextAreaElement>(`textarea[data-node-id="${focusNodeId}"]`);
-        if (target) {
-          target.focus();
-          target.setSelectionRange(target.value.length, target.value.length);
-        }
+    }
+    rebuildAll();
+    refreshBreadcrumb();
+    // Re-focus the node above (or below if it was first)
+    if (focusNodeId) {
+      const colEl = columnsEl.children[colIndex] as HTMLElement | undefined;
+      const target = colEl?.querySelector<HTMLTextAreaElement>(`textarea[data-node-id="${focusNodeId}"]`);
+      if (target) {
+        target.focus();
+        target.setSelectionRange(target.value.length, target.value.length);
       }
-    });
+    }
+    void apiDeleteNode(gId, node.id);
   };
 
   const buildColumnEl = (colIndex: number): HTMLElement => {
@@ -570,14 +570,30 @@ export function renderGraphEditor(
       if (!val) return;
       draftInput.value = '';
       childrenCache.delete(col.parentId);
+      // Optimistic: add temp node to UI immediately
+      const tempId = `temp-${++tempNodeCounter}`;
+      const tempNode: ExplorerNode = { id: tempId, [state.lang]: val };
+      if (state.columns[colIndex]) {
+        state.columns[colIndex].nodes.push(tempNode);
+        if (colIndex === 0) state.bookmarks.add(tempId);
+        const tempRow = buildNodeRow(tempNode, colIndex);
+        list.appendChild(tempRow);
+        tempRow.querySelector<HTMLTextAreaElement>('textarea')?.focus();
+      }
       const newNode = await apiCreateNode(gId, col.parentId, state.lang, val);
       if (newNode && state.columns[colIndex]) {
-        state.columns[colIndex].nodes.push(newNode);
+        // Replace temp node with real node in-place
+        const idx = state.columns[colIndex].nodes.indexOf(tempNode);
+        if (idx !== -1) state.columns[colIndex].nodes[idx] = newNode;
         if (colIndex === 0) {
+          state.bookmarks.delete(tempId);
           state.bookmarks.add(newNode.id);
           void apiAddBookmark(gId, newNode.id);
         }
-        list.appendChild(buildNodeRow(newNode, colIndex));
+        // Update DOM: replace all data-node-id references from tempId to real id
+        list.querySelectorAll<HTMLElement>(`[data-node-id="${tempId}"]`).forEach((el) => {
+          el.dataset.nodeId = newNode.id;
+        });
         void onNodeFocus(colIndex, newNode.id);
       }
     });
@@ -800,17 +816,30 @@ export function renderGraphEditor(
         if (saveTimer) { clearTimeout(saveTimer); saveTimer = null; }
         void apiUpdateNode(gId, node.id, state.lang, inp.value.trim());
         childrenCache.delete(col.parentId);
+        // Optimistic: insert temp node below current node immediately
+        const tempId = `temp-${++tempNodeCounter}`;
+        const tempNode: ExplorerNode = { id: tempId };
+        if (colIndex === 0) state.bookmarks.add(tempId);
+        const insertIdx = state.columns[colIndex].nodes.indexOf(node);
+        state.columns[colIndex].nodes.splice(insertIdx + 1, 0, tempNode);
+        const tempRow = buildNodeRow(tempNode, colIndex);
+        row.insertAdjacentElement('afterend', tempRow);
+        tempRow.querySelector<HTMLTextAreaElement>('textarea')?.focus();
         const newNode = await apiCreateNode(gId, col.parentId, state.lang, '');
         if (!newNode || !state.columns[colIndex]) return;
+        // Replace temp node with real node in-place
+        const realIdx = state.columns[colIndex].nodes.indexOf(tempNode);
+        if (realIdx !== -1) state.columns[colIndex].nodes[realIdx] = newNode;
         if (colIndex === 0) {
+          state.bookmarks.delete(tempId);
           state.bookmarks.add(newNode.id);
           void apiAddBookmark(gId, newNode.id);
         }
-        const idx = state.columns[colIndex].nodes.indexOf(node);
-        state.columns[colIndex].nodes.splice(idx + 1, 0, newNode);
-        const newRow = buildNodeRow(newNode, colIndex);
-        row.insertAdjacentElement('afterend', newRow);
-        newRow.querySelector<HTMLTextAreaElement>('textarea')?.focus();
+        // Update DOM: replace all data-node-id references from tempId to real id
+        const colEl = columnsEl.children[colIndex] as HTMLElement | undefined;
+        colEl?.querySelectorAll<HTMLElement>(`[data-node-id="${tempId}"]`).forEach((el) => {
+          el.dataset.nodeId = newNode.id;
+        });
         return;
       }
 
