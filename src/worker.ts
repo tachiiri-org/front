@@ -314,6 +314,13 @@ export default {
       return handleMcp(request, env);
     }
 
+    // Public identity API proxy — group login page reads these without a session
+    const groupIdentityMatch = pathname.match(/^\/api\/v1\/identity\/groups\/([^/]+)\/(oidc-providers|login-policy)$/);
+    if (groupIdentityMatch && request.method === 'GET') {
+      const res = await authorizeFetch(env, { path: pathname, method: 'GET' });
+      return new Response(await res.text(), { status: res.status, headers: { 'Content-Type': 'application/json' } });
+    }
+
     // OIDC admin API proxy (requires session — auth gate handled below)
     if (pathname.startsWith('/api/auth/admin/oidc') || pathname.startsWith('/api/auth/admin/login-policy')) {
       return handleAdminOidcApi(request, env);
