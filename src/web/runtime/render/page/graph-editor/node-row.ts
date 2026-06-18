@@ -244,6 +244,26 @@ export function createNodeRowFns(ctx: GraphEditorContext): {
       });
     });
     row.appendChild(inp);
+
+    // Child-count badge (col 0 only). Updated in-place when prefetch completes.
+    if (colIndex === 0) {
+      const countEl = document.createElement('span');
+      countEl.dataset.countFor = node.id;
+      const cached = ctx.childrenCache.get(node.id);
+      if (cached !== undefined && cached.length > 0) countEl.textContent = String(cached.length);
+      Object.assign(countEl.style, {
+        flexShrink: '0',
+        alignSelf: 'center',
+        fontSize: '10px',
+        color: TEXT_DIM,
+        minWidth: '14px',
+        textAlign: 'right',
+        userSelect: 'none',
+        paddingRight: '4px',
+      });
+      row.appendChild(countEl);
+    }
+
     return row;
   };
 

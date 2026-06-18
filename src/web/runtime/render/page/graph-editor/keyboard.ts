@@ -18,6 +18,21 @@ export function createNodeKeydownHandler(
     const { state, gId } = ctx;
     if (e.key === 'Escape') { inp.blur(); return; }
 
+    // Ctrl+Enter → save current text, move focus to next node below (no new node)
+    if (e.key === 'Enter' && e.ctrlKey && !e.shiftKey) {
+      e.preventDefault();
+      if (saveTimer.current) { clearTimeout(saveTimer.current); saveTimer.current = null; }
+      void apiUpdateNode(gId, node.id, state.lang, inp.value.trim());
+      const textareas = ctx.getColumnTextareas(colIndex);
+      const myIdx = textareas.indexOf(inp);
+      const next = textareas[myIdx + 1];
+      if (next) {
+        next.focus();
+        requestAnimationFrame(() => { next.setSelectionRange(0, 0); });
+      }
+      return;
+    }
+
     // Enter → add new node below; Shift+Enter → newline (default)
     if (e.key === 'Enter' && !e.shiftKey) {
       e.preventDefault();

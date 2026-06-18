@@ -51,6 +51,9 @@ export function createColumnFns(ctx: GraphEditorContext): {
     for (const nodeId of toFetch) {
       void fetchChildren(ctx.gId, nodeId, ctx.limit).then((nodes) => {
         ctx.childrenCache.set(nodeId, nodes);
+        // Update count badge in col 0 if visible
+        const badge = ctx.columnsEl.querySelector<HTMLElement>(`[data-count-for="${nodeId}"]`);
+        if (badge) badge.textContent = nodes.length > 0 ? String(nodes.length) : '';
       });
     }
   };
@@ -160,7 +163,11 @@ export function createColumnFns(ctx: GraphEditorContext): {
         if (colIndex === 0) ctx.state.bookmarks.add(tempId);
         const tempRow = ctx.buildNodeRow(tempNode, colIndex);
         list.appendChild(tempRow);
-        tempRow.querySelector<HTMLTextAreaElement>('textarea')?.focus();
+        const newTa = tempRow.querySelector<HTMLTextAreaElement>('textarea');
+        if (newTa) {
+          newTa.focus();
+          newTa.scrollIntoView({ block: 'nearest' });
+        }
       }
       const newNode = await apiCreateNode(ctx.gId, col.parentId, ctx.state.lang, val);
       if (newNode && ctx.state.columns[colIndex]) {
