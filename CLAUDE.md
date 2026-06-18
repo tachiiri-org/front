@@ -24,13 +24,17 @@ npx tsx e2e/start-session.ts
 
 ## 2. ワードグラフの読み込み
 
-`mcp__front-production__graph_read_words` がまだロードされていなければ、ToolSearch で以下のスキーマをロードする:
+ToolSearch で以下をロード（未ロードの場合）:
 
 ```
-select:mcp__front-production__graph_read_words,mcp__front-production__graph_read_texts_by_word,mcp__front-production__graph_read_nodes_from
+select:mcp__front-production__graph_read_nodes_from,mcp__front-production__graph_add_node,mcp__front-production__graph_toggle_link,mcp__front-production__graph_set_property
 ```
 
-`graph_read_words`（graph_id: `word-graph-1`）でブックマーク一覧を取得する（出力: `[node_id] label`）。タスクに関連する word を選び `graph_read_texts_by_word(word, depth=2)` でトラバース。情報が少なければ depth=3 に増やす。ユーザーがノード ID を渡した場合は `graph_read_nodes_from(node_id)` を使う。AI はグラフへの読み書きを積極的に行い、合意事項・設計判断・ルールを記録・更新する。
+ルートノード ID: `8827e2b8-be26-4731-8125-fe4e853a62fe`（graph_id: `word-graph-1`）
+
+1. `graph_read_nodes_from(node_id: ルートID, depth: 1)` → カテゴリ一覧（目次）を取得
+2. タスクに関連するカテゴリを選び `graph_read_nodes_from(node_id: <category_id>, depth: 2)` で知識を読む
+3. 合意事項・設計判断・ルールは `graph_add_node` + `graph_toggle_link` でグラフに書き込む
 
 ---
 
