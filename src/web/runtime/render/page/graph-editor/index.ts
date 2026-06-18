@@ -687,10 +687,17 @@ export function renderGraphEditor(
           state.bookmarks.add(newNode.id);
           void apiAddBookmark(gId, newNode.id);
         }
+        // Mutate tempNode so the row's event-listener closures pick up the real id.
+        Object.assign(tempNode, newNode);
         // Update DOM: replace all data-node-id references from tempId to real id
         list.querySelectorAll<HTMLElement>(`[data-node-id="${tempId}"]`).forEach((el) => {
           el.dataset.nodeId = newNode.id;
         });
+        // Flush any unsaved edits made while the API call was in-flight.
+        const createdTextarea = list.querySelector<HTMLTextAreaElement>(`textarea[data-node-id="${newNode.id}"]`);
+        if (createdTextarea?.value.trim()) {
+          void apiUpdateNode(gId, newNode.id, state.lang, createdTextarea.value.trim());
+        }
         void onNodeFocus(colIndex, newNode.id);
       }
     });
@@ -934,11 +941,18 @@ export function renderGraphEditor(
           state.bookmarks.add(newNode.id);
           void apiAddBookmark(gId, newNode.id);
         }
+        // Mutate tempNode so the row's event-listener closures pick up the real id.
+        Object.assign(tempNode, newNode);
         // Update DOM: replace all data-node-id references from tempId to real id
         const colEl = columnsEl.children[colIndex] as HTMLElement | undefined;
         colEl?.querySelectorAll<HTMLElement>(`[data-node-id="${tempId}"]`).forEach((el) => {
           el.dataset.nodeId = newNode.id;
         });
+        // Flush any text typed while the API call was in-flight.
+        const newTextarea = colEl?.querySelector<HTMLTextAreaElement>(`textarea[data-node-id="${newNode.id}"]`);
+        if (newTextarea?.value.trim()) {
+          void apiUpdateNode(gId, newNode.id, state.lang, newTextarea.value.trim());
+        }
         return;
       }
 
