@@ -174,11 +174,14 @@ async function apiMoveBookmark(graphId: string, nodeId: string, direction: 'up' 
   });
 }
 
-async function apiMoveNode(graphId: string, nodeId: string, parentId: string, direction: 'up' | 'down'): Promise<void> {
+async function apiMoveNode(
+  graphId: string, nodeId: string, parentId: string, direction: 'up' | 'down',
+  afterSwapSiblingIds: string[],
+): Promise<void> {
   await apiFetch(`/api/graph/${graphId}/node/${nodeId}/move`, {
     method: 'PATCH',
     headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify({ direction, parentId }),
+    body: JSON.stringify({ direction, parentId, afterSwapSiblingIds }),
   });
 }
 
@@ -999,9 +1002,12 @@ export function renderGraphEditor(
           const dir = direction === 'up' ? -1 : 1;
           const newIdx = idx + dir;
           if (newIdx < 0 || newIdx >= col.nodes.length) return;
-          if (col.parentId) void apiMoveNode(gId, node.id, col.parentId, direction);
           col.nodes.splice(idx, 1);
           col.nodes.splice(newIdx, 0, node);
+          if (col.parentId) {
+            const afterSwapSiblingIds = col.nodes.map((n) => n.id);
+            void apiMoveNode(gId, node.id, col.parentId, direction, afterSwapSiblingIds);
+          }
         }
         const colEl = columnsEl.children[colIndex] as HTMLElement | undefined;
         if (colEl) {
