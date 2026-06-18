@@ -1,0 +1,138 @@
+import type { ExplorerNode } from './types';
+
+export async function apiFetch(input: string, init?: RequestInit): Promise<Response> {
+  const r = await fetch(input, init);
+  if (r.status === 401) { window.location.href = '/login'; }
+  return r;
+}
+
+export async function fetchAllNodes(
+  graphId: string,
+  includeIds: string[] = [],
+  offset = 0,
+  lang?: 'en' | 'ja',
+  neighborOf?: string[],
+): Promise<{ nodes: ExplorerNode[]; hasMore: boolean }> {
+  const params = new URLSearchParams({ limit: '20', offset: String(offset) });
+  if (includeIds.length > 0) params.set('include', includeIds.join(','));
+  if (lang) params.set('lang', lang);
+  if (neighborOf && neighborOf.length > 0) params.set('nonNeighborOf', neighborOf.join(','));
+  const r = await apiFetch(`/api/graph/${graphId}/nodes?${params}`);
+  if (!r.ok) return { nodes: [], hasMore: false };
+  const data = await r.json() as { nodes: ExplorerNode[]; hasMore?: boolean };
+  return { nodes: data.nodes ?? [], hasMore: data.hasMore ?? false };
+}
+
+export async function fetchBookmarkedNodes(
+  graphId: string,
+  bookmarkIds: string[],
+  lang?: 'en' | 'ja',
+): Promise<{ nodes: ExplorerNode[]; hasMore: boolean }> {
+  if (bookmarkIds.length === 0) return { nodes: [], hasMore: false };
+  const params = new URLSearchParams({ offset: '0', onlyIncluded: 'true' });
+  params.set('include', bookmarkIds.join(','));
+  if (lang) params.set('lang', lang);
+  const r = await apiFetch(`/api/graph/${graphId}/nodes?${params}`);
+  if (!r.ok) return { nodes: [], hasMore: false };
+  const data = await r.json() as { nodes: ExplorerNode[]; hasMore?: boolean };
+  // Preserve the order returned by the bookmarks API
+  const idxMap = new Map(bookmarkIds.map((id, i) => [id, i]));
+  const nodes = (data.nodes ?? []).sort((a, b) => (idxMap.get(a.id) ?? 999) - (idxMap.get(b.id) ?? 999));
+  return { nodes, hasMore: false };
+}
+
+export async function fetchChildren(graphId: string, nodeId: string, limit: number): Promise<ExplorerNode[]> {
+  const r = await apiFetch(`/api/graph/${graphId}/node/${nodeId}/children?limit=${limit}`);
+  if (!r.ok) return [];
+  const data = await r.json() as { nodes: ExplorerNode[] };
+  // Defensive dedup by id: legacy parallel edges can return the same node twice,
+  // which would render duplicate rows that all share one id (deleting one deletes all).
+  const seen = new Set<string>();
+  return (data.nodes ?? []).filter((n) => (seen.has(n.id) ? false : (seen.add(n.id), true)));
+}
+
+export async function apiCreateNode(
+  graphId: string, parentId: string | null, lang: 'en' | 'ja', label: string,
+  insertAfterId?: string,
+): Promise<ExplorerNode | null> {
+  const labelField = label ? (lang === 'en' ? { en: label } : { ja: label }) : {};
+  const insertAfterField = insertAfterId ? { insertAfterId } : {};
+  const body = parentId ? { parentId, ...labelField, ...insertAfterField } : labelField;
+  const r = await apiFetch(`/api/graph/${graphId}/node`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify(body),
+  });
+  if (!r.ok) return null;
+  return r.json() as Promise<ExplorerNode>;
+}
+
+export async function apiUpdateNode(
+  graphId: string, nodeId: string, lang: 'en' | 'ja', label: string,
+): Promise<void> {
+  const body = lang === 'en' ? { en: label || null } : { ja: label || null };
+  await apiFetch(`/api/graph/${graphId}/node/${nodeId}`, {
+    method: 'PATCH',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify(body),
+  });
+}
+
+export async function apiUpdateColor(
+  graphId: string, nodeId: string, color: string | null,
+): Promise<void> {
+  await apiFetch(`/api/graph/${graphId}/node/${nodeId}`, {
+    method: 'PATCH',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ color }),
+  });
+}
+
+export async function apiDeleteNode(graphId: string, nodeId: string): Promise<void> {
+  await apiFetch(`/api/graph/${graphId}/node/${nodeId}`, { method: 'DELETE' });
+}
+
+export async function apiToggleLink(graphId: string, sourceId: string, targetId: string): Promise<boolean> {
+  const r = await apiFetch(`/api/graph/${graphId}/node/${sourceId}/link`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ targetId }),
+  });
+  if (!r.ok) return false;
+  const data = await r.json() as { linked: boolean };
+  return data.linked;
+}
+
+export async function fetchBookmarks(graphId: string): Promise<string[]> {
+  const r = await apiFetch(`/api/graph/${graphId}/bookmarks`);
+  if (!r.ok) return [];
+  const data = await r.json() as { bookmarks: string[] };
+  return data.bookmarks ?? [];
+}
+
+export async function apiAddBookmark(graphId: string, nodeId: string): Promise<void> {
+  await apiFetch(`/api/graph/${graphId}/bookmarks/${nodeId}`, { method: 'POST' });
+}
+
+export async function apiRemoveBookmark(graphId: string, nodeId: string): Promise<void> {
+  await apiFetch(`/api/graph/${graphId}/bookmarks/${nodeId}`, { method: 'DELETE' });
+}
+
+export async function apiMoveBookmark(graphId: string, nodeId: string, direction: 'up' | 'down'): Promise<void> {
+  await apiFetch(`/api/graph/${graphId}/bookmarks/${nodeId}/move`, {
+    method: 'PATCH',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ direction }),
+  });
+}
+
+export async function apiMoveNode(
+  graphId: string, nodeId: string, parentId: string, direction: 'up' | 'down',
+  afterSwapSiblingIds: string[],
+): Promise<void> {
+  await apiFetch(`/api/graph/${graphId}/node/${nodeId}/move`, {
+    method: 'PATCH',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ direction, parentId, afterSwapSiblingIds }),
+  });
+}
