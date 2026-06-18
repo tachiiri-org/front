@@ -1,6 +1,7 @@
 import { exchangeOidcOAuthCode, serializeOidcSessionCookie, findOrCreateUserByOidc } from "../identify";
 import { clearCookie, parseCookies, serializeCookie } from "./cookies";
 import type { AuthorizeEnv } from "./index";
+import { authorizeFetch } from "./fetch";
 import { MCP_OAUTH_PARAMS_COOKIE } from "./google";
 
 const OIDC_STATE_COOKIE = "oidc_login_oauth_state";
@@ -36,16 +37,11 @@ function getOidcCallbackUrl(request: Request, env: AuthorizeEnv): string {
 }
 
 export async function handleOidcLoginStart(context: RouteContext, oidcId: string): Promise<Response> {
-  // Fetch OIDC provider config from backend
-  const configRes = await fetch(
-    new URL(`/api/v1/identity/oidc/${encodeURIComponent(oidcId)}`, resolveFrontendOrigin(context.request, context.env)).toString(),
-    {
-      headers: {
-        "x-authorize-to-execute-token": "internal",
-        "Content-Type": "application/json",
-      },
-    },
-  );
+  // Fetch OIDC provider config via authorize backend (bypasses front worker routing)
+  const configRes = await authorizeFetch(context.env, {
+    path: `/api/v1/identity/oidc/${encodeURIComponent(oidcId)}`,
+    method: "GET",
+  });
 
   if (!configRes.ok) {
     return new Response("OIDC provider not found", { status: 404 });
@@ -53,23 +49,6 @@ export async function handleOidcLoginStart(context: RouteContext, oidcId: string
 
   const config = (await configRes.json()) as { issuer: string; app_id: string; name: string };
 
-  // Build authorization URL via backend discovery
-  const authUrlRes = await fetch(
-    new URL("/api/v1/identify/session/oidc/authorize-url", resolveFrontendOrigin(context.request, context.env)).toString(),
-    {
-      method: "POST",
-      headers: { "Content-Type": "application/json", "x-authorize-to-execute-token": "internal" },
-      body: JSON.stringify({
-        issuer: config.issuer,
-        appId: config.app_id,
-        redirectUri: getOidcCallbackUrl(context.request, context.env),
-        state: createRandomState(),
-      }),
-    },
-  );
-
-  // Fall back to building URL directly if authorize-url endpoint doesn't exist yet
-  // Use the state from the response or generate fresh
   const state = createRandomState();
   const discoveryUrl = `${config.issuer.replace(/\/$/, "")}/.well-known/openid-configuration`;
 
