@@ -159,7 +159,7 @@ export async function issueInternalToken(
 export async function issueSessionToken(
   env: { INTERNAL_AUTH_SIGNING_KEY?: SecretValue },
   data: Record<string, unknown>,
-  ttlSeconds = 600,
+  ttlSeconds = 60 * 60 * 24 * 7,
 ): Promise<string> {
   const signingKey = await resolveSecret(env.INTERNAL_AUTH_SIGNING_KEY);
   if (!signingKey) throw new Error("missing_internal_auth_signing_key");

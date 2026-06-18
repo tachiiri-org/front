@@ -245,7 +245,9 @@ const readInlineScreenData = (): unknown | null => {
   try {
     const el = document.getElementById('__screen_data__');
     if (!el || !el.textContent) return null;
-    return JSON.parse(el.textContent) as unknown;
+    const data = JSON.parse(el.textContent) as unknown;
+    el.remove();
+    return data;
   } catch {
     return null;
   }
