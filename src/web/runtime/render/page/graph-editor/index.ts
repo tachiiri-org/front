@@ -101,9 +101,11 @@ async function fetchChildren(graphId: string, nodeId: string, limit: number): Pr
 
 async function apiCreateNode(
   graphId: string, parentId: string | null, lang: 'en' | 'ja', label: string,
+  insertAfterId?: string,
 ): Promise<ExplorerNode | null> {
   const labelField = label ? (lang === 'en' ? { en: label } : { ja: label }) : {};
-  const body = parentId ? { parentId, ...labelField } : labelField;
+  const insertAfterField = insertAfterId ? { insertAfterId } : {};
+  const body = parentId ? { parentId, ...labelField, ...insertAfterField } : labelField;
   const r = await apiFetch(`/api/graph/${graphId}/node`, {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
@@ -698,6 +700,9 @@ export function renderGraphEditor(
         if (createdTextarea?.value.trim()) {
           void apiUpdateNode(gId, newNode.id, state.lang, createdTextarea.value.trim());
         }
+        if (state.linkSourceId === tempId) {
+          void setLinkSource(newNode.id);
+        }
         void onNodeFocus(colIndex, newNode.id);
       }
     });
@@ -931,7 +936,7 @@ export function renderGraphEditor(
         const tempRow = buildNodeRow(tempNode, colIndex);
         row.insertAdjacentElement('afterend', tempRow);
         tempRow.querySelector<HTMLTextAreaElement>('textarea')?.focus();
-        const newNode = await apiCreateNode(gId, col.parentId, state.lang, '');
+        const newNode = await apiCreateNode(gId, col.parentId, state.lang, '', col.parentId ? node.id : undefined);
         if (!newNode || !state.columns[colIndex]) return;
         // Replace temp node with real node in-place
         const realIdx = state.columns[colIndex].nodes.indexOf(tempNode);
@@ -952,6 +957,12 @@ export function renderGraphEditor(
         const newTextarea = colEl?.querySelector<HTMLTextAreaElement>(`textarea[data-node-id="${newNode.id}"]`);
         if (newTextarea?.value.trim()) {
           void apiUpdateNode(gId, newNode.id, state.lang, newTextarea.value.trim());
+        }
+        if (state.linkSourceId === tempId) {
+          void setLinkSource(newNode.id);
+        }
+        if (state.columns[colIndex]?.selectedId === tempId) {
+          onNodeFocus(colIndex, newNode.id);
         }
         return;
       }
