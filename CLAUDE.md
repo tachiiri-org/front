@@ -30,7 +30,7 @@ npx tsx e2e/start-session.ts
 select:mcp__front-production__graph_read_words,mcp__front-production__graph_read_texts_by_word,mcp__front-production__graph_read_nodes_from
 ```
 
-`graph_read_words`（graph_id: `word-graph-1`）でブックマーク一覧を取得する（出力: `[node_id] label`）。タスクに関連する word を選び `graph_read_texts_by_word(word, depth=2)` でトラバース。情報が少なければ depth=3 に増やす。ユーザーがノード ID を渡した場合は `graph_read_nodes_from(node_id)` を使う。ノードの追記は人間のみ行い、AI は書き込まない。
+`graph_read_words`（graph_id: `word-graph-1`）でブックマーク一覧を取得する（出力: `[node_id] label`）。タスクに関連する word を選び `graph_read_texts_by_word(word, depth=2)` でトラバース。情報が少なければ depth=3 に増やす。ユーザーがノード ID を渡した場合は `graph_read_nodes_from(node_id)` を使う。AI はグラフへの読み書きを積極的に行い、合意事項・設計判断・ルールを記録・更新する。
 
 ---
 

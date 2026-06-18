@@ -101,6 +101,87 @@ export const GRAPH_TOOLS = [
       required: ["graph_id", "node_id"],
     },
   },
+  {
+    name: "graph_add_node",
+    description: "Create a new node in the graph. Returns the new node id. Optionally connects the new node to a parent.",
+    inputSchema: {
+      type: "object",
+      properties: {
+        graph_id: { type: "string", description: "Word graph ID (e.g. 'word-graph-1')" },
+        ja: { type: "string", description: "Japanese label (required)" },
+        en: { type: "string", description: "English label (optional)" },
+        parent_node_id: { type: "string", description: "Connect to this parent node on creation (optional)" },
+      },
+      required: ["graph_id", "ja"],
+    },
+  },
+  {
+    name: "graph_update_node",
+    description: "Update a node's Japanese and/or English label. Pass null to remove a label.",
+    inputSchema: {
+      type: "object",
+      properties: {
+        graph_id: { type: "string", description: "Word graph ID (e.g. 'word-graph-1')" },
+        node_id: { type: "string", description: "Node ID to update" },
+        ja: { type: "string", description: "New Japanese label (null to remove)" },
+        en: { type: "string", description: "New English label (null to remove)" },
+      },
+      required: ["graph_id", "node_id"],
+    },
+  },
+  {
+    name: "graph_delete_node",
+    description: "Delete a node and all its edges from the graph.",
+    inputSchema: {
+      type: "object",
+      properties: {
+        graph_id: { type: "string", description: "Word graph ID (e.g. 'word-graph-1')" },
+        node_id: { type: "string", description: "Node ID to delete" },
+      },
+      required: ["graph_id", "node_id"],
+    },
+  },
+  {
+    name: "graph_toggle_link",
+    description:
+      "Toggle an edge between two nodes. Creates the edge if absent, deletes it if present. Returns {linked:true} when the edge now exists.",
+    inputSchema: {
+      type: "object",
+      properties: {
+        graph_id: { type: "string", description: "Word graph ID (e.g. 'word-graph-1')" },
+        node_id: { type: "string", description: "One endpoint of the edge" },
+        target_node_id: { type: "string", description: "The other endpoint" },
+      },
+      required: ["graph_id", "node_id", "target_node_id"],
+    },
+  },
+  {
+    name: "graph_set_property",
+    description: "Upsert a key-value metadata property on a node (e.g. key='node_type', value='rule').",
+    inputSchema: {
+      type: "object",
+      properties: {
+        graph_id: { type: "string", description: "Word graph ID (e.g. 'word-graph-1')" },
+        node_id: { type: "string", description: "Target node ID" },
+        key: { type: "string", description: "Property key (e.g. 'node_type', 'status')" },
+        value: { type: "string", description: "Property value" },
+      },
+      required: ["graph_id", "node_id", "key", "value"],
+    },
+  },
+  {
+    name: "graph_remove_property",
+    description: "Remove a metadata property from a node by key.",
+    inputSchema: {
+      type: "object",
+      properties: {
+        graph_id: { type: "string", description: "Word graph ID (e.g. 'word-graph-1')" },
+        node_id: { type: "string", description: "Target node ID" },
+        key: { type: "string", description: "Property key to remove" },
+      },
+      required: ["graph_id", "node_id", "key"],
+    },
+  },
 ];
 
 // --- Tool handler ---
@@ -143,6 +224,62 @@ export async function callGraphTool(
       const nodes = await getNeighbors(env, graphId, nodeId, depth);
       const text = nodes.map(nodeLine).join("\n") || "(no nodes)";
       return { content: [{ type: "text", text }] };
+    }
+
+    if (name === "graph_add_node") {
+      const ja = String(args.ja);
+      const en = args.en ? String(args.en) : undefined;
+      const parentNodeId = args.parent_node_id ? String(args.parent_node_id) : undefined;
+      const body: Record<string, unknown> = { ja };
+      if (en) body.en = en;
+      if (parentNodeId) body.parentId = parentNodeId;
+      const res = await graphFetch(env, graphId, "node", "POST", body);
+      if (!res.ok) throw new Error(`add_node_failed:${res.status}`);
+      const data = (await res.json()) as { id: string; en?: string; ja?: string };
+      return { content: [{ type: "text", text: `Created [${data.id}] ${[data.en, data.ja].filter(Boolean).join(" / ")}` }] };
+    }
+
+    if (name === "graph_update_node") {
+      const nodeId = String(args.node_id);
+      const body: Record<string, unknown> = {};
+      if (args.ja !== undefined) body.ja = args.ja;
+      if (args.en !== undefined) body.en = args.en;
+      const res = await graphFetch(env, graphId, `node/${encodeURIComponent(nodeId)}`, "PATCH", body);
+      if (!res.ok) throw new Error(`update_node_failed:${res.status}`);
+      return { content: [{ type: "text", text: `Updated [${nodeId}]` }] };
+    }
+
+    if (name === "graph_delete_node") {
+      const nodeId = String(args.node_id);
+      const res = await graphFetch(env, graphId, `node/${encodeURIComponent(nodeId)}`, "DELETE");
+      if (!res.ok) throw new Error(`delete_node_failed:${res.status}`);
+      return { content: [{ type: "text", text: `Deleted [${nodeId}]` }] };
+    }
+
+    if (name === "graph_toggle_link") {
+      const nodeId = String(args.node_id);
+      const targetId = String(args.target_node_id);
+      const res = await graphFetch(env, graphId, `node/${encodeURIComponent(nodeId)}/link`, "POST", { targetId });
+      if (!res.ok) throw new Error(`toggle_link_failed:${res.status}`);
+      const data = (await res.json()) as { linked: boolean };
+      return { content: [{ type: "text", text: data.linked ? `Linked [${nodeId}] ↔ [${targetId}]` : `Unlinked [${nodeId}] ↔ [${targetId}]` }] };
+    }
+
+    if (name === "graph_set_property") {
+      const nodeId = String(args.node_id);
+      const key = String(args.key);
+      const value = String(args.value);
+      const res = await graphFetch(env, graphId, `node/${encodeURIComponent(nodeId)}/property`, "POST", { key, value });
+      if (!res.ok) throw new Error(`set_property_failed:${res.status}`);
+      return { content: [{ type: "text", text: `Set [${nodeId}] ${key}=${value}` }] };
+    }
+
+    if (name === "graph_remove_property") {
+      const nodeId = String(args.node_id);
+      const key = String(args.key);
+      const res = await graphFetch(env, graphId, `node/${encodeURIComponent(nodeId)}/property/${encodeURIComponent(key)}`, "DELETE");
+      if (!res.ok) throw new Error(`remove_property_failed:${res.status}`);
+      return { content: [{ type: "text", text: `Removed [${nodeId}] ${key}` }] };
     }
 
     return { content: [{ type: "text", text: `Unknown graph tool: ${name}` }], isError: true };
