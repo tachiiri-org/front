@@ -7,6 +7,7 @@ import { renderLoginPage } from './runtime/render/page/login';
 import { renderLoginGroupPage } from './runtime/render/page/login-group';
 import { renderGroupSelectPage } from './runtime/render/page/group-select';
 import { renderSettingsPage } from './runtime/render/page/settings';
+import { renderAdminPage } from './runtime/render/page/admin';
 
 const HEADER_HEIGHT = 36;
 
@@ -386,7 +387,7 @@ const loadEditorBootstrap = async (): Promise<void> => {
   // Group-specific login page: /login/<uuid>
   if (/^\/login\/[0-9a-f-]{36}$/i.test(window.location.pathname)) {
     document.body.style.overflow = 'auto';
-    renderLoginGroupPage(root);
+    void renderLoginGroupPage(root);
     return;
   }
 
@@ -404,6 +405,11 @@ const loadEditorBootstrap = async (): Promise<void> => {
   if (screenId === 'settings') {
     document.body.style.overflow = 'auto';
     await renderSettingsPage(root);
+    return;
+  }
+  if (window.location.pathname === '/settings/admin') {
+    document.body.style.overflow = 'auto';
+    await renderAdminPage(root);
     return;
   }
 

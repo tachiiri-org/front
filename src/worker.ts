@@ -20,7 +20,9 @@ import {
   handleMcpCreateOrg,
   handleMcpToken,
 } from './mcp/oauth';
-import { clearGitHubSessionCookies, clearGitHubConnectSessionCookies, clearGoogleSessionCookies, clearMicrosoftSessionCookies } from './identify';
+import { clearGitHubSessionCookies, clearGitHubConnectSessionCookies, clearGoogleSessionCookies, clearMicrosoftSessionCookies, clearOidcSessionCookies } from './identify';
+import { handleOidcLoginStart, handleOidcLoginCallback } from './session/oidc';
+import { authorizeFetch } from './session/fetch';
 
 type AssetsEnv = {
   readonly ASSETS: {
@@ -67,7 +69,8 @@ const isPublicPath = (pathname: string): boolean =>
   pathname.startsWith('/github/oauth/') ||
   pathname.startsWith('/.well-known/') ||
   pathname.startsWith('/mcp') ||
-  pathname.startsWith('/api/');
+  pathname.startsWith('/api/') ||
+  pathname === '/settings/admin';
 
 const isNavigationRequest = (request: Request): boolean => {
   if (request.method !== 'GET' && request.method !== 'HEAD') {
@@ -77,6 +80,70 @@ const isNavigationRequest = (request: Request): boolean => {
   const accept = request.headers.get('Accept') ?? '';
   return accept.includes('text/html');
 };
+
+async function handleAdminOidcApi(request: Request, env: Env): Promise<Response> {
+  const url = new URL(request.url);
+  const pathname = url.pathname;
+
+  // POST /api/auth/admin/oidc — create provider
+  if (pathname === '/api/auth/admin/oidc' && request.method === 'POST') {
+    const body = await request.json();
+    const res = await authorizeFetch(env, {
+      path: '/api/v1/identity/oidc',
+      method: 'POST',
+      body: JSON.stringify(body),
+    });
+    return new Response(await res.text(), { status: res.status, headers: { 'Content-Type': 'application/json' } });
+  }
+
+  // PUT /api/auth/admin/oidc/:oidcId — update provider
+  const oidcPutMatch = pathname.match(/^\/api\/auth\/admin\/oidc\/([^/]+)$/);
+  if (oidcPutMatch && request.method === 'PUT') {
+    const oidcId = decodeURIComponent(oidcPutMatch[1]);
+    const body = await request.json();
+    const res = await authorizeFetch(env, {
+      path: `/api/v1/identity/oidc/${encodeURIComponent(oidcId)}`,
+      method: 'PUT',
+      body: JSON.stringify(body),
+    });
+    return new Response(await res.text(), { status: res.status, headers: { 'Content-Type': 'application/json' } });
+  }
+
+  // DELETE /api/auth/admin/oidc/:oidcId — delete provider
+  if (oidcPutMatch && request.method === 'DELETE') {
+    const oidcId = decodeURIComponent(oidcPutMatch[1]);
+    const res = await authorizeFetch(env, {
+      path: `/api/v1/identity/oidc/${encodeURIComponent(oidcId)}`,
+      method: 'DELETE',
+    });
+    return new Response(null, { status: res.status });
+  }
+
+  // GET /api/auth/admin/login-policy?group_id=
+  if (pathname === '/api/auth/admin/login-policy' && request.method === 'GET') {
+    const groupId = url.searchParams.get('group_id');
+    if (!groupId) return new Response(JSON.stringify({ error: 'group_id_required' }), { status: 400 });
+    const res = await authorizeFetch(env, {
+      path: `/api/v1/identity/groups/${encodeURIComponent(groupId)}/login-policy`,
+      method: 'GET',
+    });
+    return new Response(await res.text(), { status: res.status, headers: { 'Content-Type': 'application/json' } });
+  }
+
+  // PUT /api/auth/admin/login-policy — update policy
+  if (pathname === '/api/auth/admin/login-policy' && request.method === 'PUT') {
+    const body = (await request.json()) as { group_id?: string; allow_standard?: number; allow_oidc?: number };
+    if (!body.group_id) return new Response(JSON.stringify({ error: 'group_id_required' }), { status: 400 });
+    const res = await authorizeFetch(env, {
+      path: `/api/v1/identity/groups/${encodeURIComponent(body.group_id)}/login-policy`,
+      method: 'PUT',
+      body: JSON.stringify({ allow_standard: body.allow_standard, allow_oidc: body.allow_oidc }),
+    });
+    return new Response(await res.text(), { status: res.status, headers: { 'Content-Type': 'application/json' } });
+  }
+
+  return new Response(JSON.stringify({ error: 'not_found' }), { status: 404 });
+}
 
 export default {
   async fetch(request: Request, env: Env): Promise<Response> {
@@ -138,7 +205,7 @@ export default {
     }
     if (pathname === '/api/auth/logout' && request.method === 'POST') {
       const headers = new Headers();
-      for (const c of [...clearGitHubSessionCookies(request), ...clearGitHubConnectSessionCookies(request), ...clearGoogleSessionCookies(request), ...clearMicrosoftSessionCookies(request)]) {
+      for (const c of [...clearGitHubSessionCookies(request), ...clearGitHubConnectSessionCookies(request), ...clearGoogleSessionCookies(request), ...clearMicrosoftSessionCookies(request), ...clearOidcSessionCookies(request)]) {
         headers.append('Set-Cookie', c);
       }
       return new Response(null, { status: 204, headers });
@@ -208,6 +275,19 @@ export default {
     if (pathname === '/oauth/microsoft/callback') {
       return handleMicrosoftLoginCallback({ request, env });
     }
+    // Generic OIDC login (org-specific IdP)
+    const oidcStartMatch = pathname.match(/^\/oauth\/oidc\/start\/([^/]+)$/);
+    if (oidcStartMatch) {
+      return handleOidcLoginStart({ request, env }, decodeURIComponent(oidcStartMatch[1]));
+    }
+    if (pathname === '/oauth/oidc/callback') {
+      return handleOidcLoginCallback({ request, env });
+    }
+    if (pathname === '/oauth/oidc/logout' && request.method === 'GET') {
+      const headers = new Headers({ Location: '/' });
+      for (const c of clearOidcSessionCookies(request)) headers.append('Set-Cookie', c);
+      return new Response(null, { status: 302, headers });
+    }
 
     if (pathname === '/.well-known/oauth-authorization-server') {
       return handleOAuthMetadata(request, env);
@@ -232,6 +312,11 @@ export default {
     }
     if (pathname === '/mcp' || pathname.startsWith('/mcp/')) {
       return handleMcp(request, env);
+    }
+
+    // OIDC admin API proxy (requires session — auth gate handled below)
+    if (pathname.startsWith('/api/auth/admin/oidc') || pathname.startsWith('/api/auth/admin/login-policy')) {
+      return handleAdminOidcApi(request, env);
     }
 
     if (pathname.startsWith('/api/')) {

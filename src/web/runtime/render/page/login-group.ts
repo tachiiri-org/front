@@ -51,7 +51,7 @@ function readGroupData(): { id: string; name: string | null } {
   }
 }
 
-export const renderLoginGroupPage = (root: HTMLElement): void => {
+export const renderLoginGroupPage = async (root: HTMLElement): Promise<void> => {
   const data = readGroupData();
   const groupId = data.id || window.location.pathname.split('/').pop() || '';
   const groupName = data.name;
@@ -104,6 +104,22 @@ export const renderLoginGroupPage = (root: HTMLElement): void => {
     card.appendChild(errEl);
   }
 
+  // Fetch login policy + OIDC providers for this group
+  type LoginPolicy = { allow_standard: number; allow_oidc: number };
+  type OidcProvider = { oidc_id: string; name: string | null };
+
+  let policy: LoginPolicy = { allow_standard: 1, allow_oidc: 0 };
+  let oidcProviders: OidcProvider[] = [];
+
+  if (groupId) {
+    const [policyRes, providersRes] = await Promise.all([
+      fetch(`/api/v1/identity/groups/${encodeURIComponent(groupId)}/login-policy`).catch(() => null),
+      fetch(`/api/v1/identity/groups/${encodeURIComponent(groupId)}/oidc-providers`).catch(() => null),
+    ]);
+    if (policyRes?.ok) policy = (await policyRes.json()) as LoginPolicy;
+    if (providersRes?.ok) oidcProviders = ((await providersRes.json()) as { providers: OidcProvider[] }).providers;
+  }
+
   // OAuth buttons
   const oauthSection = el('div', { display: 'flex', flexDirection: 'column', gap: '8px' });
   const btnBase: Partial<CSSStyleDeclaration> = {
@@ -112,16 +128,35 @@ export const renderLoginGroupPage = (root: HTMLElement): void => {
     fontSize: '14px', cursor: 'pointer', width: '100%', fontFamily: 'monospace',
     textDecoration: 'none', boxSizing: 'border-box', textAlign: 'center',
   };
-  for (const [label, href] of [
-    ['GitHub でログイン', '/oauth/github/start'],
-    ['Google でログイン', '/oauth/google/start'],
-    ['Microsoft でログイン', '/oauth/microsoft/start'],
-  ] as const) {
-    const btn = el('a', { ...btnBase }, label);
-    btn.href = href;
-    oauthSection.appendChild(btn);
+
+  // OIDC provider buttons (shown first if configured)
+  if (policy.allow_oidc && oidcProviders.length > 0) {
+    for (const provider of oidcProviders) {
+      const btn = el('a', { ...btnBase, borderColor: C.accent, color: C.bright }, `${provider.name ?? 'IdP'} でログイン`);
+      btn.href = `/oauth/oidc/start/${encodeURIComponent(provider.oidc_id)}`;
+      oauthSection.appendChild(btn);
+    }
   }
+
+  if (policy.allow_standard) {
+    for (const [label, href] of [
+      ['GitHub でログイン', '/oauth/github/start'],
+      ['Google でログイン', '/oauth/google/start'],
+      ['Microsoft でログイン', '/oauth/microsoft/start'],
+    ] as const) {
+      const btn = el('a', { ...btnBase }, label);
+      btn.href = href;
+      oauthSection.appendChild(btn);
+    }
+  }
+
   card.appendChild(oauthSection);
+
+  // Only show divider + magic link form when standard login is allowed
+  if (!policy.allow_standard && policy.allow_oidc) {
+    root.replaceChildren(card);
+    return;
+  }
 
   card.appendChild(divider());
 

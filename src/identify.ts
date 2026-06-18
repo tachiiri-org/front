@@ -502,3 +502,100 @@ export async function findOrCreateUserByMicrosoft(
   if (!createRes.ok) throw new Error(`identity_create_user_failed:${createRes.status}`);
   return ((await createRes.json()) as IdentityUser).user_id;
 }
+
+// ---- OIDC login ----
+
+export type IdentifyOidcSession = {
+  authenticated: true;
+  oidcId: string;
+  sub: string;
+  email: string | null;
+  name: string | null;
+};
+
+const OIDC_SESSION_COOKIE = "oidc_session";
+
+export async function exchangeOidcOAuthCode(
+  env: AuthorizeEnv,
+  oidcId: string,
+  code: string,
+  redirectUri: string,
+): Promise<IdentifyOidcSession> {
+  // First fetch provider config
+  const configRes = await authorizeFetch(env, {
+    path: `/api/v1/identity/oidc/${encodeURIComponent(oidcId)}`,
+    method: "GET",
+  });
+  if (!configRes.ok) throw new Error(`oidc_provider_not_found:${oidcId}`);
+  const config = (await configRes.json()) as { issuer: string; app_id: string; app_secret: string };
+
+  const response = await authorizeFetch(env, {
+    path: "/api/v1/identify/session/oidc/callback",
+    method: "POST",
+    body: JSON.stringify({
+      oidcId,
+      issuer: config.issuer,
+      appId: config.app_id,
+      appSecret: config.app_secret,
+      code,
+      redirectUri,
+    }),
+  });
+  if (!response.ok) {
+    const body = await response.text().catch(() => "");
+    throw new Error(`identify_oidc_exchange_failed:${response.status}:${body}`);
+  }
+  return (await response.json()) as IdentifyOidcSession;
+}
+
+export async function serializeOidcSessionCookie(
+  session: IdentifyOidcSession,
+  env: AuthorizeEnv,
+  request: Request,
+): Promise<string> {
+  const token = await issueSessionToken(env, { ...session }, SESSION_TTL);
+  return serializeCookie(OIDC_SESSION_COOKIE, token, {
+    maxAge: SESSION_TTL,
+    path: "/",
+    secure: new URL(request.url).protocol === "https:",
+    httpOnly: true,
+    sameSite: "Lax",
+  });
+}
+
+export async function readOidcSession(
+  request: Request | null,
+  env: AuthorizeEnv,
+): Promise<IdentifyOidcSession | null> {
+  if (!request) return null;
+  const cookies = parseCookies(request);
+  const token = cookies.get(OIDC_SESSION_COOKIE);
+  if (!token) return null;
+  const data = await readSessionToken<IdentifyOidcSession>(env, token);
+  return data?.authenticated ? data : null;
+}
+
+export function clearOidcSessionCookies(request: Request): string[] {
+  return [clearCookie(OIDC_SESSION_COOKIE, request)];
+}
+
+export async function findOrCreateUserByOidc(
+  env: AuthorizeEnv,
+  oidcId: string,
+  sub: string,
+): Promise<string> {
+  const findRes = await authorizeFetch(env, {
+    path: `/api/v1/identity/users/by-oidc?oidc_id=${encodeURIComponent(oidcId)}&sub=${encodeURIComponent(sub)}`,
+    method: "GET",
+  });
+  if (findRes.ok) return ((await findRes.json()) as { user_id: string }).user_id;
+  if (findRes.status !== 404) throw new Error(`identity_find_oidc_failed:${findRes.status}`);
+
+  const createRes = await authorizeFetch(env, {
+    path: "/api/v1/identity/users",
+    method: "POST",
+    body: JSON.stringify({ oidc_id: oidcId, oidc_sub: sub }),
+  });
+  if (!createRes.ok) throw new Error(`identity_create_oidc_user_failed:${createRes.status}`);
+  return ((await createRes.json()) as { user_id: string }).user_id;
+}
