@@ -26,7 +26,7 @@ async function graphFetch(
   });
 }
 
-type ApiNode = { id: string; en?: string | null; ja?: string | null; color?: string | null };
+type ApiNode = { id: string; en?: string | null; ja?: string | null; color?: string | null; node_type?: string | null };
 
 async function getBookmarks(env: AuthorizeEnv, graphId: string): Promise<string[]> {
   const res = await graphFetch(env, graphId, "bookmarks");
@@ -57,7 +57,8 @@ function clampDepth(raw: unknown): number {
 }
 
 const nodeLabel = (n: ApiNode): string => [n.en, n.ja].filter(Boolean).join(" / ");
-const nodeLine = (n: ApiNode): string => `[${n.id}] ${nodeLabel(n)}`;
+const nodeLine = (n: ApiNode): string =>
+  `[${n.id}] ${nodeLabel(n)}${n.node_type ? ` {node_type=${n.node_type}}` : ""}`;
 
 // --- Tool definitions ---
 
