@@ -12,8 +12,11 @@
   },
   "include": [
     "src/worker.ts",
+    "src/client-path.ts",
     "src/auth/**/*.ts",
     "src/identify.ts",
+    "src/session/**/*.ts",
+    "src/routes/**/*.ts",
     "src/mcp/**/*.ts",
     "src/api/**/*.ts",
     "src/shared/**/*.ts",
