@@ -51,6 +51,14 @@ async function getNeighbors(env: AuthorizeEnv, graphId: string, nodeId: string, 
   return data.nodes ?? [];
 }
 
+async function getNeighborsByWord(env: AuthorizeEnv, graphId: string, word: string, depth: number): Promise<ApiNode[] | null> {
+  const res = await graphFetch(env, graphId, `neighbors?word=${encodeURIComponent(word)}&depth=${depth}`);
+  if (res.status === 404) return null;
+  if (!res.ok) throw new Error(`get_neighbors_by_word_failed:${res.status}`);
+  const data = (await res.json()) as { nodes: ApiNode[] };
+  return data.nodes ?? [];
+}
+
 function clampDepth(raw: unknown): number {
   const n = typeof raw === "number" ? Math.floor(raw) : 2;
   return Math.min(Math.max(Number.isFinite(n) ? n : 2, 0), 5);
@@ -206,15 +214,10 @@ export async function callGraphTool(
     if (name === "graph_read_texts_by_word") {
       const word = String(args.word);
       const depth = clampDepth(args.depth);
-
-      const ids = await getBookmarks(env, graphId);
-      const bookmarks = await getNodesByIds(env, graphId, ids);
-      const match = bookmarks.find((n) => n.en === word || n.ja === word);
-      if (!match) {
+      const nodes = await getNeighborsByWord(env, graphId, word, depth);
+      if (nodes === null) {
         return { content: [{ type: "text", text: `No bookmark found matching: ${word}` }], isError: true };
       }
-
-      const nodes = await getNeighbors(env, graphId, match.id, depth);
       const text = nodes.map(nodeLine).join("\n") || "(no nodes)";
       return { content: [{ type: "text", text }] };
     }
