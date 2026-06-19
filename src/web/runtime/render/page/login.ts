@@ -350,13 +350,15 @@ export const renderLoginPage = (root: HTMLElement): void => {
     fontSize: '14px', cursor: 'pointer', width: '100%', fontFamily: 'monospace',
     textDecoration: 'none', boxSizing: 'border-box', textAlign: 'center',
   };
-  for (const [label, href] of [
+  const returnTo = new URLSearchParams(window.location.search).get('returnTo') ?? '';
+  const returnToParam = returnTo.startsWith('/') ? `?returnTo=${encodeURIComponent(returnTo)}` : '';
+  for (const [label, path] of [
     ['GitHub でログイン', '/oauth/github/start'],
     ['Google でログイン', '/oauth/google/start'],
     ['Microsoft でログイン', '/oauth/microsoft/start'],
   ] as const) {
     const btn = el('a', { ...btnBase }, label);
-    btn.href = href;
+    btn.href = `${path}${returnToParam}`;
     oauthSection.appendChild(btn);
   }
   newPanelLogin.appendChild(oauthSection);

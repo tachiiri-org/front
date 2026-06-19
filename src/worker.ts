@@ -227,8 +227,8 @@ export default {
       for (const c of clearMicrosoftSessionCookies(request)) headers.append('Set-Cookie', c);
       return new Response(null, { status: 204, headers });
     }
-    if (pathname === '/identify-viewer') {
-      return new Response(null, { status: 302, headers: new Headers({ Location: '/' }) });
+    if (pathname === '/identify-viewer' || pathname === '/org-select') {
+      return new Response(null, { status: 302, headers: new Headers({ Location: '/group-select' }) });
     }
     if (pathname === '/oauth/github/logout' && request.method === 'GET') {
       const headers = new Headers({ Location: '/' });
@@ -339,10 +339,12 @@ export default {
     if (isNavigationRequest(request) && !isPublicPath(pathname)) {
       const { userId, orgId } = getNavCookies(request);
       if (!userId) {
-        return Response.redirect(new URL('/login', request.url).href, 302);
+        const returnTo = encodeURIComponent(pathname);
+        return Response.redirect(new URL(`/login?returnTo=${returnTo}`, request.url).href, 302);
       }
       if (!orgId && pathname !== '/group-select') {
-        return Response.redirect(new URL('/group-select', request.url).href, 302);
+        const returnTo = encodeURIComponent(pathname);
+        return Response.redirect(new URL(`/group-select?returnTo=${returnTo}`, request.url).href, 302);
       }
     }
 

@@ -129,23 +129,26 @@ export const renderLoginGroupPage = async (root: HTMLElement): Promise<void> => 
     textDecoration: 'none', boxSizing: 'border-box', textAlign: 'center',
   };
 
+  const returnTo = new URLSearchParams(window.location.search).get('returnTo') ?? '';
+  const returnToParam = returnTo.startsWith('/') ? `?returnTo=${encodeURIComponent(returnTo)}` : '';
+
   // OIDC provider buttons (shown first if configured)
   if (policy.allow_oidc && oidcProviders.length > 0) {
     for (const provider of oidcProviders) {
       const btn = el('a', { ...btnBase, borderColor: C.accent, color: C.bright }, `${provider.name ?? 'IdP'} でログイン`);
-      btn.href = `/oauth/oidc/start/${encodeURIComponent(provider.oidc_id)}`;
+      btn.href = `/oauth/oidc/start/${encodeURIComponent(provider.oidc_id)}${returnToParam}`;
       oauthSection.appendChild(btn);
     }
   }
 
   if (policy.allow_standard) {
-    for (const [label, href] of [
+    for (const [label, path] of [
       ['GitHub でログイン', '/oauth/github/start'],
       ['Google でログイン', '/oauth/google/start'],
       ['Microsoft でログイン', '/oauth/microsoft/start'],
     ] as const) {
       const btn = el('a', { ...btnBase }, label);
-      btn.href = href;
+      btn.href = `${path}${returnToParam}`;
       oauthSection.appendChild(btn);
     }
   }

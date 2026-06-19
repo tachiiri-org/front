@@ -6,6 +6,7 @@ import { MCP_OAUTH_PARAMS_COOKIE } from "./google";
 
 const OIDC_STATE_COOKIE = "oidc_login_oauth_state";
 const OIDC_ID_COOKIE = "oidc_login_oidc_id";
+const OIDC_RETURN_TO_COOKIE = "oidc_login_return_to";
 const IDENTITY_USER_ID_COOKIE = "identity_user_id";
 const STATE_TTL_SECONDS = 60 * 10;
 
@@ -67,6 +68,7 @@ export async function handleOidcLoginStart(context: RouteContext, oidcId: string
   authorizeUrl.searchParams.set("scope", "openid email profile");
   authorizeUrl.searchParams.set("state", state);
 
+  const returnTo = new URL(context.request.url).searchParams.get("returnTo") ?? "";
   const secure = isSecureRequest(context.request);
   const headers = new Headers();
   headers.set("Location", authorizeUrl.toString());
@@ -76,6 +78,11 @@ export async function handleOidcLoginStart(context: RouteContext, oidcId: string
   headers.append("Set-Cookie", serializeCookie(OIDC_ID_COOKIE, oidcId, {
     maxAge: STATE_TTL_SECONDS, path: "/", secure, httpOnly: true, sameSite: "Lax",
   }));
+  if (returnTo.startsWith("/")) {
+    headers.append("Set-Cookie", serializeCookie(OIDC_RETURN_TO_COOKIE, returnTo, {
+      maxAge: STATE_TTL_SECONDS, path: "/", secure, httpOnly: true, sameSite: "Lax",
+    }));
+  }
 
   return new Response(null, { status: 302, headers });
 }
@@ -118,9 +125,14 @@ export async function handleOidcLoginCallback(context: RouteContext): Promise<Re
     // identity lookup failure is non-fatal; org-select page will handle missing state
   }
 
+  const loginReturnTo = cookies.get(OIDC_RETURN_TO_COOKIE) ?? "";
+  headers.append("Set-Cookie", clearCookie(OIDC_RETURN_TO_COOKIE, context.request));
+  const groupSelectDest = loginReturnTo.startsWith("/")
+    ? `/group-select?returnTo=${encodeURIComponent(loginReturnTo)}`
+    : "/group-select";
   const dest = cookies.has(MCP_OAUTH_PARAMS_COOKIE)
     ? `${resolveFrontendOrigin(context.request, context.env)}/oauth/mcp/select-org`
-    : `${resolveFrontendOrigin(context.request, context.env)}/group-select`;
+    : `${resolveFrontendOrigin(context.request, context.env)}${groupSelectDest}`;
 
   headers.set("Location", dest);
   return new Response(null, { status: 302, headers });

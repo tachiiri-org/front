@@ -257,11 +257,12 @@ export async function handleSelectOrg(request: Request, env: AuthorizeEnv): Prom
     return json({ error: 'group_id_required' }, { status: 400 });
   }
 
+  const returnTo = url.searchParams.get('returnTo') ?? '';
   const cookies = parseCookies(request);
   const identityUserId = cookies.get('identity_user_id');
   const isSecure = url.protocol === 'https:';
   const headers = new Headers();
-  headers.set('Location', '/');
+  headers.set('Location', returnTo.startsWith('/') ? returnTo : '/');
   headers.append('Set-Cookie', `identity_group_id=${encodeURIComponent(orgId)}; Path=/; Max-Age=${60 * 60 * 24}${isSecure ? '; Secure' : ''}; SameSite=Lax`);
 
   if (identityUserId) {

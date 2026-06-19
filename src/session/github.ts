@@ -57,17 +57,30 @@ export function handleGitHubLoginStart(context: RouteContext): Response {
     return new Response("Missing GITHUB_OAUTH_CLIENT_ID", { status: 503 });
   }
 
+  const returnTo = new URL(context.request.url).searchParams.get("returnTo") ?? "";
   const state = createRandomState();
   const scope = "read:user user:email";
+  const secure = isSecureRequest(context.request);
   const headers = new Headers();
   headers.set(
     "Set-Cookie",
     serializeCookie(LOGIN_STATE_COOKIE_NAME, state, {
       maxAge: STATE_TTL_SECONDS,
       path: "/",
-      secure: isSecureRequest(context.request),
+      secure,
     }),
   );
+  if (returnTo.startsWith("/")) {
+    headers.append(
+      "Set-Cookie",
+      serializeCookie(LOGIN_RETURN_TO_COOKIE, returnTo, {
+        maxAge: STATE_TTL_SECONDS,
+        path: "/",
+        secure,
+        httpOnly: true,
+      }),
+    );
+  }
   headers.set("Location", buildGitHubAuthorizeUrl(context.request, context.env, state, scope));
 
   return new Response(null, { status: 302, headers });
@@ -127,11 +140,16 @@ export async function handleGitHubLoginCallback(context: RouteContext): Promise<
     // identity lookup failure is non-fatal; org-select page will handle the missing state
   }
 
+  const loginReturnTo = cookies2.get(LOGIN_RETURN_TO_COOKIE) ?? "";
+  headers.append("Set-Cookie", clearCookie(LOGIN_RETURN_TO_COOKIE, context.request));
+  const groupSelectDest = loginReturnTo.startsWith("/")
+    ? `/group-select?returnTo=${encodeURIComponent(loginReturnTo)}`
+    : "/group-select";
   const dest = linkMode && existingUserId
     ? `${resolveFrontendOrigin(context.request, context.env)}/settings`
     : cookies2.has(MCP_OAUTH_PARAMS_COOKIE)
     ? `${resolveFrontendOrigin(context.request, context.env)}/oauth/mcp/select-org`
-    : `${resolveFrontendOrigin(context.request, context.env)}/group-select`;
+    : `${resolveFrontendOrigin(context.request, context.env)}${groupSelectDest}`;
   headers.set("Location", dest);
   return new Response(null, { status: 302, headers });
 }
@@ -217,6 +235,7 @@ export async function handleGitHubOAuthCallback(context: RouteContext): Promise<
 }
 
 const LOGIN_STATE_COOKIE_NAME = "github_login_oauth_state";
+const LOGIN_RETURN_TO_COOKIE = "github_login_return_to";
 const CONNECT_STATE_COOKIE_NAME = "github_connect_oauth_state";
 const CONNECT_RETURN_TO_COOKIE = "github_connect_return_to";
 export const IDENTITY_USER_ID_COOKIE = "identity_user_id";

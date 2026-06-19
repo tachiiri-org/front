@@ -56,13 +56,14 @@ export const renderGroupSelectPage = async (root: HTMLElement): Promise<void> =>
 
   const loginIntent = getCookie('login_intent');
   const isOrgCreate = loginIntent === 'group_create';
+  const returnTo = new URLSearchParams(window.location.search).get('returnTo') ?? '';
 
   // Try auto-select unless we're in org-create mode
   if (!isOrgCreate) {
     const autoRes = await fetch('/api/auth/auto-select-org').catch(() => null);
     if (autoRes?.ok) {
       clearCookieClient('login_intent');
-      window.location.href = '/';
+      window.location.href = returnTo.startsWith('/') ? returnTo : '/';
       return;
     }
   }
@@ -95,7 +96,8 @@ export const renderGroupSelectPage = async (root: HTMLElement): Promise<void> =>
       row.appendChild(el('span', { color: C.bright }, org.name));
       row.appendChild(el('span', { color: C.dim }, '→'));
       row.addEventListener('click', () => {
-        window.location.href = `/api/auth/select-org?group_id=${encodeURIComponent(org.id)}`;
+        const returnToParam = returnTo.startsWith('/') ? `&returnTo=${encodeURIComponent(returnTo)}` : '';
+        window.location.href = `/api/auth/select-org?group_id=${encodeURIComponent(org.id)}${returnToParam}`;
       });
       listSection.appendChild(row);
     }
@@ -151,7 +153,8 @@ export const renderGroupSelectPage = async (root: HTMLElement): Promise<void> =>
       if (res.ok) {
         const org = (await res.json()) as { id: string; name: string };
         clearCookieClient('login_intent');
-        window.location.href = `/api/auth/select-org?group_id=${encodeURIComponent(org.id)}`;
+        const returnToParam = returnTo.startsWith('/') ? `&returnTo=${encodeURIComponent(returnTo)}` : '';
+        window.location.href = `/api/auth/select-org?group_id=${encodeURIComponent(org.id)}${returnToParam}`;
       } else {
         const data = (await res.json().catch(() => ({}))) as { error?: string };
         status.textContent = data.error === 'name_required' ? 'グループ名を入力してください' : 'エラーが発生しました';

@@ -49,16 +49,29 @@ export function handleGoogleLoginStart(context: RouteContext): Response {
     return new Response("Missing GOOGLE_OAUTH_CLIENT_ID", { status: 503 });
   }
 
+  const returnTo = new URL(context.request.url).searchParams.get("returnTo") ?? "";
   const state = createRandomState();
+  const secure = isSecureRequest(context.request);
   const headers = new Headers();
   headers.set(
     "Set-Cookie",
     serializeCookie(LOGIN_STATE_COOKIE_NAME, state, {
       maxAge: STATE_TTL_SECONDS,
       path: "/",
-      secure: isSecureRequest(context.request),
+      secure,
     }),
   );
+  if (returnTo.startsWith("/")) {
+    headers.append(
+      "Set-Cookie",
+      serializeCookie(LOGIN_RETURN_TO_COOKIE, returnTo, {
+        maxAge: STATE_TTL_SECONDS,
+        path: "/",
+        secure,
+        httpOnly: true,
+      }),
+    );
+  }
   headers.set("Location", buildGoogleAuthorizeUrl(context.request, context.env, state));
 
   return new Response(null, { status: 302, headers });
@@ -111,16 +124,22 @@ export async function handleGoogleLoginCallback(context: RouteContext): Promise<
     // identity lookup failure is non-fatal; org-select page will handle the missing state
   }
 
+  const loginReturnTo = cookies2.get(LOGIN_RETURN_TO_COOKIE) ?? "";
+  headers.append("Set-Cookie", clearCookie(LOGIN_RETURN_TO_COOKIE, context.request));
+  const groupSelectDest = loginReturnTo.startsWith("/")
+    ? `/group-select?returnTo=${encodeURIComponent(loginReturnTo)}`
+    : "/group-select";
   const dest = linkMode && existingUserId
     ? `${resolveFrontendOrigin(context.request, context.env)}/settings`
     : cookies2.has(MCP_OAUTH_PARAMS_COOKIE)
     ? `${resolveFrontendOrigin(context.request, context.env)}/oauth/mcp/select-org`
-    : `${resolveFrontendOrigin(context.request, context.env)}/group-select`;
+    : `${resolveFrontendOrigin(context.request, context.env)}${groupSelectDest}`;
   headers.set("Location", dest);
   return new Response(null, { status: 302, headers });
 }
 
 const LOGIN_STATE_COOKIE_NAME = "google_login_oauth_state";
+const LOGIN_RETURN_TO_COOKIE = "google_login_return_to";
 const IDENTITY_USER_ID_COOKIE = "identity_user_id";
 const IDENTITY_LINK_MODE_COOKIE = "identity_link_mode";
 export const MCP_OAUTH_PARAMS_COOKIE = "mcp_oauth_params";
