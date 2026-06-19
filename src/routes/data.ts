@@ -567,3 +567,42 @@ export async function handleGroupLoginPage(
     headers: { 'Content-Type': 'text/html; charset=UTF-8' },
   });
 }
+
+// GET /login/:org-slug — look up org by slug and redirect to SSO flow
+export async function handleOrgSlugLogin(
+  request: Request,
+  env: AuthorizeEnv,
+): Promise<Response | null> {
+  const url = new URL(request.url);
+  const match = url.pathname.match(/^\/login\/([a-z0-9][a-z0-9-]{0,61}[a-z0-9])$/i);
+  // Exclude UUID pattern (handled by handleGroupLoginPage)
+  if (!match || /^[0-9a-f-]{36}$/i.test(match[1]) || request.method !== 'GET') return null;
+
+  const slug = match[1].toLowerCase();
+  const res = await authorizeFetch(env, {
+    path: `/api/v1/identity/orgs/by-slug/${encodeURIComponent(slug)}`,
+    method: 'GET',
+  });
+
+  if (res.status === 404) {
+    return new Response('Organization not found', { status: 404 });
+  }
+  if (!res.ok) {
+    return new Response('Failed to look up organization', { status: 502 });
+  }
+
+  const org = (await res.json()) as { id: string; sso_type: string | null; sso_id: string | null };
+
+  if (org.sso_type === 'oidc' && org.sso_id) {
+    const returnTo = url.searchParams.get('returnTo') ?? '';
+    const dest = `/oauth/oidc/start/${encodeURIComponent(org.sso_id)}${returnTo ? `?returnTo=${encodeURIComponent(returnTo)}` : ''}`;
+    return new Response(null, { status: 302, headers: new Headers({ Location: dest }) });
+  }
+
+  if (org.sso_type === 'saml' && org.sso_id) {
+    const dest = `/auth/saml/${encodeURIComponent(slug)}/sso`;
+    return new Response(null, { status: 302, headers: new Headers({ Location: dest }) });
+  }
+
+  return new Response('No SSO configured for this organization', { status: 404 });
+}
