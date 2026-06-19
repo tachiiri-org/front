@@ -41,6 +41,7 @@ export interface GraphEditorContext {
   // ── Immutable config ──
   gId: string;
   limit: number;
+  rootNodeId: string | null;
   outer: HTMLElement;
   columnsEl: HTMLElement;
   // ── Shared mutable state ──

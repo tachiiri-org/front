@@ -40,6 +40,11 @@ export function createColumnFns(ctx: GraphEditorContext): {
       }
       if (ctx.childrenCache.has(null)) return { nodes: ctx.childrenCache.get(null)!, hasMore: false };
       const lang = ctx.state.showFallback ? undefined : ctx.state.lang;
+      if (ctx.rootNodeId) {
+        const nodes = await fetchChildren(ctx.gId, ctx.rootNodeId, ctx.limit);
+        ctx.childrenCache.set(null, nodes);
+        return { nodes, hasMore: false };
+      }
       const result = await fetchBookmarkedNodes(ctx.gId, [...ctx.state.bookmarks], lang);
       ctx.childrenCache.set(null, result.nodes);
       return result;
@@ -163,9 +168,10 @@ export function createColumnFns(ctx: GraphEditorContext): {
       // Optimistic: add temp node to UI immediately
       const tempId = `temp-${++ctx.tempNodeCounter}`;
       const tempNode: ExplorerNode = { id: tempId, [ctx.state.lang]: val };
+      const isRootCol = colIndex === 0 && !ctx.rootNodeId;
       if (ctx.state.columns[colIndex]) {
         ctx.state.columns[colIndex].nodes.push(tempNode);
-        if (colIndex === 0) ctx.state.bookmarks.add(tempId);
+        if (isRootCol) ctx.state.bookmarks.add(tempId);
         const tempRow = ctx.buildNodeRow(tempNode, colIndex);
         list.appendChild(tempRow);
         const newTa = tempRow.querySelector<HTMLTextAreaElement>('textarea');
@@ -174,12 +180,13 @@ export function createColumnFns(ctx: GraphEditorContext): {
           newTa.scrollIntoView({ block: 'nearest' });
         }
       }
-      const newNode = await apiCreateNode(ctx.gId, col.parentId, ctx.state.lang, val);
+      const createParentId = colIndex === 0 ? (ctx.rootNodeId ?? null) : col.parentId;
+      const newNode = await apiCreateNode(ctx.gId, createParentId, ctx.state.lang, val);
       if (newNode && ctx.state.columns[colIndex]) {
         // Replace temp node with real node in-place
         const idx = ctx.state.columns[colIndex].nodes.indexOf(tempNode);
         if (idx !== -1) ctx.state.columns[colIndex].nodes[idx] = newNode;
-        if (colIndex === 0) {
+        if (isRootCol) {
           ctx.state.bookmarks.delete(tempId);
           ctx.state.bookmarks.add(newNode.id);
           void apiAddBookmark(ctx.gId, newNode.id);
@@ -215,9 +222,9 @@ export function createColumnFns(ctx: GraphEditorContext): {
         : col.nodes.filter((n) => primaryLabel(n, ctx.state.lang) != null);
       // ナビ親（2列前の選択ノード）を除外してループを防ぐ
       const navParentId = colIndex >= 2 ? (ctx.state.columns[colIndex - 2]?.selectedId ?? null) : null;
-      // col 0: search results (all) or bookmarks only; col 1+: exclude nav-parent and bookmarks
+      // col 0: search results (all), rootNodeId children (all), or bookmarks only; col 1+: exclude nav-parent and bookmarks
       const nodes = (colIndex === 0
-        ? (ctx.state.searchQuery
+        ? (ctx.state.searchQuery || ctx.rootNodeId
             ? base
             : base.filter((n) => ctx.state.bookmarks.has(n.id)))
         : base.filter((n) => n.id !== navParentId && !ctx.state.bookmarks.has(n.id))

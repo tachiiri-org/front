@@ -5,6 +5,7 @@ export type GraphEditorComponent = {
   graphId: string;
   lang?: 'en' | 'ja';
   limit?: number;
+  rootNodeId?: string;
 };
 
 export const graphEditorDefaults: GraphEditorComponent = {
@@ -18,6 +19,7 @@ export const graphEditorSchema: SchemaField[] = [
   { kind: 'text-field', key: 'graphId', label: 'graphId' },
   { kind: 'text-field', key: 'lang', label: 'lang (en | ja)' },
   { kind: 'text-field', key: 'limit', label: 'limit' },
+  { kind: 'text-field', key: 'rootNodeId', label: 'rootNodeId (optional)' },
 ];
 
 export const isGraphEditorComponent = (value: unknown): value is GraphEditorComponent => {
@@ -27,5 +29,6 @@ export const isGraphEditorComponent = (value: unknown): value is GraphEditorComp
   if (typeof c.graphId !== 'string') return false;
   if (c.lang !== undefined && c.lang !== 'en' && c.lang !== 'ja') return false;
   if (c.limit !== undefined && typeof c.limit !== 'number') return false;
+  if (c.rootNodeId !== undefined && typeof c.rootNodeId !== 'string') return false;
   return true;
 };

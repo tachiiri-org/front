@@ -163,8 +163,9 @@ export function renderGraphEditor(
   // base object only carries config + shared mutable state. Every factory closes over
   // `ctx` and resolves the other modules' callbacks lazily (at event time), which is
   // what lets the mutually-recursive render functions live in separate files.
+  const rootNodeId = comp.rootNodeId ?? null;
   const ctx = {
-    gId, limit, outer, columnsEl, state, childrenCache,
+    gId, limit, rootNodeId, outer, columnsEl, state, childrenCache,
     columnVersion: 0, tempNodeCounter: 0, pendingDeleteId: null,
   } as unknown as GraphEditorContext;
   Object.assign(ctx, createColumnFns(ctx), createNodeRowFns(ctx), createDeleteFns(ctx));
@@ -194,10 +195,14 @@ export function renderGraphEditor(
     void ctx.loadColumn(null, 0);
   });
 
-  fetchBookmarks(gId).then((ids) => {
-    state.bookmarks = new Set(ids);
+  if (rootNodeId) {
     void ctx.loadColumn(null, 0);
-  });
+  } else {
+    fetchBookmarks(gId).then((ids) => {
+      state.bookmarks = new Set(ids);
+      void ctx.loadColumn(null, 0);
+    });
+  }
 
   return outer;
 }
