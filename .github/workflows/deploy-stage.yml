@@ -27,7 +27,6 @@ jobs:
         run: bun run build && bun run gen-client-path
 
       - name: Build screens
-        continue-on-error: true
         env:
           BASE_URL: https://front-stage.tachiiri.workers.dev
           BUILD_TOKEN: ${{ secrets.BUILD_SCREENS_TOKEN }}
