@@ -320,7 +320,7 @@ export async function callTool(
     if (!response.ok) {
       return { content: [{ type: "text", text: `Error ${response.status}: ${text}` }], isError: true };
     }
-    if (name === "authorize_d1" && text.includes("enc:v1:")) {
+    if (text.includes("enc:v1:")) {
       const decKey = await loadDecryptKey(env.IDENTITY_ENCRYPTION_KEY);
       if (decKey) {
         const decrypted = await decryptJsonValues(text, decKey);
