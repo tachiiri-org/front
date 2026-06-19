@@ -12,11 +12,14 @@ export async function fetchAllNodes(
   offset = 0,
   lang?: 'en' | 'ja',
   neighborOf?: string[],
+  q?: string,
+  limit = 20,
 ): Promise<{ nodes: ExplorerNode[]; hasMore: boolean }> {
-  const params = new URLSearchParams({ limit: '20', offset: String(offset) });
+  const params = new URLSearchParams({ limit: String(limit), offset: String(offset) });
   if (includeIds.length > 0) params.set('include', includeIds.join(','));
   if (lang) params.set('lang', lang);
   if (neighborOf && neighborOf.length > 0) params.set('nonNeighborOf', neighborOf.join(','));
+  if (q) params.set('q', q);
   const r = await apiFetch(`/api/graph/${graphId}/nodes?${params}`);
   if (!r.ok) return { nodes: [], hasMore: false };
   const data = await r.json() as { nodes: ExplorerNode[]; hasMore?: boolean };

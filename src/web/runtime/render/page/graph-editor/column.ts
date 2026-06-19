@@ -33,13 +33,18 @@ export function createColumnFns(ctx: GraphEditorContext): {
   };
 
   const fetchCached = async (parentId: string | null): Promise<{ nodes: ExplorerNode[]; hasMore: boolean }> => {
-    if (ctx.childrenCache.has(parentId)) return { nodes: ctx.childrenCache.get(parentId)!, hasMore: false };
     if (parentId === null) {
+      if (ctx.state.searchQuery) {
+        const lang = ctx.state.showFallback ? undefined : ctx.state.lang;
+        return fetchAllNodes(ctx.gId, [], 0, lang, undefined, ctx.state.searchQuery, 50);
+      }
+      if (ctx.childrenCache.has(null)) return { nodes: ctx.childrenCache.get(null)!, hasMore: false };
       const lang = ctx.state.showFallback ? undefined : ctx.state.lang;
       const result = await fetchBookmarkedNodes(ctx.gId, [...ctx.state.bookmarks], lang);
       ctx.childrenCache.set(null, result.nodes);
       return result;
     }
+    if (ctx.childrenCache.has(parentId)) return { nodes: ctx.childrenCache.get(parentId)!, hasMore: false };
     const nodes = await fetchChildren(ctx.gId, parentId, ctx.limit);
     ctx.childrenCache.set(parentId, nodes);
     return { nodes, hasMore: false };
@@ -63,8 +68,8 @@ export function createColumnFns(ctx: GraphEditorContext): {
     const version = ++ctx.columnVersion;
     ctx.state.columns = ctx.state.columns.slice(0, colIndex);
 
-    // Cache hit: render immediately
-    if (ctx.childrenCache.has(parentId)) {
+    // Cache hit: render immediately (skip for col 0 when search is active — results are never cached)
+    if (ctx.childrenCache.has(parentId) && !(parentId === null && ctx.state.searchQuery)) {
       const cached = ctx.childrenCache.get(parentId)!;
       ctx.state.columns.push({ parentId, nodes: cached, loading: false, selectedId: null, hasMore: false, nextOffset: cached.length });
       appendColumn(colIndex);
@@ -199,7 +204,9 @@ export function createColumnFns(ctx: GraphEditorContext): {
     draftRow.appendChild(draftStar);
     draftRow.appendChild(draftMarker);
     draftRow.appendChild(draftInput);
-    list.appendChild(draftRow);
+    if (!(colIndex === 0 && ctx.state.searchQuery)) {
+      list.appendChild(draftRow);
+    }
 
     if (!col.loading) {
       // Filter out nodes that have no text in current lang but have text in other lang (when showFallback=false)
@@ -208,10 +215,11 @@ export function createColumnFns(ctx: GraphEditorContext): {
         : col.nodes.filter((n) => primaryLabel(n, ctx.state.lang) != null);
       // ナビ親（2列前の選択ノード）を除外してループを防ぐ
       const navParentId = colIndex >= 2 ? (ctx.state.columns[colIndex - 2]?.selectedId ?? null) : null;
-      // col 0: bookmarks only; col 1+: exclude nav-parent (loop guard) and bookmarks
-      // (ブックマークは2列目以降に出さない). A node pending deletion is hidden everywhere.
+      // col 0: search results (all) or bookmarks only; col 1+: exclude nav-parent and bookmarks
       const nodes = (colIndex === 0
-        ? base.filter((n) => ctx.state.bookmarks.has(n.id))
+        ? (ctx.state.searchQuery
+            ? base
+            : base.filter((n) => ctx.state.bookmarks.has(n.id)))
         : base.filter((n) => n.id !== navParentId && !ctx.state.bookmarks.has(n.id))
       ).filter((n) => n.id !== ctx.pendingDeleteId);
       for (const node of nodes) {

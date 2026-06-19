@@ -18,6 +18,7 @@ export type ExplorerState = {
   showFallback: boolean;
   linkSourceId: string | null;   // last focused node — source for link operations
   linkedNodeIds: Set<string>;    // nodes currently linked to linkSourceId
+  searchQuery: string;
 };
 
 // Deferred delete + undo: deletion is held for UNDO_MS before hitting the backend

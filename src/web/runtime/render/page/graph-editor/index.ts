@@ -26,6 +26,7 @@ export function renderGraphEditor(
     showFallback: false,
     linkSourceId: null,
     linkedNodeIds: new Set(),
+    searchQuery: '',
   };
 
   // In-memory cache: null key = all-nodes (col 0), string key = children of nodeId
@@ -79,6 +80,51 @@ export function renderGraphEditor(
   topBar.appendChild(jaBtn);
   topBar.appendChild(enBtn);
   outer.appendChild(topBar);
+
+  // ── Search bar ────────────────────────────────────────────────────
+  const searchBar = document.createElement('div');
+  searchBar.style.cssText = `display:flex;align-items:center;padding:4px 8px;border-bottom:1px solid ${BORDER};flex-shrink:0;gap:6px;`;
+
+  const searchIcon = document.createElement('span');
+  searchIcon.textContent = '🔍';
+  searchIcon.style.cssText = `flex-shrink:0;font-size:12px;opacity:0.5;`;
+
+  const searchInput = document.createElement('input');
+  searchInput.type = 'text';
+  searchInput.placeholder = 'ノードを検索…';
+  Object.assign(searchInput.style, {
+    flex: '1', background: 'transparent', border: 'none', outline: 'none',
+    color: TEXT_HIGH, fontSize: '13px', fontFamily: 'inherit', lineHeight: '1.5',
+  });
+
+  const clearBtn = document.createElement('button');
+  clearBtn.textContent = '✕';
+  clearBtn.style.cssText = `background:transparent;border:none;color:${TEXT_MID};cursor:pointer;font-size:12px;padding:0 2px;display:none;`;
+  clearBtn.addEventListener('click', () => {
+    searchInput.value = '';
+    clearBtn.style.display = 'none';
+    state.searchQuery = '';
+    childrenCache.delete(null);
+    void ctx.loadColumn(null, 0);
+    searchInput.focus();
+  });
+
+  let searchTimer: ReturnType<typeof setTimeout> | null = null;
+  searchInput.addEventListener('input', () => {
+    const q = searchInput.value.trim();
+    clearBtn.style.display = q ? 'block' : 'none';
+    if (searchTimer) clearTimeout(searchTimer);
+    searchTimer = setTimeout(() => {
+      state.searchQuery = q;
+      childrenCache.delete(null);
+      void ctx.loadColumn(null, 0);
+    }, 250);
+  });
+
+  searchBar.appendChild(searchIcon);
+  searchBar.appendChild(searchInput);
+  searchBar.appendChild(clearBtn);
+  outer.appendChild(searchBar);
 
   // ── Breadcrumb ───────────────────────────────────────────────────
   const breadcrumbEl = document.createElement('div');
