@@ -1,6 +1,6 @@
 import type { SpecDocument } from '../shared/spec-document';
 import type { UiShellSettings } from '../shared/ui-shell-settings';
-import { readGitHubSession, readGitHubConnectSession, readGoogleSession, readMicrosoftSession, listUserOrganizations, createOrganization, resolveOrgUser, getDefaultGroup, verifyMagicLinkToken, createBareUser, findMemberByEmail, registerGroupMember, fetchGroupInfo } from '../identify';
+import { readGitHubSession, readGitHubConnectSession, readGoogleSession, readMicrosoftSession, readOidcSession, listUserOrganizations, createOrganization, resolveOrgUser, getDefaultGroup, verifyMagicLinkToken, createBareUser, findMemberByEmail, registerGroupMember, fetchGroupInfo } from '../identify';
 import { parseCookies } from '../session/cookies';
 import { authorizeFetch } from '../session/fetch';
 import type { AuthorizeEnv } from '../session';
@@ -139,17 +139,19 @@ export async function handleAuthStatus(
     return null;
   }
 
-  const [githubResult, githubConnectResult, googleResult, microsoftResult] = await Promise.allSettled([
+  const [githubResult, githubConnectResult, googleResult, microsoftResult, oidcResult] = await Promise.allSettled([
     readGitHubSession(request, env),
     readGitHubConnectSession(request, env),
     readGoogleSession(request, env),
     readMicrosoftSession(request, env),
+    readOidcSession(request, env),
   ]);
 
   const githubSession = githubResult.status === 'fulfilled' ? githubResult.value : null;
   const githubConnectSession = githubConnectResult.status === 'fulfilled' ? githubConnectResult.value : null;
   const googleSession = googleResult.status === 'fulfilled' ? googleResult.value : null;
   const microsoftSession = microsoftResult.status === 'fulfilled' ? microsoftResult.value : null;
+  const oidcSession = oidcResult.status === 'fulfilled' ? oidcResult.value : null;
 
   return json(
     {
@@ -170,6 +172,11 @@ export async function handleAuthStatus(
         authenticated: Boolean(microsoftSession),
         email: microsoftSession?.email ?? null,
         name: microsoftSession?.name ?? null,
+      },
+      oidc: {
+        authenticated: Boolean(oidcSession),
+        email: oidcSession?.email ?? null,
+        name: oidcSession?.name ?? null,
       },
     },
     { status: 200 },

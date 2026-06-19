@@ -162,11 +162,11 @@ const renderNav = async (screenId: string): Promise<void> => {
   try {
     if (authResult.status === 'fulfilled' && authResult.value.ok) {
       const authStatus = (await authResult.value.json()) as AuthStatus;
-      if (authStatus.github.authenticated || authStatus.google.authenticated || authStatus.microsoft?.authenticated) {
+      if (authStatus.github.authenticated || authStatus.google.authenticated || authStatus.microsoft?.authenticated || authStatus.oidc?.authenticated) {
         const userEl = document.createElement('span');
         userEl.textContent = authStatus.github.login
           ? `@${authStatus.github.login}`
-          : (authStatus.google.email ?? authStatus.microsoft?.email ?? '');
+          : (authStatus.google.email ?? authStatus.microsoft?.email ?? authStatus.oidc?.email ?? '');
         Object.assign(userEl.style, { color: '#9ca3af', fontSize: '12px' });
         nav.appendChild(userEl);
 
@@ -182,6 +182,8 @@ const renderNav = async (screenId: string): Promise<void> => {
           ? '/oauth/github/logout'
           : authStatus.microsoft?.authenticated
           ? '/oauth/microsoft/logout'
+          : authStatus.oidc?.authenticated
+          ? '/oauth/oidc/logout'
           : '/oauth/google/logout';
         Object.assign(logoutLink.style, { color: '#6b7280', fontSize: '12px', textDecoration: 'none' });
         nav.appendChild(logoutLink);
@@ -369,6 +371,7 @@ type AuthStatus = {
   github: { authenticated: boolean; login: string | null };
   google: { authenticated: boolean; email: string | null; name: string | null };
   microsoft: { authenticated: boolean; email: string | null; name: string | null };
+  oidc?: { authenticated: boolean; email: string | null; name: string | null };
 };
 
 type IdentityStatus = {
