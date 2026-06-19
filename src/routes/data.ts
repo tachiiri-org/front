@@ -1,8 +1,9 @@
 import type { SpecDocument } from '../shared/spec-document';
 import type { UiShellSettings } from '../shared/ui-shell-settings';
 import { readGitHubSession, readGitHubConnectSession, readGoogleSession, readMicrosoftSession, readOidcSession, listUserOrganizations, createOrganization, resolveOrgUser, getDefaultGroup, verifyMagicLinkToken, createBareUser, findMemberByEmail, registerGroupMember, fetchGroupInfo } from '../identify';
-import { parseCookies } from '../session/cookies';
+import { parseCookies, serializeCookie } from '../session/cookies';
 import { authorizeFetch } from '../session/fetch';
+import { OIDC_ORG_ID_COOKIE } from '../session/oidc';
 import type { AuthorizeEnv } from '../session';
 
 type StoredObject = {
@@ -542,6 +543,62 @@ export function handleLoginPage(
   return new Response(buildLoginShellHtml(clientJsPath, siteKey, 'Tempri'), {
     headers: { 'Content-Type': 'text/html; charset=UTF-8' },
   });
+}
+
+// GET /api/v1/auth/org-groups?org_id=... — proxies org group list from identity backend
+export async function handleOrgGroupsApi(request: Request, env: AuthorizeEnv): Promise<Response | null> {
+  const url = new URL(request.url);
+  if (url.pathname !== '/api/v1/auth/org-groups' || request.method !== 'GET') return null;
+  const orgId = url.searchParams.get('org_id');
+  if (!orgId) return new Response(JSON.stringify({ error: 'org_id required' }), { status: 400, headers: { 'Content-Type': 'application/json' } });
+  const res = await authorizeFetch(env, {
+    path: `/api/v1/identity/orgs/${encodeURIComponent(orgId)}/groups`,
+    method: 'GET',
+  });
+  if (!res.ok) return new Response(await res.text(), { status: res.status, headers: { 'Content-Type': 'application/json' } });
+  return new Response(await res.text(), { status: 200, headers: { 'Content-Type': 'application/json' } });
+}
+
+// GET /org-group-select?org_id=... — server-renders org group selection page
+export async function handleOrgGroupSelectPage(
+  request: Request,
+  env: AuthorizeEnv,
+): Promise<Response | null> {
+  const url = new URL(request.url);
+  if (url.pathname !== '/org-group-select' || request.method !== 'GET') return null;
+  const orgId = url.searchParams.get('org_id');
+  if (!orgId) return new Response('Missing org_id', { status: 400 });
+  const returnTo = url.searchParams.get('returnTo') ?? '';
+
+  const res = await authorizeFetch(env, {
+    path: `/api/v1/identity/orgs/${encodeURIComponent(orgId)}/groups`,
+    method: 'GET',
+  });
+  const groups: Array<{ id: string; name: string }> = res.ok
+    ? ((await res.json()) as { groups: Array<{ id: string; name: string }> }).groups
+    : [];
+
+  const safeReturnTo = returnTo.startsWith('/') ? returnTo : '/';
+  const items = groups
+    .map((g) => {
+      const dest = `/api/v1/auth/select-org?org_id=${encodeURIComponent(g.id)}${safeReturnTo !== '/' ? `&returnTo=${encodeURIComponent(safeReturnTo)}` : ''}`;
+      return `<li><a href="${escHtml(dest)}">${escHtml(g.name)}</a></li>`;
+    })
+    .join('\n');
+  const body = `<!DOCTYPE html>
+<html lang="ja">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>グループを選択 - Tempri</title>
+<style>body{font-family:sans-serif;max-width:400px;margin:80px auto;padding:0 16px}ul{list-style:none;padding:0}li{margin:8px 0}a{display:block;padding:12px 16px;border:1px solid #ddd;border-radius:6px;text-decoration:none;color:#333}a:hover{background:#f5f5f5}</style>
+</head>
+<body>
+<h1>グループを選択</h1>
+${items.length ? `<ul>\n${items}\n</ul>` : '<p>グループが見つかりません。</p>'}
+</body>
+</html>`;
+  return new Response(body, { headers: { 'Content-Type': 'text/html; charset=UTF-8' } });
 }
 
 // GET /login/:groupId — server-renders group-specific login page with injected group info
