@@ -5,12 +5,13 @@ import {
   hasAuthorizeConfig,
   issueInternalToken,
   type AuthorizeEnv,
-} from "../src/auth";
+} from "../src/session";
 import {
   buildGitHubOAuthStartUrl,
   exchangeGitHubOAuthCode,
   readGitHubSession,
 } from "../src/identify";
+import { issueSessionToken } from "../src/session/token";
 
 const encoder = new TextEncoder();
 const decoder = new TextDecoder();
@@ -143,32 +144,20 @@ describe("authorize helpers", () => {
     );
   });
 
-  it("reads the GitHub session from backend", async () => {
-    const backend = {
-      fetch: vi.fn(async (request: Request) => {
-        expect(request.url).toBe("https://backend.local/api/v1/identify/session/github");
-        expect(request.method).toBe("GET");
-        return Response.json({
-          authenticated: true,
-          accessToken: "github-token",
-          viewer: { login: "octocat", name: "Mona" },
-        });
-      }),
-    };
-
-    await expect(
-      readGitHubSession({
-        BACKEND: backend,
-        FRONT_TO_BACKEND_TOKEN: "backend-token",
-        INTERNAL_AUTH_SIGNING_KEY: privateKeyJwk,
-      }),
-    ).resolves.toEqual({
-      authenticated: true,
+  it("reads the GitHub session from cookie", async () => {
+    const sessionData = {
+      authenticated: true as const,
       accessToken: "github-token",
       viewer: { login: "octocat", name: "Mona" },
+      email: null,
+    };
+    const env = { INTERNAL_AUTH_SIGNING_KEY: privateKeyJwk };
+    const token = await issueSessionToken(env, sessionData);
+    const request = new Request("https://front.example.com/", {
+      headers: { Cookie: `github_session=${token}` },
     });
 
-    expect(backend.fetch).toHaveBeenCalledOnce();
+    await expect(readGitHubSession(request, env)).resolves.toMatchObject(sessionData);
   });
 
   it("prefers AUTHORIZE_ORIGIN over the authorize service binding", async () => {
@@ -204,7 +193,12 @@ describe("authorize helpers", () => {
         expect(request.url).toBe("https://backend.local/api/v1/identify/session/github/oauth/callback");
         expect(request.method).toBe("POST");
         await expect(request.json()).resolves.toMatchObject({ code: "oauth-code" });
-        return new Response(null, { status: 204 });
+        return Response.json({
+          authenticated: true,
+          accessToken: "github-token",
+          viewer: { login: "octocat", name: "Mona" },
+          email: null,
+        });
       }),
     };
 
@@ -218,7 +212,7 @@ describe("authorize helpers", () => {
         "oauth-code",
         "https://front.example.com/oauth/github/callback",
       ),
-    ).resolves.toBeUndefined();
+    ).resolves.toMatchObject({ authenticated: true, accessToken: "github-token" });
 
     expect(backend.fetch).toHaveBeenCalledOnce();
   });

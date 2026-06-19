@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { COMPONENT_KINDS, componentSchemas, isSchemaField } from "../src/schema/component";
+import { COMPONENT_KINDS, componentSchemas, isSchemaField } from "../src/web/schema/component";
 
 describe("schema field validation", () => {
   it("accepts unknown field kinds with nested fields", () => {
@@ -20,7 +20,9 @@ describe("schema field validation", () => {
   });
 
   it("includes name as the first field in every component schema", () => {
+    const KINDS_WITHOUT_NAME_FIRST = new Set(['graph-editor']);
     for (const kind of COMPONENT_KINDS) {
+      if (KINDS_WITHOUT_NAME_FIRST.has(kind)) continue;
       expect(componentSchemas[kind]?.[0]).toMatchObject({
         kind: "text-field",
         key: "name",

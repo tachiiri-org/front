@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest';
-import { handleApiRequest } from '../src/api/layout';
-import type { LayoutsEnv } from '../src/storage/layouts/r2';
+import { handleApiRequest } from '../src/routes/layout';
+import type { LayoutsEnv } from '../src/web/storage/layouts/r2';
 
 const makeEnv = (objects: Record<string, string> = {}): LayoutsEnv & { ASSETS: { fetch(): Promise<Response> } } => ({
   ASSETS: {
@@ -34,9 +34,11 @@ describe('layout api', () => {
       ]),
     });
 
-    const response = await handleApiRequest(new Request('http://localhost/api/list/category'), env);
+    const response = await handleApiRequest(new Request('http://localhost/api/v1/component-schemas/list/category'), env);
     expect(response.status).toBe(200);
-    await expect(response.json()).resolves.toEqual([
+    const payload = await response.json() as { kind: string; data: { rows: Array<{ values: { value: string; label: string } }> } };
+    expect(payload.kind).toBe('table');
+    expect(payload.data.rows.map((r) => ({ value: r.values.value, label: r.values.label }))).toEqual([
       { value: 'component', label: 'component' },
       { value: 'source', label: 'source' },
     ]);

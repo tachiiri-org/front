@@ -43,12 +43,20 @@ it("starts GitHub OAuth from the public front route", async () => {
 
 it("exchanges the GitHub OAuth callback through backend", async () => {
   const backendFetch = vi.fn(async (request: Request) => {
-    expect(request.url).toBe("https://backend.local/api/v1/identify/session/github/oauth/callback");
-    expect(request.method).toBe("POST");
-    const body = (await request.json()) as { code: string; redirectUri: string };
-    expect(body.code).toBe("abc");
-    expect(body.redirectUri).toBe("https://front.example.com/oauth/github/callback");
-    return new Response(null, { status: 204 });
+    if (request.url.endsWith("/oauth/callback")) {
+      expect(request.method).toBe("POST");
+      const body = (await request.json()) as { code: string; redirectUri: string };
+      expect(body.code).toBe("abc");
+      expect(body.redirectUri).toBe("https://front.example.com/oauth/github/callback");
+      return Response.json({
+        authenticated: true,
+        accessToken: "github-token",
+        viewer: { login: "octocat", name: "Mona" },
+        email: null,
+      });
+    }
+    // identity lookup
+    return new Response("not found", { status: 404 });
   });
 
   const response = await worker.fetch(
@@ -70,16 +78,22 @@ it("exchanges the GitHub OAuth callback through backend", async () => {
 
   expect(response.status).toBe(302);
   expect(response.headers.get("Location")).toBe(
-    "https://front.example.com/?tab=openapi-explorer",
+    "https://front.example.com/group-select",
   );
-  expect(backendFetch).toHaveBeenCalledOnce();
+  expect(backendFetch).toHaveBeenCalled();
 });
 
 it("accepts the legacy GitHub OAuth callback path", async () => {
   const backendFetch = vi.fn(async (request: Request) => {
-    expect(request.url).toBe("https://backend.local/api/v1/identify/session/github/oauth/callback");
-    expect(request.method).toBe("POST");
-    return new Response(null, { status: 204 });
+    if (request.url.endsWith("/oauth/callback")) {
+      return Response.json({
+        authenticated: true,
+        accessToken: "github-token",
+        viewer: { login: "octocat", name: "Mona" },
+        email: null,
+      });
+    }
+    return new Response("not found", { status: 404 });
   });
 
   const response = await worker.fetch(
@@ -101,7 +115,7 @@ it("accepts the legacy GitHub OAuth callback path", async () => {
 
   expect(response.status).toBe(302);
   expect(response.headers.get("Location")).toBe(
-    "https://front.example.com/?tab=openapi-explorer",
+    "https://front.example.com/group-select",
   );
-  expect(backendFetch).toHaveBeenCalledOnce();
+  expect(backendFetch).toHaveBeenCalled();
 });

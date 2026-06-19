@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { allocateDefaultEntityName, assignDefaultEntityNames } from "../src/name";
+import { allocateDefaultEntityName, assignDefaultEntityNames } from "../src/web/schema/component/name";
 
 describe("entity naming", () => {
   it("allocates unique names with a kind prefix", () => {

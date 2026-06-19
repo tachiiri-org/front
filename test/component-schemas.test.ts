@@ -6,8 +6,8 @@ import {
   handleComponentSchemaPut,
   SCHEMA_TABLE_SCHEMA,
   STYLE_TABLE_SCHEMA,
-} from '../src/api/component-schemas';
-import type { LayoutBackend } from '../src/storage/layouts/r2';
+} from '../src/routes/component-schemas';
+import type { LayoutBackend } from '../src/web/storage/layouts/r2';
 
 const makeBackend = (): { backend: LayoutBackend; writes: Record<string, string> } => {
   const writes: Record<string, string> = {};
@@ -109,7 +109,8 @@ describe('component schemas', () => {
   });
 
   it('lists only current style keys in the style category', async () => {
-    const response = handleComponentSchemasList(new URLSearchParams('category=style'));
+    const { backend } = makeBackend();
+    const response = await handleComponentSchemasList(backend, new URLSearchParams('category=style'));
     const payload = await response.json() as { items: Array<{ value: string; label: string }> };
 
     expect(payload.items.some((item) => item.value === 'paddingTop')).toBe(false);
@@ -119,7 +120,8 @@ describe('component schemas', () => {
   });
 
   it('lists source schemas in the source category', async () => {
-    const response = handleComponentSchemasList(new URLSearchParams('category=source'));
+    const { backend } = makeBackend();
+    const response = await handleComponentSchemasList(backend, new URLSearchParams('category=source'));
     const payload = await response.json() as { items: Array<{ value: string; label: string }> };
 
     expect(payload.items.some((item) => item.value === 'source/endpoint')).toBe(true);
@@ -129,11 +131,20 @@ describe('component schemas', () => {
   });
 
   it('lists source endpoint and list schemas in their own categories', async () => {
-    const endpointResponse = handleComponentSchemasList(new URLSearchParams('category=endpoint'));
+    const { backend } = makeBackend();
+    const endpointResponse = await handleComponentSchemasList(backend, new URLSearchParams('category=endpoint'));
     const endpointPayload = await endpointResponse.json() as { items: Array<{ value: string; label: string }> };
     expect(endpointPayload.items.some((item) => item.value === 'source/endpoint')).toBe(true);
 
-    const listResponse = handleComponentSchemasList(new URLSearchParams('category=list'));
+    const listBackend: LayoutBackend = {
+      async list() {
+        return { objects: [{ key: 'list/category.json' }], truncated: false };
+      },
+      async getText() { return null; },
+      async putText() {},
+      async deleteKey() {},
+    };
+    const listResponse = await handleComponentSchemasList(listBackend, new URLSearchParams('category=list'));
     const listPayload = await listResponse.json() as { items: Array<{ value: string; label: string }> };
     expect(listPayload.items.some((item) => item.value === 'list/category')).toBe(true);
     expect(listPayload.items.find((item) => item.value === 'list/category')?.label).toBe('category');
@@ -301,6 +312,7 @@ describe('component schemas', () => {
         columns: [
           { key: 'value', label: 'value', type: 'string' },
           { key: 'label', label: 'label', type: 'string', nullable: true },
+          { key: 'childList', label: 'childList', type: 'string', nullable: true },
           { key: 'raw_json', label: 'raw', type: 'string', hidden: true, nullable: true },
         ],
       },
@@ -311,6 +323,7 @@ describe('component schemas', () => {
             values: {
               value: 'component',
               label: 'component',
+              childList: '',
               raw_json: JSON.stringify({ value: 'component', label: 'component' }),
             },
           },
@@ -319,6 +332,7 @@ describe('component schemas', () => {
             values: {
               value: 'source',
               label: 'source',
+              childList: '',
               raw_json: JSON.stringify({ value: 'source', label: 'source' }),
             },
           },
@@ -365,7 +379,7 @@ describe('component schemas', () => {
         label: 'source',
         source: {
           kind: 'endpoint',
-          url: '/api/layouts/:screenId/canvases',
+          url: '/api/v1/layouts/:screenId/canvases',
           itemsPath: 'items',
           valueKey: 'value',
           labelKey: 'label',
