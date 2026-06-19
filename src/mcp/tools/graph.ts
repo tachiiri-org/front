@@ -175,7 +175,35 @@ export const GRAPH_TOOLS = [
   {
     name: "graph_toggle_link",
     description:
-      "Toggle an edge between two nodes. Creates the edge if absent, deletes it if present. Returns {linked:true} when the edge now exists.",
+      "Toggle an edge between two nodes. Creates the edge if absent, deletes it if present. Returns {linked:true} when the edge now exists. For reliable (non-toggle) link operations use graph_link / graph_unlink instead.",
+    inputSchema: {
+      type: "object",
+      properties: {
+        graph_id: { type: "string", description: "Word graph ID (e.g. 'word-graph-1')" },
+        node_id: { type: "string", description: "One endpoint of the edge" },
+        target_node_id: { type: "string", description: "The other endpoint" },
+      },
+      required: ["graph_id", "node_id", "target_node_id"],
+    },
+  },
+  {
+    name: "graph_link",
+    description:
+      "Idempotently create an edge between two nodes. Does nothing if the edge already exists. Use this instead of graph_toggle_link when you want to ensure an edge exists without risking accidental deletion.",
+    inputSchema: {
+      type: "object",
+      properties: {
+        graph_id: { type: "string", description: "Word graph ID (e.g. 'word-graph-1')" },
+        node_id: { type: "string", description: "One endpoint of the edge" },
+        target_node_id: { type: "string", description: "The other endpoint" },
+      },
+      required: ["graph_id", "node_id", "target_node_id"],
+    },
+  },
+  {
+    name: "graph_unlink",
+    description:
+      "Idempotently delete an edge between two nodes. Does nothing if the edge does not exist. Use this instead of graph_toggle_link when you want to ensure an edge is removed without risking accidental creation.",
     inputSchema: {
       type: "object",
       properties: {
@@ -296,6 +324,22 @@ export async function callGraphTool(
       if (!res.ok) throw new Error(`toggle_link_failed:${res.status}`);
       const data = (await res.json()) as { linked: boolean };
       return { content: [{ type: "text", text: data.linked ? `Linked [${nodeId}] ↔ [${targetId}]` : `Unlinked [${nodeId}] ↔ [${targetId}]` }] };
+    }
+
+    if (name === "graph_link") {
+      const nodeId = String(args.node_id);
+      const targetId = String(args.target_node_id);
+      const res = await graphFetch(env, graphId, "link", "POST", { node_id: nodeId, target_node_id: targetId });
+      if (!res.ok) throw new Error(`graph_link_failed:${res.status}`);
+      return { content: [{ type: "text", text: `Linked [${nodeId}] ↔ [${targetId}]` }] };
+    }
+
+    if (name === "graph_unlink") {
+      const nodeId = String(args.node_id);
+      const targetId = String(args.target_node_id);
+      const res = await graphFetch(env, graphId, "link", "DELETE", { node_id: nodeId, target_node_id: targetId });
+      if (!res.ok) throw new Error(`graph_unlink_failed:${res.status}`);
+      return { content: [{ type: "text", text: `Unlinked [${nodeId}] ↔ [${targetId}]` }] };
     }
 
     if (name === "graph_set_property") {
