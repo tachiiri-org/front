@@ -44,11 +44,22 @@ async function getNodesByIds(env: AuthorizeEnv, graphId: string, ids: string[]):
   return data.nodes ?? [];
 }
 
-async function getNeighbors(env: AuthorizeEnv, graphId: string, nodeId: string, depth: number): Promise<ApiNode[]> {
-  const res = await graphFetch(env, graphId, `node/${encodeURIComponent(nodeId)}/neighbors?depth=${depth}`);
+async function getNeighbors(
+  env: AuthorizeEnv,
+  graphId: string,
+  nodeId: string,
+  depth: number,
+  opts?: { filterNodeType?: string | string[]; limit?: number },
+): Promise<{ nodes: ApiNode[]; truncated?: boolean; count?: number }> {
+  const params = new URLSearchParams({ depth: String(depth) });
+  if (opts?.filterNodeType != null) {
+    const types = Array.isArray(opts.filterNodeType) ? opts.filterNodeType : [opts.filterNodeType];
+    params.set("filter[node_type]", types.join(","));
+  }
+  if (opts?.limit != null) params.set("limit", String(opts.limit));
+  const res = await graphFetch(env, graphId, `node/${encodeURIComponent(nodeId)}/neighbors?${params.toString()}`);
   if (!res.ok) throw new Error(`get_neighbors_failed:${res.status}`);
-  const data = (await res.json()) as { nodes: ApiNode[] };
-  return data.nodes ?? [];
+  return res.json() as Promise<{ nodes: ApiNode[]; truncated?: boolean; count?: number }>;
 }
 
 async function getNeighborsByWord(env: AuthorizeEnv, graphId: string, word: string, depth: number): Promise<ApiNode[] | null> {
@@ -99,13 +110,24 @@ export const GRAPH_TOOLS = [
   {
     name: "graph_read_nodes_from",
     description:
-      "Traverse the graph from any node ID, returning all nodes reachable within `depth` hops (default 2, max 5). Use this when the user provides a node ID copied from the graph editor.",
+      "Traverse the graph from any node ID, returning all nodes reachable within `depth` hops (default 2, max 5). Use this when the user provides a node ID copied from the graph editor. Supports optional `filter` to narrow results by node_type at the DB level. Returns `truncated: true` with `count` when the result exceeds the limit (default 100, max 500) — use filter or reduce depth to get complete results.",
     inputSchema: {
       type: "object",
       properties: {
         graph_id: { type: "string", description: "Word graph ID (e.g. 'word-graph-1')" },
         node_id: { type: "string", description: "Starting node ID" },
         depth: { type: "number", description: "Hops to traverse (default 2, max 5)" },
+        filter: {
+          type: "object",
+          description: "Filter returned nodes by property. Only nodes matching the condition are returned; traversal still follows all edges.",
+          properties: {
+            node_type: {
+              description: "node_type value(s) to include. String for single, array for OR match.",
+              oneOf: [{ type: "string" }, { type: "array", items: { type: "string" } }],
+            },
+          },
+        },
+        limit: { type: "number", description: "Max nodes to return (default 100, max 500). If truncated, reduce depth or add filter." },
       },
       required: ["graph_id", "node_id"],
     },
@@ -225,8 +247,15 @@ export async function callGraphTool(
     if (name === "graph_read_nodes_from") {
       const nodeId = String(args.node_id);
       const depth = clampDepth(args.depth);
-      const nodes = await getNeighbors(env, graphId, nodeId, depth);
-      const text = nodes.map(nodeLine).join("\n") || "(no nodes)";
+      const filter = args.filter as { node_type?: string | string[] } | undefined;
+      const rawLimit = typeof args.limit === "number" ? args.limit : undefined;
+      const result = await getNeighbors(env, graphId, nodeId, depth, {
+        filterNodeType: filter?.node_type,
+        limit: rawLimit,
+      });
+      const nodes = result.nodes ?? [];
+      let text = nodes.map(nodeLine).join("\n") || "(no nodes)";
+      if (result.truncated) text += `\n[truncated: ${result.count} nodes returned, more exist — reduce depth or add filter]`;
       return { content: [{ type: "text", text }] };
     }
 
