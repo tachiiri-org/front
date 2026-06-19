@@ -603,19 +603,19 @@ export const handleApiRequest = async (request: Request, env: Env): Promise<Resp
     return new Response('Method Not Allowed', { status: 405 });
   }
 
-  if (url.pathname === '/api/v1/layouts/json-files' || url.pathname === '/api/layouts/json-files') {
+  if (url.pathname === '/api/v1/layouts/json-files') {
     if (request.method === 'GET') return handleScreensListGet(screenNames);
     return new Response('Method Not Allowed', { status: 405 });
   }
 
-  const layoutsRenameMatch = url.pathname.match(/^\/api\/(?:v1\/)?layouts\/([^/]+)\/rename$/);
+  const layoutsRenameMatch = url.pathname.match(/^\/api\/v1\/layouts\/([^/]+)\/rename$/);
   if (layoutsRenameMatch) {
     const name = decodeURIComponent(layoutsRenameMatch[1]);
     if (request.method === 'POST') return handleScreenRename(request, backend, screenNames, name);
     return new Response('Method Not Allowed', { status: 405 });
   }
 
-  const layoutsItemMatch = url.pathname.match(/^\/api\/(?:v1\/)?layouts\/([^/]+)$/);
+  const layoutsItemMatch = url.pathname.match(/^\/api\/v1\/layouts\/([^/]+)$/);
   if (layoutsItemMatch) {
     const name = decodeURIComponent(layoutsItemMatch[1]);
     if (request.method === 'GET') return handleScreenGet(backend, screenNames, name);
