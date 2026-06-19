@@ -184,6 +184,7 @@ export async function handleIdentityStatus(
     return null;
   }
 
+  const url = new URL(request.url);
   const cookies = parseCookies(request);
   const userId = cookies.get('identity_user_id') ?? null;
 
@@ -191,11 +192,18 @@ export async function handleIdentityStatus(
     return json({ user_id: null, organizations: [] }, { status: 200 });
   }
 
+  const isSecure = url.protocol === 'https:';
+  const refreshCookie = `identity_user_id=${encodeURIComponent(userId)}; Path=/; Max-Age=${60 * 60 * 24}${isSecure ? '; Secure' : ''}; SameSite=Lax; HttpOnly`;
+
   try {
     const organizations = await listUserOrganizations(env, userId);
-    return json({ user_id: userId, organizations }, { status: 200 });
+    const res = json({ user_id: userId, organizations }, { status: 200 });
+    res.headers.append('Set-Cookie', refreshCookie);
+    return res;
   } catch {
-    return json({ user_id: userId, organizations: [] }, { status: 200 });
+    const res = json({ user_id: userId, organizations: [] }, { status: 200 });
+    res.headers.append('Set-Cookie', refreshCookie);
+    return res;
   }
 }
 

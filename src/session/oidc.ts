@@ -116,7 +116,7 @@ export async function handleOidcLoginCallback(context: RouteContext): Promise<Re
 
     const userId = await findOrCreateUserByOidc(context.env, oidcId, oidcSession.sub);
     headers.append("Set-Cookie", serializeCookie(IDENTITY_USER_ID_COOKIE, userId, {
-      maxAge: 60 * 10,
+      maxAge: 60 * 60 * 24,
       path: "/",
       secure: isSecureRequest(context.request),
       httpOnly: true,

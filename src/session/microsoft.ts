@@ -114,7 +114,7 @@ export async function handleMicrosoftLoginCallback(context: RouteContext): Promi
       headers.append(
         "Set-Cookie",
         serializeCookie(IDENTITY_USER_ID_COOKIE, userId, {
-          maxAge: 60 * 10,
+          maxAge: 60 * 60 * 24,
           path: "/",
           secure: isSecureRequest(context.request),
           httpOnly: true,
