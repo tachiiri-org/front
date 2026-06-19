@@ -8,7 +8,7 @@ import {
 import { handleGoogleLoginStart, handleGoogleLoginCallback } from './session/google';
 import { handleMicrosoftLoginStart, handleMicrosoftLoginCallback } from './session/microsoft';
 import type { AuthorizeEnv } from './session';
-import { handleApiRequest as handleDataApiRequest, handleGitHubAuthStatus, handleAuthStatus, handleIdentityStatus, handleOrgCreate, handleSelectOrg, handleOrgMembers, handleAutoSelectOrg, handleMagicLinkRequest, handleMagicLinkVerify, handleMemberCheck, handleGroupLoginPage, handleOrgSlugLogin } from './routes/data';
+import { handleApiRequest as handleDataApiRequest, handleGitHubAuthStatus, handleAuthStatus, handleIdentityStatus, handleOrgCreate, handleSelectOrg, handleOrgMembers, handleAutoSelectOrg, handleMagicLinkRequest, handleMagicLinkVerify, handleMemberCheck, handleGroupLoginPage, handleOrgSlugLogin, handleOrgGroupsApi, handleOrgGroupSelectPage } from './routes/data';
 import { handleApiRequest as handleLayoutApiRequest } from './routes/layout';
 import { handleMcp } from './mcp/handler';
 import {
@@ -65,8 +65,10 @@ const isPublicPath = (pathname: string): boolean =>
   pathname === '/login' ||
   /^\/login\/[0-9a-f-]{36}$/i.test(pathname) ||
   /^\/login\/[a-z0-9][a-z0-9-]*[a-z0-9]$/i.test(pathname) ||
+  pathname === '/org-group-select' ||
   pathname === '/auth/magic' ||
   pathname === '/api/v1/auth/member-check' ||
+  pathname === '/api/v1/auth/org-groups' ||
   /^\/auth\/saml\/[^/]+\/(metadata|sso|acs)$/.test(pathname) ||
   pathname.startsWith('/oauth/') ||
   pathname.startsWith('/github/oauth/') ||
@@ -201,6 +203,14 @@ async function fetchInner(request: Request, env: Env): Promise<Response> {
     }
     if (/^\/login\/[a-z0-9][a-z0-9-]*[a-z0-9]$/i.test(pathname) && request.method === 'GET') {
       const res = await handleOrgSlugLogin(request, env);
+      if (res) return res;
+    }
+    if (pathname === '/org-group-select' && request.method === 'GET') {
+      const res = await handleOrgGroupSelectPage(request, env);
+      if (res) return res;
+    }
+    if (pathname === '/api/v1/auth/org-groups' && request.method === 'GET') {
+      const res = await handleOrgGroupsApi(request, env);
       if (res) return res;
     }
     if (pathname === '/api/v1/auth/organizations' && request.method === 'POST') {

@@ -7,6 +7,7 @@ import { MCP_OAUTH_PARAMS_COOKIE } from "./google";
 const OIDC_STATE_COOKIE = "oidc_login_oauth_state";
 const OIDC_ID_COOKIE = "oidc_login_oidc_id";
 const OIDC_RETURN_TO_COOKIE = "oidc_login_return_to";
+export const OIDC_ORG_ID_COOKIE = "oidc_login_org_id";
 const IDENTITY_USER_ID_COOKIE = "identity_user_id";
 const STATE_TTL_SECONDS = 60 * 10;
 
@@ -127,12 +128,22 @@ export async function handleOidcLoginCallback(context: RouteContext): Promise<Re
 
   const loginReturnTo = cookies.get(OIDC_RETURN_TO_COOKIE) ?? "";
   headers.append("Set-Cookie", clearCookie(OIDC_RETURN_TO_COOKIE, context.request));
-  const groupSelectDest = loginReturnTo.startsWith("/")
-    ? `/group-select?returnTo=${encodeURIComponent(loginReturnTo)}`
-    : "/group-select";
-  const dest = cookies.has(MCP_OAUTH_PARAMS_COOKIE)
-    ? `${resolveFrontendOrigin(context.request, context.env)}/oauth/mcp/select-org`
-    : `${resolveFrontendOrigin(context.request, context.env)}${groupSelectDest}`;
+
+  const orgId = cookies.get(OIDC_ORG_ID_COOKIE) ?? "";
+  headers.append("Set-Cookie", clearCookie(OIDC_ORG_ID_COOKIE, context.request));
+
+  let dest: string;
+  if (cookies.has(MCP_OAUTH_PARAMS_COOKIE)) {
+    dest = `${resolveFrontendOrigin(context.request, context.env)}/oauth/mcp/select-org`;
+  } else if (orgId) {
+    const returnPart = loginReturnTo.startsWith("/") ? `&returnTo=${encodeURIComponent(loginReturnTo)}` : "";
+    dest = `${resolveFrontendOrigin(context.request, context.env)}/org-group-select?org_id=${encodeURIComponent(orgId)}${returnPart}`;
+  } else {
+    const groupSelectDest = loginReturnTo.startsWith("/")
+      ? `/group-select?returnTo=${encodeURIComponent(loginReturnTo)}`
+      : "/group-select";
+    dest = `${resolveFrontendOrigin(context.request, context.env)}${groupSelectDest}`;
+  }
 
   headers.set("Location", dest);
   return new Response(null, { status: 302, headers });
