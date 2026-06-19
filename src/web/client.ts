@@ -428,7 +428,7 @@ const loadEditorBootstrap = async (): Promise<void> => {
     if (status?.user_id) {
       const autoRes = await fetch('/api/v1/auth/auto-select-org').catch(() => null);
       if (autoRes?.ok) {
-        window.location.reload();
+        window.location.href = decodeURIComponent(returnTo);
         return;
       }
       window.location.href = `/group-select?returnTo=${returnTo}`;
