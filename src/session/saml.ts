@@ -180,6 +180,28 @@ function checkSamlConditions(xml: string, expectedAudience: string, expectedDest
   return true;
 }
 
+
+// WebCrypto requires SubjectPublicKeyInfo (SPKI), not the full X.509 DER cert.
+function extractSpkiFromCertDer(der: Uint8Array): Uint8Array {
+  function readLen(pos: number): [number, number] {
+    if (der[pos] < 0x80) return [der[pos], pos + 1];
+    const n = der[pos] & 0x7f;
+    let len = 0;
+    for (let i = 1; i <= n; i++) len = (len << 8) | der[pos + i];
+    return [len, pos + 1 + n];
+  }
+  function skip(pos: number): number {
+    const [len, end] = readLen(pos + 1);
+    return end + len;
+  }
+  const [, outerEnd] = readLen(1);
+  let p = outerEnd;
+  const [, tbsValStart] = readLen(p + 1); p = tbsValStart;
+  if (der[p] === 0xa0) p = skip(p);
+  p = skip(p); p = skip(p); p = skip(p); p = skip(p); p = skip(p);
+  const [spkiLen, spkiValStart] = readLen(p + 1);
+  return der.slice(p, spkiValStart + spkiLen);
+}
 async function verifySamlSignature(xml: string, pemCertificate: string): Promise<boolean> {
   try {
     const signatureValueMatch = xml.match(/<(?:[a-zA-Z0-9]+:)?SignatureValue[^>]*>\s*([\s\S]+?)\s*<\/(?:[a-zA-Z0-9]+:)?SignatureValue>/);
@@ -198,7 +220,8 @@ async function verifySamlSignature(xml: string, pemCertificate: string): Promise
       .replace(/-----END CERTIFICATE-----/g, '')
       .replace(/\s/g, '');
     const certDer = Uint8Array.from(atob(certBase64), c => c.charCodeAt(0));
-    const publicKey = await crypto.subtle.importKey('spki', certDer, { name: 'RSASSA-PKCS1-v1_5', hash: hashAlg }, false, ['verify']);
+    const spki = extractSpkiFromCertDer(certDer);
+    const publicKey = await crypto.subtle.importKey('spki', spki, { name: 'RSASSA-PKCS1-v1_5', hash: hashAlg }, false, ['verify']);
 
     const signatureBytes = Uint8Array.from(atob(signatureB64), c => c.charCodeAt(0));
     const signedInfoBytes = new TextEncoder().encode(signedInfoXml);
