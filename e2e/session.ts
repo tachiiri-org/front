@@ -67,7 +67,7 @@ export async function getSession(): Promise<{ browser: Browser; context: Browser
 }
 
 export async function ensureAuthOnPage(page: Page, context: BrowserContext) {
-  const res = await page.goto(`${BASE_URL}/api/auth/status`);
+  const res = await page.goto(`${BASE_URL}/api/v1/auth/status`);
   const status = await res!.json();
   console.log('[auth] status:', JSON.stringify(status));
 
