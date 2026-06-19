@@ -124,7 +124,22 @@ export const renderDbApply = (
   });
   ciDeployBtn.textContent = 'CI Deploy (stage→main)';
 
-  tabBar.append(identityTab, userDbTab, tabSpacer, connectLink, ciDeployBtn);
+  const runMigrateBtn = styled('button', {
+    padding: '3px 10px',
+    fontSize: '11px',
+    fontFamily: 'monospace',
+    cursor: 'pointer',
+    border: `1px solid ${C.border}`,
+    borderRadius: '3px',
+    background: C.surface,
+    color: C.textBright,
+    marginBottom: '4px',
+    marginLeft: '4px',
+    alignSelf: 'center',
+  });
+  runMigrateBtn.textContent = 'Run Migration Runner';
+
+  tabBar.append(identityTab, userDbTab, tabSpacer, connectLink, ciDeployBtn, runMigrateBtn);
   root.appendChild(tabBar);
 
   // ================================================================
@@ -685,6 +700,52 @@ export const renderDbApply = (
         logLine(`Unexpected error: ${String(e)}`, true);
       } finally {
         ciDeployBtn.disabled = false;
+      }
+    })();
+  });
+
+  runMigrateBtn.addEventListener('click', () => {
+    void (async () => {
+      ciLog.style.display = '';
+      ciLog.replaceChildren();
+      runMigrateBtn.disabled = true;
+      logLine('=== Migration Runner start ===');
+      try {
+        const res = await fetch('/api/v1/admin/db-apply/migrate-auto', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: '{}' });
+        const body = await res.json() as Record<string, unknown>;
+        if (!res.ok) { logLine(`Failed: ${String(body.message ?? body.error ?? res.status)}`, true); return; }
+        const runId = body.runId as string;
+        logLine(`Workflow started: ${runId}`);
+        for (let i = 0; i < 120; i++) {
+          await new Promise(r => setTimeout(r, 5000));
+          try {
+            const statusRes = await fetch(`/api/v1/admin/db-apply/migrate/${runId}`);
+            if (!statusRes.ok) { logLine(`Status check failed: ${statusRes.status}`, true); continue; }
+            const s = await statusRes.json() as { status: string; output?: { identity?: { applied: string[]; skipped: string[]; error?: string }; secrets?: { applied: string[]; skipped: string[]; error?: string } | null; groups?: Array<{ label: string; applied: string[]; skipped: string[]; error?: string }>; identityFailed?: boolean } };
+            logLine(`[${i + 1}] status: ${s.status}`);
+            if (s.status === 'complete' || s.status === 'errored') {
+              if (s.output) {
+                const out = s.output;
+                if (out.identityFailed) logLine('Identity DB migration FAILED', true);
+                else {
+                  if (out.identity) logLine(`identity: applied=${out.identity.applied.length} skipped=${out.identity.skipped.length}${out.identity.error ? ' ERROR: ' + out.identity.error : ''}`);
+                  if (out.secrets) logLine(`secrets: applied=${out.secrets.applied.length} skipped=${out.secrets.skipped.length}${out.secrets.error ? ' ERROR: ' + out.secrets.error : ''}`);
+                  if (out.groups) {
+                    const failed = out.groups.filter(g => g.error);
+                    logLine(`groups: total=${out.groups.length} failed=${failed.length}`);
+                    for (const f of failed) logLine(`  [${f.label}] Error: ${f.error}`, true);
+                  }
+                }
+              }
+              logLine(`=== Migration Runner ${s.status} ===`, s.status !== 'complete');
+              break;
+            }
+          } catch { /* retry */ }
+        }
+      } catch (e) {
+        logLine(`Unexpected error: ${String(e)}`, true);
+      } finally {
+        runMigrateBtn.disabled = false;
       }
     })();
   });
