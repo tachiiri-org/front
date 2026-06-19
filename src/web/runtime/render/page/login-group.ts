@@ -196,7 +196,7 @@ export const renderLoginGroupPage = async (root: HTMLElement): Promise<void> => 
     // Validate membership before sending
     try {
       const checkRes = await fetch(
-        `/api/auth/member-check?group_id=${encodeURIComponent(groupId)}&email=${encodeURIComponent(email)}`,
+        `/api/v1/auth/member-check?group_id=${encodeURIComponent(groupId)}&email=${encodeURIComponent(email)}`,
       );
       if (checkRes.status === 404) {
         statusEl.textContent = 'このメールアドレスはこのグループに登録されていません';
@@ -222,7 +222,7 @@ export const renderLoginGroupPage = async (root: HTMLElement): Promise<void> => 
 
     sendBtn.textContent = '送信中...';
     try {
-      const res = await fetch('/api/auth/magic-link', {
+      const res = await fetch('/api/v1/auth/magic-link', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ email, purpose: 'login', group_id: groupId }),

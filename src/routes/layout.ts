@@ -185,7 +185,7 @@ const handleMigrateListsToTree = async (backend: LayoutBackend): Promise<Respons
               const src = frame.source as Record<string, unknown> | undefined;
               if (!src || typeof src.url !== 'string') continue;
               if (!src.url.includes('api/list') && !src.url.includes('component-schemas')) continue;
-              frame.source = { url: `/api/trees/${newTreeId}`, itemsPath: 'nodes' };
+              frame.source = { url: `/api/v1/trees/${newTreeId}`, itemsPath: 'nodes' };
               changed = true;
             }
             if (changed) {
@@ -350,7 +350,7 @@ export const handleApiRequest = async (request: Request, env: Env): Promise<Resp
       };
   const screenNames = createScreenNameBackend(env, tenantContext);
 
-  if (url.pathname === '/api/component-schemas') {
+  if (url.pathname === '/api/v1/component-schemas') {
     if (request.method === 'GET') {
       if (url.searchParams.get('format') === 'tree') return handleComponentSchemasTree(backend);
       return handleComponentSchemasList(backend, url.searchParams);
@@ -358,7 +358,7 @@ export const handleApiRequest = async (request: Request, env: Env): Promise<Resp
     return new Response('Method Not Allowed', { status: 405 });
   }
 
-  const dbApplyMatch = url.pathname.match(/^\/api\/admin\/db-apply\/(.+)$/);
+  const dbApplyMatch = url.pathname.match(/^\/api\/v1\/admin\/db-apply\/(.+)$/);
   if (dbApplyMatch) {
     const suffix = dbApplyMatch[1] + url.search;
     const body = request.method !== 'GET' ? await request.text() : undefined;
@@ -374,7 +374,7 @@ export const handleApiRequest = async (request: Request, env: Env): Promise<Resp
     });
   }
 
-  if (url.pathname === '/api/admin/migration/schema' && request.method === 'POST') {
+  if (url.pathname === '/api/v1/admin/migration/schema' && request.method === 'POST') {
     const body = await request.text();
     return authorizeFetch(env, {
       path: '/api/v1/admin/migration/schema',
@@ -385,7 +385,7 @@ export const handleApiRequest = async (request: Request, env: Env): Promise<Resp
     });
   }
 
-  if (url.pathname === '/api/admin/migration/table' && request.method === 'POST') {
+  if (url.pathname === '/api/v1/admin/migration/table' && request.method === 'POST') {
     const body = await request.text();
     return authorizeFetch(env, {
       path: '/api/v1/admin/migration/table',
@@ -396,7 +396,7 @@ export const handleApiRequest = async (request: Request, env: Env): Promise<Resp
     });
   }
 
-  if (url.pathname === '/api/admin/migration/user-databases' && request.method === 'POST') {
+  if (url.pathname === '/api/v1/admin/migration/user-databases' && request.method === 'POST') {
     const body = await request.text();
     return authorizeFetch(env, {
       path: '/api/v1/admin/migration/user-databases',
@@ -407,7 +407,7 @@ export const handleApiRequest = async (request: Request, env: Env): Promise<Resp
     });
   }
 
-  if (url.pathname === '/api/admin/migration/r2' && request.method === 'POST') {
+  if (url.pathname === '/api/v1/admin/migration/r2' && request.method === 'POST') {
     const body = await request.text();
     return authorizeFetch(env, {
       path: '/api/v1/admin/migration/r2',
@@ -418,7 +418,7 @@ export const handleApiRequest = async (request: Request, env: Env): Promise<Resp
     });
   }
 
-  if (url.pathname === '/api/admin/migration/r2-layouts' && request.method === 'POST') {
+  if (url.pathname === '/api/v1/admin/migration/r2-layouts' && request.method === 'POST') {
     const body = await request.text();
     return authorizeFetch(env, {
       path: '/api/v1/admin/migration/r2-layouts',
@@ -429,7 +429,7 @@ export const handleApiRequest = async (request: Request, env: Env): Promise<Resp
     });
   }
 
-  if (url.pathname === '/api/admin/migration/identity' && request.method === 'POST') {
+  if (url.pathname === '/api/v1/admin/migration/identity' && request.method === 'POST') {
     const body = await request.text();
     return authorizeFetch(env, {
       path: '/api/v1/admin/migration/identity',
@@ -440,18 +440,18 @@ export const handleApiRequest = async (request: Request, env: Env): Promise<Resp
     });
   }
 
-  if (url.pathname === '/api/migrate/lists-to-tree') {
+  if (url.pathname === '/api/v1/migrate/lists-to-tree') {
     if (request.method === 'POST') return handleMigrateListsToTree(backend);
     return new Response('Method Not Allowed', { status: 405 });
   }
 
-  if (url.pathname === '/api/migrate/screens-to-folder') {
+  if (url.pathname === '/api/v1/migrate/screens-to-folder') {
     if (request.method === 'POST') return handleMigrateScreensToFolder(backend, screenNames);
     return new Response('Method Not Allowed', { status: 405 });
   }
 
   // Storage Explorer: D1 proxy
-  if (url.pathname === '/api/viewer/d1/databases' && request.method === 'GET') {
+  if (url.pathname === '/api/v1/viewer/d1/databases' && request.method === 'GET') {
     const cookies = parseCookies(request);
     const tenantContext = {
       tenantId: cookies.get('identity_group_id') ?? undefined,
@@ -460,7 +460,7 @@ export const handleApiRequest = async (request: Request, env: Env): Promise<Resp
     return authorizeFetch(env, { path: '/api/v1/d1/v4/databases', method: 'GET', tenantContext });
   }
 
-  const d1QueryMatch = url.pathname.match(/^\/api\/viewer\/d1\/([^/]+)\/query$/);
+  const d1QueryMatch = url.pathname.match(/^\/api\/v1\/viewer\/d1\/([^/]+)\/query$/);
   if (d1QueryMatch && request.method === 'POST') {
     const dbId = decodeURIComponent(d1QueryMatch[1]);
     const body = await request.text();
@@ -478,7 +478,7 @@ export const handleApiRequest = async (request: Request, env: Env): Promise<Resp
   }
 
   // Storage Explorer: R2 proxy
-  if (url.pathname === '/api/viewer/r2/buckets' && request.method === 'GET') {
+  if (url.pathname === '/api/v1/viewer/r2/buckets' && request.method === 'GET') {
     const cookies = parseCookies(request);
     const tenantContext = {
       tenantId: cookies.get('identity_group_id') ?? undefined,
@@ -492,7 +492,7 @@ export const handleApiRequest = async (request: Request, env: Env): Promise<Resp
     });
   }
 
-  if (url.pathname === '/api/viewer/r2/files' && request.method === 'POST') {
+  if (url.pathname === '/api/v1/viewer/r2/files' && request.method === 'POST') {
     const body = await request.text();
     const cookies = parseCookies(request);
     const tenantContext = {
@@ -507,7 +507,7 @@ export const handleApiRequest = async (request: Request, env: Env): Promise<Resp
     });
   }
 
-  if (url.pathname === '/api/viewer/r2/file' && request.method === 'POST') {
+  if (url.pathname === '/api/v1/viewer/r2/file' && request.method === 'POST') {
     const body = await request.text();
     const cookies = parseCookies(request);
     const tenantContext = {
@@ -523,7 +523,7 @@ export const handleApiRequest = async (request: Request, env: Env): Promise<Resp
   }
 
   // D1-backed graph API — proxy to backend /api/v1/graph/*
-  const graphApiMatch = url.pathname.match(/^\/api\/graph(\/.*)?$/);
+  const graphApiMatch = url.pathname.match(/^\/api\/v1\/graph(\/.*)?$/);
   if (graphApiMatch) {
     const suffix = graphApiMatch[1] ?? '/';
     const backendPath = `/api/v1/graph${suffix}${url.search}`;
@@ -543,7 +543,7 @@ export const handleApiRequest = async (request: Request, env: Env): Promise<Resp
     }
   }
 
-  const treesMatch = url.pathname.match(/^\/api\/trees\/(.+)$/);
+  const treesMatch = url.pathname.match(/^\/api\/v1\/trees\/(.+)$/);
   if (treesMatch) {
     const treeId = decodeURIComponent(treesMatch[1]);
     if (request.method === 'GET') {
@@ -554,7 +554,7 @@ export const handleApiRequest = async (request: Request, env: Env): Promise<Resp
     return new Response('Method Not Allowed', { status: 405 });
   }
 
-  const canvasOptionsMatch = url.pathname.match(/^\/api\/layouts\/([^/]+)\/canvases$/);
+  const canvasOptionsMatch = url.pathname.match(/^\/api\/v1\/layouts\/([^/]+)\/canvases$/);
   if (canvasOptionsMatch) {
     const screenName = decodeURIComponent(canvasOptionsMatch[1]);
     const storageId = await resolveScreenStorageId(backend, screenNames, screenName);
@@ -564,14 +564,14 @@ export const handleApiRequest = async (request: Request, env: Env): Promise<Resp
   }
 
   const componentSchemaDefinitionMatch =
-    url.pathname.match(/^\/api\/component-schemas\/(.+)\/definition$/);
+    url.pathname.match(/^\/api\/v1\/component-schemas\/(.+)\/definition$/);
   if (componentSchemaDefinitionMatch) {
     const kind = decodeURIComponent(componentSchemaDefinitionMatch[1]);
     if (request.method === 'GET') return handleComponentSchemaDefinitionGet(backend, kind);
     return new Response('Method Not Allowed', { status: 405 });
   }
 
-  const componentSchemaMatch = url.pathname.match(/^\/api\/component-schemas\/(.+)$/);
+  const componentSchemaMatch = url.pathname.match(/^\/api\/v1\/component-schemas\/(.+)$/);
   if (componentSchemaMatch) {
     const kind = decodeURIComponent(componentSchemaMatch[1]);
     if (request.method === 'GET') return handleComponentSchemaGet(backend, kind);
@@ -579,7 +579,7 @@ export const handleApiRequest = async (request: Request, env: Env): Promise<Resp
     return new Response('Method Not Allowed', { status: 405 });
   }
 
-  const componentMatch = url.pathname.match(/^\/api\/layouts\/([^/]+)\/components\/(.+)$/);
+  const componentMatch = url.pathname.match(/^\/api\/v1\/layouts\/([^/]+)\/components\/(.+)$/);
   if (componentMatch) {
     const screenName = decodeURIComponent(componentMatch[1]);
     const componentId = decodeURIComponent(componentMatch[2]);
@@ -591,7 +591,7 @@ export const handleApiRequest = async (request: Request, env: Env): Promise<Resp
     return new Response('Method Not Allowed', { status: 405 });
   }
 
-  const jsonFilesSubMatch = url.pathname.match(/^\/api\/layouts\/([^/]+)\/json-files$/);
+  const jsonFilesSubMatch = url.pathname.match(/^\/api\/v1\/layouts\/([^/]+)\/json-files$/);
   if (jsonFilesSubMatch) {
     const screenName = decodeURIComponent(jsonFilesSubMatch[1]);
     const storageId = await resolveScreenStorageId(backend, screenNames, screenName);
@@ -603,19 +603,19 @@ export const handleApiRequest = async (request: Request, env: Env): Promise<Resp
     return new Response('Method Not Allowed', { status: 405 });
   }
 
-  if (url.pathname === '/api/layouts/json-files') {
+  if (url.pathname === '/api/v1/layouts/json-files') {
     if (request.method === 'GET') return handleScreensListGet(screenNames);
     return new Response('Method Not Allowed', { status: 405 });
   }
 
-  const layoutsRenameMatch = url.pathname.match(/^\/api\/layouts\/([^/]+)\/rename$/);
+  const layoutsRenameMatch = url.pathname.match(/^\/api\/v1\/layouts\/([^/]+)\/rename$/);
   if (layoutsRenameMatch) {
     const name = decodeURIComponent(layoutsRenameMatch[1]);
     if (request.method === 'POST') return handleScreenRename(request, backend, screenNames, name);
     return new Response('Method Not Allowed', { status: 405 });
   }
 
-  const layoutsItemMatch = url.pathname.match(/^\/api\/layouts\/([^/]+)$/);
+  const layoutsItemMatch = url.pathname.match(/^\/api\/v1\/layouts\/([^/]+)$/);
   if (layoutsItemMatch) {
     const name = decodeURIComponent(layoutsItemMatch[1]);
     if (request.method === 'GET') return handleScreenGet(backend, screenNames, name);
@@ -624,7 +624,7 @@ export const handleApiRequest = async (request: Request, env: Env): Promise<Resp
     return new Response('Method Not Allowed', { status: 405 });
   }
 
-  const resourceRenameMatch = url.pathname.match(/^\/api\/([^/]+)\/([^/]+)\/rename$/);
+  const resourceRenameMatch = url.pathname.match(/^\/api\/v1\/([^/]+)\/([^/]+)\/rename$/);
   if (resourceRenameMatch) {
     const config = RESOURCE_CONFIGS.find((c) => c.name === decodeURIComponent(resourceRenameMatch[1]));
     if (!config) return new Response('Not Found', { status: 404 });
@@ -637,7 +637,7 @@ export const handleApiRequest = async (request: Request, env: Env): Promise<Resp
     return new Response('Method Not Allowed', { status: 405 });
   }
 
-  const resourceItemMatch = url.pathname.match(/^\/api\/([^/]+)\/([^/]+)$/);
+  const resourceItemMatch = url.pathname.match(/^\/api\/v1\/([^/]+)\/([^/]+)$/);
   if (resourceItemMatch) {
     const config = RESOURCE_CONFIGS.find((c) => c.name === decodeURIComponent(resourceItemMatch[1]));
     if (!config) return new Response('Not Found', { status: 404 });

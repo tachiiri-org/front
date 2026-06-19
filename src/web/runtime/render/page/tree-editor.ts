@@ -327,7 +327,7 @@ const renderSourceDrivenTree = (
   const scheduleItemSave = (itemValue: string, itemState: ItemState): void => {
     if (itemState.saveTimer) clearTimeout(itemState.saveTimer);
     itemState.saveTimer = setTimeout(() => {
-      void fetch(`/api/trees/${encodeURIComponent(itemValue)}`, {
+      void fetch(`/api/v1/trees/${encodeURIComponent(itemValue)}`, {
         method: 'PUT',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ nodes: itemState.nodes }),
@@ -380,7 +380,7 @@ const renderSourceDrivenTree = (
         renderItemNodes(itemValue, itemState, null);
       };
 
-      void fetch(`/api/trees/${encodeURIComponent(itemValue)}`)
+      void fetch(`/api/v1/trees/${encodeURIComponent(itemValue)}`)
         .then((res) => (res.ok ? res.json() : { nodes: [] }))
         .then((data) => {
           const loaded = (data as Record<string, unknown>).nodes;
@@ -623,7 +623,7 @@ export const renderEditableTree = (
     if (!treeId) return;
     if (saveTimer) clearTimeout(saveTimer);
     saveTimer = setTimeout(() => {
-      void fetch(`/api/trees/${encodeURIComponent(treeId)}`, {
+      void fetch(`/api/v1/trees/${encodeURIComponent(treeId)}`, {
         method: 'PUT',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ nodes }),

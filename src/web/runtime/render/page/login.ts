@@ -144,7 +144,7 @@ function wire(
       statusEl.textContent = '';
       try {
         const checkRes = await fetch(
-          `/api/auth/member-check?group_id=${encodeURIComponent(groupParam)}&email=${encodeURIComponent(email)}`,
+          `/api/v1/auth/member-check?group_id=${encodeURIComponent(groupParam)}&email=${encodeURIComponent(email)}`,
         );
         if (checkRes.status === 404) {
           statusEl.textContent = 'このメールアドレスはこのグループに登録されていません';
@@ -170,7 +170,7 @@ function wire(
       btnLogin.textContent = '送信中...';
       try {
         const turnstileToken = getLoginToken?.() || undefined;
-        const res = await fetch('/api/auth/magic-link', {
+        const res = await fetch('/api/v1/auth/magic-link', {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
           body: JSON.stringify({ email, purpose: 'login', group_id: groupParam, turnstile_token: turnstileToken }),
@@ -237,7 +237,7 @@ function wire(
       statusEl.textContent = '';
       try {
         const turnstileToken = getNewToken?.() || undefined;
-        const res = await fetch('/api/auth/magic-link', {
+        const res = await fetch('/api/v1/auth/magic-link', {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
           body: JSON.stringify({ email, purpose: 'group_create', group_name: groupName, turnstile_token: turnstileToken }),

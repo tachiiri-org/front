@@ -11,14 +11,14 @@ export const fetchFrameComponent = async (
   screenId: string,
   frameSrc: string,
 ): Promise<Component | null> => {
-  const response = await fetch(`/api/layouts/${screenId}/components/${frameSrc}`);
+  const response = await fetch(`/api/v1/layouts/${screenId}/components/${frameSrc}`);
   if (!response.ok) return null;
   const value = (await response.json()) as unknown;
   return isComponent(value) ? value : null;
 };
 
 export const fetchScreenIds = async (): Promise<string[]> => {
-  const response = await fetch('/api/layouts/json-files');
+  const response = await fetch('/api/v1/layouts/json-files');
   if (!response.ok) return [];
   const value = (await response.json()) as unknown;
   if (typeof value !== 'object' || value === null || Array.isArray(value)) return [];
@@ -39,7 +39,7 @@ const isEditorScreen = (screen: Screen): boolean =>
 export const findEditorScreenId = async (): Promise<string | null> => {
   const screenIds = await fetchScreenIds();
   for (const screenId of screenIds) {
-    const response = await fetch(`/api/layouts/${screenId}`);
+    const response = await fetch(`/api/v1/layouts/${screenId}`);
     if (!response.ok) continue;
     const value = (await response.json()) as unknown;
     if (isScreen(value) && isEditorScreen(value)) return screenId;

@@ -166,7 +166,7 @@ export const renderOutliner = (
     const saveUrl = docNodeId !== null
       ? `/api/docs/${encodeURIComponent(docNodeId)}`
       : resolvedTreeId
-      ? `/api/trees/${encodeURIComponent(resolvedTreeId)}`
+      ? `/api/v1/trees/${encodeURIComponent(resolvedTreeId)}`
       : null;
     if (!saveUrl) return;
     if (saveTimer) clearTimeout(saveTimer);

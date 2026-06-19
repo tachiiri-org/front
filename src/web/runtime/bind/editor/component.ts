@@ -57,7 +57,7 @@ export const hydrateComponentEditor = async (
 
   if (isFrameRef(frame)) {
     componentSrc = frame.src;
-    const compResponse = await fetch(`/api/layouts/${selectedScreenId}/components/${frame.src}`);
+    const compResponse = await fetch(`/api/v1/layouts/${selectedScreenId}/components/${frame.src}`);
     if (compResponse.ok) {
       const compValue = (await compResponse.json()) as unknown;
       if (isComponent(compValue)) {

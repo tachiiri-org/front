@@ -1,14 +1,14 @@
 import { isScreen, type Screen } from '../../../schema/screen/screen';
 
 export const fetchScreen = async (screenId: string): Promise<Screen | null> => {
-  const res = await fetch(`/api/layouts/${screenId}`);
+  const res = await fetch(`/api/v1/layouts/${screenId}`);
   if (!res.ok) return null;
   const value = (await res.json()) as unknown;
   return isScreen(value) ? value : null;
 };
 
 export const putScreen = async (screenId: string, value: unknown): Promise<void> => {
-  const res = await fetch(`/api/layouts/${screenId}`, {
+  const res = await fetch(`/api/v1/layouts/${screenId}`, {
     method: 'PUT',
     headers: { 'Content-Type': 'application/json' },
     body: JSON.stringify(value),
@@ -20,11 +20,11 @@ export const putScreen = async (screenId: string, value: unknown): Promise<void>
 
 export const createScreen = async (screenId: string, value: unknown): Promise<void> => {
   const encoded = encodeURIComponent(screenId);
-  const existing = await fetch(`/api/layouts/${encoded}`);
+  const existing = await fetch(`/api/v1/layouts/${encoded}`);
   if (existing.ok) {
     throw new Error(`screen already exists: ${screenId}`);
   }
-  const res = await fetch(`/api/layouts/${encoded}`, {
+  const res = await fetch(`/api/v1/layouts/${encoded}`, {
     method: 'PUT',
     headers: { 'Content-Type': 'application/json' },
     body: JSON.stringify(value),
@@ -35,7 +35,7 @@ export const createScreen = async (screenId: string, value: unknown): Promise<vo
 };
 
 export const deleteScreen = async (screenId: string): Promise<void> => {
-  const res = await fetch(`/api/layouts/${encodeURIComponent(screenId)}`, {
+  const res = await fetch(`/api/v1/layouts/${encodeURIComponent(screenId)}`, {
     method: 'DELETE',
   });
   if (!res.ok) {
@@ -48,7 +48,7 @@ export const putComponent = async (
   componentSrc: string,
   data: unknown,
 ): Promise<void> => {
-  const res = await fetch(`/api/layouts/${screenId}/components/${componentSrc}`, {
+  const res = await fetch(`/api/v1/layouts/${screenId}/components/${componentSrc}`, {
     method: 'PUT',
     headers: { 'Content-Type': 'application/json' },
     body: JSON.stringify(data),
@@ -59,7 +59,7 @@ export const putComponent = async (
 };
 
 export const putComponentSchema = async (kind: string, data: unknown): Promise<void> => {
-  const res = await fetch(`/api/component-schemas/${encodeURIComponent(kind)}`, {
+  const res = await fetch(`/api/v1/component-schemas/${encodeURIComponent(kind)}`, {
     method: 'PUT',
     headers: { 'Content-Type': 'application/json' },
     body: JSON.stringify(data),

@@ -37,7 +37,7 @@ export const renderSettingsPage = async (root: HTMLElement): Promise<void> => {
 
   root.replaceChildren(el('div', { color: C.dim, fontSize: '14px' }, '読み込み中...'));
 
-  const authRes = await fetch('/api/auth/status').catch(() => null);
+  const authRes = await fetch('/api/v1/auth/status').catch(() => null);
   const auth = authRes?.ok ? (await authRes.json() as AuthStatus) : null;
 
   const wrap = el('div', { width: '100%', maxWidth: '480px', boxSizing: 'border-box' });

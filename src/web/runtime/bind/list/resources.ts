@@ -5,7 +5,7 @@ export type ResourceDef = {
 
 export const RESOURCES: Record<string, ResourceDef> = {
   layouts: {
-    listUrl: '/api/layouts/json-files',
-    itemBaseUrl: '/api/layouts',
+    listUrl: '/api/v1/layouts/json-files',
+    itemBaseUrl: '/api/v1/layouts',
   },
 };

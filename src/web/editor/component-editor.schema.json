@@ -6,7 +6,7 @@
     "label": "source",
     "source": {
       "kind": "endpoint",
-      "url": "/api/layouts/:screenId/canvases",
+      "url": "/api/v1/layouts/:screenId/canvases",
       "itemsPath": "items",
       "valueKey": "value",
       "labelKey": "label"

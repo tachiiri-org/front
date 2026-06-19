@@ -272,7 +272,7 @@ export const renderStorageExplorer = (
   const loadD1Databases = async (): Promise<void> => {
     showMessage('データベースを読み込み中...');
     try {
-      const res = await fetch('/api/viewer/d1/databases');
+      const res = await fetch('/api/v1/viewer/d1/databases');
       if (!res.ok) { showMessage(`エラー: ${res.status}`); return; }
       const data = (await res.json()) as D1ListResponse;
       const dbs = Array.isArray(data.result) ? data.result : [];
@@ -299,7 +299,7 @@ export const renderStorageExplorer = (
     d1SelectedRow = null;
     showMessage('テーブルを読み込み中...');
     try {
-      const res = await fetch(`/api/viewer/d1/${encodeURIComponent(dbId)}/query`, {
+      const res = await fetch(`/api/v1/viewer/d1/${encodeURIComponent(dbId)}/query`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ sql: "SELECT name FROM sqlite_master WHERE type='table' ORDER BY name" }),
@@ -328,7 +328,7 @@ export const renderStorageExplorer = (
     mainHeader.appendChild(info);
 
     try {
-      const res = await fetch(`/api/viewer/d1/${encodeURIComponent(dbId)}/query`, {
+      const res = await fetch(`/api/v1/viewer/d1/${encodeURIComponent(dbId)}/query`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ sql: `SELECT * FROM "${tableName}" LIMIT ${D1_LIMIT} OFFSET ${offset}` }),
@@ -447,7 +447,7 @@ export const renderStorageExplorer = (
     mainContent.appendChild(loading);
 
     try {
-      const res = await fetch('/api/viewer/r2/file', {
+      const res = await fetch('/api/v1/viewer/r2/file', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ bucket_id: bucketId, key }),
@@ -501,7 +501,7 @@ export const renderStorageExplorer = (
     bucketId: string,
     prefix: string,
   ): Promise<{ folders: string[]; files: R2FileEntry[] }> => {
-    const res = await fetch('/api/viewer/r2/files', {
+    const res = await fetch('/api/v1/viewer/r2/files', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({ bucket_id: bucketId, prefix, delimiter: '/' }),
@@ -641,7 +641,7 @@ export const renderStorageExplorer = (
   const loadR2Buckets = async (): Promise<void> => {
     showMessage('バケットを読み込み中...');
     try {
-      const res = await fetch('/api/viewer/r2/buckets');
+      const res = await fetch('/api/v1/viewer/r2/buckets');
       if (!res.ok) { showMessage(`エラー: ${res.status}`); return; }
       const data = (await res.json()) as R2BucketsResponse;
       const buckets = Array.isArray(data.buckets) ? data.buckets : [];

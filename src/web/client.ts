@@ -69,7 +69,7 @@ const renderNav = async (screenId: string): Promise<void> => {
     'background:#1f2937;color:#d1d5db;border:1px solid #374151;padding:2px 8px;font-size:12px;font-family:monospace;border-radius:4px;cursor:pointer;height:24px;';
 
   try {
-    const res = await fetch('/api/layouts/json-files');
+    const res = await fetch('/api/v1/layouts/json-files');
     if (gen !== navRenderGen) return;
     if (res.ok) {
       const data = (await res.json()) as { items: { value: string; label: string }[] };
@@ -118,8 +118,8 @@ const renderNav = async (screenId: string): Promise<void> => {
   nav.appendChild(envSelect);
 
   const [authResult, identityResult] = await Promise.allSettled([
-    fetch('/api/auth/status'),
-    fetch('/api/auth/identity-status'),
+    fetch('/api/v1/auth/status'),
+    fetch('/api/v1/auth/identity-status'),
   ]);
   if (gen !== navRenderGen) return;
 
@@ -151,7 +151,7 @@ const renderNav = async (screenId: string): Promise<void> => {
         orgSelect.addEventListener('change', async () => {
           const orgId = orgSelect.value;
           if (!orgId) return;
-          await fetch(`/api/auth/select-org?group_id=${encodeURIComponent(orgId)}`, { redirect: 'manual' });
+          await fetch(`/api/v1/auth/select-org?group_id=${encodeURIComponent(orgId)}`, { redirect: 'manual' });
           window.location.reload();
         });
         nav.appendChild(orgSelect);
@@ -259,7 +259,7 @@ const renderScreen = async (screenId: string): Promise<void> => {
   if (inlineData !== null) {
     value = inlineData;
   } else {
-    const response = await fetch(`/api/layouts/${screenId}`);
+    const response = await fetch(`/api/v1/layouts/${screenId}`);
     if (!response.ok) {
       showLoadError(`Failed to load screen "${screenId}" (${response.status} ${response.statusText}).`);
       return;
@@ -422,11 +422,11 @@ const loadEditorBootstrap = async (): Promise<void> => {
   }
 
   if (!getCookie('identity_group_id')) {
-    const res = await fetch('/api/auth/identity-status').catch(() => null);
+    const res = await fetch('/api/v1/auth/identity-status').catch(() => null);
     const status = res?.ok ? (await res.json() as { user_id: string | null }) : null;
     const returnTo = encodeURIComponent(window.location.pathname);
     if (status?.user_id) {
-      const autoRes = await fetch('/api/auth/auto-select-org').catch(() => null);
+      const autoRes = await fetch('/api/v1/auth/auto-select-org').catch(() => null);
       if (autoRes?.ok) {
         window.location.reload();
         return;

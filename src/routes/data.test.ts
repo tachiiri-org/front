@@ -39,7 +39,7 @@ describe('handleGitHubAuthStatus', () => {
     };
 
     const response = await handleGitHubAuthStatus(
-      new Request('https://front.example.com/api/auth/github/status'),
+      new Request('https://front.example.com/api/v1/auth/github/status'),
       {
         BACKEND: backend,
         FRONT_TO_BACKEND_TOKEN: 'backend-token',
@@ -62,7 +62,7 @@ describe('handleGitHubAuthStatus', () => {
     };
 
     const response = await handleGitHubAuthStatus(
-      new Request('https://front.example.com/api/auth/github/status'),
+      new Request('https://front.example.com/api/v1/auth/github/status'),
       {
         BACKEND: backend,
         FRONT_TO_BACKEND_TOKEN: 'backend-token',

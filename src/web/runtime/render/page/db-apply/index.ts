@@ -385,7 +385,7 @@ export const renderDbApply = (
 
     try {
       const type = currentMode === 'identity' ? 'identity' : 'user';
-      const res = await fetch(`/api/admin/db-apply/migration-file?type=${type}&name=${encodeURIComponent(name)}`);
+      const res = await fetch(`/api/v1/admin/db-apply/migration-file?type=${type}&name=${encodeURIComponent(name)}`);
       if (!res.ok) { showMessage(`Error: ${res.status}`); return; }
       const data = (await res.json()) as FileResponse;
       mainContent.replaceChildren();
@@ -515,10 +515,10 @@ export const renderDbApply = (
     ciLog.replaceChildren();
     logLine(`=== ${label} Apply start ===`);
     try {
-      const res = await fetch(`/api/admin/db-apply/${endpoint}`, { method: 'POST' });
+      const res = await fetch(`/api/v1/admin/db-apply/${endpoint}`, { method: 'POST' });
       const body = (await res.json()) as Record<string, unknown>;
       if (!res.ok) {
-        logLine(`Failed (HTTP ${res.status}): ${String(body.message ?? body.error_code ?? '')}`, true);
+        logLine(`Failed (HTTP ${res.status}): ${String(body.message ?? body.error ?? '')}`, true);
         return;
       }
       if ('results' in body && Array.isArray(body.results)) {
@@ -547,8 +547,8 @@ export const renderDbApply = (
     const type = currentMode === 'identity' ? 'identity' : 'user';
     try {
       const [statusRes, filesRes] = await Promise.all([
-        fetch('/api/admin/db-apply/status'),
-        fetch(`/api/admin/db-apply/migration-files?type=${type}`),
+        fetch('/api/v1/admin/db-apply/status'),
+        fetch(`/api/v1/admin/db-apply/migration-files?type=${type}`),
       ]);
 
       if (!statusRes.ok) {
@@ -652,7 +652,7 @@ export const renderDbApply = (
     for (let i = 0; i < 60; i++) {
       await new Promise(r => setTimeout(r, 10000));
       try {
-        const res = await fetch('/api/admin/db-apply/ci-status');
+        const res = await fetch('/api/v1/admin/db-apply/ci-status');
         if (!res.ok) continue;
         const body = (await res.json()) as { run: { status: string; conclusion: string | null; html_url: string; name: string } | null };
         const run = body.run;
@@ -674,7 +674,7 @@ export const renderDbApply = (
       ciDeployBtn.disabled = true;
       logLine('=== CI Deploy start (stage → main) ===');
       try {
-        const res = await fetch('/api/admin/db-apply/ci-deploy', { method: 'POST' });
+        const res = await fetch('/api/v1/admin/db-apply/ci-deploy', { method: 'POST' });
         const body = (await res.json()) as { merged?: boolean; alreadyUpToDate?: boolean; conflict?: boolean };
         if (res.status === 409) { logLine('Conflict. Resolve manually.', true); return; }
         if (!res.ok) { logLine(`Failed: HTTP ${res.status}`, true); return; }

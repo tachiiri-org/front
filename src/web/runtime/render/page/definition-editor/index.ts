@@ -45,7 +45,7 @@ export const renderDefinitionEditor = (
     if (state.saveTimer) clearTimeout(state.saveTimer);
     state.saveTimer = setTimeout(() => {
       state.saveTimer = null;
-      void fetch(`/api/trees/${encodeURIComponent(state.resolvedTreeId!)}`, {
+      void fetch(`/api/v1/trees/${encodeURIComponent(state.resolvedTreeId!)}`, {
         method: 'PUT',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ nodes: state.nodes }),

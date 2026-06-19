@@ -20,7 +20,7 @@ export async function fetchAllNodes(
   if (lang) params.set('lang', lang);
   if (neighborOf && neighborOf.length > 0) params.set('nonNeighborOf', neighborOf.join(','));
   if (q) params.set('q', q);
-  const r = await apiFetch(`/api/graph/${graphId}/nodes?${params}`);
+  const r = await apiFetch(`/api/v1/graph/${graphId}/nodes?${params}`);
   if (!r.ok) return { nodes: [], hasMore: false };
   const data = await r.json() as { nodes: ExplorerNode[]; hasMore?: boolean };
   return { nodes: data.nodes ?? [], hasMore: data.hasMore ?? false };
@@ -35,7 +35,7 @@ export async function fetchBookmarkedNodes(
   const params = new URLSearchParams({ offset: '0', onlyIncluded: 'true' });
   params.set('include', bookmarkIds.join(','));
   if (lang) params.set('lang', lang);
-  const r = await apiFetch(`/api/graph/${graphId}/nodes?${params}`);
+  const r = await apiFetch(`/api/v1/graph/${graphId}/nodes?${params}`);
   if (!r.ok) return { nodes: [], hasMore: false };
   const data = await r.json() as { nodes: ExplorerNode[]; hasMore?: boolean };
   // Preserve the order returned by the bookmarks API
@@ -45,7 +45,7 @@ export async function fetchBookmarkedNodes(
 }
 
 export async function fetchChildren(graphId: string, nodeId: string, limit: number): Promise<ExplorerNode[]> {
-  const r = await apiFetch(`/api/graph/${graphId}/node/${nodeId}/children?limit=${limit}`);
+  const r = await apiFetch(`/api/v1/graph/${graphId}/node/${nodeId}/children?limit=${limit}`);
   if (!r.ok) return [];
   const data = await r.json() as { nodes: ExplorerNode[] };
   // Defensive dedup by id: legacy parallel edges can return the same node twice,
@@ -61,7 +61,7 @@ export async function apiCreateNode(
   const labelField = label ? (lang === 'en' ? { en: label } : { ja: label }) : {};
   const insertAfterField = insertAfterId ? { insertAfterId } : {};
   const body = parentId ? { parentId, ...labelField, ...insertAfterField } : labelField;
-  const r = await apiFetch(`/api/graph/${graphId}/node`, {
+  const r = await apiFetch(`/api/v1/graph/${graphId}/node`, {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
     body: JSON.stringify(body),
@@ -74,7 +74,7 @@ export async function apiUpdateNode(
   graphId: string, nodeId: string, lang: 'en' | 'ja', label: string,
 ): Promise<void> {
   const body = lang === 'en' ? { en: label || null } : { ja: label || null };
-  await apiFetch(`/api/graph/${graphId}/node/${nodeId}`, {
+  await apiFetch(`/api/v1/graph/${graphId}/node/${nodeId}`, {
     method: 'PATCH',
     headers: { 'Content-Type': 'application/json' },
     body: JSON.stringify(body),
@@ -84,7 +84,7 @@ export async function apiUpdateNode(
 export async function apiUpdateColor(
   graphId: string, nodeId: string, color: string | null,
 ): Promise<void> {
-  await apiFetch(`/api/graph/${graphId}/node/${nodeId}`, {
+  await apiFetch(`/api/v1/graph/${graphId}/node/${nodeId}`, {
     method: 'PATCH',
     headers: { 'Content-Type': 'application/json' },
     body: JSON.stringify({ color }),
@@ -92,11 +92,11 @@ export async function apiUpdateColor(
 }
 
 export async function apiDeleteNode(graphId: string, nodeId: string): Promise<void> {
-  await apiFetch(`/api/graph/${graphId}/node/${nodeId}`, { method: 'DELETE' });
+  await apiFetch(`/api/v1/graph/${graphId}/node/${nodeId}`, { method: 'DELETE' });
 }
 
 export async function apiToggleLink(graphId: string, sourceId: string, targetId: string): Promise<boolean> {
-  const r = await apiFetch(`/api/graph/${graphId}/node/${sourceId}/link`, {
+  const r = await apiFetch(`/api/v1/graph/${graphId}/node/${sourceId}/link`, {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
     body: JSON.stringify({ targetId }),
@@ -107,22 +107,22 @@ export async function apiToggleLink(graphId: string, sourceId: string, targetId:
 }
 
 export async function fetchBookmarks(graphId: string): Promise<string[]> {
-  const r = await apiFetch(`/api/graph/${graphId}/bookmarks`);
+  const r = await apiFetch(`/api/v1/graph/${graphId}/bookmarks`);
   if (!r.ok) return [];
   const data = await r.json() as { bookmarks: string[] };
   return data.bookmarks ?? [];
 }
 
 export async function apiAddBookmark(graphId: string, nodeId: string): Promise<void> {
-  await apiFetch(`/api/graph/${graphId}/bookmarks/${nodeId}`, { method: 'POST' });
+  await apiFetch(`/api/v1/graph/${graphId}/bookmarks/${nodeId}`, { method: 'POST' });
 }
 
 export async function apiRemoveBookmark(graphId: string, nodeId: string): Promise<void> {
-  await apiFetch(`/api/graph/${graphId}/bookmarks/${nodeId}`, { method: 'DELETE' });
+  await apiFetch(`/api/v1/graph/${graphId}/bookmarks/${nodeId}`, { method: 'DELETE' });
 }
 
 export async function apiMoveBookmark(graphId: string, nodeId: string, direction: 'up' | 'down'): Promise<void> {
-  await apiFetch(`/api/graph/${graphId}/bookmarks/${nodeId}/move`, {
+  await apiFetch(`/api/v1/graph/${graphId}/bookmarks/${nodeId}/move`, {
     method: 'PATCH',
     headers: { 'Content-Type': 'application/json' },
     body: JSON.stringify({ direction }),
@@ -133,7 +133,7 @@ export async function apiMoveNode(
   graphId: string, nodeId: string, parentId: string, direction: 'up' | 'down',
   afterSwapSiblingIds: string[],
 ): Promise<void> {
-  await apiFetch(`/api/graph/${graphId}/node/${nodeId}/move`, {
+  await apiFetch(`/api/v1/graph/${graphId}/node/${nodeId}/move`, {
     method: 'PATCH',
     headers: { 'Content-Type': 'application/json' },
     body: JSON.stringify({ direction, parentId, afterSwapSiblingIds }),

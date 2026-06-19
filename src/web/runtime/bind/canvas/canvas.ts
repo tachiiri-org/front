@@ -39,7 +39,7 @@ export const hydrateCanvas = async (
     return;
   }
 
-  const response = await fetch(`/api/layouts/${selectedScreenId}`);
+  const response = await fetch(`/api/v1/layouts/${selectedScreenId}`);
   if (!response.ok) { canvasEl.replaceChildren(); return; }
   const value = (await response.json()) as unknown;
   if (!isScreen(value)) { canvasEl.replaceChildren(); return; }
@@ -283,11 +283,11 @@ export const hydrateCanvas = async (
             return;
           }
           void (async () => {
-            const freshRes = await fetch(`/api/layouts/${screenId}`);
+            const freshRes = await fetch(`/api/v1/layouts/${screenId}`);
             if (!freshRes.ok) return;
             const freshScreen = (await freshRes.json()) as unknown;
             if (!isScreen(freshScreen)) return;
-            await fetch(`/api/layouts/${screenId}`, {
+            await fetch(`/api/v1/layouts/${screenId}`, {
               method: 'PUT',
               headers: { 'Content-Type': 'application/json' },
               body: JSON.stringify({
@@ -335,11 +335,11 @@ export const hydrateCanvas = async (
             return;
           }
           void (async () => {
-            const freshRes = await fetch(`/api/layouts/${screenId}`);
+            const freshRes = await fetch(`/api/v1/layouts/${screenId}`);
             if (!freshRes.ok) return;
             const freshScreen = (await freshRes.json()) as unknown;
             if (!isScreen(freshScreen)) return;
-            await fetch(`/api/layouts/${screenId}`, {
+            await fetch(`/api/v1/layouts/${screenId}`, {
               method: 'PUT',
               headers: { 'Content-Type': 'application/json' },
               body: JSON.stringify({
@@ -387,11 +387,11 @@ export const hydrateCanvas = async (
     if (e.key === 'Delete') {
       e.preventDefault();
       void (async () => {
-        const freshRes = await fetch(`/api/layouts/${screenId}`);
+        const freshRes = await fetch(`/api/v1/layouts/${screenId}`);
         if (!freshRes.ok) return;
         const freshScreen = (await freshRes.json()) as unknown;
         if (!isScreen(freshScreen)) return;
-        await fetch(`/api/layouts/${screenId}`, {
+        await fetch(`/api/v1/layouts/${screenId}`, {
           method: 'PUT',
           headers: { 'Content-Type': 'application/json' },
           body: JSON.stringify({
@@ -421,7 +421,7 @@ export const hydrateCanvas = async (
     e.preventDefault();
     const [dx, dy] = dir;
     void (async () => {
-      const freshRes = await fetch(`/api/layouts/${screenId}`);
+      const freshRes = await fetch(`/api/v1/layouts/${screenId}`);
       if (!freshRes.ok) return;
       const freshScreen = (await freshRes.json()) as unknown;
       if (!isScreen(freshScreen)) return;
@@ -440,7 +440,7 @@ export const hydrateCanvas = async (
         p.x = Math.max(1, Math.min(cols - p.width + 1, p.x + dx));
         p.y = Math.max(1, p.y + dy);
       }
-      await fetch(`/api/layouts/${screenId}`, {
+      await fetch(`/api/v1/layouts/${screenId}`, {
         method: 'PUT',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
@@ -525,7 +525,7 @@ export const hydrateCanvas = async (
       const newId = crypto.randomUUID();
 
       void (async () => {
-        const freshRes = await fetch(`/api/layouts/${screenId}`);
+        const freshRes = await fetch(`/api/v1/layouts/${screenId}`);
         if (!freshRes.ok) return;
         const freshScreen = (await freshRes.json()) as unknown;
         if (!isScreen(freshScreen)) return;
@@ -540,7 +540,7 @@ export const hydrateCanvas = async (
             elementDefaults.kind,
           ),
         } as Frame;
-        await fetch(`/api/layouts/${screenId}`, {
+        await fetch(`/api/v1/layouts/${screenId}`, {
           method: 'PUT',
           headers: { 'Content-Type': 'application/json' },
           body: JSON.stringify({

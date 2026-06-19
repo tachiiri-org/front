@@ -64,7 +64,7 @@ const isPublicPath = (pathname: string): boolean =>
   pathname === '/login' ||
   /^\/login\/[0-9a-f-]{36}$/i.test(pathname) ||
   pathname === '/auth/magic' ||
-  pathname === '/api/auth/member-check' ||
+  pathname === '/api/v1/auth/member-check' ||
   pathname.startsWith('/oauth/') ||
   pathname.startsWith('/github/oauth/') ||
   pathname.startsWith('/.well-known/') ||
@@ -85,8 +85,8 @@ async function handleAdminOidcApi(request: Request, env: Env): Promise<Response>
   const url = new URL(request.url);
   const pathname = url.pathname;
 
-  // POST /api/auth/admin/oidc — create provider
-  if (pathname === '/api/auth/admin/oidc' && request.method === 'POST') {
+  // POST /api/v1/auth/admin/oidc — create provider
+  if (pathname === '/api/v1/auth/admin/oidc' && request.method === 'POST') {
     const body = await request.json();
     const res = await authorizeFetch(env, {
       path: '/api/v1/identity/oidc',
@@ -96,8 +96,8 @@ async function handleAdminOidcApi(request: Request, env: Env): Promise<Response>
     return new Response(await res.text(), { status: res.status, headers: { 'Content-Type': 'application/json' } });
   }
 
-  // PUT /api/auth/admin/oidc/:oidcId — update provider
-  const oidcPutMatch = pathname.match(/^\/api\/auth\/admin\/oidc\/([^/]+)$/);
+  // PUT /api/v1/auth/admin/oidc/:oidcId — update provider
+  const oidcPutMatch = pathname.match(/^\/api\/v1\/auth\/admin\/oidc\/([^/]+)$/);
   if (oidcPutMatch && request.method === 'PUT') {
     const oidcId = decodeURIComponent(oidcPutMatch[1]);
     const body = await request.json();
@@ -109,7 +109,7 @@ async function handleAdminOidcApi(request: Request, env: Env): Promise<Response>
     return new Response(await res.text(), { status: res.status, headers: { 'Content-Type': 'application/json' } });
   }
 
-  // DELETE /api/auth/admin/oidc/:oidcId — delete provider
+  // DELETE /api/v1/auth/admin/oidc/:oidcId — delete provider
   if (oidcPutMatch && request.method === 'DELETE') {
     const oidcId = decodeURIComponent(oidcPutMatch[1]);
     const res = await authorizeFetch(env, {
@@ -119,8 +119,8 @@ async function handleAdminOidcApi(request: Request, env: Env): Promise<Response>
     return new Response(null, { status: res.status });
   }
 
-  // GET /api/auth/admin/login-policy?group_id=
-  if (pathname === '/api/auth/admin/login-policy' && request.method === 'GET') {
+  // GET /api/v1/auth/admin/login-policy?group_id=
+  if (pathname === '/api/v1/auth/admin/login-policy' && request.method === 'GET') {
     const groupId = url.searchParams.get('group_id');
     if (!groupId) return new Response(JSON.stringify({ error: 'group_id_required' }), { status: 400 });
     const res = await authorizeFetch(env, {
@@ -130,8 +130,8 @@ async function handleAdminOidcApi(request: Request, env: Env): Promise<Response>
     return new Response(await res.text(), { status: res.status, headers: { 'Content-Type': 'application/json' } });
   }
 
-  // PUT /api/auth/admin/login-policy — update policy
-  if (pathname === '/api/auth/admin/login-policy' && request.method === 'PUT') {
+  // PUT /api/v1/auth/admin/login-policy — update policy
+  if (pathname === '/api/v1/auth/admin/login-policy' && request.method === 'PUT') {
     const body = (await request.json()) as { group_id?: string; allow_standard?: number; allow_oidc?: number };
     if (!body.group_id) return new Response(JSON.stringify({ error: 'group_id_required' }), { status: 400 });
     const res = await authorizeFetch(env, {
@@ -159,33 +159,33 @@ export default {
 async function fetchInner(request: Request, env: Env): Promise<Response> {
     const pathname = new URL(request.url).pathname;
 
-    if (pathname === '/api/spec-document' || pathname === '/api/ui-shell-settings') {
+    if (pathname === '/api/v1/spec-document' || pathname === '/api/v1/ui-shell-settings') {
       const apiResponse = await handleDataApiRequest(request, env);
       if (apiResponse) {
         return apiResponse;
       }
     }
-    if (pathname === '/api/auth/github/status') {
+    if (pathname === '/api/v1/auth/github/status') {
       const authStatusResponse = await handleGitHubAuthStatus(request, env);
       if (authStatusResponse) {
         return authStatusResponse;
       }
     }
-    if (pathname === '/api/auth/status') {
+    if (pathname === '/api/v1/auth/status') {
       const authStatusResponse = await handleAuthStatus(request, env);
       if (authStatusResponse) {
         return authStatusResponse;
       }
     }
-    if (pathname === '/api/auth/identity-status') {
+    if (pathname === '/api/v1/auth/identity-status') {
       const res = await handleIdentityStatus(request, env);
       if (res) return res;
     }
-    if (pathname === '/api/auth/magic-link' && request.method === 'POST') {
+    if (pathname === '/api/v1/auth/magic-link' && request.method === 'POST') {
       const res = await handleMagicLinkRequest(request, env);
       if (res) return res;
     }
-    if (pathname === '/api/auth/member-check' && request.method === 'GET') {
+    if (pathname === '/api/v1/auth/member-check' && request.method === 'GET') {
       const res = await handleMemberCheck(request, env);
       if (res) return res;
     }
@@ -197,23 +197,23 @@ async function fetchInner(request: Request, env: Env): Promise<Response> {
       const res = await handleGroupLoginPage(request, env, CLIENT_JS_PATH);
       if (res) return res;
     }
-    if (pathname === '/api/auth/organizations' && request.method === 'POST') {
+    if (pathname === '/api/v1/auth/organizations' && request.method === 'POST') {
       const res = await handleOrgCreate(request, env);
       if (res) return res;
     }
-    if (pathname === '/api/auth/auto-select-org' && request.method === 'GET') {
+    if (pathname === '/api/v1/auth/auto-select-org' && request.method === 'GET') {
       const res = await handleAutoSelectOrg(request, env);
       if (res) return res;
     }
-    if (pathname === '/api/auth/select-org' && request.method === 'GET') {
+    if (pathname === '/api/v1/auth/select-org' && request.method === 'GET') {
       const res = await handleSelectOrg(request, env);
       if (res) return res;
     }
-    if (pathname.startsWith('/api/auth/members')) {
+    if (pathname.startsWith('/api/v1/auth/members')) {
       const res = await handleOrgMembers(request, env);
       if (res) return res;
     }
-    if (pathname === '/api/auth/logout' && request.method === 'POST') {
+    if (pathname === '/api/v1/auth/logout' && request.method === 'POST') {
       const headers = new Headers();
       for (const c of [...clearGitHubSessionCookies(request), ...clearGitHubConnectSessionCookies(request), ...clearGoogleSessionCookies(request), ...clearMicrosoftSessionCookies(request), ...clearOidcSessionCookies(request)]) {
         headers.append('Set-Cookie', c);
@@ -223,19 +223,19 @@ async function fetchInner(request: Request, env: Env): Promise<Response> {
       }
       return new Response(null, { status: 204, headers });
     }
-    if (pathname === '/api/auth/github/logout' && request.method === 'POST') {
+    if (pathname === '/api/v1/auth/github/logout' && request.method === 'POST') {
       const headers = new Headers();
       for (const c of [...clearGitHubSessionCookies(request), ...clearGitHubConnectSessionCookies(request)]) {
         headers.append('Set-Cookie', c);
       }
       return new Response(null, { status: 204, headers });
     }
-    if (pathname === '/api/auth/google/logout' && request.method === 'POST') {
+    if (pathname === '/api/v1/auth/google/logout' && request.method === 'POST') {
       const headers = new Headers();
       for (const c of clearGoogleSessionCookies(request)) headers.append('Set-Cookie', c);
       return new Response(null, { status: 204, headers });
     }
-    if (pathname === '/api/auth/microsoft/logout' && request.method === 'POST') {
+    if (pathname === '/api/v1/auth/microsoft/logout' && request.method === 'POST') {
       const headers = new Headers();
       for (const c of clearMicrosoftSessionCookies(request)) headers.append('Set-Cookie', c);
       return new Response(null, { status: 204, headers });
@@ -347,7 +347,7 @@ async function fetchInner(request: Request, env: Env): Promise<Response> {
     }
 
     // OIDC admin API proxy (requires session — auth gate handled below)
-    if (pathname.startsWith('/api/auth/admin/oidc') || pathname.startsWith('/api/auth/admin/login-policy')) {
+    if (pathname.startsWith('/api/v1/auth/admin/oidc') || pathname.startsWith('/api/v1/auth/admin/login-policy')) {
       return handleAdminOidcApi(request, env);
     }
 

@@ -449,7 +449,7 @@ const renderEditableTable = (
 
       populateCssPropOptions(CSS_PROP_KEYS);
 
-      fetch('/api/component-schemas/list/css-prop-keys')
+      fetch('/api/v1/component-schemas/list/css-prop-keys')
         .then((res) => (res.ok ? res.json() : null))
         .then((payload: unknown) => {
           if (!payload || typeof payload !== 'object' || payload === null) return;
@@ -531,7 +531,7 @@ const renderEditableTable = (
         populateSelectOptions(column.source.options);
       } else if (column.source.kind === 'list') {
         populateSelectOptions([]);
-        fetch(`/api/component-schemas/list/${column.source.id}`)
+        fetch(`/api/v1/component-schemas/list/${column.source.id}`)
           .then((res) => (res.ok ? res.json() : null))
           .then((payload: unknown) => {
             if (!payload || typeof payload !== 'object' || payload === null) return;

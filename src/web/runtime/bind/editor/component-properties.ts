@@ -43,7 +43,7 @@ const pickEditableData = (
 };
 
 const loadSchemaDefinition = async (kind: string): Promise<SchemaField[] | null> => {
-  const response = await fetch(`/api/component-schemas/${encodeURIComponent(kind)}/definition`);
+  const response = await fetch(`/api/v1/component-schemas/${encodeURIComponent(kind)}/definition`);
   if (!response.ok) return null;
   const payload = (await response.json()) as unknown;
   if (!isSchemaFieldArray(payload)) return null;

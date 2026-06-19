@@ -102,7 +102,7 @@ export const renderAdminPage = async (root: HTMLElement): Promise<void> => {
       const deleteBtn = btn('削除');
       deleteBtn.onclick = async () => {
         if (!confirm(`プロバイダー「${p.name}」を削除しますか？`)) return;
-        const r = await fetch(`/api/auth/admin/oidc/${encodeURIComponent(p.oidc_id)}`, { method: 'DELETE' });
+        const r = await fetch(`/api/v1/auth/admin/oidc/${encodeURIComponent(p.oidc_id)}`, { method: 'DELETE' });
         statusEl.textContent = r.ok ? '削除しました' : '削除に失敗しました';
         statusEl.style.color = r.ok ? C.success : C.error;
         void refreshProviders();
@@ -139,7 +139,7 @@ export const renderAdminPage = async (root: HTMLElement): Promise<void> => {
     }
     addBtn.disabled = true;
     addBtn.textContent = '登録中...';
-    const res = await fetch('/api/auth/admin/oidc', {
+    const res = await fetch('/api/v1/auth/admin/oidc', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({
@@ -161,8 +161,8 @@ export const renderAdminPage = async (root: HTMLElement): Promise<void> => {
       appSecretIn.value = '';
       void refreshProviders();
     } else {
-      const body = await res.json().catch(() => ({})) as { error_code?: string };
-      statusEl.textContent = `登録失敗: ${body.error_code ?? res.status}`;
+      const body = await res.json().catch(() => ({})) as { error?: string };
+      statusEl.textContent = `登録失敗: ${body.error ?? res.status}`;
       statusEl.style.color = C.error;
     }
   };
@@ -175,7 +175,7 @@ export const renderAdminPage = async (root: HTMLElement): Promise<void> => {
 
   let currentPolicy = { allow_standard: 1, allow_oidc: 0 };
   if (groupId) {
-    const pRes = await fetch(`/api/auth/admin/login-policy?group_id=${encodeURIComponent(groupId)}`).catch(() => null);
+    const pRes = await fetch(`/api/v1/auth/admin/login-policy?group_id=${encodeURIComponent(groupId)}`).catch(() => null);
     if (pRes?.ok) currentPolicy = (await pRes.json()) as { allow_standard: number; allow_oidc: number };
   }
 
@@ -202,7 +202,7 @@ export const renderAdminPage = async (root: HTMLElement): Promise<void> => {
     if (!groupId) { policyStatusEl.textContent = 'グループが選択されていません'; policyStatusEl.style.color = C.error; return; }
     saveBtn.disabled = true;
     saveBtn.textContent = '保存中...';
-    const res = await fetch('/api/auth/admin/login-policy', {
+    const res = await fetch('/api/v1/auth/admin/login-policy', {
       method: 'PUT',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({ group_id: groupId, allow_standard: stdCb.checked ? 1 : 0, allow_oidc: oidcCb.checked ? 1 : 0 }),

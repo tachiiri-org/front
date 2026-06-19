@@ -88,7 +88,7 @@ export async function handleApiRequest(request: Request, env: ApiEnv): Promise<R
     return bucket;
   }
 
-  if (pathname === '/api/spec-document') {
+  if (pathname === '/api/v1/spec-document') {
     if (request.method === 'GET') {
       return handleGet<SpecDocument | null>(bucket, SPEC_DOCUMENT_KEY, null);
     }
@@ -97,7 +97,7 @@ export async function handleApiRequest(request: Request, env: ApiEnv): Promise<R
     }
   }
 
-  if (pathname === '/api/ui-shell-settings') {
+  if (pathname === '/api/v1/ui-shell-settings') {
     if (request.method === 'GET') {
       return handleGet<UiShellSettings>(bucket, UI_SHELL_SETTINGS_KEY, { topics: {} });
     }
@@ -113,7 +113,7 @@ export async function handleGitHubAuthStatus(
   request: Request,
   env: AuthorizeEnv,
 ): Promise<Response | null> {
-  if (new URL(request.url).pathname !== '/api/auth/github/status') {
+  if (new URL(request.url).pathname !== '/api/v1/auth/github/status') {
     return null;
   }
 
@@ -135,7 +135,7 @@ export async function handleAuthStatus(
   request: Request,
   env: AuthorizeEnv,
 ): Promise<Response | null> {
-  if (new URL(request.url).pathname !== '/api/auth/status') {
+  if (new URL(request.url).pathname !== '/api/v1/auth/status') {
     return null;
   }
 
@@ -180,7 +180,7 @@ export async function handleIdentityStatus(
   request: Request,
   env: AuthorizeEnv,
 ): Promise<Response | null> {
-  if (new URL(request.url).pathname !== '/api/auth/identity-status') {
+  if (new URL(request.url).pathname !== '/api/v1/auth/identity-status') {
     return null;
   }
 
@@ -209,7 +209,7 @@ export async function handleIdentityStatus(
 
 export async function handleAutoSelectOrg(request: Request, env: AuthorizeEnv): Promise<Response | null> {
   const url = new URL(request.url);
-  if (url.pathname !== '/api/auth/auto-select-org' || request.method !== 'GET') {
+  if (url.pathname !== '/api/v1/auth/auto-select-org' || request.method !== 'GET') {
     return null;
   }
 
@@ -256,7 +256,7 @@ export async function handleAutoSelectOrg(request: Request, env: AuthorizeEnv): 
 
 export async function handleSelectOrg(request: Request, env: AuthorizeEnv): Promise<Response | null> {
   const url = new URL(request.url);
-  if (url.pathname !== '/api/auth/select-org' || request.method !== 'GET') {
+  if (url.pathname !== '/api/v1/auth/select-org' || request.method !== 'GET') {
     return null;
   }
 
@@ -304,7 +304,7 @@ export async function handleOrgCreate(
   request: Request,
   env: AuthorizeEnv,
 ): Promise<Response | null> {
-  if (new URL(request.url).pathname !== '/api/auth/organizations' || request.method !== 'POST') {
+  if (new URL(request.url).pathname !== '/api/v1/auth/organizations' || request.method !== 'POST') {
     return null;
   }
 
@@ -325,7 +325,7 @@ export async function handleOrgCreate(
 
 export async function handleOrgMembers(request: Request, env: AuthorizeEnv): Promise<Response | null> {
   const url = new URL(request.url);
-  if (!url.pathname.startsWith('/api/auth/members')) return null;
+  if (!url.pathname.startsWith('/api/v1/auth/members')) return null;
 
   const cookies = parseCookies(request);
   const orgId = cookies.get('identity_org_id');
@@ -334,7 +334,7 @@ export async function handleOrgMembers(request: Request, env: AuthorizeEnv): Pro
     return json({ error: 'not_authenticated' }, { status: 401 });
   }
 
-  const backendPath = url.pathname.replace('/api/auth/members', '/api/v1/graph/members') + url.search;
+  const backendPath = url.pathname.replace('/api/v1/auth/members', '/api/v1/graph/members') + url.search;
   const bodyText = request.body ? await request.text() : undefined;
 
   const res = await authorizeFetch(env, {
@@ -356,7 +356,7 @@ export async function handleMagicLinkRequest(
   env: AuthorizeEnv,
 ): Promise<Response | null> {
   const url = new URL(request.url);
-  if (url.pathname !== '/api/auth/magic-link' || request.method !== 'POST') return null;
+  if (url.pathname !== '/api/v1/auth/magic-link' || request.method !== 'POST') return null;
 
   const body = (await request.json()) as {
     email?: string; purpose?: string; group_id?: string; group_name?: string; turnstile_token?: string;
@@ -370,13 +370,13 @@ export async function handleMagicLinkRequest(
   if (secretKey) {
     const token = body.turnstile_token ?? '';
     if (!token) {
-      return new Response(JSON.stringify({ error_code: 'turnstile_required' }), {
+      return new Response(JSON.stringify({ error: 'turnstile_required' }), {
         status: 400, headers: { 'Content-Type': 'application/json; charset=utf-8' },
       });
     }
     const valid = await verifyTurnstileToken(token, secretKey, request.headers.get('CF-Connecting-IP') ?? undefined);
     if (!valid) {
-      return new Response(JSON.stringify({ error_code: 'turnstile_failed' }), {
+      return new Response(JSON.stringify({ error: 'turnstile_failed' }), {
         status: 400, headers: { 'Content-Type': 'application/json; charset=utf-8' },
       });
     }
@@ -452,14 +452,14 @@ export async function handleMagicLinkVerify(
   return new Response(null, { status: 302, headers });
 }
 
-// GET /api/auth/member-check?group_id=xxx&email=yyy
+// GET /api/v1/auth/member-check?group_id=xxx&email=yyy
 // Pre-login check: is this email registered in the group? Returns { user_id } or 404.
 export async function handleMemberCheck(
   request: Request,
   env: AuthorizeEnv,
 ): Promise<Response | null> {
   const url = new URL(request.url);
-  if (url.pathname !== '/api/auth/member-check' || request.method !== 'GET') return null;
+  if (url.pathname !== '/api/v1/auth/member-check' || request.method !== 'GET') return null;
 
   const groupId = url.searchParams.get('group_id');
   const email = url.searchParams.get('email');

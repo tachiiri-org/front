@@ -62,7 +62,7 @@ const loadDataIntoTree = async (
   const tf = treeFrame as Record<string, unknown>;
   tf.treeId = treeId;
 
-  const res = await fetch(`/api/trees/${encodeURIComponent(treeId)}`);
+  const res = await fetch(`/api/v1/trees/${encodeURIComponent(treeId)}`);
   if (res.ok) {
     const payload = (await res.json()) as unknown;
     if (typeof payload === 'object' && payload !== null) {
@@ -76,7 +76,7 @@ const loadDataIntoTree = async (
   }
 
   // trees/ が空か未存在 → component-schemas からフォールバック変換
-  const schemaRes = await fetch(`/api/component-schemas/${encodeURIComponent(treeId)}`);
+  const schemaRes = await fetch(`/api/v1/component-schemas/${encodeURIComponent(treeId)}`);
   if (schemaRes.ok) {
     const schema = (await schemaRes.json()) as unknown;
     if (typeof schema === 'object' && schema !== null) {
@@ -98,7 +98,7 @@ const loadSchemaIntoTable = async (
   tableFrame: Frame,
   onFrameRerender?: (id: string) => void,
 ): Promise<void> => {
-  const res = await fetch(`/api/component-schemas/${encodeURIComponent(kind)}`);
+  const res = await fetch(`/api/v1/component-schemas/${encodeURIComponent(kind)}`);
   if (!res.ok) return;
   const payload = (await res.json()) as unknown;
   if (typeof payload !== 'object' || payload === null) return;
@@ -195,7 +195,7 @@ const hydrateSelectTableBindings = async (
         categoryEl.appendChild(el);
       }
     } else if (source?.kind === 'list' && typeof source.id === 'string' && source.id) {
-      await populateSelectFromEndpoint(categoryEl, `/api/component-schemas/list/${String(source.id)}`, { itemsPath: 'data.rows', valueKey: 'values.value', labelKey: 'values.label' });
+      await populateSelectFromEndpoint(categoryEl, `/api/v1/component-schemas/list/${String(source.id)}`, { itemsPath: 'data.rows', valueKey: 'values.value', labelKey: 'values.label' });
     } else if (source?.kind === 'endpoint' && typeof source.url === 'string' && source.url) {
       await populateSelectFromEndpoint(categoryEl, source.url, source);
       if (!categoryEl.value && categoryEl.options.length > 0) {
@@ -248,7 +248,7 @@ const hydrateSelectTableBindings = async (
 
     const source = c.source as Record<string, unknown> | undefined;
     if (source?.kind === 'list' && typeof source.id === 'string' && source.id) {
-      await populateSelectFromEndpoint(selectEl, `/api/component-schemas/list/${String(source.id)}`, { itemsPath: 'data.rows', valueKey: 'values.value', labelKey: 'values.label' });
+      await populateSelectFromEndpoint(selectEl, `/api/v1/component-schemas/list/${String(source.id)}`, { itemsPath: 'data.rows', valueKey: 'values.value', labelKey: 'values.label' });
       if (selectEl.options.length > 0) {
         selectEl.value = selectEl.options[0].value;
         await loadSchemaIntoTable(selectEl.value, tableFrame, onFrameRerender);
@@ -606,7 +606,7 @@ const hydrateMigrationComponents = async (): Promise<void> => {
   const logErr = async (res: Response, context: string): Promise<void> => {
     try {
       const body = await res.json() as Record<string, unknown>;
-      const msg = body.message ?? body.error_code ?? res.status;
+      const msg = body.message ?? body.error ?? res.status;
       const detail = body.details ? ` / ${String(body.details)}` : '';
       log(`${context}: ${String(msg)}${detail}`, true);
     } catch {
@@ -625,7 +625,7 @@ const hydrateMigrationComponents = async (): Promise<void> => {
     try {
       log(`=== D1 マイグレーション開始: prod → ${target} ===`);
       log('スキーマ移行中 (DROP → CREATE)...');
-      const schemaRes = await fetch('/api/admin/migration/schema', {
+      const schemaRes = await fetch('/api/v1/admin/migration/schema', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ target }),
@@ -644,7 +644,7 @@ const hydrateMigrationComponents = async (): Promise<void> => {
       let succeeded = 0;
       for (const tableName of schema.dataTableOrder) {
         log(`[${tableName}] 移行中... (${succeeded + 1}/${schema.dataTableOrder.length})`, false, 1);
-        const tableRes = await fetch('/api/admin/migration/table', {
+        const tableRes = await fetch('/api/v1/admin/migration/table', {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
           body: JSON.stringify({ target, table: tableName }),
@@ -667,7 +667,7 @@ const hydrateMigrationComponents = async (): Promise<void> => {
       log(`Identity DB 完了 (${succeeded} テーブル)`);
 
       log('テナント DB 移行中...');
-      const userDbRes = await fetch('/api/admin/migration/user-databases', {
+      const userDbRes = await fetch('/api/v1/admin/migration/user-databases', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ target }),
@@ -695,7 +695,7 @@ const hydrateMigrationComponents = async (): Promise<void> => {
     try {
       log(`=== R2 テナント移行開始: prod → ${target} ===`);
       log('テナント R2 移行中...');
-      const r2Res = await fetch('/api/admin/migration/r2', {
+      const r2Res = await fetch('/api/v1/admin/migration/r2', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ target }),
@@ -720,7 +720,7 @@ const hydrateMigrationComponents = async (): Promise<void> => {
     btn.disabled = true;
     try {
       log(`=== R2 Layouts 移行開始: prod → ${target} ===`);
-      const r2Res = await fetch('/api/admin/migration/r2-layouts', {
+      const r2Res = await fetch('/api/v1/admin/migration/r2-layouts', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ target }),
@@ -742,7 +742,7 @@ const hydrateMigrationComponents = async (): Promise<void> => {
     try {
       log(`=== D1 User DB 移行開始: prod → ${target} ===`);
       log('テナント DB 移行中...');
-      const res = await fetch('/api/admin/migration/user-databases', {
+      const res = await fetch('/api/v1/admin/migration/user-databases', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ target }),
@@ -768,7 +768,7 @@ const hydrateMigrationComponents = async (): Promise<void> => {
     btn.disabled = true;
     try {
       log(`=== D1 Identity 移行開始: prod → ${target} ===`);
-      const res = await fetch('/api/admin/migration/identity', {
+      const res = await fetch('/api/v1/admin/migration/identity', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ target }),
@@ -846,11 +846,11 @@ const hydrateOrgSelectComponents = async (): Promise<void> => {
   const updateSelectBtnHref = (): void => {
     if (!(pickerEl instanceof HTMLSelectElement) || !(selectBtnEl instanceof HTMLAnchorElement)) return;
     const orgId = pickerEl.value;
-    selectBtnEl.href = orgId ? `/api/auth/select-org?group_id=${encodeURIComponent(orgId)}` : '#';
+    selectBtnEl.href = orgId ? `/api/v1/auth/select-org?group_id=${encodeURIComponent(orgId)}` : '#';
   };
 
   if (pickerEl instanceof HTMLSelectElement) {
-    await populateSelectFromEndpoint(pickerEl, '/api/auth/identity-status', {
+    await populateSelectFromEndpoint(pickerEl, '/api/v1/auth/identity-status', {
       itemsPath: 'organizations',
       labelKey: 'name',
       valueKey: 'id',
@@ -866,14 +866,14 @@ const hydrateOrgSelectComponents = async (): Promise<void> => {
         if (!name) return;
         createBtnEl.disabled = true;
         try {
-          const res = await fetch('/api/auth/organizations', {
+          const res = await fetch('/api/v1/auth/organizations', {
             method: 'POST',
             headers: { 'Content-Type': 'application/json' },
             body: JSON.stringify({ name }),
           });
           if (!res.ok) return;
           const org = await res.json() as { id: string };
-          window.location.href = `/api/auth/select-org?group_id=${encodeURIComponent(org.id)}`;
+          window.location.href = `/api/v1/auth/select-org?group_id=${encodeURIComponent(org.id)}`;
         } finally {
           createBtnEl.disabled = false;
         }
