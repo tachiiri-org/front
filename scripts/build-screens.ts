@@ -102,7 +102,7 @@ const escapeHtml = (s: string): string =>
 type ScreenListResponse = { items: { value: string; label: string }[] };
 
 const fetchScreenList = async (): Promise<string[]> => {
-  const url = `${BASE_URL}/api/v1/layouts/json-files`;
+  const url = `${BASE_URL}/api/layouts/json-files`;
   const res = await fetch(url, { headers: buildHeaders() });
   if (!res.ok) {
     throw new Error(`GET ${url} failed: ${res.status} ${res.statusText}`);
@@ -112,7 +112,7 @@ const fetchScreenList = async (): Promise<string[]> => {
 };
 
 const fetchScreenData = async (screenName: string): Promise<string> => {
-  const url = `${BASE_URL}/api/v1/layouts/${encodeURIComponent(screenName)}`;
+  const url = `${BASE_URL}/api/layouts/${encodeURIComponent(screenName)}`;
   const res = await fetch(url, { headers: buildHeaders() });
   if (!res.ok) {
     throw new Error(`GET ${url} failed: ${res.status} ${res.statusText}`);
