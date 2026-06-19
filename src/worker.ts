@@ -22,6 +22,7 @@ import {
 } from './mcp/oauth';
 import { clearGitHubSessionCookies, clearGitHubConnectSessionCookies, clearGoogleSessionCookies, clearMicrosoftSessionCookies, clearOidcSessionCookies } from './identify';
 import { handleOidcLoginStart, handleOidcLoginCallback } from './session/oidc';
+import { handleSamlMetadata, handleSamlSsoStart, handleSamlAcs } from './session/saml';
 import { authorizeFetch } from './session/fetch';
 
 type AssetsEnv = {
@@ -66,6 +67,7 @@ const isPublicPath = (pathname: string): boolean =>
   /^\/login\/[a-z0-9][a-z0-9-]*[a-z0-9]$/i.test(pathname) ||
   pathname === '/auth/magic' ||
   pathname === '/api/v1/auth/member-check' ||
+  /^\/auth\/saml\/[^/]+\/(metadata|sso|acs)$/.test(pathname) ||
   pathname.startsWith('/oauth/') ||
   pathname.startsWith('/github/oauth/') ||
   pathname.startsWith('/.well-known/') ||
@@ -308,6 +310,18 @@ async function fetchInner(request: Request, env: Env): Promise<Response> {
     }
     if (pathname === '/oauth/oidc/callback') {
       return handleOidcLoginCallback({ request, env });
+    }
+    if (/^\/auth\/saml\/[^/]+\/metadata$/.test(pathname)) {
+      const res = await handleSamlMetadata({ request, env });
+      if (res) return res;
+    }
+    if (/^\/auth\/saml\/[^/]+\/sso$/.test(pathname)) {
+      const res = await handleSamlSsoStart({ request, env });
+      if (res) return res;
+    }
+    if (/^\/auth\/saml\/[^/]+\/acs$/.test(pathname)) {
+      const res = await handleSamlAcs({ request, env });
+      if (res) return res;
     }
     if (pathname === '/oauth/oidc/logout' && request.method === 'GET') {
       const headers = new Headers({ Location: '/' });
