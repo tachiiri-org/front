@@ -218,6 +218,9 @@ async function fetchInner(request: Request, env: Env): Promise<Response> {
       for (const c of [...clearGitHubSessionCookies(request), ...clearGitHubConnectSessionCookies(request), ...clearGoogleSessionCookies(request), ...clearMicrosoftSessionCookies(request), ...clearOidcSessionCookies(request)]) {
         headers.append('Set-Cookie', c);
       }
+      for (const name of ['identity_user_id', 'identity_group_id', 'org_user_id', 'login_intent']) {
+        headers.append('Set-Cookie', `${name}=; Path=/; Max-Age=0; SameSite=Lax`);
+      }
       return new Response(null, { status: 204, headers });
     }
     if (pathname === '/api/auth/github/logout' && request.method === 'POST') {

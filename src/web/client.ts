@@ -424,16 +424,17 @@ const loadEditorBootstrap = async (): Promise<void> => {
   if (!getCookie('identity_group_id')) {
     const res = await fetch('/api/auth/identity-status').catch(() => null);
     const status = res?.ok ? (await res.json() as { user_id: string | null }) : null;
+    const returnTo = encodeURIComponent(window.location.pathname);
     if (status?.user_id) {
       const autoRes = await fetch('/api/auth/auto-select-org').catch(() => null);
       if (autoRes?.ok) {
         window.location.reload();
         return;
       }
-      window.location.href = '/group-select';
+      window.location.href = `/group-select?returnTo=${returnTo}`;
       return;
     } else {
-      window.location.href = '/login';
+      window.location.href = `/login?returnTo=${returnTo}`;
       return;
     }
   }
