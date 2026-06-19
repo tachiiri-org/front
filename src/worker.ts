@@ -69,8 +69,7 @@ const isPublicPath = (pathname: string): boolean =>
   pathname.startsWith('/github/oauth/') ||
   pathname.startsWith('/.well-known/') ||
   pathname.startsWith('/mcp') ||
-  pathname.startsWith('/api/') ||
-  pathname === '/settings/admin';
+  pathname.startsWith('/api/');
 
 const isNavigationRequest = (request: Request): boolean => {
   if (request.method !== 'GET' && request.method !== 'HEAD') {
