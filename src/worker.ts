@@ -248,16 +248,25 @@ async function fetchInner(request: Request, env: Env): Promise<Response> {
       for (const c of [...clearGitHubSessionCookies(request), ...clearGitHubConnectSessionCookies(request)]) {
         headers.append('Set-Cookie', c);
       }
+      for (const name of ['identity_user_id', 'identity_group_id', 'org_user_id', 'login_intent']) {
+        headers.append('Set-Cookie', `${name}=; Path=/; Max-Age=0; SameSite=Lax`);
+      }
       return new Response(null, { status: 302, headers });
     }
     if (pathname === '/oauth/google/logout' && request.method === 'GET') {
       const headers = new Headers({ Location: '/' });
       for (const c of clearGoogleSessionCookies(request)) headers.append('Set-Cookie', c);
+      for (const name of ['identity_user_id', 'identity_group_id', 'org_user_id', 'login_intent']) {
+        headers.append('Set-Cookie', `${name}=; Path=/; Max-Age=0; SameSite=Lax`);
+      }
       return new Response(null, { status: 302, headers });
     }
     if (pathname === '/oauth/microsoft/logout' && request.method === 'GET') {
       const headers = new Headers({ Location: '/' });
       for (const c of clearMicrosoftSessionCookies(request)) headers.append('Set-Cookie', c);
+      for (const name of ['identity_user_id', 'identity_group_id', 'org_user_id', 'login_intent']) {
+        headers.append('Set-Cookie', `${name}=; Path=/; Max-Age=0; SameSite=Lax`);
+      }
       return new Response(null, { status: 302, headers });
     }
     // GitHub login (read:user scope — identity only)
@@ -299,6 +308,9 @@ async function fetchInner(request: Request, env: Env): Promise<Response> {
     if (pathname === '/oauth/oidc/logout' && request.method === 'GET') {
       const headers = new Headers({ Location: '/' });
       for (const c of clearOidcSessionCookies(request)) headers.append('Set-Cookie', c);
+      for (const name of ['identity_user_id', 'identity_group_id', 'org_user_id', 'login_intent']) {
+        headers.append('Set-Cookie', `${name}=; Path=/; Max-Age=0; SameSite=Lax`);
+      }
       return new Response(null, { status: 302, headers });
     }
 
