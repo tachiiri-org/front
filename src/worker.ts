@@ -147,6 +147,16 @@ async function handleAdminOidcApi(request: Request, env: Env): Promise<Response>
 
 export default {
   async fetch(request: Request, env: Env): Promise<Response> {
+    try {
+      return await fetchInner(request, env);
+    } catch (e) {
+      console.error('[worker] unhandled error', request.method, request.url, String(e), e instanceof Error ? e.stack : undefined);
+      throw e;
+    }
+  },
+};
+
+async function fetchInner(request: Request, env: Env): Promise<Response> {
     const pathname = new URL(request.url).pathname;
 
     if (pathname === '/api/spec-document' || pathname === '/api/ui-shell-settings') {
@@ -375,5 +385,4 @@ export default {
     return new Response(`<!doctype html><script type="module" src="${CLIENT_JS_PATH}"></script>`, {
       headers: { 'Content-Type': 'text/html; charset=UTF-8' },
     });
-  },
-};
+}
