@@ -268,8 +268,8 @@ const renderScreenSpec = (screenId: string, spec: ScreenSpec): void => {
   applyViewportLayout();
   void renderNav(screenId);
   root.innerHTML = '';
-  root.style.display = 'flex';
-  root.style.flexDirection = 'column';
+  // position:relative so children can use position:absolute with inset:0
+  root.style.position = 'relative';
   const components = spec.viewports?.desktop?.components ?? [];
   for (const comp of components) {
     let el: HTMLElement;
@@ -281,9 +281,11 @@ const renderScreenSpec = (screenId: string, spec: ScreenSpec): void => {
       el = document.createElement('div');
       el.textContent = `Unknown component type: ${comp.type}`;
     }
-    el.style.flex = '1';
-    el.style.minHeight = '0';
-    root.appendChild(el);
+    // Wrap in an absolutely positioned container so height:100% inside el resolves correctly
+    const wrapper = document.createElement('div');
+    wrapper.style.cssText = 'position:absolute;inset:0;';
+    wrapper.appendChild(el);
+    root.appendChild(wrapper);
   }
 };
 
