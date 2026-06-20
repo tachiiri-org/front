@@ -49,7 +49,7 @@ export function renderGraphEditor(
 
   // ── Language switcher ─────────────────────────────────────────────
   const topBar = document.createElement('div');
-  topBar.style.cssText = `display:flex;justify-content:flex-end;align-items:center;padding:3px 8px;border-bottom:1px solid ${BORDER};flex-shrink:0;gap:4px;`;
+  topBar.style.cssText = `display:flex;align-items:center;padding:3px 8px;border-bottom:1px solid ${BORDER};flex-shrink:0;gap:4px;`;
 
   // ── View mode toggle ──────────────────────────────────────────────
   const VIEW_MODE_KEY = `graph-editor-view:${gId}`;
@@ -105,30 +105,21 @@ export function renderGraphEditor(
   fallbackBtn.title = '現在の言語にテキストがなく他言語にのみあるノードの表示切り替え';
   fallbackBtn.style.cssText = makeFallbackBtnStyle();
 
-  topBar.appendChild(fallbackBtn);
-  topBar.appendChild(jaBtn);
-  topBar.appendChild(enBtn);
-  outer.appendChild(topBar);
-
-  // ── Search bar ────────────────────────────────────────────────────
-  const searchBar = document.createElement('div');
-  searchBar.style.cssText = `display:flex;align-items:center;padding:4px 8px;border-bottom:1px solid ${BORDER};flex-shrink:0;gap:6px;`;
-
-  const searchIcon = document.createElement('span');
-  searchIcon.textContent = '🔍';
-  searchIcon.style.cssText = `flex-shrink:0;font-size:12px;opacity:0.5;`;
+  // ── Search input (in topBar) ──────────────────────────────────────
+  const searchSep = document.createElement('span');
+  searchSep.style.cssText = `width:1px;height:14px;background:${BORDER};margin:0 2px;flex-shrink:0;`;
 
   const searchInput = document.createElement('input');
   searchInput.type = 'text';
-  searchInput.placeholder = 'ノードを検索…';
   Object.assign(searchInput.style, {
     flex: '1', background: 'transparent', border: 'none', outline: 'none',
-    color: TEXT_HIGH, fontSize: '13px', fontFamily: 'inherit', lineHeight: '1.5',
+    color: TEXT_HIGH, fontSize: '12px', fontFamily: 'inherit', lineHeight: '1.5',
+    minWidth: '60px',
   });
 
   const clearBtn = document.createElement('button');
   clearBtn.textContent = '✕';
-  clearBtn.style.cssText = `background:transparent;border:none;color:${TEXT_MID};cursor:pointer;font-size:12px;padding:0 2px;display:none;`;
+  clearBtn.style.cssText = `background:transparent;border:none;color:${TEXT_MID};cursor:pointer;font-size:12px;padding:0 2px;display:none;flex-shrink:0;`;
   clearBtn.addEventListener('click', () => {
     searchInput.value = '';
     clearBtn.style.display = 'none';
@@ -150,10 +141,25 @@ export function renderGraphEditor(
     }, 250);
   });
 
-  searchBar.appendChild(searchIcon);
-  searchBar.appendChild(searchInput);
-  searchBar.appendChild(clearBtn);
-  outer.appendChild(searchBar);
+  const langSep = document.createElement('span');
+  langSep.style.cssText = `width:1px;height:14px;background:${BORDER};margin:0 2px;flex-shrink:0;`;
+
+  topBar.appendChild(searchSep);
+  topBar.appendChild(searchInput);
+  topBar.appendChild(clearBtn);
+  topBar.appendChild(langSep);
+  topBar.appendChild(fallbackBtn);
+  topBar.appendChild(jaBtn);
+  topBar.appendChild(enBtn);
+  outer.appendChild(topBar);
+
+  // Esc → focus search from anywhere inside the graph editor
+  outer.addEventListener('keydown', (e) => {
+    if (e.key === 'Escape' && document.activeElement !== searchInput) {
+      e.preventDefault();
+      searchInput.focus();
+    }
+  }, true);
 
   // ── Breadcrumb ───────────────────────────────────────────────────
   const breadcrumbEl = document.createElement('div');

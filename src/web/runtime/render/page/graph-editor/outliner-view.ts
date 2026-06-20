@@ -149,8 +149,7 @@ export function createOutlinerView(ctx: GraphEditorContext): {
       `background:transparent;border:none;color:${active ? TEXT_HIGH : TEXT_MID};cursor:pointer;font-size:12px;padding:0 2px;white-space:nowrap;max-width:120px;overflow:hidden;text-overflow:ellipsis;`;
 
     const homeBtn = document.createElement('button');
-    homeBtn.textContent = '↩';
-    homeBtn.title = 'ルートに戻る';
+    homeBtn.textContent = 'ルート';
     homeBtn.style.cssText = btnStyle(false);
     homeBtn.addEventListener('click', () => void doZoomTo(0));
     bcEl.appendChild(homeBtn);
@@ -230,7 +229,7 @@ export function createOutlinerView(ctx: GraphEditorContext): {
     const label = primaryLabel(onode.node, ctx.state.lang) ?? fallbackLabel(onode.node, ctx.state.lang);
     const ta = document.createElement('textarea');
     ta.value = label;
-    ta.style.cssText = `flex:1;background:transparent;border:none;outline:none;resize:none;font-size:14px;font-family:inherit;line-height:1.5;padding:0 4px 0 0;overflow:hidden;min-height:20px;color:${onode.node.color ?? TEXT_HIGH};`;
+    ta.style.cssText = `flex:1;background:transparent;border:none;outline:none;resize:none;font-size:16px;font-family:inherit;line-height:1.8;padding:0 4px 0 0;overflow:hidden;min-height:20px;color:${onode.node.color ?? TEXT_HIGH};`;
     ta.rows = 1;
 
     const resize = () => { ta.style.height = 'auto'; ta.style.height = ta.scrollHeight + 'px'; };
