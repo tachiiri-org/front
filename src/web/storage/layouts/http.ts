@@ -1,7 +1,7 @@
 import { isScreen } from '../../schema/screen/screen';
 import { isSelectComponent } from '../../schema/component';
 import type { LayoutBackend, ScreenNameBackend } from './r2';
-import { normalizeScreen, normalizeComponentValue } from './normalize';
+import { normalizeComponentValue } from './normalize';
 
 const SCREEN_PREFIX = 'screens/';
 
@@ -39,7 +39,6 @@ const buildJsonFileItems = async (
   return [...seen.values()].sort((a, b) => a.label.localeCompare(b.label));
 };
 
-const normalizeScreenJson: JsonNormalizer = (_, __, value) => normalizeScreen(value);
 
 // --- Screen registry (D1-backed via ScreenNameBackend) ---
 
@@ -81,7 +80,7 @@ export const handleScreenGet = async (
 ): Promise<Response> => {
   const storageId = await resolveScreenStorageId(backend, screenNames, name);
   if (!storageId) return new Response('Not Found', { status: 404 });
-  return handleResourceGet(backend, SCREEN_PREFIX, storageId, normalizeScreenJson);
+  return handleResourceGet(backend, SCREEN_PREFIX, storageId);
 };
 
 export const handleComponentGet = async (backend: LayoutBackend, screenId: string, componentId: string): Promise<Response> => {
@@ -112,7 +111,7 @@ export const handleScreenPut = async (
   name: string,
 ): Promise<Response> => {
   const storageId = await getOrCreateScreenStorageId(backend, screenNames, name);
-  return handleResourcePut(request, backend, SCREEN_PREFIX, storageId, normalizeScreenJson);
+  return handleResourcePut(request, backend, SCREEN_PREFIX, storageId);
 };
 
 export const deleteScreenObjects = async (backend: LayoutBackend, screenId: string): Promise<void> => {
