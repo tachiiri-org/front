@@ -189,10 +189,7 @@ export function createOutlinerView(ctx: GraphEditorContext): {
       cached = await fetchChildren(ctx.gId, onode.node.id, ctx.limit);
       ctx.childrenCache.set(onode.node.id, cached);
     }
-    // Populate shared propStore from fetched node properties
-    for (const n of cached) {
-      if (n.properties) ctx.propStore.set(n.id, { ...ctx.propStore.get(n.id), ...n.properties });
-    }
+    seedPropStore(cached);
     const excl = ancestorIds(onode); excl.add(onode.node.id);
     onode.children = cached.filter(c => !excl.has(c.id)).map(c => make(c, onode.node.id, onode.depth + 1));
     onode.childrenLoaded = true;
@@ -986,6 +983,14 @@ export function createOutlinerView(ctx: GraphEditorContext): {
     if (onode.parentId !== null) void apiToggleLink(ctx.gId, onode.node.id, onode.parentId);
   };
 
+  // Merge node properties into the shared propStore
+  const seedPropStore = (nodes: ExplorerNode[]) => {
+    for (const n of nodes) {
+      if (n.properties && Object.keys(n.properties).length > 0)
+        ctx.propStore.set(n.id, { ...ctx.propStore.get(n.id), ...n.properties });
+    }
+  };
+
   const load = async () => {
     byId.clear();
     zoomStack.splice(0);
@@ -1002,6 +1007,7 @@ export function createOutlinerView(ctx: GraphEditorContext): {
         cached = await fetchChildren(ctx.gId, ctx.rootNodeId, ctx.limit);
         ctx.childrenCache.set(null, cached);
       }
+      seedPropStore(cached);
       topNodes = cached; parentId = ctx.rootNodeId;
     } else {
       if (ctx.state.bookmarks.size === 0) {
@@ -1010,6 +1016,7 @@ export function createOutlinerView(ctx: GraphEditorContext): {
       }
       const lang = ctx.state.showFallback ? undefined : ctx.state.lang;
       const { nodes } = await fetchBookmarkedNodes(ctx.gId, [...ctx.state.bookmarks], lang);
+      seedPropStore(nodes);
       topNodes = nodes; parentId = null;
     }
 
@@ -1023,6 +1030,7 @@ export function createOutlinerView(ctx: GraphEditorContext): {
     updateBreadcrumb();
     const lang = ctx.state.showFallback ? undefined : ctx.state.lang;
     const { nodes } = await fetchAllNodes(ctx.gId, [], 0, lang, undefined, query, 50);
+    seedPropStore(nodes);
     roots = nodes.map(n => make(n, null, 0));
     render();
   };
