@@ -20,7 +20,7 @@ export function createOutlinerView(ctx: GraphEditorContext): {
   refresh: () => void;
 } {
   const el = document.createElement('div');
-  el.style.cssText = `flex:1;overflow-y:auto;overflow-x:hidden;padding:4px 0;`;
+  el.style.cssText = `flex:1;overflow-y:auto;overflow-x:hidden;padding:4px 0 4px 10px;`;
 
   let roots: ONode[] = [];
   const byId = new Map<string, ONode>();
@@ -154,7 +154,7 @@ export function createOutlinerView(ctx: GraphEditorContext): {
     const label = primaryLabel(onode.node, ctx.state.lang) ?? fallbackLabel(onode.node, ctx.state.lang);
     const ta = document.createElement('textarea');
     ta.value = label;
-    ta.style.cssText = `flex:1;background:transparent;border:none;outline:none;resize:none;font-size:13px;font-family:inherit;line-height:1.5;padding:0 4px 0 0;overflow:hidden;min-height:20px;color:${onode.node.color ?? TEXT_HIGH};`;
+    ta.style.cssText = `flex:1;background:transparent;border:none;outline:none;resize:none;font-size:14px;font-family:inherit;line-height:1.5;padding:0 4px 0 0;overflow:hidden;min-height:20px;color:${onode.node.color ?? TEXT_HIGH};`;
     ta.rows = 1;
 
     const resize = () => { ta.style.height = 'auto'; ta.style.height = ta.scrollHeight + 'px'; };
@@ -204,11 +204,19 @@ export function createOutlinerView(ctx: GraphEditorContext): {
         e.preventDefault(); void doDelete(onode, i, vis); return;
       }
 
-      // ↑/↓ — immediate node navigation (no cursor-position check)
+      // ↑/↓ — DOM-order navigation (robust against stale vis index)
       if (e.key === 'ArrowUp' && !e.shiftKey && !e.ctrlKey && !e.metaKey) {
-        e.preventDefault(); if (i > 0) focusRow(vis[i - 1]);
+        e.preventDefault();
+        const tAs = [...el.querySelectorAll<HTMLTextAreaElement>('textarea')];
+        const tIdx = tAs.indexOf(ta);
+        if (tIdx > 0) tAs[tIdx - 1].focus();
+        return;
       } else if (e.key === 'ArrowDown' && !e.shiftKey && !e.ctrlKey && !e.metaKey) {
-        e.preventDefault(); if (i < vis.length - 1) focusRow(vis[i + 1]);
+        e.preventDefault();
+        const tAs = [...el.querySelectorAll<HTMLTextAreaElement>('textarea')];
+        const tIdx = tAs.indexOf(ta);
+        if (tIdx < tAs.length - 1) tAs[tIdx + 1].focus();
+        return;
       } else if (e.key === 'Enter' && !e.shiftKey && !e.ctrlKey && !e.metaKey) {
         e.preventDefault(); void doAddSibling(onode);
       } else if (e.key === 'Backspace' && ta.value === '') {
