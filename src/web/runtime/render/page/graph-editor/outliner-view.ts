@@ -390,6 +390,11 @@ export function createOutlinerView(ctx: GraphEditorContext): {
         if (tIdx < tAs.length - 1) tAs[tIdx + 1].focus();
         return;
       }
+      // /: link existing node (only when textarea is empty)
+      if (e.key === '/' && ta.value === '' && !e.ctrlKey && !e.metaKey && !e.altKey && !e.shiftKey) {
+        e.preventDefault(); doLinkSearch(onode); return;
+      }
+
       if (e.key === 'Enter' && !e.shiftKey && !e.ctrlKey && !e.metaKey) {
         e.preventDefault(); clearSelection(); void doAddSibling(onode);
       } else if (e.key === 'Backspace' && ta.value === '') {
@@ -407,6 +412,97 @@ export function createOutlinerView(ctx: GraphEditorContext): {
   const fixDepths = (o: ONode, d: number) => {
     o.depth = d;
     o.children.forEach(c => fixDepths(c, d + 1));
+  };
+
+  // ── Link-search (/) ──────────────────────────────────────────────────
+
+  const doLinkSearch = (onode: ONode) => {
+    // Remove any existing search panel first
+    listEl.querySelector('[data-link-search]')?.remove();
+
+    const leftPad = (onode.depth - baseDepth) * 20 + 6 + 22; // align with textarea left edge
+
+    const wrap = document.createElement('div');
+    wrap.dataset.linkSearch = '1';
+
+    const bar = document.createElement('div');
+    bar.style.cssText = `display:flex;align-items:center;padding:1px 0;padding-left:${leftPad}px;gap:4px;`;
+
+    const slash = document.createElement('span');
+    slash.textContent = '/';
+    slash.style.cssText = `color:${TEXT_DIM};font-size:15px;flex-shrink:0;line-height:1.8;`;
+
+    const inp = document.createElement('input');
+    inp.type = 'text';
+    inp.style.cssText = `flex:1;background:transparent;border:none;outline:none;color:${TEXT_HIGH};font-size:15px;font-family:inherit;line-height:1.8;`;
+
+    bar.append(slash, inp);
+
+    const drop = document.createElement('div');
+    drop.style.cssText = `max-height:200px;overflow-y:auto;border-top:1px solid ${BORDER};`;
+
+    wrap.append(bar, drop);
+    lastDescRow(onode).insertAdjacentElement('afterend', wrap);
+    inp.focus();
+
+    let resultNodes: ExplorerNode[] = [];
+    let selIdx = 0;
+    let timer: ReturnType<typeof setTimeout> | null = null;
+
+    const close = () => { wrap.remove(); focusRow(onode); };
+
+    const highlight = () => {
+      ([...drop.children] as HTMLElement[]).forEach((el, i) => {
+        el.style.background = i === selIdx ? 'rgba(99,102,241,0.12)' : 'transparent';
+        el.style.color = i === selIdx ? TEXT_HIGH : TEXT_MID;
+      });
+    };
+
+    const doLink = (node: ExplorerNode) => {
+      close();
+      const sibs = getSiblings(onode);
+      const idx = sibs.indexOf(onode);
+      const no = make(node, onode.parentId, onode.depth);
+      sibs.splice(idx + 1, 0, no);
+      const newRow = buildRow(no);
+      lastDescRow(onode).insertAdjacentElement('afterend', newRow);
+      const cc = ctx.childrenCache.get(onode.parentId);
+      if (cc) { const ci = cc.findIndex(x => x.id === onode.node.id); if (ci >= 0) cc.splice(ci + 1, 0, node); }
+      focusRow(no);
+      const edgeTarget = onode.parentId ?? ctx.rootNodeId;
+      if (edgeTarget) void apiToggleLink(ctx.gId, node.id, edgeTarget);
+    };
+
+    inp.addEventListener('input', () => {
+      if (timer) clearTimeout(timer);
+      timer = setTimeout(async () => {
+        const q = inp.value.trim();
+        drop.innerHTML = ''; selIdx = 0; resultNodes = [];
+        if (!q) return;
+        const lang = ctx.state.showFallback ? undefined : ctx.state.lang;
+        const { nodes } = await fetchAllNodes(ctx.gId, [], 0, lang, undefined, q, 20);
+        const visIds = new Set(flatVisible().map(n => n.node.id));
+        resultNodes = nodes.filter(n => !visIds.has(n.id));
+        for (let i = 0; i < resultNodes.length; i++) {
+          const n = resultNodes[i];
+          const lbl = (primaryLabel(n, ctx.state.lang) ?? fallbackLabel(n, ctx.state.lang)) || n.id.slice(0, 8);
+          const item = document.createElement('div');
+          item.textContent = lbl;
+          item.style.cssText = `padding:3px 4px 3px ${leftPad + 8}px;cursor:pointer;font-size:14px;color:${TEXT_MID};`;
+          item.addEventListener('mouseenter', () => { selIdx = i; highlight(); });
+          item.addEventListener('click', () => doLink(n));
+          drop.appendChild(item);
+        }
+        highlight();
+      }, 200);
+    });
+
+    inp.addEventListener('keydown', (e) => {
+      if (e.key === 'Escape') { e.preventDefault(); close(); return; }
+      if (e.key === 'ArrowDown') { e.preventDefault(); selIdx = Math.min(selIdx + 1, resultNodes.length - 1); highlight(); return; }
+      if (e.key === 'ArrowUp') { e.preventDefault(); selIdx = Math.max(selIdx - 1, 0); highlight(); return; }
+      if (e.key === 'Enter' && resultNodes[selIdx]) { e.preventDefault(); doLink(resultNodes[selIdx]); }
+    });
   };
 
   // ── Multi-select operations ───────────────────────────────────────────
