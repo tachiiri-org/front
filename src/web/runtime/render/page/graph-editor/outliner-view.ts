@@ -42,6 +42,10 @@ export function createOutlinerView(ctx: GraphEditorContext): {
   // Zoom stack: ONodes we've zoomed into (innermost last)
   const zoomStack: ONode[] = [];
 
+  // Multi-select state: anchor (fixed end) and cur (moving end)
+  let selAnchorId: string | null = null;
+  let selCurId: string | null = null;
+
   const make = (node: ExplorerNode, parentId: string | null, depth: number): ONode => {
     const o: ONode = { node, parentId, depth, expanded: false, childrenLoaded: false, children: [] };
     byId.set(node.id, o);
@@ -69,11 +73,35 @@ export function createOutlinerView(ctx: GraphEditorContext): {
     rowMap.clear();
     listEl.innerHTML = '';
     for (const o of flatVisible()) listEl.appendChild(buildRow(o));
+    updateSelectionHighlight();
   };
 
   const focusRow = (onode: ONode) => {
     rowMap.get(onode.node.id)?.querySelector<HTMLTextAreaElement>('textarea')?.focus();
   };
+
+  const getSelectedONodes = (): ONode[] => {
+    if (!selAnchorId) return [];
+    const vis = flatVisible();
+    const ai = vis.findIndex(n => n.node.id === selAnchorId);
+    if (ai === -1) return [];
+    if (!selCurId || selCurId === selAnchorId) return [vis[ai]].filter(Boolean);
+    const ci = vis.findIndex(n => n.node.id === selCurId);
+    if (ci === -1) return [vis[ai]].filter(Boolean);
+    return vis.slice(Math.min(ai, ci), Math.max(ai, ci) + 1);
+  };
+
+  const isMultiSelect = () => getSelectedONodes().length > 1;
+
+  const updateSelectionHighlight = () => {
+    const sel = getSelectedONodes();
+    const ids = sel.length > 1 ? new Set(sel.map(n => n.node.id)) : new Set<string>();
+    rowMap.forEach((row, id) => {
+      row.style.backgroundColor = ids.has(id) ? 'rgba(99,102,241,0.12)' : '';
+    });
+  };
+
+  const clearSelection = () => { selAnchorId = null; selCurId = null; updateSelectionHighlight(); };
 
   const lastDescRow = (onode: ONode): HTMLElement => {
     if (onode.expanded && onode.children.length > 0)
@@ -275,41 +303,85 @@ export function createOutlinerView(ctx: GraphEditorContext): {
         e.preventDefault(); void doZoomOut(); return;
       }
 
-      // Tab: indent (make child of node above), Shift+Tab: dedent
-      if (e.key === 'Tab') {
+      // Shift+↑/↓: extend / shrink multi-select range
+      if (e.key === 'ArrowUp' && e.shiftKey && !e.altKey && !e.ctrlKey && !e.metaKey) {
         e.preventDefault();
-        if (e.shiftKey) void doDedent(onode);
-        else void doIndent(onode, vis, i);
+        const tAs = [...listEl.querySelectorAll<HTMLTextAreaElement>('textarea')];
+        const tIdx = tAs.indexOf(ta);
+        if (tIdx <= 0) return;
+        if (!selAnchorId) selAnchorId = onode.node.id;
+        const prevId = tAs[tIdx - 1].closest<HTMLElement>('[data-node-id]')?.dataset.nodeId;
+        if (prevId) { selCurId = prevId; updateSelectionHighlight(); }
+        tAs[tIdx - 1].focus();
+        return;
+      }
+      if (e.key === 'ArrowDown' && e.shiftKey && !e.altKey && !e.ctrlKey && !e.metaKey) {
+        e.preventDefault();
+        const tAs = [...listEl.querySelectorAll<HTMLTextAreaElement>('textarea')];
+        const tIdx = tAs.indexOf(ta);
+        if (tIdx >= tAs.length - 1) return;
+        if (!selAnchorId) selAnchorId = onode.node.id;
+        const nextId = tAs[tIdx + 1].closest<HTMLElement>('[data-node-id]')?.dataset.nodeId;
+        if (nextId) { selCurId = nextId; updateSelectionHighlight(); }
+        tAs[tIdx + 1].focus();
         return;
       }
 
-      // Shift+Alt+↑↓ reorder / cross-hierarchy move
+      // Esc: clear multi-select (stop propagation to prevent focus-search)
+      if (e.key === 'Escape' && isMultiSelect()) {
+        e.preventDefault(); e.stopPropagation(); clearSelection(); return;
+      }
+
+      // Shift+Alt+↑↓ reorder / cross-hierarchy move (multi or single)
       if ((e.key === 'ArrowUp' || e.key === 'ArrowDown') && e.shiftKey && e.altKey) {
-        e.preventDefault(); void doMove(onode, e.key === 'ArrowUp' ? 'up' : 'down'); return;
+        e.preventDefault();
+        if (isMultiSelect()) doMoveMulti(e.key === 'ArrowUp' ? 'up' : 'down');
+        else void doMove(onode, e.key === 'ArrowUp' ? 'up' : 'down');
+        return;
       }
 
-      // Ctrl+Shift+Backspace: delete node
+      // Tab: indent / dedent (multi or single)
+      if (e.key === 'Tab') {
+        e.preventDefault();
+        if (isMultiSelect()) {
+          const sel = getSelectedONodes(); clearSelection();
+          void doTabMulti(sel, e.shiftKey);
+        } else {
+          if (e.shiftKey) void doDedent(onode);
+          else void doIndent(onode, vis, i);
+        }
+        return;
+      }
+
+      // Ctrl+Shift+Backspace: delete (multi or single)
       if (e.key === 'Backspace' && (e.ctrlKey || e.metaKey) && e.shiftKey) {
-        e.preventDefault(); void doDelete(onode, i, vis); return;
+        e.preventDefault();
+        if (isMultiSelect()) doDeleteMulti();
+        else void doDelete(onode, i, vis);
+        return;
       }
 
-      // ↑/↓ — DOM-order navigation (robust against stale vis index)
+      // ↑/↓ — DOM-order navigation; clear multi-select
       if (e.key === 'ArrowUp' && !e.shiftKey && !e.ctrlKey && !e.metaKey && !e.altKey) {
         e.preventDefault();
+        clearSelection();
         const tAs = [...listEl.querySelectorAll<HTMLTextAreaElement>('textarea')];
         const tIdx = tAs.indexOf(ta);
         if (tIdx > 0) tAs[tIdx - 1].focus();
         return;
-      } else if (e.key === 'ArrowDown' && !e.shiftKey && !e.ctrlKey && !e.metaKey && !e.altKey) {
+      }
+      if (e.key === 'ArrowDown' && !e.shiftKey && !e.ctrlKey && !e.metaKey && !e.altKey) {
         e.preventDefault();
+        clearSelection();
         const tAs = [...listEl.querySelectorAll<HTMLTextAreaElement>('textarea')];
         const tIdx = tAs.indexOf(ta);
         if (tIdx < tAs.length - 1) tAs[tIdx + 1].focus();
         return;
-      } else if (e.key === 'Enter' && !e.shiftKey && !e.ctrlKey && !e.metaKey) {
-        e.preventDefault(); void doAddSibling(onode);
+      }
+      if (e.key === 'Enter' && !e.shiftKey && !e.ctrlKey && !e.metaKey) {
+        e.preventDefault(); clearSelection(); void doAddSibling(onode);
       } else if (e.key === 'Backspace' && ta.value === '') {
-        e.preventDefault(); void doDelete(onode, i, vis);
+        e.preventDefault(); clearSelection(); void doDelete(onode, i, vis);
       }
     });
 
@@ -323,6 +395,71 @@ export function createOutlinerView(ctx: GraphEditorContext): {
   const fixDepths = (o: ONode, d: number) => {
     o.depth = d;
     o.children.forEach(c => fixDepths(c, d + 1));
+  };
+
+  // ── Multi-select operations ───────────────────────────────────────────
+
+  const doDeleteMulti = () => {
+    const sel = getSelectedONodes();
+    if (sel.length === 0) return;
+    const vis = flatVisible();
+    const firstIdx = vis.indexOf(sel[0]);
+    clearSelection();
+    for (const n of sel) {
+      if (n.expanded) collapseInDom(n);
+      rowMap.get(n.node.id)?.remove(); rowMap.delete(n.node.id);
+      const sibs = getSiblings(n);
+      const idx = sibs.indexOf(n); if (idx !== -1) sibs.splice(idx, 1);
+      byId.delete(n.node.id);
+      const cc = ctx.childrenCache.get(n.parentId);
+      if (cc) { const ci = cc.findIndex(x => x.id === n.node.id); if (ci >= 0) cc.splice(ci, 1); }
+      void apiDeleteNode(ctx.gId, n.node.id);
+    }
+    const selSet = new Set(sel.map(n => n.node.id));
+    const remaining = vis.filter(n => !selSet.has(n.node.id));
+    const target = remaining[Math.max(0, firstIdx - 1)] ?? remaining[0];
+    if (target && byId.has(target.node.id)) focusRow(target);
+  };
+
+  const doMoveMulti = (direction: 'up' | 'down') => {
+    const sel = getSelectedONodes();
+    if (sel.length <= 1) return;
+    const parentId = sel[0].parentId;
+    if (!sel.every(n => n.parentId === parentId)) return;
+    const sibs = getSiblings(sel[0]);
+    const minIdx = Math.min(...sel.map(n => sibs.indexOf(n)));
+    const maxIdx = Math.max(...sel.map(n => sibs.indexOf(n)));
+    if (direction === 'up') {
+      if (minIdx === 0) return;
+      const displaced = sibs[minIdx - 1];
+      sibs.splice(minIdx - 1, 1); sibs.splice(maxIdx, 0, displaced);
+      const displacedRows = visibleRowGroup(displaced);
+      let anchor: HTMLElement = lastDescRow(sel[sel.length - 1]);
+      for (const r of displacedRows) { anchor.insertAdjacentElement('afterend', r); anchor = r; }
+    } else {
+      if (maxIdx === sibs.length - 1) return;
+      const displaced = sibs[maxIdx + 1];
+      sibs.splice(maxIdx + 1, 1); sibs.splice(minIdx, 0, displaced);
+      const displacedRows = visibleRowGroup(displaced);
+      const firstGroupRow = rowMap.get(sel[0].node.id)!;
+      for (const r of displacedRows) listEl.insertBefore(r, firstGroupRow);
+    }
+    const cc = ctx.childrenCache.get(parentId);
+    if (cc) { const order = new Map(sibs.map((n, i) => [n.node.id, i])); cc.sort((a, b) => (order.get(a.id) ?? 0) - (order.get(b.id) ?? 0)); }
+    updateSelectionHighlight();
+    if (parentId !== null) void apiMoveNode(ctx.gId, sel[0].node.id, parentId, direction, sibs.map(n => n.node.id));
+  };
+
+  const doTabMulti = async (sel: ONode[], dedent: boolean) => {
+    if (dedent) {
+      for (const n of sel) { if (byId.has(n.node.id)) await doDedent(n); }
+    } else {
+      for (const n of [...sel].reverse()) {
+        if (!byId.has(n.node.id)) continue;
+        const v = flatVisible(); const ii = v.indexOf(n);
+        if (ii > 0) await doIndent(n, v, ii);
+      }
+    }
   };
 
   // ── Node operations ───────────────────────────────────────────────────
