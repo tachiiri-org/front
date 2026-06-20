@@ -220,15 +220,22 @@ export function createColumnFns(ctx: GraphEditorContext): {
       const base = ctx.state.showFallback
         ? col.nodes
         : col.nodes.filter((n) => primaryLabel(n, ctx.state.lang) != null);
-      // ナビ親（2列前の選択ノード）を除外してループを防ぐ
-      const navParentId = colIndex >= 2 ? (ctx.state.columns[colIndex - 2]?.selectedId ?? null) : null;
-      // col 0: search results (all), rootNodeId children (all), or bookmarks only; col 1+: exclude nav-parent and bookmarks
+      // Collect all ancestor IDs to prevent loops in the undirected graph.
+      // rootNodeId is always excluded (it is the nav root, not a content node).
+      // All selectedIds in columns to the left are also excluded (they form the current navigation path).
+      const ancestorIds = new Set<string>();
+      if (ctx.rootNodeId) ancestorIds.add(ctx.rootNodeId);
+      for (let i = 0; i < colIndex; i++) {
+        const sel = ctx.state.columns[i]?.selectedId;
+        if (sel) ancestorIds.add(sel);
+      }
+      // col 0: search results (all), rootNodeId children (all), or bookmarks only; col 1+: all base nodes
       const nodes = (colIndex === 0
         ? (ctx.state.searchQuery || ctx.rootNodeId
             ? base
             : base.filter((n) => ctx.state.bookmarks.has(n.id)))
-        : base.filter((n) => n.id !== navParentId && !ctx.state.bookmarks.has(n.id))
-      ).filter((n) => n.id !== ctx.pendingDeleteId);
+        : base
+      ).filter((n) => !ancestorIds.has(n.id) && n.id !== ctx.pendingDeleteId);
       for (const node of nodes) {
         list.appendChild(ctx.buildNodeRow(node, colIndex));
       }

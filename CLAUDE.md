@@ -30,7 +30,7 @@ ToolSearch で以下をロード（未ロードの場合）:
 select:mcp__front-production__graph_read_nodes_from,mcp__front-production__graph_add_node,mcp__front-production__graph_update_node,mcp__front-production__graph_delete_node,mcp__front-production__graph_toggle_link,mcp__front-production__graph_set_property,mcp__front-production__graph_remove_property
 ```
 
-ルートノード ID: `8827e2b8-be26-4731-8125-fe4e853a62fe`（graph_id: `word-graph-1`）。**2層構造**: ルート → ドメイン(`システム`/`インフラ`/`ビジネス`)＋`_ガイド`＋`fix` → カテゴリ → 知識ノード。各ノードに `node_type`(root/domain/guide/category/rule/fact/goal/issue) が付き、read 結果に `{node_type=...}` で表示される。
+ルートノード ID: `6427e286-9195-4826-8498-6a79a5c29fb7`（graph_id: `word-graph-1`）。**2層構造**: ルート → ドメイン(`システム`/`インフラ`/`ビジネス`)＋`_ガイド`＋`fix` → カテゴリ → 知識ノード。各ノードに `node_type`(root/domain/guide/category/rule/fact/goal/issue) が付き、read 結果に `{node_type=...}` で表示される。
 
 1. **最初に `_ガイド` を読む**（AI運用ルール集）。`graph_read_nodes_from(node_id: ルートID, depth: 1)` でドメイン目次、`depth: 2` でカテゴリ一覧を取得。
 2. タスクに関連するカテゴリを `graph_read_nodes_from(node_id: <category_id>, depth: 1)` または `graph_read_texts_by_word(word: "<カテゴリ名>")` で知識を読む。
