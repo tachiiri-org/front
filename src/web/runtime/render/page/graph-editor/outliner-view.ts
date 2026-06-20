@@ -75,6 +75,7 @@ export function createOutlinerView(ctx: GraphEditorContext): {
 
   // Scrollable list
   const listEl = document.createElement('div');
+  listEl.dataset.outlinerList = '1';
   listEl.style.cssText = `flex:1;overflow-y:auto;overflow-x:hidden;padding:4px 0 4px 10px;`;
   el.appendChild(listEl);
 
