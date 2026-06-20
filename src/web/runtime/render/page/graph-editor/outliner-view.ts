@@ -505,6 +505,15 @@ export function createOutlinerView(ctx: GraphEditorContext): {
 
   // ── Property menu (right-click on expand marker) ─────────────────────
 
+  // Sync a property change to ALL ExplorerNode instances of the same node across childrenCache
+  const syncPropChange = (nodeId: string, updater: (props: Record<string, string>) => void) => {
+    ctx.childrenCache.forEach(nodes => {
+      for (const n of nodes) { if (n.id === nodeId) { n.properties ??= {}; updater(n.properties); } }
+    });
+    const o = byId.get(nodeId);
+    if (o) { o.node.properties ??= {}; updater(o.node.properties); }
+  };
+
   const showPropertyMenu = (onode: ONode, x: number, y: number) => {
     document.querySelector('[data-prop-menu]')?.remove();
 
@@ -535,7 +544,7 @@ export function createOutlinerView(ctx: GraphEditorContext): {
         del.style.cssText = `background:transparent;border:none;color:${TEXT_DIM};cursor:pointer;padding:0 2px;font-size:12px;flex-shrink:0;`;
         del.addEventListener('click', (e) => {
           e.stopPropagation();
-          delete (onode.node.properties ??= {})[key];
+          syncPropChange(onode.node.id, p => { delete p[key]; });
           void apiRemoveProperty(ctx.gId, onode.node.id, key);
           rebuild();
         });
@@ -566,7 +575,7 @@ export function createOutlinerView(ctx: GraphEditorContext): {
         const k = eqIdx >= 0 ? raw.slice(0, eqIdx).trim() : raw;
         const v = eqIdx >= 0 ? raw.slice(eqIdx + 1).trim() : '●';
         if (!k) return;
-        (onode.node.properties ??= {})[k] = v;
+        syncPropChange(onode.node.id, p => { p[k] = v; });
         void apiSetProperty(ctx.gId, onode.node.id, k, v);
         propIn.value = '';
         rebuild();
