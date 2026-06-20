@@ -306,7 +306,8 @@ export async function callTool(
   }
 
   try {
-    const backendOpts = name === 'authorize_backend'
+    const needsTenant = ['authorize_backend', 'authorize_d1', 'authorize_r2_s3', 'authorize_r2_control'].includes(name);
+    const backendOpts = needsTenant
       ? env.actor
         ? {
             actorType: 'ai' as const,
