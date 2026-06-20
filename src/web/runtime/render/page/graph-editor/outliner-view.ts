@@ -189,6 +189,10 @@ export function createOutlinerView(ctx: GraphEditorContext): {
       cached = await fetchChildren(ctx.gId, onode.node.id, ctx.limit);
       ctx.childrenCache.set(onode.node.id, cached);
     }
+    // Populate shared propStore from fetched node properties
+    for (const n of cached) {
+      if (n.properties) ctx.propStore.set(n.id, { ...ctx.propStore.get(n.id), ...n.properties });
+    }
     const excl = ancestorIds(onode); excl.add(onode.node.id);
     onode.children = cached.filter(c => !excl.has(c.id)).map(c => make(c, onode.node.id, onode.depth + 1));
     onode.childrenLoaded = true;
@@ -505,13 +509,18 @@ export function createOutlinerView(ctx: GraphEditorContext): {
 
   // ── Property menu (right-click on expand marker) ─────────────────────
 
-  // Sync a property change to ALL ExplorerNode instances of the same node across childrenCache
+  // Update propStore and sync to all ExplorerNode instances in childrenCache
   const syncPropChange = (nodeId: string, updater: (props: Record<string, string>) => void) => {
+    const props = ctx.propStore.get(nodeId) ?? {};
+    updater(props);
+    if (Object.keys(props).length > 0) ctx.propStore.set(nodeId, props);
+    else ctx.propStore.delete(nodeId);
+    // Also sync to ExplorerNode instances already in memory
     ctx.childrenCache.forEach(nodes => {
-      for (const n of nodes) { if (n.id === nodeId) { n.properties ??= {}; updater(n.properties); } }
+      for (const n of nodes) { if (n.id === nodeId) n.properties = { ...props }; }
     });
     const o = byId.get(nodeId);
-    if (o) { o.node.properties ??= {}; updater(o.node.properties); }
+    if (o) o.node.properties = { ...props };
   };
 
   const showPropertyMenu = (onode: ONode, x: number, y: number) => {
@@ -530,7 +539,7 @@ export function createOutlinerView(ctx: GraphEditorContext): {
       menu.appendChild(title);
 
       // "●" is the sentinel value for tag-style (key-only) properties
-      const props = onode.node.properties ?? {};
+      const props = ctx.propStore.get(onode.node.id) ?? {};
       for (const [key, value] of Object.entries(props)) {
         const row = document.createElement('div');
         row.style.cssText = `display:flex;align-items:center;gap:6px;margin-bottom:4px;`;

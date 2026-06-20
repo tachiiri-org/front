@@ -201,8 +201,9 @@ export function renderGraphEditor(
   // `ctx` and resolves the other modules' callbacks lazily (at event time), which is
   // what lets the mutually-recursive render functions live in separate files.
   const rootNodeId = comp.rootNodeId ?? null;
+  const propStore = new Map<string, Record<string, string>>();
   const ctx = {
-    gId, limit, rootNodeId, outer, columnsEl, state, childrenCache,
+    gId, limit, rootNodeId, outer, columnsEl, state, childrenCache, propStore,
     columnVersion: 0, tempNodeCounter: 0, pendingDeleteId: null,
   } as unknown as GraphEditorContext;
   Object.assign(ctx, createColumnFns(ctx), createNodeRowFns(ctx), createDeleteFns(ctx));
