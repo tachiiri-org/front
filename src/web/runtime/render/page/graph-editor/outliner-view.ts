@@ -280,33 +280,64 @@ export function createOutlinerView(ctx: GraphEditorContext): {
     void apiDeleteNode(ctx.gId, onode.node.id); // fire and forget
   };
 
-  // Move node up/down in sibling order — incremental DOM move
+  // Move node up/down — same-parent reorder, or cross-hierarchy when at boundary
   const doMove = async (onode: ONode, direction: 'up' | 'down') => {
     const sibs = getSiblings(onode);
     const idx = sibs.indexOf(onode);
     const newIdx = idx + (direction === 'up' ? -1 : 1);
-    if (newIdx < 0 || newIdx >= sibs.length) return;
-    const neighbor = sibs[newIdx];
 
-    sibs.splice(idx, 1); sibs.splice(newIdx, 0, onode);
-
-    const cc = ctx.childrenCache.get(onode.parentId);
-    if (cc) { const ci = cc.findIndex(n => n.id === onode.node.id); if (ci >= 0) { cc.splice(ci, 1); cc.splice(newIdx, 0, onode.node); } }
-
-    // Move DOM rows of onode group
-    const group = visibleRowGroup(onode);
-    if (direction === 'up') {
-      const neighborRow = rowMap.get(neighbor.node.id)!;
-      for (const r of group) el.insertBefore(r, neighborRow);
-    } else {
-      const anchor = lastDescRow(neighbor);
-      let insertAfter = anchor;
-      for (const r of group) { insertAfter.insertAdjacentElement('afterend', r); insertAfter = r; }
+    if (newIdx >= 0 && newIdx < sibs.length) {
+      // Same-parent reorder (incremental DOM move)
+      const neighbor = sibs[newIdx];
+      sibs.splice(idx, 1); sibs.splice(newIdx, 0, onode);
+      const cc = ctx.childrenCache.get(onode.parentId);
+      if (cc) { const ci = cc.findIndex(n => n.id === onode.node.id); if (ci >= 0) { cc.splice(ci, 1); cc.splice(newIdx, 0, onode.node); } }
+      const group = visibleRowGroup(onode);
+      if (direction === 'up') {
+        const neighborRow = rowMap.get(neighbor.node.id)!;
+        for (const r of group) el.insertBefore(r, neighborRow);
+      } else {
+        const anchor = lastDescRow(neighbor);
+        let insertAfter = anchor;
+        for (const r of group) { insertAfter.insertAdjacentElement('afterend', r); insertAfter = r; }
+      }
+      focusRow(onode);
+      if (onode.parentId === null) void apiMoveBookmark(ctx.gId, onode.node.id, direction);
+      else void apiMoveNode(ctx.gId, onode.node.id, onode.parentId, direction, sibs.map(n => n.node.id));
+      return;
     }
 
+    // Cross-hierarchy: move to adjacent uncle node
+    if (onode.parentId === null) return; // already at root, nowhere to go
+    const parentONode = byId.get(onode.parentId);
+    if (!parentONode) return;
+    const parentSibs = getSiblings(parentONode);
+    const parentIdx = parentSibs.indexOf(parentONode);
+    const targetParentIdx = parentIdx + (direction === 'down' ? 1 : -1);
+    if (targetParentIdx < 0 || targetParentIdx >= parentSibs.length) return;
+    const targetParent = parentSibs[targetParentIdx];
+    const oldParentId = onode.parentId;
+
+    if (!targetParent.childrenLoaded) await ensureChildren(targetParent);
+
+    // Detach from old parent
+    sibs.splice(idx, 1);
+    const oldCc = ctx.childrenCache.get(oldParentId);
+    if (oldCc) { const ci = oldCc.findIndex(n => n.id === onode.node.id); if (ci >= 0) oldCc.splice(ci, 1); }
+
+    // Attach to target parent (first child when moving down, last child when moving up)
+    onode.parentId = targetParent.node.id;
+    fixDepths(onode, targetParent.depth + 1);
+    if (direction === 'down') targetParent.children.unshift(onode);
+    else targetParent.children.push(onode);
+    targetParent.expanded = true;
+    ctx.childrenCache.delete(targetParent.node.id);
+
+    render();
     focusRow(onode);
-    if (onode.parentId === null) void apiMoveBookmark(ctx.gId, onode.node.id, direction);
-    else void apiMoveNode(ctx.gId, onode.node.id, onode.parentId, direction, sibs.map(n => n.node.id));
+
+    void apiToggleLink(ctx.gId, onode.node.id, oldParentId);      // remove old edge
+    void apiToggleLink(ctx.gId, onode.node.id, targetParent.node.id); // add new edge
   };
 
   // Shift+↑: make current node the last child of the node above it (indent)

@@ -52,7 +52,9 @@ export function renderGraphEditor(
   topBar.style.cssText = `display:flex;justify-content:flex-end;align-items:center;padding:3px 8px;border-bottom:1px solid ${BORDER};flex-shrink:0;gap:4px;`;
 
   // ── View mode toggle ──────────────────────────────────────────────
-  let viewMode: 'columns' | 'outline' = 'columns';
+  const VIEW_MODE_KEY = `graph-editor-view:${gId}`;
+  const storedView = localStorage.getItem(VIEW_MODE_KEY);
+  let viewMode: 'columns' | 'outline' = storedView === 'outline' ? 'outline' : 'columns';
 
   const makeViewBtnStyle = (mode: 'columns' | 'outline') => {
     const active = viewMode === mode;
@@ -206,6 +208,7 @@ export function renderGraphEditor(
 
   const switchView = (mode: 'columns' | 'outline') => {
     viewMode = mode;
+    localStorage.setItem(VIEW_MODE_KEY, mode);
     refreshViewBtns();
     if (mode === 'outline') {
       columnsEl.style.display = 'none';
@@ -221,6 +224,9 @@ export function renderGraphEditor(
   };
   colViewBtn.addEventListener('click', () => switchView('columns'));
   outlineViewBtn.addEventListener('click', () => switchView('outline'));
+
+  // Restore saved view on load
+  if (viewMode === 'outline') switchView('outline');
 
   // ── Language / fallback wiring (needs ctx) ─────────────────────────
   const switchLang = (l: 'en' | 'ja') => {
