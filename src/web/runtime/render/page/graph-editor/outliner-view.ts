@@ -417,40 +417,46 @@ export function createOutlinerView(ctx: GraphEditorContext): {
   // ── Link-search (/) ──────────────────────────────────────────────────
 
   const doLinkSearch = (onode: ONode) => {
-    // Remove any existing search panel first
-    listEl.querySelector('[data-link-search]')?.remove();
+    // Close any existing search panel
+    (listEl.querySelector('[data-link-search]') as HTMLElement | null)?.remove();
 
-    const leftPad = (onode.depth - baseDepth) * 20 + 6 + 22; // align with textarea left edge
+    const row = rowMap.get(onode.node.id);
+    if (!row) return;
+    const ta = row.querySelector<HTMLTextAreaElement>('textarea');
+    if (!ta) return;
 
-    const wrap = document.createElement('div');
-    wrap.dataset.linkSearch = '1';
-    wrap.style.cssText = `position:relative;`;
-
-    const bar = document.createElement('div');
-    bar.style.cssText = `display:flex;align-items:center;padding:1px 0;padding-left:${leftPad}px;gap:4px;`;
+    // Hide textarea, insert search input in its place within the same flex row
+    ta.style.display = 'none';
+    row.style.position = 'relative';
 
     const slash = document.createElement('span');
     slash.textContent = '/';
-    slash.style.cssText = `color:${TEXT_DIM};font-size:15px;flex-shrink:0;line-height:1.8;`;
+    slash.style.cssText = `flex-shrink:0;color:${TEXT_DIM};font-size:15px;line-height:1.8;padding-right:2px;`;
 
     const inp = document.createElement('input');
+    inp.dataset.linkSearch = '1';
     inp.type = 'text';
-    inp.style.cssText = `width:200px;background:transparent;border:none;outline:none;color:${TEXT_HIGH};font-size:15px;font-family:inherit;line-height:1.8;`;
+    inp.style.cssText = `flex:1;background:transparent;border:none;outline:none;color:${TEXT_HIGH};font-size:15px;font-family:inherit;line-height:1.8;padding:0;`;
 
-    bar.append(slash, inp);
+    row.append(slash, inp);
 
+    // Dropdown appears below the row
     const drop = document.createElement('div');
-    drop.style.cssText = `position:absolute;left:${leftPad}px;top:100%;z-index:20;width:280px;max-height:200px;overflow-y:auto;background:hsl(240,14%,9%);border:1px solid ${BORDER};border-radius:4px;`;
+    drop.style.cssText = `position:absolute;left:0;top:100%;z-index:20;min-width:240px;max-width:360px;max-height:200px;overflow-y:auto;background:hsl(240,14%,9%);border:1px solid ${BORDER};border-radius:4px;`;
+    row.appendChild(drop);
 
-    wrap.append(bar, drop);
-    lastDescRow(onode).insertAdjacentElement('afterend', wrap);
     inp.focus();
 
     let resultNodes: ExplorerNode[] = [];
     let selIdx = 0;
     let timer: ReturnType<typeof setTimeout> | null = null;
 
-    const close = () => { wrap.remove(); focusRow(onode); };
+    const close = () => {
+      drop.remove(); slash.remove(); inp.remove();
+      ta.style.display = '';
+      row.style.position = '';
+      focusRow(onode);
+    };
 
     const highlight = () => {
       ([...drop.children] as HTMLElement[]).forEach((el, i) => {
