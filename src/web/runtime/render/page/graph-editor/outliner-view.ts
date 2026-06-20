@@ -131,11 +131,8 @@ export function createOutlinerView(ctx: GraphEditorContext): {
         e.preventDefault();
         if (i < vis.length - 1) focusRow(vis[i + 1]);
       } else if (e.key === 'Enter' && !e.shiftKey && !e.ctrlKey && !e.metaKey) {
-        // Only add sibling when we know the parent (rootNodeId mode)
-        if (onode.parentId !== null) {
-          e.preventDefault();
-          void doAddSibling(onode);
-        }
+        e.preventDefault();
+        void doAddSibling(onode);
       } else if (e.key === 'Backspace' && ta.value === '') {
         e.preventDefault();
         void doDelete(onode, i, vis);
