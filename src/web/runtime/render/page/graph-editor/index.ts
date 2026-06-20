@@ -8,6 +8,7 @@ import { fetchBookmarks } from './api';
 import { createColumnFns } from './column';
 import { createNodeRowFns } from './node-row';
 import { createDeleteFns } from './delete';
+import { createOutlinerView } from './outliner-view';
 
 export function renderGraphEditor(
   id: string,
@@ -49,6 +50,32 @@ export function renderGraphEditor(
   // ── Language switcher ─────────────────────────────────────────────
   const topBar = document.createElement('div');
   topBar.style.cssText = `display:flex;justify-content:flex-end;align-items:center;padding:3px 8px;border-bottom:1px solid ${BORDER};flex-shrink:0;gap:4px;`;
+
+  // ── View mode toggle ──────────────────────────────────────────────
+  let viewMode: 'columns' | 'outline' = 'columns';
+
+  const makeViewBtnStyle = (mode: 'columns' | 'outline') => {
+    const active = viewMode === mode;
+    return `background:${active ? SELECT_STRONG : 'transparent'};border:1px solid ${active ? SELECT_STRONG : BORDER};color:${active ? TEXT_HIGH : TEXT_MID};cursor:pointer;font-size:11px;padding:1px 7px;border-radius:3px;line-height:1.5;`;
+  };
+  const colViewBtn = document.createElement('button');
+  colViewBtn.textContent = '列';
+  colViewBtn.title = 'カラムビュー';
+  const outlineViewBtn = document.createElement('button');
+  outlineViewBtn.textContent = 'アウトライン';
+  outlineViewBtn.title = 'アウトラインビュー';
+
+  const refreshViewBtns = () => {
+    colViewBtn.style.cssText = makeViewBtnStyle('columns');
+    outlineViewBtn.style.cssText = makeViewBtnStyle('outline');
+  };
+  refreshViewBtns();
+
+  const sep = document.createElement('span');
+  sep.style.cssText = `width:1px;height:14px;background:${BORDER};margin:0 2px;flex-shrink:0;`;
+  topBar.appendChild(colViewBtn);
+  topBar.appendChild(outlineViewBtn);
+  topBar.appendChild(sep);
 
   const makeLangBtnStyle = (l: 'en' | 'ja') => {
     const active = state.lang === l;
@@ -158,6 +185,7 @@ export function renderGraphEditor(
   columnsEl.style.cssText = `display:flex;flex:1;overflow-x:auto;overflow-y:hidden;`;
   outer.appendChild(columnsEl);
 
+
   // ── Context assembly ──────────────────────────────────────────────
   // The callback fields are filled in by the module factories below; until then the
   // base object only carries config + shared mutable state. Every factory closes over
@@ -171,12 +199,37 @@ export function renderGraphEditor(
   Object.assign(ctx, createColumnFns(ctx), createNodeRowFns(ctx), createDeleteFns(ctx));
   ctx.refreshBreadcrumb = refreshBreadcrumb;
 
+  // ── Outliner view (needs ctx) ──────────────────────────────────────
+  const outliner = createOutlinerView(ctx);
+  outliner.el.style.display = 'none';
+  outer.appendChild(outliner.el);
+
+  const switchView = (mode: 'columns' | 'outline') => {
+    viewMode = mode;
+    refreshViewBtns();
+    if (mode === 'outline') {
+      columnsEl.style.display = 'none';
+      breadcrumbEl.style.display = 'none';
+      outliner.el.style.display = 'flex';
+      outliner.el.style.flexDirection = 'column';
+      void outliner.load();
+    } else {
+      outliner.el.style.display = 'none';
+      columnsEl.style.display = 'flex';
+      breadcrumbEl.style.display = '';
+    }
+  };
+  colViewBtn.addEventListener('click', () => switchView('columns'));
+  outlineViewBtn.addEventListener('click', () => switchView('outline'));
+
   // ── Language / fallback wiring (needs ctx) ─────────────────────────
   const switchLang = (l: 'en' | 'ja') => {
     state.lang = l;
     refreshLangBtns();
     fallbackBtn.style.cssText = makeFallbackBtnStyle();
-    if (!state.showFallback) {
+    if (viewMode === 'outline') {
+      outliner.refresh();
+    } else if (!state.showFallback) {
       // Re-fetch col0 with new lang filter
       childrenCache.delete(null);
       void ctx.loadColumn(null, 0);
@@ -191,8 +244,12 @@ export function renderGraphEditor(
   fallbackBtn.addEventListener('click', () => {
     state.showFallback = !state.showFallback;
     fallbackBtn.style.cssText = makeFallbackBtnStyle();
-    childrenCache.delete(null);
-    void ctx.loadColumn(null, 0);
+    if (viewMode === 'outline') {
+      void outliner.load();
+    } else {
+      childrenCache.delete(null);
+      void ctx.loadColumn(null, 0);
+    }
   });
 
   if (rootNodeId) {
