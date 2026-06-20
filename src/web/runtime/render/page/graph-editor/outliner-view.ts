@@ -20,13 +20,23 @@ export function createOutlinerView(ctx: GraphEditorContext): {
   el.style.cssText = `flex:1;overflow-y:auto;overflow-x:hidden;padding:4px 0;`;
 
   let roots: ONode[] = [];
-  let focusedId: string | null = null;
   const byId = new Map<string, ONode>();
 
   const make = (node: ExplorerNode, parentId: string | null, depth: number): ONode => {
     const o: ONode = { node, parentId, depth, expanded: false, childrenLoaded: false, children: [] };
     byId.set(node.id, o);
     return o;
+  };
+
+  // Collect all ancestor IDs of a node (to filter them out of child lists)
+  const ancestorIds = (onode: ONode): Set<string> => {
+    const ids = new Set<string>();
+    let cur: ONode | undefined = onode;
+    while (cur?.parentId != null) {
+      ids.add(cur.parentId);
+      cur = byId.get(cur.parentId);
+    }
+    return ids;
   };
 
   const flatVisible = (): ONode[] => {
@@ -50,14 +60,26 @@ export function createOutlinerView(ctx: GraphEditorContext): {
       cached = await fetchChildren(ctx.gId, onode.node.id, ctx.limit);
       ctx.childrenCache.set(onode.node.id, cached);
     }
-    onode.children = cached.map(c => make(c, onode.node.id, onode.depth + 1));
+    const exclude = ancestorIds(onode);
+    exclude.add(onode.node.id); // also exclude self
+    onode.children = cached
+      .filter(c => !exclude.has(c.id))
+      .map(c => make(c, onode.node.id, onode.depth + 1));
     onode.childrenLoaded = true;
+  };
+
+  const toggleExpand = async (onode: ONode, forceExpand?: boolean) => {
+    const next = forceExpand !== undefined ? forceExpand : !onode.expanded;
+    if (next && !onode.childrenLoaded) await ensureChildren(onode);
+    onode.expanded = next;
+    render();
+    restoreFocus();
   };
 
   const buildRow = (onode: ONode): HTMLElement => {
     const row = document.createElement('div');
     row.dataset.nodeId = onode.node.id;
-    row.style.cssText = `display:flex;align-items:flex-start;padding:1px 0;${focusedId === onode.node.id ? `background:${SELECT_STRONG}22;` : ''}`;
+    row.style.cssText = `display:flex;align-items:flex-start;padding:1px 0;`;
 
     // Indent spacer
     const spacer = document.createElement('span');
@@ -78,12 +100,7 @@ export function createOutlinerView(ctx: GraphEditorContext): {
       btn.textContent = onode.expanded ? '▾' : '▸';
       btn.style.color = TEXT_MID;
       btn.style.cursor = 'pointer';
-      btn.addEventListener('click', async () => {
-        await ensureChildren(onode);
-        onode.expanded = !onode.expanded;
-        render();
-        restoreFocus();
-      });
+      btn.addEventListener('click', () => void toggleExpand(onode));
     }
     row.appendChild(btn);
 
@@ -99,7 +116,6 @@ export function createOutlinerView(ctx: GraphEditorContext): {
     ta.addEventListener('input', resize);
 
     ta.addEventListener('focus', () => {
-      focusedId = onode.node.id;
       row.style.background = `${SELECT_STRONG}22`;
     });
 
@@ -110,7 +126,6 @@ export function createOutlinerView(ctx: GraphEditorContext): {
         void apiUpdateNode(ctx.gId, onode.node.id, ctx.state.lang, ta.value).then(() => {
           if (ctx.state.lang === 'en') onode.node.en = ta.value;
           else onode.node.ja = ta.value;
-          // keep childrenCache in sync
           const cc = ctx.childrenCache.get(onode.parentId);
           const cn = cc?.find(n => n.id === onode.node.id);
           if (cn) { if (ctx.state.lang === 'en') cn.en = ta.value; else cn.ja = ta.value; }
@@ -121,6 +136,18 @@ export function createOutlinerView(ctx: GraphEditorContext): {
     ta.addEventListener('keydown', (e) => {
       const vis = flatVisible();
       const i = vis.indexOf(onode);
+
+      // Ctrl/Cmd + ↓ : expand, Ctrl/Cmd + ↑ : collapse
+      if (e.key === 'ArrowDown' && (e.ctrlKey || e.metaKey) && !e.shiftKey) {
+        e.preventDefault();
+        void toggleExpand(onode, true);
+        return;
+      }
+      if (e.key === 'ArrowUp' && (e.ctrlKey || e.metaKey) && !e.shiftKey) {
+        e.preventDefault();
+        void toggleExpand(onode, false);
+        return;
+      }
 
       if (e.key === 'ArrowUp' && !e.shiftKey && !e.ctrlKey && !e.metaKey) {
         if (ta.selectionStart !== 0) return;
@@ -144,12 +171,17 @@ export function createOutlinerView(ctx: GraphEditorContext): {
   };
 
   const restoreFocus = () => {
-    if (!focusedId) return;
-    el.querySelector<HTMLTextAreaElement>(`[data-node-id="${focusedId}"] textarea`)?.focus();
+    // After render(), re-focus the textarea that was active before
+    const active = document.activeElement;
+    if (active instanceof HTMLTextAreaElement) {
+      const nodeId = active.closest<HTMLElement>('[data-node-id]')?.dataset.nodeId;
+      if (nodeId) {
+        el.querySelector<HTMLTextAreaElement>(`[data-node-id="${nodeId}"] textarea`)?.focus();
+      }
+    }
   };
 
   const focusRow = (onode: ONode) => {
-    focusedId = onode.node.id;
     el.querySelector<HTMLTextAreaElement>(`[data-node-id="${onode.node.id}"] textarea`)?.focus();
   };
 
@@ -164,7 +196,6 @@ export function createOutlinerView(ctx: GraphEditorContext): {
     const no = make(nn, onode.parentId, onode.depth);
     no.childrenLoaded = true;
     sibs.splice(idx + 1, 0, no);
-    // keep childrenCache in sync
     const cc = ctx.childrenCache.get(onode.parentId);
     if (cc) { const ci = cc.findIndex(n => n.id === onode.node.id); cc.splice(ci + 1, 0, nn); }
     render();
@@ -176,7 +207,6 @@ export function createOutlinerView(ctx: GraphEditorContext): {
     const sibs = getSiblings(onode);
     sibs.splice(sibs.indexOf(onode), 1);
     byId.delete(onode.node.id);
-    // keep childrenCache in sync
     const cc = ctx.childrenCache.get(onode.parentId);
     if (cc) { const ci = cc.findIndex(n => n.id === onode.node.id); if (ci >= 0) cc.splice(ci, 1); }
     render();
