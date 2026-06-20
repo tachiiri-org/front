@@ -373,7 +373,7 @@ export function createOutlinerView(ctx: GraphEditorContext): {
       // Shift+Alt+↑↓ reorder / cross-hierarchy move (multi or single)
       if ((e.key === 'ArrowUp' || e.key === 'ArrowDown') && e.shiftKey && e.altKey) {
         e.preventDefault();
-        if (isMultiSelect()) doMoveMulti(e.key === 'ArrowUp' ? 'up' : 'down');
+        if (isMultiSelect()) void doMoveMulti(e.key === 'ArrowUp' ? 'up' : 'down');
         else void doMove(onode, e.key === 'ArrowUp' ? 'up' : 'down');
         return;
       }
@@ -576,7 +576,7 @@ export function createOutlinerView(ctx: GraphEditorContext): {
     if (target && byId.has(target.node.id)) focusRow(target);
   };
 
-  const doMoveMulti = (direction: 'up' | 'down') => {
+  const doMoveMulti = async (direction: 'up' | 'down') => {
     const sel = getSelectedONodes();
     if (sel.length <= 1) return;
     const parentId = sel[0].parentId;
@@ -584,25 +584,69 @@ export function createOutlinerView(ctx: GraphEditorContext): {
     const sibs = getSiblings(sel[0]);
     const minIdx = Math.min(...sel.map(n => sibs.indexOf(n)));
     const maxIdx = Math.max(...sel.map(n => sibs.indexOf(n)));
-    if (direction === 'up') {
-      if (minIdx === 0) return;
+
+    // Same-parent reorder
+    if (direction === 'up' && minIdx > 0) {
       const displaced = sibs[minIdx - 1];
       sibs.splice(minIdx - 1, 1); sibs.splice(maxIdx, 0, displaced);
       const displacedRows = visibleRowGroup(displaced);
       let anchor: HTMLElement = lastDescRow(sel[sel.length - 1]);
       for (const r of displacedRows) { anchor.insertAdjacentElement('afterend', r); anchor = r; }
-    } else {
-      if (maxIdx === sibs.length - 1) return;
+      const cc = ctx.childrenCache.get(parentId);
+      if (cc) { const order = new Map(sibs.map((n, i) => [n.node.id, i])); cc.sort((a, b) => (order.get(a.id) ?? 0) - (order.get(b.id) ?? 0)); }
+      updateSelectionHighlight();
+      if (parentId !== null) void apiMoveNode(ctx.gId, sel[0].node.id, parentId, direction, sibs.map(n => n.node.id));
+      return;
+    }
+    if (direction === 'down' && maxIdx < sibs.length - 1) {
       const displaced = sibs[maxIdx + 1];
       sibs.splice(maxIdx + 1, 1); sibs.splice(minIdx, 0, displaced);
       const displacedRows = visibleRowGroup(displaced);
       const firstGroupRow = rowMap.get(sel[0].node.id)!;
       for (const r of displacedRows) listEl.insertBefore(r, firstGroupRow);
+      const cc = ctx.childrenCache.get(parentId);
+      if (cc) { const order = new Map(sibs.map((n, i) => [n.node.id, i])); cc.sort((a, b) => (order.get(a.id) ?? 0) - (order.get(b.id) ?? 0)); }
+      updateSelectionHighlight();
+      if (parentId !== null) void apiMoveNode(ctx.gId, sel[0].node.id, parentId, direction, sibs.map(n => n.node.id));
+      return;
     }
-    const cc = ctx.childrenCache.get(parentId);
-    if (cc) { const order = new Map(sibs.map((n, i) => [n.node.id, i])); cc.sort((a, b) => (order.get(a.id) ?? 0) - (order.get(b.id) ?? 0)); }
-    updateSelectionHighlight();
-    if (parentId !== null) void apiMoveNode(ctx.gId, sel[0].node.id, parentId, direction, sibs.map(n => n.node.id));
+
+    // Cross-hierarchy: move group to adjacent uncle
+    if (parentId === null) return;
+    const parentONode = byId.get(parentId);
+    if (!parentONode) return;
+    const parentSibs = getSiblings(parentONode);
+    const parentIdx = parentSibs.indexOf(parentONode);
+    const targetParentIdx = parentIdx + (direction === 'down' ? 1 : -1);
+    if (targetParentIdx < 0 || targetParentIdx >= parentSibs.length) return;
+    const targetParent = parentSibs[targetParentIdx];
+    const oldParentId = parentId;
+
+    if (!targetParent.childrenLoaded) await ensureChildren(targetParent);
+
+    // Remove group from old parent (iterate descending to avoid index shift)
+    const selSet = new Set(sel);
+    for (let i = sibs.length - 1; i >= 0; i--) { if (selSet.has(sibs[i])) sibs.splice(i, 1); }
+    const oldCc = ctx.childrenCache.get(oldParentId);
+    const selIds = new Set(sel.map(n => n.node.id));
+    if (oldCc) oldCc.splice(0, oldCc.length, ...oldCc.filter(x => !selIds.has(x.id)));
+
+    // Re-parent and fix depths
+    const newDepth = targetParent.depth + 1;
+    for (const n of sel) { n.parentId = targetParent.node.id; fixDepths(n, newDepth); }
+
+    if (direction === 'down') targetParent.children.unshift(...sel);
+    else targetParent.children.push(...sel);
+    targetParent.expanded = true;
+    ctx.childrenCache.delete(targetParent.node.id);
+
+    render();
+    if (sel[0]) focusRow(sel[0]);
+
+    for (const n of sel) {
+      void apiToggleLink(ctx.gId, n.node.id, oldParentId);
+      void apiToggleLink(ctx.gId, n.node.id, targetParent.node.id);
+    }
   };
 
   const doTabMulti = async (sel: ONode[], dedent: boolean) => {
