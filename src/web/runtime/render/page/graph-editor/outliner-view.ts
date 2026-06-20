@@ -627,7 +627,7 @@ export function createOutlinerView(ctx: GraphEditorContext): {
 
         // Color swatch button
         const swatch = document.createElement('button');
-        swatch.style.cssText = `flex-shrink:0;width:14px;height:14px;border-radius:3px;border:1px solid ${BORDER};background:${propColor?.code ?? 'transparent'};cursor:pointer;`;
+        swatch.style.cssText = `flex-shrink:0;width:14px;height:14px;border-radius:3px;border:1px solid ${BORDER};background:${propColor?.code ?? TEXT_DIM};cursor:pointer;`;
         swatch.addEventListener('click', (e) => { e.stopPropagation(); showColorPicker(key, swatch); });
 
         row.append(cb, labelEl, swatch);
