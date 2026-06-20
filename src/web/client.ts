@@ -8,6 +8,10 @@ import { renderLoginGroupPage } from './runtime/render/page/login-group';
 import { renderGroupSelectPage } from './runtime/render/page/group-select';
 import { renderSettingsPage } from './runtime/render/page/settings';
 import { renderAdminPage } from './runtime/render/page/admin';
+import { renderGraphEditor } from './runtime/render/page/graph-editor';
+import { renderStorageExplorer } from './runtime/render/page/storage-explorer';
+import type { GraphEditorComponent } from './schema/component/kind/graph-editor';
+import type { StorageExplorerComponent } from './schema/component/kind/storage-explorer';
 
 const HEADER_HEIGHT = 36;
 
@@ -255,6 +259,34 @@ const readInlineScreenData = (): unknown | null => {
   }
 };
 
+type ScreenSpecComponent = { id: string; type: string; props: Record<string, unknown> };
+type ScreenSpec = { viewports: { desktop?: { components?: ScreenSpecComponent[] } } };
+const isScreenSpec = (v: unknown): v is ScreenSpec =>
+  typeof v === 'object' && v !== null && typeof (v as Record<string, unknown>).viewports === 'object';
+
+const renderScreenSpec = (screenId: string, spec: ScreenSpec): void => {
+  applyViewportLayout();
+  void renderNav(screenId);
+  root.innerHTML = '';
+  root.style.display = 'flex';
+  root.style.flexDirection = 'column';
+  const components = spec.viewports?.desktop?.components ?? [];
+  for (const comp of components) {
+    let el: HTMLElement;
+    if (comp.type === 'graph-editor') {
+      el = renderGraphEditor(comp.id, comp.props as unknown as GraphEditorComponent);
+    } else if (comp.type === 'storage-explorer') {
+      el = renderStorageExplorer(comp.id, comp.props as unknown as StorageExplorerComponent);
+    } else {
+      el = document.createElement('div');
+      el.textContent = `Unknown component type: ${comp.type}`;
+    }
+    el.style.flex = '1';
+    el.style.minHeight = '0';
+    root.appendChild(el);
+  }
+};
+
 const renderScreen = async (screenId: string): Promise<void> => {
   const inlineData = readInlineScreenData();
   let value: unknown;
@@ -267,6 +299,10 @@ const renderScreen = async (screenId: string): Promise<void> => {
       return;
     }
     value = (await response.json()) as unknown;
+  }
+  if (isScreenSpec(value)) {
+    renderScreenSpec(screenId, value);
+    return;
   }
   if (!isScreen(value)) {
     showLoadError(`Invalid screen payload for "${screenId}".`);
