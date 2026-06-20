@@ -131,10 +131,24 @@ export function createOutlinerView(ctx: GraphEditorContext): {
     onode.childrenLoaded = true;
   };
 
+  const updateExpandMarker = (onode: ONode) => {
+    const row = rowMap.get(onode.node.id);
+    if (!row) return;
+    const m = row.querySelector<HTMLElement>('[data-expand-marker]');
+    if (!m) return;
+    const hasChildren = onode.childrenLoaded
+      ? onode.children.length > 0
+      : (ctx.childrenCache.get(onode.node.id)?.length ?? 1) > 0;
+    const filled = hasChildren && !onode.expanded;
+    m.style.background = filled ? TEXT_MID : 'transparent';
+    m.style.border = filled ? 'none' : `1.5px solid ${hasChildren ? TEXT_MID : TEXT_DIM}`;
+    const wrap = m.parentElement;
+    if (wrap) wrap.style.cursor = hasChildren ? 'pointer' : 'default';
+  };
+
   const expandInDom = (onode: ONode) => {
     onode.expanded = true;
-    const toggleBtn = rowMap.get(onode.node.id)?.querySelector<HTMLButtonElement>('button');
-    if (toggleBtn && toggleBtn.textContent !== '·') toggleBtn.textContent = '▾';
+    updateExpandMarker(onode);
     let anchor = rowMap.get(onode.node.id)!;
     const insertSubtree = (list: ONode[]) => {
       for (const child of list) {
@@ -149,8 +163,7 @@ export function createOutlinerView(ctx: GraphEditorContext): {
 
   const collapseInDom = (onode: ONode) => {
     onode.expanded = false;
-    const toggleBtn = rowMap.get(onode.node.id)?.querySelector<HTMLButtonElement>('button');
-    if (toggleBtn && toggleBtn.textContent !== '·') toggleBtn.textContent = '▸';
+    updateExpandMarker(onode);
     const removeSubtree = (list: ONode[]) => {
       for (const child of list) {
         rowMap.get(child.node.id)?.remove(); rowMap.delete(child.node.id);
@@ -164,6 +177,7 @@ export function createOutlinerView(ctx: GraphEditorContext): {
     const next = forceExpand !== undefined ? forceExpand : !onode.expanded;
     if (next === onode.expanded) { focusRow(onode); return; }
     if (next && !onode.childrenLoaded) await ensureChildren(onode);
+    if (next && onode.children.length === 0) { updateExpandMarker(onode); focusRow(onode); return; }
     if (next) expandInDom(onode); else collapseInDom(onode);
     focusRow(onode);
   };
@@ -249,17 +263,15 @@ export function createOutlinerView(ctx: GraphEditorContext): {
     spacer.style.cssText = `flex-shrink:0;width:${(onode.depth - baseDepth) * 20 + 6}px;`;
     row.appendChild(spacer);
 
-    const btn = document.createElement('button');
-    btn.style.cssText = `flex-shrink:0;display:flex;align-items:center;justify-content:center;width:18px;background:transparent;border:none;padding:0;font-size:10px;line-height:1;`;
-    const knownLen = onode.childrenLoaded ? onode.children.length : ctx.childrenCache.get(onode.node.id)?.length;
-    if (knownLen === 0) {
-      btn.textContent = '·'; btn.style.color = TEXT_DIM; btn.style.cursor = 'default';
-    } else {
-      btn.textContent = onode.expanded ? '▾' : '▸';
-      btn.style.color = TEXT_MID; btn.style.cursor = 'pointer';
-      btn.addEventListener('click', () => void toggleExpand(onode));
-    }
-    row.appendChild(btn);
+    const btnWrap = document.createElement('span');
+    btnWrap.style.cssText = `flex-shrink:0;display:flex;align-items:center;justify-content:center;width:18px;`;
+    btnWrap.addEventListener('click', () => void toggleExpand(onode));
+    const marker = document.createElement('span');
+    marker.dataset.expandMarker = '1';
+    marker.style.cssText = `width:7px;height:7px;border-radius:1px;box-sizing:border-box;pointer-events:none;`;
+    btnWrap.appendChild(marker);
+    row.appendChild(btnWrap);
+    updateExpandMarker(onode);
 
     const label = primaryLabel(onode.node, ctx.state.lang) ?? fallbackLabel(onode.node, ctx.state.lang);
     const ta = document.createElement('textarea');
