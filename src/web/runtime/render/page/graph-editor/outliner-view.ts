@@ -41,41 +41,34 @@ export function createOutlinerView(ctx: GraphEditorContext): {
   filterLabel.textContent = 'filter';
   filterLabel.style.cssText = `color:${TEXT_DIM};font-size:11px;flex-shrink:0;`;
 
-  const filterKeyIn = document.createElement('input');
-  filterKeyIn.placeholder = 'key';
-  filterKeyIn.style.cssText = `width:72px;background:transparent;border:none;border-bottom:1px solid ${BORDER};padding:1px 2px;color:${TEXT_HIGH};font-size:12px;outline:none;font-family:inherit;`;
-
-  const filterSepEl = document.createElement('span');
-  filterSepEl.textContent = '=';
-  filterSepEl.style.cssText = `color:${TEXT_DIM};font-size:12px;flex-shrink:0;`;
-
-  const filterValIn = document.createElement('input');
-  filterValIn.placeholder = 'value';
-  filterValIn.style.cssText = `width:100px;background:transparent;border:none;border-bottom:1px solid ${BORDER};padding:1px 2px;color:${TEXT_HIGH};font-size:12px;outline:none;font-family:inherit;`;
+  // Single input: "例外" → key="例外", "key=val" → key+value match
+  const filterIn = document.createElement('input');
+  filterIn.placeholder = '例外 または key=value';
+  filterIn.style.cssText = `flex:1;background:transparent;border:none;border-bottom:1px solid ${BORDER};padding:1px 2px;color:${TEXT_HIGH};font-size:12px;outline:none;font-family:inherit;`;
 
   const filterCount = document.createElement('span');
-  filterCount.style.cssText = `color:${TEXT_DIM};font-size:11px;margin-left:4px;`;
+  filterCount.style.cssText = `color:${TEXT_DIM};font-size:11px;flex-shrink:0;`;
 
   const filterClearBtn = document.createElement('button');
   filterClearBtn.textContent = '×';
   filterClearBtn.title = 'フィルタをクリア';
-  filterClearBtn.style.cssText = `background:transparent;border:none;color:${TEXT_DIM};cursor:pointer;font-size:13px;padding:0 2px;display:none;`;
+  filterClearBtn.style.cssText = `background:transparent;border:none;color:${TEXT_DIM};cursor:pointer;font-size:13px;padding:0 2px;display:none;flex-shrink:0;`;
 
-  filterEl.append(filterLabel, filterKeyIn, filterSepEl, filterValIn, filterCount, filterClearBtn);
+  filterEl.append(filterLabel, filterIn, filterCount, filterClearBtn);
   el.appendChild(filterEl);
 
   const applyFilter = () => {
-    filterKey = filterKeyIn.value.trim();
-    filterValue = filterValIn.value.trim();
-    filterClearBtn.style.display = (filterKey || filterValue) ? '' : 'none';
+    const raw = filterIn.value.trim();
+    const eqIdx = raw.indexOf('=');
+    filterKey = eqIdx >= 0 ? raw.slice(0, eqIdx).trim() : raw;
+    filterValue = eqIdx >= 0 ? raw.slice(eqIdx + 1).trim() : '';
+    filterClearBtn.style.display = raw ? '' : 'none';
     render();
   };
 
-  filterKeyIn.addEventListener('input', applyFilter);
-  filterValIn.addEventListener('input', applyFilter);
+  filterIn.addEventListener('input', applyFilter);
   filterClearBtn.addEventListener('click', () => {
-    filterKeyIn.value = ''; filterValIn.value = '';
-    filterKey = ''; filterValue = '';
+    filterIn.value = ''; filterKey = ''; filterValue = '';
     filterClearBtn.style.display = 'none';
     render();
   });
@@ -127,10 +120,14 @@ export function createOutlinerView(ctx: GraphEditorContext): {
       const matched: ONode[] = [];
       byId.forEach(o => {
         const props = o.node.properties ?? {};
-        const keyMatch = !filterKey || props[filterKey] !== undefined;
-        const valMatch = !filterValue || Object.values(props).includes(filterValue);
-        const exactMatch = !filterKey || !filterValue || props[filterKey] === filterValue;
-        if (filterKey && filterValue ? exactMatch : (keyMatch && valMatch)) matched.push(o);
+        // key only: node has that key (any value)
+        // key=value: exact match
+        const ok = filterKey && filterValue
+          ? props[filterKey] === filterValue
+          : filterKey
+            ? props[filterKey] !== undefined
+            : Object.values(props).includes(filterValue);
+        if (ok) matched.push(o);
       });
       filterCount.textContent = `${matched.length}件`;
       for (const o of matched) listEl.appendChild(buildRow(o));
@@ -523,34 +520,27 @@ export function createOutlinerView(ctx: GraphEditorContext): {
       title.style.cssText = `color:${TEXT_DIM};font-size:11px;margin-bottom:6px;letter-spacing:.05em;`;
       menu.appendChild(title);
 
+      // "●" is the sentinel value for tag-style (key-only) properties
       const props = onode.node.properties ?? {};
       for (const [key, value] of Object.entries(props)) {
         const row = document.createElement('div');
         row.style.cssText = `display:flex;align-items:center;gap:6px;margin-bottom:4px;`;
 
-        const keyEl = document.createElement('span');
-        keyEl.textContent = key;
-        keyEl.style.cssText = `color:${TEXT_MID};flex-shrink:0;max-width:80px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;`;
-
-        const sep = document.createElement('span');
-        sep.textContent = ':';
-        sep.style.cssText = `color:${TEXT_DIM};flex-shrink:0;`;
-
-        const valEl = document.createElement('span');
-        valEl.textContent = value;
-        valEl.style.cssText = `color:${TEXT_HIGH};flex:1;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;`;
+        const labelEl = document.createElement('span');
+        labelEl.textContent = value === '●' ? key : `${key}: ${value}`;
+        labelEl.style.cssText = `color:${TEXT_MID};flex:1;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;`;
 
         const del = document.createElement('button');
         del.textContent = '×';
         del.style.cssText = `background:transparent;border:none;color:${TEXT_DIM};cursor:pointer;padding:0 2px;font-size:12px;flex-shrink:0;`;
-        del.addEventListener('click', async (e) => {
+        del.addEventListener('click', (e) => {
           e.stopPropagation();
           delete (onode.node.properties ??= {})[key];
           void apiRemoveProperty(ctx.gId, onode.node.id, key);
           rebuild();
         });
 
-        row.append(keyEl, sep, valEl, del);
+        row.append(labelEl, del);
         menu.appendChild(row);
       }
 
@@ -558,30 +548,33 @@ export function createOutlinerView(ctx: GraphEditorContext): {
       divider.style.cssText = `border-top:1px solid ${BORDER};margin:6px 0;`;
       menu.appendChild(divider);
 
+      // Single input: "例外" → key="例外" value="●", "key=val" → key="key" value="val"
       const addRow = document.createElement('div');
       addRow.style.cssText = `display:flex;align-items:center;gap:4px;`;
 
-      const inStyle = `flex:1;background:transparent;border:1px solid ${BORDER};border-radius:3px;padding:3px 5px;color:${TEXT_HIGH};font-size:12px;outline:none;font-family:inherit;min-width:0;`;
-      const keyIn = document.createElement('input');
-      keyIn.placeholder = 'key'; keyIn.style.cssText = inStyle;
-      const valIn = document.createElement('input');
-      valIn.placeholder = 'value'; valIn.style.cssText = inStyle;
+      const propIn = document.createElement('input');
+      propIn.placeholder = '例外 または key=value';
+      propIn.style.cssText = `flex:1;background:transparent;border:1px solid ${BORDER};border-radius:3px;padding:3px 5px;color:${TEXT_HIGH};font-size:12px;outline:none;font-family:inherit;min-width:0;`;
 
       const addBtn = document.createElement('button');
       addBtn.textContent = '+';
       addBtn.style.cssText = `background:transparent;border:1px solid ${BORDER};border-radius:3px;color:${TEXT_MID};cursor:pointer;padding:2px 7px;font-size:13px;flex-shrink:0;`;
 
-      const doAdd = async () => {
-        const k = keyIn.value.trim(); const v = valIn.value.trim();
-        if (!k || !v) return;
+      const doAdd = () => {
+        const raw = propIn.value.trim(); if (!raw) return;
+        const eqIdx = raw.indexOf('=');
+        const k = eqIdx >= 0 ? raw.slice(0, eqIdx).trim() : raw;
+        const v = eqIdx >= 0 ? raw.slice(eqIdx + 1).trim() : '●';
+        if (!k) return;
         (onode.node.properties ??= {})[k] = v;
         void apiSetProperty(ctx.gId, onode.node.id, k, v);
+        propIn.value = '';
         rebuild();
       };
       addBtn.addEventListener('click', doAdd);
-      valIn.addEventListener('keydown', (e) => { if (e.key === 'Enter') void doAdd(); });
+      propIn.addEventListener('keydown', (e) => { if (e.key === 'Enter') doAdd(); });
 
-      addRow.append(keyIn, valIn, addBtn);
+      addRow.append(propIn, addBtn);
       menu.appendChild(addRow);
     };
 
