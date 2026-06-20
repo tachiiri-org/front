@@ -74,6 +74,7 @@ export function createOutlinerView(ctx: GraphEditorContext): {
     listEl.innerHTML = '';
     for (const o of flatVisible()) listEl.appendChild(buildRow(o));
     updateSelectionHighlight();
+    schedulePrefetch();
   };
 
   const focusRow = (onode: ONode) => {
@@ -131,6 +132,24 @@ export function createOutlinerView(ctx: GraphEditorContext): {
     onode.childrenLoaded = true;
   };
 
+  // Warm childrenCache for visible-but-unexpanded nodes serially
+  let prefetchTimer: ReturnType<typeof setTimeout> | null = null;
+  const schedulePrefetch = () => {
+    if (prefetchTimer) clearTimeout(prefetchTimer);
+    prefetchTimer = setTimeout(() => {
+      prefetchTimer = null;
+      const queue = flatVisible().filter(o => !o.childrenLoaded && !ctx.childrenCache.has(o.node.id));
+      let i = 0;
+      const next = () => {
+        if (i >= queue.length) return;
+        const o = queue[i++];
+        if (!o.childrenLoaded && !ctx.childrenCache.has(o.node.id)) void ensureChildren(o).then(next);
+        else next();
+      };
+      next();
+    }, 150);
+  };
+
   const updateExpandMarker = (onode: ONode) => {
     const row = rowMap.get(onode.node.id);
     if (!row) return;
@@ -159,6 +178,7 @@ export function createOutlinerView(ctx: GraphEditorContext): {
       }
     };
     insertSubtree(onode.children);
+    schedulePrefetch();
   };
 
   const collapseInDom = (onode: ONode) => {
