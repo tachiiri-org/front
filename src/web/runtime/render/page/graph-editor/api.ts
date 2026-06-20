@@ -129,6 +129,18 @@ export async function apiMoveBookmark(graphId: string, nodeId: string, direction
   });
 }
 
+export async function apiSetProperty(graphId: string, nodeId: string, key: string, value: string): Promise<void> {
+  await apiFetch(`/api/v1/graph/${graphId}/node/${nodeId}/property`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ key, value }),
+  });
+}
+
+export async function apiRemoveProperty(graphId: string, nodeId: string, key: string): Promise<void> {
+  await apiFetch(`/api/v1/graph/${graphId}/node/${nodeId}/property/${encodeURIComponent(key)}`, { method: 'DELETE' });
+}
+
 export async function apiMoveNode(
   graphId: string, nodeId: string, parentId: string, direction: 'up' | 'down',
   afterSwapSiblingIds: string[],

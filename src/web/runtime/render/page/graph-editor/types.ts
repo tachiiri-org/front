@@ -1,4 +1,4 @@
-export type ExplorerNode = { id: string; en?: string; ja?: string; color?: string };
+export type ExplorerNode = { id: string; en?: string; ja?: string; color?: string; properties?: Record<string, string> };
 
 export type ExplorerColumn = {
   parentId: string | null; // null for column 0 (all-nodes view)
