@@ -440,9 +440,10 @@ export function createOutlinerView(ctx: GraphEditorContext): {
 
     row.append(slash, inp);
 
-    // Dropdown appears below the row
+    // Dropdown appears below the row, left edge aligned with textarea start
+    const textLeft = (onode.depth - baseDepth) * 20 + 24;
     const drop = document.createElement('div');
-    drop.style.cssText = `position:absolute;left:0;top:100%;z-index:20;min-width:240px;max-width:360px;max-height:200px;overflow-y:auto;background:hsl(240,14%,9%);border:1px solid ${BORDER};border-radius:4px;`;
+    drop.style.cssText = `position:absolute;left:${textLeft}px;top:100%;z-index:20;min-width:240px;max-width:360px;max-height:200px;overflow-y:auto;background:hsl(240,14%,9%);border:1px solid ${BORDER};border-radius:4px;`;
     row.appendChild(drop);
 
     inp.focus();
@@ -451,12 +452,13 @@ export function createOutlinerView(ctx: GraphEditorContext): {
     let selIdx = 0;
     let timer: ReturnType<typeof setTimeout> | null = null;
 
-    const close = () => {
+    const restoreRow = () => {
       drop.remove(); slash.remove(); inp.remove();
       ta.style.display = '';
       row.style.position = '';
-      focusRow(onode);
     };
+
+    const close = () => { restoreRow(); focusRow(onode); };
 
     const highlight = () => {
       ([...drop.children] as HTMLElement[]).forEach((el, i) => {
@@ -466,18 +468,30 @@ export function createOutlinerView(ctx: GraphEditorContext): {
     };
 
     const doLink = (node: ExplorerNode) => {
-      close();
-      const sibs = getSiblings(onode);
-      const idx = sibs.indexOf(onode);
-      const no = make(node, onode.parentId, onode.depth);
-      sibs.splice(idx + 1, 0, no);
-      const newRow = buildRow(no);
-      lastDescRow(onode).insertAdjacentElement('afterend', newRow);
+      const oldId = onode.node.id;
+      restoreRow();
+
+      // Replace current onode's data with the found node (in-place)
+      byId.delete(oldId);
+      rowMap.delete(oldId);
+      onode.node = node;
+      byId.set(node.id, onode);
+      row.dataset.nodeId = node.id;
+      rowMap.set(node.id, row);
+
+      // Update textarea to show found node's label
+      ta.value = (primaryLabel(node, ctx.state.lang) ?? fallbackLabel(node, ctx.state.lang)) || '';
+
+      // Update childrenCache entry
       const cc = ctx.childrenCache.get(onode.parentId);
-      if (cc) { const ci = cc.findIndex(x => x.id === onode.node.id); if (ci >= 0) cc.splice(ci + 1, 0, node); }
-      focusRow(no);
+      if (cc) { const ci = cc.findIndex(x => x.id === oldId); if (ci >= 0) cc[ci] = node; }
+
+      // Delete old placeholder node; link found node to parent
+      void apiDeleteNode(ctx.gId, oldId);
       const edgeTarget = onode.parentId ?? ctx.rootNodeId;
       if (edgeTarget) void apiToggleLink(ctx.gId, node.id, edgeTarget);
+
+      focusRow(onode);
     };
 
     inp.addEventListener('input', () => {
