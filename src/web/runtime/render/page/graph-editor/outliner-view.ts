@@ -424,6 +424,7 @@ export function createOutlinerView(ctx: GraphEditorContext): {
 
     const wrap = document.createElement('div');
     wrap.dataset.linkSearch = '1';
+    wrap.style.cssText = `position:relative;`;
 
     const bar = document.createElement('div');
     bar.style.cssText = `display:flex;align-items:center;padding:1px 0;padding-left:${leftPad}px;gap:4px;`;
@@ -434,12 +435,12 @@ export function createOutlinerView(ctx: GraphEditorContext): {
 
     const inp = document.createElement('input');
     inp.type = 'text';
-    inp.style.cssText = `flex:1;background:transparent;border:none;outline:none;color:${TEXT_HIGH};font-size:15px;font-family:inherit;line-height:1.8;`;
+    inp.style.cssText = `width:200px;background:transparent;border:none;outline:none;color:${TEXT_HIGH};font-size:15px;font-family:inherit;line-height:1.8;`;
 
     bar.append(slash, inp);
 
     const drop = document.createElement('div');
-    drop.style.cssText = `max-height:200px;overflow-y:auto;border-top:1px solid ${BORDER};`;
+    drop.style.cssText = `position:absolute;left:${leftPad}px;top:100%;z-index:20;width:280px;max-height:200px;overflow-y:auto;background:hsl(240,14%,9%);border:1px solid ${BORDER};border-radius:4px;`;
 
     wrap.append(bar, drop);
     lastDescRow(onode).insertAdjacentElement('afterend', wrap);
@@ -488,7 +489,7 @@ export function createOutlinerView(ctx: GraphEditorContext): {
           const lbl = (primaryLabel(n, ctx.state.lang) ?? fallbackLabel(n, ctx.state.lang)) || n.id.slice(0, 8);
           const item = document.createElement('div');
           item.textContent = lbl;
-          item.style.cssText = `padding:3px 4px 3px ${leftPad + 8}px;cursor:pointer;font-size:14px;color:${TEXT_MID};`;
+          item.style.cssText = `padding:5px 12px;cursor:pointer;font-size:14px;color:${TEXT_MID};white-space:nowrap;overflow:hidden;text-overflow:ellipsis;`;
           item.addEventListener('mouseenter', () => { selIdx = i; highlight(); });
           item.addEventListener('click', () => doLink(n));
           drop.appendChild(item);
