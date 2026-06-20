@@ -507,12 +507,13 @@ export function createOutlinerView(ctx: GraphEditorContext): {
 
   // ── Property menu (right-click on expand marker) ─────────────────────
 
-  // Update propStore and sync to all ExplorerNode instances in childrenCache
+  // Update propStore/allPropKeys and sync to all ExplorerNode instances in childrenCache
   const syncPropChange = (nodeId: string, updater: (props: Record<string, string>) => void) => {
     const props = ctx.propStore.get(nodeId) ?? {};
     updater(props);
     if (Object.keys(props).length > 0) ctx.propStore.set(nodeId, props);
     else ctx.propStore.delete(nodeId);
+    for (const k of Object.keys(props)) ctx.allPropKeys.add(k);
     // Also sync to ExplorerNode instances already in memory
     ctx.childrenCache.forEach(nodes => {
       for (const n of nodes) { if (n.id === nodeId) n.properties = { ...props }; }
@@ -536,27 +537,36 @@ export function createOutlinerView(ctx: GraphEditorContext): {
       title.style.cssText = `color:${TEXT_DIM};font-size:11px;margin-bottom:6px;letter-spacing:.05em;`;
       menu.appendChild(title);
 
-      // "●" is the sentinel value for tag-style (key-only) properties
-      const props = ctx.propStore.get(onode.node.id) ?? {};
-      for (const [key, value] of Object.entries(props)) {
+      const nodeProps = ctx.propStore.get(onode.node.id) ?? {};
+
+      // Show all globally known keys; assigned ones show ×, unassigned ones show +
+      for (const key of ctx.allPropKeys) {
+        const assigned = key in nodeProps;
+        const value = nodeProps[key];
+
         const row = document.createElement('div');
-        row.style.cssText = `display:flex;align-items:center;gap:6px;margin-bottom:4px;`;
+        row.style.cssText = `display:flex;align-items:center;gap:6px;margin-bottom:4px;cursor:pointer;`;
 
         const labelEl = document.createElement('span');
-        labelEl.textContent = value === '●' ? key : `${key}: ${value}`;
-        labelEl.style.cssText = `color:${TEXT_MID};flex:1;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;`;
+        labelEl.textContent = assigned && value !== '●' ? `${key}: ${value}` : key;
+        labelEl.style.cssText = `flex:1;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;color:${assigned ? TEXT_HIGH : TEXT_DIM};`;
 
-        const del = document.createElement('button');
-        del.textContent = '×';
-        del.style.cssText = `background:transparent;border:none;color:${TEXT_DIM};cursor:pointer;padding:0 2px;font-size:12px;flex-shrink:0;`;
-        del.addEventListener('click', (e) => {
+        const btn = document.createElement('button');
+        btn.textContent = assigned ? '×' : '+';
+        btn.style.cssText = `background:transparent;border:none;color:${assigned ? TEXT_MID : TEXT_DIM};cursor:pointer;padding:0 2px;font-size:12px;flex-shrink:0;`;
+        btn.addEventListener('click', (e) => {
           e.stopPropagation();
-          syncPropChange(onode.node.id, p => { delete p[key]; });
-          void apiRemoveProperty(ctx.gId, onode.node.id, key);
+          if (assigned) {
+            syncPropChange(onode.node.id, p => { delete p[key]; });
+            void apiRemoveProperty(ctx.gId, onode.node.id, key);
+          } else {
+            syncPropChange(onode.node.id, p => { p[key] = '●'; });
+            void apiSetProperty(ctx.gId, onode.node.id, key, '●');
+          }
           rebuild();
         });
 
-        row.append(labelEl, del);
+        row.append(labelEl, btn);
         menu.appendChild(row);
       }
 
@@ -564,12 +574,12 @@ export function createOutlinerView(ctx: GraphEditorContext): {
       divider.style.cssText = `border-top:1px solid ${BORDER};margin:6px 0;`;
       menu.appendChild(divider);
 
-      // Single input: "例外" → key="例外" value="●", "key=val" → key="key" value="val"
+      // New key input: "例外" → key="例外" value="●", "key=val" → key+value
       const addRow = document.createElement('div');
       addRow.style.cssText = `display:flex;align-items:center;gap:4px;`;
 
       const propIn = document.createElement('input');
-      propIn.placeholder = '例外 または key=value';
+      propIn.placeholder = '新しいキー または key=value';
       propIn.style.cssText = `flex:1;background:transparent;border:1px solid ${BORDER};border-radius:3px;padding:3px 5px;color:${TEXT_HIGH};font-size:12px;outline:none;font-family:inherit;min-width:0;`;
 
       const addBtn = document.createElement('button');
@@ -582,6 +592,7 @@ export function createOutlinerView(ctx: GraphEditorContext): {
         const k = eqIdx >= 0 ? raw.slice(0, eqIdx).trim() : raw;
         const v = eqIdx >= 0 ? raw.slice(eqIdx + 1).trim() : '●';
         if (!k) return;
+        ctx.allPropKeys.add(k);
         syncPropChange(onode.node.id, p => { p[k] = v; });
         void apiSetProperty(ctx.gId, onode.node.id, k, v);
         propIn.value = '';
@@ -984,11 +995,13 @@ export function createOutlinerView(ctx: GraphEditorContext): {
     if (onode.parentId !== null) void apiToggleLink(ctx.gId, onode.node.id, onode.parentId);
   };
 
-  // Merge node properties into the shared propStore
+  // Merge node properties into propStore and register all keys into allPropKeys
   const seedPropStore = (nodes: ExplorerNode[]) => {
     for (const n of nodes) {
-      if (n.properties && Object.keys(n.properties).length > 0)
+      if (n.properties && Object.keys(n.properties).length > 0) {
         ctx.propStore.set(n.id, { ...ctx.propStore.get(n.id), ...n.properties });
+        for (const k of Object.keys(n.properties)) ctx.allPropKeys.add(k);
+      }
     }
   };
 

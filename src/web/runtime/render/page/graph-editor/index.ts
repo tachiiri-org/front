@@ -202,8 +202,9 @@ export function renderGraphEditor(
   // what lets the mutually-recursive render functions live in separate files.
   const rootNodeId = comp.rootNodeId ?? null;
   const propStore = new Map<string, Record<string, string>>();
+  const allPropKeys = new Set<string>();
   const ctx = {
-    gId, limit, rootNodeId, outer, columnsEl, state, childrenCache, propStore,
+    gId, limit, rootNodeId, outer, columnsEl, state, childrenCache, propStore, allPropKeys,
     columnVersion: 0, tempNodeCounter: 0, pendingDeleteId: null,
   } as unknown as GraphEditorContext;
   Object.assign(ctx, createColumnFns(ctx), createNodeRowFns(ctx), createDeleteFns(ctx));

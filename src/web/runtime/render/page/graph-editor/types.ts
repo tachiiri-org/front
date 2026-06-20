@@ -48,6 +48,7 @@ export interface GraphEditorContext {
   state: ExplorerState;
   childrenCache: Map<string | null, ExplorerNode[]>;
   propStore: Map<string, Record<string, string>>;
+  allPropKeys: Set<string>;
   columnVersion: number;
   tempNodeCounter: number;
   // While set, this id is filtered out of every column so a refetch cannot resurrect it.
