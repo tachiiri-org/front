@@ -23,9 +23,9 @@ export function createOutlinerView(ctx: GraphEditorContext): {
   const el = document.createElement('div');
   el.style.cssText = `flex:1;display:flex;flex-direction:column;overflow:hidden;`;
 
-  // Breadcrumb bar (shown when zoomed in)
+  // Breadcrumb bar (always visible)
   const bcEl = document.createElement('div');
-  bcEl.style.cssText = `display:none;flex-shrink:0;align-items:center;gap:2px;flex-wrap:wrap;padding:4px 8px 4px 10px;border-bottom:1px solid ${BORDER};font-size:12px;`;
+  bcEl.style.cssText = `display:flex;flex-shrink:0;align-items:center;gap:2px;flex-wrap:wrap;padding:4px 8px 4px 10px;border-bottom:1px solid ${BORDER};font-size:12px;`;
   el.appendChild(bcEl);
 
   // Scrollable list
@@ -142,11 +142,17 @@ export function createOutlinerView(ctx: GraphEditorContext): {
   // ── Breadcrumb ───────────────────────────────────────────────────────
   const updateBreadcrumb = () => {
     bcEl.innerHTML = '';
-    if (zoomStack.length === 0) { bcEl.style.display = 'none'; return; }
-    bcEl.style.display = 'flex';
 
     const btnStyle = (active: boolean) =>
-      `background:transparent;border:none;color:${active ? TEXT_HIGH : TEXT_MID};cursor:pointer;font-size:12px;padding:0 2px;white-space:nowrap;max-width:120px;overflow:hidden;text-overflow:ellipsis;`;
+      `background:transparent;border:none;color:${active ? TEXT_HIGH : TEXT_MID};cursor:${active ? 'default' : 'pointer'};font-size:12px;padding:0 2px;white-space:nowrap;max-width:120px;overflow:hidden;text-overflow:ellipsis;`;
+
+    if (zoomStack.length === 0) {
+      const span = document.createElement('span');
+      span.textContent = 'ルート';
+      span.style.cssText = `color:${TEXT_HIGH};font-size:12px;padding:0 2px;`;
+      bcEl.appendChild(span);
+      return;
+    }
 
     const homeBtn = document.createElement('button');
     homeBtn.textContent = 'ルート';
@@ -165,7 +171,7 @@ export function createOutlinerView(ctx: GraphEditorContext): {
       btn.textContent = lbl;
       btn.title = lbl;
       btn.style.cssText = btnStyle(i === zoomStack.length - 1);
-      btn.addEventListener('click', () => void doZoomTo(i + 1));
+      if (i < zoomStack.length - 1) btn.addEventListener('click', () => void doZoomTo(i + 1));
       bcEl.appendChild(btn);
     });
   };
@@ -207,7 +213,7 @@ export function createOutlinerView(ctx: GraphEditorContext): {
   const buildRow = (onode: ONode): HTMLElement => {
     const row = document.createElement('div');
     row.dataset.nodeId = onode.node.id;
-    row.style.cssText = `display:flex;align-items:flex-start;padding:1px 0;`;
+    row.style.cssText = `display:flex;align-items:center;padding:1px 0;`;
     rowMap.set(onode.node.id, row);
 
     const spacer = document.createElement('span');
@@ -229,7 +235,7 @@ export function createOutlinerView(ctx: GraphEditorContext): {
     const label = primaryLabel(onode.node, ctx.state.lang) ?? fallbackLabel(onode.node, ctx.state.lang);
     const ta = document.createElement('textarea');
     ta.value = label;
-    ta.style.cssText = `flex:1;background:transparent;border:none;outline:none;resize:none;font-size:16px;font-family:inherit;line-height:1.8;padding:0 4px 0 0;overflow:hidden;min-height:20px;color:${onode.node.color ?? TEXT_HIGH};`;
+    ta.style.cssText = `flex:1;background:transparent;border:none;outline:none;resize:none;font-size:15px;font-family:inherit;line-height:1.8;padding:0 4px 0 0;overflow:hidden;min-height:20px;color:${onode.node.color ?? TEXT_HIGH};`;
     ta.rows = 1;
 
     const resize = () => { ta.style.height = 'auto'; ta.style.height = ta.scrollHeight + 'px'; };
@@ -498,5 +504,6 @@ export function createOutlinerView(ctx: GraphEditorContext): {
     render();
   };
 
+  updateBreadcrumb(); // show "ルート" on initial render
   return { el, load, refresh: render };
 }
