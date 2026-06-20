@@ -173,10 +173,16 @@ export function createOutlinerView(ctx: GraphEditorContext): {
     removeSubtree(onode.children);
   };
 
+  const expandingSet = new Set<string>();
   const toggleExpand = async (onode: ONode, forceExpand?: boolean) => {
     const next = forceExpand !== undefined ? forceExpand : !onode.expanded;
     if (next === onode.expanded) { focusRow(onode); return; }
-    if (next && !onode.childrenLoaded) await ensureChildren(onode);
+    if (next && expandingSet.has(onode.node.id)) return;
+    if (next && !onode.childrenLoaded) {
+      expandingSet.add(onode.node.id);
+      await ensureChildren(onode);
+      expandingSet.delete(onode.node.id);
+    }
     if (next && onode.children.length === 0) { updateExpandMarker(onode); focusRow(onode); return; }
     if (next) expandInDom(onode); else collapseInDom(onode);
     focusRow(onode);
