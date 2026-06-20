@@ -1,7 +1,7 @@
 import type { ExplorerNode, GraphEditorContext } from './types';
 import { BORDER, TEXT_HIGH, TEXT_MID, TEXT_DIM, primaryLabel, fallbackLabel } from './constants';
 import {
-  fetchChildren, fetchBookmarks, fetchBookmarkedNodes,
+  fetchChildren, fetchBookmarks, fetchBookmarkedNodes, fetchAllNodes,
   apiCreateNode, apiUpdateNode, apiDeleteNode, apiMoveNode, apiMoveBookmark, apiToggleLink,
 } from './api';
 
@@ -18,6 +18,7 @@ export function createOutlinerView(ctx: GraphEditorContext): {
   el: HTMLElement;
   load: () => Promise<void>;
   refresh: () => void;
+  search: (query: string) => Promise<void>;
 } {
   // Outer wrapper (returned as el)
   const el = document.createElement('div');
@@ -213,7 +214,7 @@ export function createOutlinerView(ctx: GraphEditorContext): {
   const buildRow = (onode: ONode): HTMLElement => {
     const row = document.createElement('div');
     row.dataset.nodeId = onode.node.id;
-    row.style.cssText = `display:flex;align-items:center;padding:1px 0;`;
+    row.style.cssText = `display:flex;align-items:stretch;padding:1px 0;`;
     rowMap.set(onode.node.id, row);
 
     const spacer = document.createElement('span');
@@ -221,7 +222,7 @@ export function createOutlinerView(ctx: GraphEditorContext): {
     row.appendChild(spacer);
 
     const btn = document.createElement('button');
-    btn.style.cssText = `flex-shrink:0;width:18px;height:20px;background:transparent;border:none;padding:0;font-size:10px;line-height:1;`;
+    btn.style.cssText = `flex-shrink:0;display:flex;align-items:center;justify-content:center;width:18px;background:transparent;border:none;padding:0;font-size:10px;line-height:1;`;
     const knownLen = onode.childrenLoaded ? onode.children.length : ctx.childrenCache.get(onode.node.id)?.length;
     if (knownLen === 0) {
       btn.textContent = '·'; btn.style.color = TEXT_DIM; btn.style.cursor = 'default';
@@ -504,6 +505,16 @@ export function createOutlinerView(ctx: GraphEditorContext): {
     render();
   };
 
+  const search = async (query: string) => {
+    if (!query) { await load(); return; }
+    byId.clear(); zoomStack.splice(0); baseDepth = 0;
+    updateBreadcrumb();
+    const lang = ctx.state.showFallback ? undefined : ctx.state.lang;
+    const { nodes } = await fetchAllNodes(ctx.gId, [], 0, lang, undefined, query, 50);
+    roots = nodes.map(n => make(n, null, 0));
+    render();
+  };
+
   updateBreadcrumb(); // show "ルート" on initial render
-  return { el, load, refresh: render };
+  return { el, load, refresh: render, search };
 }

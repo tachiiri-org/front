@@ -123,22 +123,23 @@ export function renderGraphEditor(
   clearBtn.addEventListener('click', () => {
     searchInput.value = '';
     clearBtn.style.display = 'none';
-    state.searchQuery = '';
-    childrenCache.delete(null);
-    void ctx.loadColumn(null, 0);
+    doSearch('');
     searchInput.focus();
   });
+
+  // doSearch is overwritten after outliner is created (see below)
+  let doSearch = (q: string) => {
+    state.searchQuery = q;
+    childrenCache.delete(null);
+    void ctx.loadColumn(null, 0);
+  };
 
   let searchTimer: ReturnType<typeof setTimeout> | null = null;
   searchInput.addEventListener('input', () => {
     const q = searchInput.value.trim();
     clearBtn.style.display = q ? 'block' : 'none';
     if (searchTimer) clearTimeout(searchTimer);
-    searchTimer = setTimeout(() => {
-      state.searchQuery = q;
-      childrenCache.delete(null);
-      void ctx.loadColumn(null, 0);
-    }, 250);
+    searchTimer = setTimeout(() => doSearch(q), 250);
   });
 
   const langSep = document.createElement('span');
@@ -211,6 +212,17 @@ export function renderGraphEditor(
   const outliner = createOutlinerView(ctx);
   outliner.el.style.display = 'none';
   outer.appendChild(outliner.el);
+
+  // Wire up search for both view modes now that outliner exists
+  doSearch = (q: string) => {
+    state.searchQuery = q;
+    if (viewMode === 'outline') {
+      void outliner.search(q);
+    } else {
+      childrenCache.delete(null);
+      void ctx.loadColumn(null, 0);
+    }
+  };
 
   const switchView = (mode: 'columns' | 'outline') => {
     viewMode = mode;
