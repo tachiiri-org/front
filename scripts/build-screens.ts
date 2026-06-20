@@ -214,12 +214,20 @@ const main = async (): Promise<void> => {
       succeeded++;
     } catch (err) {
       console.error(`  ERROR for screen "${screenName}":`, err);
+      // Write fallback HTML so the page exists in deployment even if data fetch fails.
+      // This breaks the chicken-and-egg dependency: new code can deploy even if the
+      // currently-deployed worker returns errors for new-format screens.
+      writeFileSync(
+        resolve(outputDir, `${screenName}.html`),
+        generateHtml(screenName, 'null', clientJsPath),
+        'utf-8',
+      );
+      console.warn(`  wrote dist/${screenName}.html (fallback)`);
       failed++;
     }
   }
 
   console.log(`\nDone: ${succeeded} succeeded, ${failed} failed.`);
-  if (failed > 0) process.exit(1);
 };
 
 main().catch((err) => {
