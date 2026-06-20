@@ -1,6 +1,9 @@
 import type { ExplorerNode, GraphEditorContext } from './types';
 import { TEXT_HIGH, TEXT_MID, TEXT_DIM, SELECT_STRONG, primaryLabel, fallbackLabel } from './constants';
-import { fetchChildren, fetchBookmarks, fetchBookmarkedNodes, apiCreateNode, apiUpdateNode, apiDeleteNode, apiMoveNode, apiMoveBookmark } from './api';
+import {
+  fetchChildren, fetchBookmarks, fetchBookmarkedNodes,
+  apiCreateNode, apiUpdateNode, apiDeleteNode, apiMoveNode, apiMoveBookmark, apiToggleLink,
+} from './api';
 
 type ONode = {
   node: ExplorerNode;
@@ -21,6 +24,8 @@ export function createOutlinerView(ctx: GraphEditorContext): {
 
   let roots: ONode[] = [];
   const byId = new Map<string, ONode>();
+  // Performance: O(1) row lookup instead of querySelectorAll
+  const rowMap = new Map<string, HTMLElement>();
 
   const make = (node: ExplorerNode, parentId: string | null, depth: number): ONode => {
     const o: ONode = { node, parentId, depth, expanded: false, childrenLoaded: false, children: [] };
@@ -31,10 +36,7 @@ export function createOutlinerView(ctx: GraphEditorContext): {
   const ancestorIds = (onode: ONode): Set<string> => {
     const ids = new Set<string>();
     let cur: ONode | undefined = onode;
-    while (cur?.parentId != null) {
-      ids.add(cur.parentId);
-      cur = byId.get(cur.parentId);
-    }
+    while (cur?.parentId != null) { ids.add(cur.parentId); cur = byId.get(cur.parentId); }
     return ids;
   };
 
@@ -47,13 +49,33 @@ export function createOutlinerView(ctx: GraphEditorContext): {
     return out;
   };
 
+  // Full rebuild — only for load / delete / move / indent
   const render = () => {
+    rowMap.clear();
     el.innerHTML = '';
     for (const o of flatVisible()) el.appendChild(buildRow(o));
   };
 
   const focusRow = (onode: ONode) => {
-    el.querySelector<HTMLTextAreaElement>(`[data-node-id="${onode.node.id}"] textarea`)?.focus();
+    rowMap.get(onode.node.id)?.querySelector<HTMLTextAreaElement>('textarea')?.focus();
+  };
+
+  // Last visible descendant row (used to find insertion point)
+  const lastDescRow = (onode: ONode): HTMLElement => {
+    if (onode.expanded && onode.children.length > 0)
+      return lastDescRow(onode.children[onode.children.length - 1]);
+    return rowMap.get(onode.node.id)!;
+  };
+
+  // All visible rows of onode + its expanded descendants, in order
+  const visibleRowGroup = (onode: ONode): HTMLElement[] => {
+    const rows: HTMLElement[] = [];
+    const walk = (o: ONode) => {
+      const r = rowMap.get(o.node.id); if (r) rows.push(r);
+      if (o.expanded) o.children.forEach(walk);
+    };
+    walk(onode);
+    return rows;
   };
 
   const ensureChildren = async (onode: ONode) => {
@@ -63,51 +85,72 @@ export function createOutlinerView(ctx: GraphEditorContext): {
       cached = await fetchChildren(ctx.gId, onode.node.id, ctx.limit);
       ctx.childrenCache.set(onode.node.id, cached);
     }
-    const exclude = ancestorIds(onode);
-    exclude.add(onode.node.id);
-    onode.children = cached
-      .filter(c => !exclude.has(c.id))
-      .map(c => make(c, onode.node.id, onode.depth + 1));
+    const excl = ancestorIds(onode); excl.add(onode.node.id);
+    onode.children = cached.filter(c => !excl.has(c.id)).map(c => make(c, onode.node.id, onode.depth + 1));
     onode.childrenLoaded = true;
+  };
+
+  // Incremental expand — inserts child rows without rebuilding whole tree
+  const expandInDom = (onode: ONode) => {
+    onode.expanded = true;
+    const toggleBtn = rowMap.get(onode.node.id)?.querySelector<HTMLButtonElement>('button');
+    if (toggleBtn && toggleBtn.textContent !== '·') toggleBtn.textContent = '▾';
+    let anchor = rowMap.get(onode.node.id)!;
+    const insertSubtree = (list: ONode[]) => {
+      for (const child of list) {
+        const row = buildRow(child);
+        anchor.insertAdjacentElement('afterend', row);
+        anchor = row;
+        if (child.expanded) insertSubtree(child.children);
+      }
+    };
+    insertSubtree(onode.children);
+  };
+
+  // Incremental collapse — removes descendant rows without rebuilding
+  const collapseInDom = (onode: ONode) => {
+    onode.expanded = false;
+    const toggleBtn = rowMap.get(onode.node.id)?.querySelector<HTMLButtonElement>('button');
+    if (toggleBtn && toggleBtn.textContent !== '·') toggleBtn.textContent = '▸';
+    const removeSubtree = (list: ONode[]) => {
+      for (const child of list) {
+        rowMap.get(child.node.id)?.remove(); rowMap.delete(child.node.id);
+        if (child.expanded) removeSubtree(child.children);
+      }
+    };
+    removeSubtree(onode.children);
   };
 
   const toggleExpand = async (onode: ONode, forceExpand?: boolean) => {
     const next = forceExpand !== undefined ? forceExpand : !onode.expanded;
+    if (next === onode.expanded) { focusRow(onode); return; }
     if (next && !onode.childrenLoaded) await ensureChildren(onode);
-    onode.expanded = next;
-    render();
-    focusRow(onode); // re-focus the same node after render
+    if (next) expandInDom(onode); else collapseInDom(onode);
+    focusRow(onode);
   };
 
   const buildRow = (onode: ONode): HTMLElement => {
     const row = document.createElement('div');
     row.dataset.nodeId = onode.node.id;
     row.style.cssText = `display:flex;align-items:flex-start;padding:1px 0;`;
+    rowMap.set(onode.node.id, row);
 
-    // Indent spacer
     const spacer = document.createElement('span');
     spacer.style.cssText = `flex-shrink:0;width:${onode.depth * 20 + 6}px;`;
     row.appendChild(spacer);
 
-    // Expand/collapse toggle
     const btn = document.createElement('button');
     btn.style.cssText = `flex-shrink:0;width:18px;height:20px;background:transparent;border:none;padding:0;font-size:10px;line-height:1;`;
-    const knownLen = onode.childrenLoaded
-      ? onode.children.length
-      : ctx.childrenCache.get(onode.node.id)?.length;
+    const knownLen = onode.childrenLoaded ? onode.children.length : ctx.childrenCache.get(onode.node.id)?.length;
     if (knownLen === 0) {
-      btn.textContent = '·';
-      btn.style.color = TEXT_DIM;
-      btn.style.cursor = 'default';
+      btn.textContent = '·'; btn.style.color = TEXT_DIM; btn.style.cursor = 'default';
     } else {
       btn.textContent = onode.expanded ? '▾' : '▸';
-      btn.style.color = TEXT_MID;
-      btn.style.cursor = 'pointer';
+      btn.style.color = TEXT_MID; btn.style.cursor = 'pointer';
       btn.addEventListener('click', () => void toggleExpand(onode));
     }
     row.appendChild(btn);
 
-    // Editable label
     const label = primaryLabel(onode.node, ctx.state.lang) ?? fallbackLabel(onode.node, ctx.state.lang);
     const ta = document.createElement('textarea');
     ta.value = label;
@@ -118,18 +161,14 @@ export function createOutlinerView(ctx: GraphEditorContext): {
     requestAnimationFrame(resize);
     ta.addEventListener('input', resize);
 
-    ta.addEventListener('focus', () => {
-      row.style.background = `${SELECT_STRONG}22`;
-    });
-
+    ta.addEventListener('focus', () => { row.style.background = `${SELECT_STRONG}22`; });
     ta.addEventListener('blur', () => {
       row.style.background = '';
       const old = primaryLabel(onode.node, ctx.state.lang) ?? fallbackLabel(onode.node, ctx.state.lang);
       const newVal = ta.value;
       if (newVal !== old) {
-        // Optimistic: update onode.node immediately so render() uses the new value
-        if (ctx.state.lang === 'en') onode.node.en = newVal;
-        else onode.node.ja = newVal;
+        // Optimistic: update immediately so render() uses the new value
+        if (ctx.state.lang === 'en') onode.node.en = newVal; else onode.node.ja = newVal;
         const cc = ctx.childrenCache.get(onode.parentId);
         const cn = cc?.find(n => n.id === onode.node.id);
         if (cn) { if (ctx.state.lang === 'en') cn.en = newVal; else cn.ja = newVal; }
@@ -141,43 +180,36 @@ export function createOutlinerView(ctx: GraphEditorContext): {
       const vis = flatVisible();
       const i = vis.indexOf(onode);
 
-      // Ctrl/Cmd+↓ : expand, Ctrl/Cmd+↑ : collapse
+      // Ctrl/Cmd+↓ expand, Ctrl/Cmd+↑ collapse
       if (e.key === 'ArrowDown' && (e.ctrlKey || e.metaKey) && !e.shiftKey) {
-        e.preventDefault();
-        void toggleExpand(onode, true);
-        return;
+        e.preventDefault(); void toggleExpand(onode, true); return;
       }
       if (e.key === 'ArrowUp' && (e.ctrlKey || e.metaKey) && !e.shiftKey) {
-        e.preventDefault();
-        void toggleExpand(onode, false);
-        return;
+        e.preventDefault(); void toggleExpand(onode, false); return;
       }
 
-      // Shift+Alt+↑↓ : reorder node (same as column view)
+      // Shift+↑ indent (become child of node above), Shift+↓ dedent
+      if (e.key === 'ArrowUp' && e.shiftKey && !e.ctrlKey && !e.metaKey) {
+        e.preventDefault(); void doIndent(onode, vis, i); return;
+      }
+      if (e.key === 'ArrowDown' && e.shiftKey && !e.ctrlKey && !e.metaKey) {
+        e.preventDefault(); void doDedent(onode); return;
+      }
+
+      // Shift+Alt+↑↓ reorder (same as column view)
       if ((e.key === 'ArrowUp' || e.key === 'ArrowDown') && e.shiftKey && e.altKey) {
-        e.preventDefault();
-        void doMove(onode, e.key === 'ArrowUp' ? 'up' : 'down');
-        return;
+        e.preventDefault(); void doMove(onode, e.key === 'ArrowUp' ? 'up' : 'down'); return;
       }
 
-      // ↑ at start → focus previous node
-      if (e.key === 'ArrowUp' && !e.shiftKey && !e.ctrlKey && !e.metaKey && !e.altKey) {
-        if (ta.selectionStart !== 0) return;
-        e.preventDefault();
-        if (i > 0) focusRow(vis[i - 1]);
-      // ↓ at end → focus next node
-      } else if (e.key === 'ArrowDown' && !e.shiftKey && !e.ctrlKey && !e.metaKey && !e.altKey) {
-        if (ta.selectionStart !== ta.value.length) return;
-        e.preventDefault();
-        if (i < vis.length - 1) focusRow(vis[i + 1]);
-      // Enter → add sibling node
+      // ↑/↓ — immediate node navigation (no cursor-position check)
+      if (e.key === 'ArrowUp' && !e.shiftKey && !e.ctrlKey && !e.metaKey) {
+        e.preventDefault(); if (i > 0) focusRow(vis[i - 1]);
+      } else if (e.key === 'ArrowDown' && !e.shiftKey && !e.ctrlKey && !e.metaKey) {
+        e.preventDefault(); if (i < vis.length - 1) focusRow(vis[i + 1]);
       } else if (e.key === 'Enter' && !e.shiftKey && !e.ctrlKey && !e.metaKey) {
-        e.preventDefault();
-        void doAddSibling(onode);
-      // Backspace on empty → delete node
+        e.preventDefault(); void doAddSibling(onode);
       } else if (e.key === 'Backspace' && ta.value === '') {
-        e.preventDefault();
-        void doDelete(onode, i, vis);
+        e.preventDefault(); void doDelete(onode, i, vis);
       }
     });
 
@@ -188,6 +220,12 @@ export function createOutlinerView(ctx: GraphEditorContext): {
   const getSiblings = (onode: ONode): ONode[] =>
     onode.parentId === null ? roots : (byId.get(onode.parentId)?.children ?? roots);
 
+  const fixDepths = (o: ONode, d: number) => {
+    o.depth = d;
+    o.children.forEach(c => fixDepths(c, d + 1));
+  };
+
+  // Add sibling node — incremental DOM insert
   const doAddSibling = async (onode: ONode) => {
     const nn = await apiCreateNode(ctx.gId, onode.parentId, ctx.state.lang, '', onode.node.id);
     if (!nn) return;
@@ -198,51 +236,108 @@ export function createOutlinerView(ctx: GraphEditorContext): {
     sibs.splice(idx + 1, 0, no);
     const cc = ctx.childrenCache.get(onode.parentId);
     if (cc) { const ci = cc.findIndex(n => n.id === onode.node.id); cc.splice(ci + 1, 0, nn); }
-    render();
+    // Insert after onode's last visible descendant
+    const anchor = lastDescRow(onode);
+    anchor.insertAdjacentElement('afterend', buildRow(no));
     focusRow(no);
   };
 
+  // Delete node — incremental DOM remove
   const doDelete = async (onode: ONode, visIdx: number, vis: ONode[]) => {
+    if (onode.expanded) collapseInDom(onode);
+    rowMap.get(onode.node.id)?.remove(); rowMap.delete(onode.node.id);
     await apiDeleteNode(ctx.gId, onode.node.id);
     const sibs = getSiblings(onode);
     sibs.splice(sibs.indexOf(onode), 1);
     byId.delete(onode.node.id);
     const cc = ctx.childrenCache.get(onode.parentId);
     if (cc) { const ci = cc.findIndex(n => n.id === onode.node.id); if (ci >= 0) cc.splice(ci, 1); }
-    render();
     const target = vis[visIdx - 1] ?? vis[visIdx + 1];
     if (target && byId.has(target.node.id)) focusRow(target);
   };
 
+  // Move node up/down in sibling order — incremental DOM move
   const doMove = async (onode: ONode, direction: 'up' | 'down') => {
     const sibs = getSiblings(onode);
     const idx = sibs.indexOf(onode);
     const newIdx = idx + (direction === 'up' ? -1 : 1);
     if (newIdx < 0 || newIdx >= sibs.length) return;
+    const neighbor = sibs[newIdx];
 
-    // Optimistic local reorder
-    sibs.splice(idx, 1);
-    sibs.splice(newIdx, 0, onode);
+    sibs.splice(idx, 1); sibs.splice(newIdx, 0, onode);
 
-    // Sync childrenCache order
     const cc = ctx.childrenCache.get(onode.parentId);
-    if (cc) {
-      const ci = cc.findIndex(n => n.id === onode.node.id);
-      if (ci >= 0) {
-        cc.splice(ci, 1);
-        cc.splice(newIdx, 0, onode.node);
-      }
+    if (cc) { const ci = cc.findIndex(n => n.id === onode.node.id); if (ci >= 0) { cc.splice(ci, 1); cc.splice(newIdx, 0, onode.node); } }
+
+    // Move DOM rows of onode group
+    const group = visibleRowGroup(onode);
+    if (direction === 'up') {
+      const neighborRow = rowMap.get(neighbor.node.id)!;
+      for (const r of group) el.insertBefore(r, neighborRow);
+    } else {
+      const anchor = lastDescRow(neighbor);
+      let insertAfter = anchor;
+      for (const r of group) { insertAfter.insertAdjacentElement('afterend', r); insertAfter = r; }
     }
+
+    focusRow(onode);
+    if (onode.parentId === null) void apiMoveBookmark(ctx.gId, onode.node.id, direction);
+    else void apiMoveNode(ctx.gId, onode.node.id, onode.parentId, direction, sibs.map(n => n.node.id));
+  };
+
+  // Shift+↑: make current node the last child of the node above it (indent)
+  const doIndent = async (onode: ONode, vis: ONode[], i: number) => {
+    if (i === 0) return;
+    const prev = vis[i - 1];
+    const oldParentId = onode.parentId;
+
+    if (!prev.childrenLoaded) await ensureChildren(prev);
+
+    // Detach from old parent
+    const oldSibs = getSiblings(onode);
+    oldSibs.splice(oldSibs.indexOf(onode), 1);
+    const oldCc = ctx.childrenCache.get(oldParentId);
+    if (oldCc) { const ci = oldCc.findIndex(n => n.id === onode.node.id); if (ci >= 0) oldCc.splice(ci, 1); }
+
+    // Attach as last child of prev
+    onode.parentId = prev.node.id;
+    fixDepths(onode, prev.depth + 1);
+    prev.children.push(onode);
+    ctx.childrenCache.delete(prev.node.id); // invalidate so next expand is fresh
 
     render();
     focusRow(onode);
 
-    if (onode.parentId === null) {
-      void apiMoveBookmark(ctx.gId, onode.node.id, direction);
-    } else {
-      const afterSwapSiblingIds = sibs.map(n => n.node.id);
-      void apiMoveNode(ctx.gId, onode.node.id, onode.parentId, direction, afterSwapSiblingIds);
-    }
+    // API: remove old parent edge, add new parent edge
+    if (oldParentId !== null) void apiToggleLink(ctx.gId, onode.node.id, oldParentId);
+    void apiToggleLink(ctx.gId, onode.node.id, prev.node.id);
+  };
+
+  // Shift+↓: move current node out of its parent (dedent)
+  const doDedent = async (onode: ONode) => {
+    if (onode.parentId === null) return; // already at root
+    const parent = byId.get(onode.parentId);
+    if (!parent) return;
+    const oldParentId = onode.parentId;
+
+    // Detach from parent
+    parent.children.splice(parent.children.indexOf(onode), 1);
+    ctx.childrenCache.delete(oldParentId);
+
+    // Attach as sibling after parent
+    const grandSibs = getSiblings(parent);
+    const parentIdx = grandSibs.indexOf(parent);
+    onode.parentId = parent.parentId;
+    fixDepths(onode, parent.depth);
+    grandSibs.splice(parentIdx + 1, 0, onode);
+    if (onode.parentId !== null) ctx.childrenCache.delete(onode.parentId);
+
+    render();
+    focusRow(onode);
+
+    // API: remove old parent edge, add new parent edge (if not root)
+    void apiToggleLink(ctx.gId, onode.node.id, oldParentId);
+    if (onode.parentId !== null) void apiToggleLink(ctx.gId, onode.node.id, onode.parentId);
   };
 
   const load = async () => {
@@ -256,8 +351,7 @@ export function createOutlinerView(ctx: GraphEditorContext): {
         cached = await fetchChildren(ctx.gId, ctx.rootNodeId, ctx.limit);
         ctx.childrenCache.set(ctx.rootNodeId, cached);
       }
-      topNodes = cached;
-      parentId = ctx.rootNodeId;
+      topNodes = cached; parentId = ctx.rootNodeId;
     } else {
       if (ctx.state.bookmarks.size === 0) {
         const ids = await fetchBookmarks(ctx.gId);
@@ -265,8 +359,7 @@ export function createOutlinerView(ctx: GraphEditorContext): {
       }
       const lang = ctx.state.showFallback ? undefined : ctx.state.lang;
       const { nodes } = await fetchBookmarkedNodes(ctx.gId, [...ctx.state.bookmarks], lang);
-      topNodes = nodes;
-      parentId = null;
+      topNodes = nodes; parentId = null;
     }
 
     roots = topNodes.map(n => make(n, parentId, 0));
