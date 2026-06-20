@@ -186,14 +186,12 @@ export function createOutlinerView(ctx: GraphEditorContext): {
         e.preventDefault(); void toggleExpand(onode, false); return;
       }
 
-      // Shift+Tab: dedent (bring to parent level)
-      if (e.key === 'Tab' && e.shiftKey) {
-        e.preventDefault(); void doDedent(onode); return;
-      }
-
-      // Shift+↑: indent (make child of node above)
-      if (e.key === 'ArrowUp' && e.shiftKey && !e.ctrlKey && !e.metaKey && !e.altKey) {
-        e.preventDefault(); void doIndent(onode, vis, i); return;
+      // Tab: indent (make child of node above), Shift+Tab: dedent
+      if (e.key === 'Tab') {
+        e.preventDefault();
+        if (e.shiftKey) void doDedent(onode);
+        else void doIndent(onode, vis, i);
+        return;
       }
 
       // Shift+Alt+↑↓ reorder (same as column view)
