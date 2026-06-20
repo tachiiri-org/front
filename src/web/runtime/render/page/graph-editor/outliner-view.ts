@@ -485,10 +485,11 @@ export function createOutlinerView(ctx: GraphEditorContext): {
     let parentId: string | null;
 
     if (ctx.rootNodeId) {
-      let cached = ctx.childrenCache.get(ctx.rootNodeId);
+      // Use same cache key (null) as column view so both views share the same root node list
+      let cached = ctx.childrenCache.get(null);
       if (!cached) {
         cached = await fetchChildren(ctx.gId, ctx.rootNodeId, ctx.limit);
-        ctx.childrenCache.set(ctx.rootNodeId, cached);
+        ctx.childrenCache.set(null, cached);
       }
       topNodes = cached; parentId = ctx.rootNodeId;
     } else {
