@@ -1,5 +1,5 @@
 import type { ExplorerNode, GraphEditorContext } from './types';
-import { TEXT_HIGH, TEXT_MID, TEXT_DIM, SELECT_STRONG, primaryLabel, fallbackLabel } from './constants';
+import { TEXT_HIGH, TEXT_MID, TEXT_DIM, primaryLabel, fallbackLabel } from './constants';
 import {
   fetchChildren, fetchBookmarks, fetchBookmarkedNodes,
   apiCreateNode, apiUpdateNode, apiDeleteNode, apiMoveNode, apiMoveBookmark, apiToggleLink,
@@ -161,9 +161,7 @@ export function createOutlinerView(ctx: GraphEditorContext): {
     requestAnimationFrame(resize);
     ta.addEventListener('input', resize);
 
-    ta.addEventListener('focus', () => { row.style.background = `${SELECT_STRONG}22`; });
     ta.addEventListener('blur', () => {
-      row.style.background = '';
       const old = primaryLabel(onode.node, ctx.state.lang) ?? fallbackLabel(onode.node, ctx.state.lang);
       const newVal = ta.value;
       if (newVal !== old) {
@@ -188,12 +186,14 @@ export function createOutlinerView(ctx: GraphEditorContext): {
         e.preventDefault(); void toggleExpand(onode, false); return;
       }
 
-      // Shift+↑ indent (become child of node above), Shift+↓ dedent
-      if (e.key === 'ArrowUp' && e.shiftKey && !e.ctrlKey && !e.metaKey) {
-        e.preventDefault(); void doIndent(onode, vis, i); return;
-      }
-      if (e.key === 'ArrowDown' && e.shiftKey && !e.ctrlKey && !e.metaKey) {
+      // Shift+Tab: dedent (bring to parent level)
+      if (e.key === 'Tab' && e.shiftKey) {
         e.preventDefault(); void doDedent(onode); return;
+      }
+
+      // Shift+↑: indent (make child of node above)
+      if (e.key === 'ArrowUp' && e.shiftKey && !e.ctrlKey && !e.metaKey && !e.altKey) {
+        e.preventDefault(); void doIndent(onode, vis, i); return;
       }
 
       // Shift+Alt+↑↓ reorder (same as column view)
