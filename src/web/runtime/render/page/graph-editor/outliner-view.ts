@@ -201,6 +201,11 @@ export function createOutlinerView(ctx: GraphEditorContext): {
         e.preventDefault(); void doMove(onode, e.key === 'ArrowUp' ? 'up' : 'down'); return;
       }
 
+      // Ctrl+Shift+Backspace: delete node (same as column view)
+      if (e.key === 'Backspace' && (e.ctrlKey || e.metaKey) && e.shiftKey) {
+        e.preventDefault(); void doDelete(onode, i, vis); return;
+      }
+
       // ↑/↓ — immediate node navigation (no cursor-position check)
       if (e.key === 'ArrowUp' && !e.shiftKey && !e.ctrlKey && !e.metaKey) {
         e.preventDefault(); if (i > 0) focusRow(vis[i - 1]);
@@ -299,11 +304,12 @@ export function createOutlinerView(ctx: GraphEditorContext): {
     const oldCc = ctx.childrenCache.get(oldParentId);
     if (oldCc) { const ci = oldCc.findIndex(n => n.id === onode.node.id); if (ci >= 0) oldCc.splice(ci, 1); }
 
-    // Attach as last child of prev
+    // Attach as last child of prev and make it visible
     onode.parentId = prev.node.id;
     fixDepths(onode, prev.depth + 1);
     prev.children.push(onode);
-    ctx.childrenCache.delete(prev.node.id); // invalidate so next expand is fresh
+    prev.expanded = true; // show the node we just moved in
+    ctx.childrenCache.delete(prev.node.id);
 
     render();
     focusRow(onode);
