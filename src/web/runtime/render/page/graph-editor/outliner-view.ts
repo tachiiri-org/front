@@ -228,28 +228,48 @@ export function createOutlinerView(ctx: GraphEditorContext): {
     o.children.forEach(c => fixDepths(c, d + 1));
   };
 
-  // Add sibling node — incremental DOM insert
+  // Add sibling — optimistic: insert temp row immediately, swap to real ID when API returns
   const doAddSibling = async (onode: ONode) => {
-    const nn = await apiCreateNode(ctx.gId, onode.parentId, ctx.state.lang, '', onode.node.id);
-    if (!nn) return;
+    const tempId = `temp-${++ctx.tempNodeCounter}`;
+    const tempNode: ExplorerNode = { id: tempId };
     const sibs = getSiblings(onode);
     const idx = sibs.indexOf(onode);
-    const no = make(nn, onode.parentId, onode.depth);
+    const no = make(tempNode, onode.parentId, onode.depth);
     no.childrenLoaded = true;
     sibs.splice(idx + 1, 0, no);
-    const cc = ctx.childrenCache.get(onode.parentId);
-    if (cc) { const ci = cc.findIndex(n => n.id === onode.node.id); cc.splice(ci + 1, 0, nn); }
-    // Insert after onode's last visible descendant
     const anchor = lastDescRow(onode);
-    anchor.insertAdjacentElement('afterend', buildRow(no));
+    const newRow = buildRow(no);
+    anchor.insertAdjacentElement('afterend', newRow);
     focusRow(no);
+
+    const nn = await apiCreateNode(ctx.gId, onode.parentId, ctx.state.lang, '', onode.node.id);
+    if (!nn) {
+      // Rollback
+      newRow.remove(); rowMap.delete(tempId);
+      sibs.splice(sibs.indexOf(no), 1); byId.delete(tempId);
+      focusRow(onode);
+      return;
+    }
+
+    // Flush any text typed while the API was in-flight
+    const typedText = newRow.querySelector<HTMLTextAreaElement>('textarea')?.value ?? '';
+
+    // Swap temp → real in all maps
+    byId.delete(tempId); byId.set(nn.id, no);
+    rowMap.delete(tempId); rowMap.set(nn.id, newRow);
+    newRow.dataset.nodeId = nn.id;
+    Object.assign(tempNode, nn); // mutate in place so blur-handler closures pick up real id
+
+    const cc = ctx.childrenCache.get(onode.parentId);
+    if (cc) { const ci = cc.findIndex(n => n.id === onode.node.id); if (ci >= 0) cc.splice(ci + 1, 0, nn); }
+
+    if (typedText.trim()) void apiUpdateNode(ctx.gId, nn.id, ctx.state.lang, typedText);
   };
 
-  // Delete node — incremental DOM remove
-  const doDelete = async (onode: ONode, visIdx: number, vis: ONode[]) => {
+  // Delete — optimistic: remove from DOM and focus next node immediately, fire API after
+  const doDelete = (onode: ONode, visIdx: number, vis: ONode[]) => {
     if (onode.expanded) collapseInDom(onode);
     rowMap.get(onode.node.id)?.remove(); rowMap.delete(onode.node.id);
-    await apiDeleteNode(ctx.gId, onode.node.id);
     const sibs = getSiblings(onode);
     sibs.splice(sibs.indexOf(onode), 1);
     byId.delete(onode.node.id);
@@ -257,6 +277,7 @@ export function createOutlinerView(ctx: GraphEditorContext): {
     if (cc) { const ci = cc.findIndex(n => n.id === onode.node.id); if (ci >= 0) cc.splice(ci, 1); }
     const target = vis[visIdx - 1] ?? vis[visIdx + 1];
     if (target && byId.has(target.node.id)) focusRow(target);
+    void apiDeleteNode(ctx.gId, onode.node.id); // fire and forget
   };
 
   // Move node up/down in sibling order — incremental DOM move
