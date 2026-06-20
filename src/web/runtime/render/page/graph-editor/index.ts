@@ -203,8 +203,11 @@ export function renderGraphEditor(
   const rootNodeId = comp.rootNodeId ?? null;
   const propStore = new Map<string, Record<string, string>>();
   const allPropKeys = new Set<string>();
+  const allPropColors = new Map<string, { colorId: string; code: string }>();
+  const colorPalette = new Map<string, string>();
   const ctx = {
-    gId, limit, rootNodeId, outer, columnsEl, state, childrenCache, propStore, allPropKeys,
+    gId, limit, rootNodeId, outer, columnsEl, state, childrenCache,
+    propStore, allPropKeys, allPropColors, colorPalette,
     columnVersion: 0, tempNodeCounter: 0, pendingDeleteId: null,
   } as unknown as GraphEditorContext;
   Object.assign(ctx, createColumnFns(ctx), createNodeRowFns(ctx), createDeleteFns(ctx));

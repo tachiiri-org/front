@@ -129,6 +129,32 @@ export async function apiMoveBookmark(graphId: string, nodeId: string, direction
   });
 }
 
+export async function fetchColors(graphId: string): Promise<Array<{ id: string; code: string }>> {
+  const r = await apiFetch(`/api/v1/graph/${graphId}/colors`);
+  if (!r.ok) return [];
+  const data = await r.json() as { colors: Array<{ id: string; code: string }> };
+  return data.colors ?? [];
+}
+
+export async function fetchPropertyColors(graphId: string): Promise<Record<string, { colorId: string; code: string }>> {
+  const r = await apiFetch(`/api/v1/graph/${graphId}/property-color`);
+  if (!r.ok) return {};
+  const data = await r.json() as { propertyColors: Record<string, { colorId: string; code: string }> };
+  return data.propertyColors ?? {};
+}
+
+export async function apiSetPropertyColor(graphId: string, key: string, colorId: string): Promise<void> {
+  await apiFetch(`/api/v1/graph/${graphId}/property-color`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ key, colorId }),
+  });
+}
+
+export async function apiRemovePropertyColor(graphId: string, key: string): Promise<void> {
+  await apiFetch(`/api/v1/graph/${graphId}/property-color/${encodeURIComponent(key)}`, { method: 'DELETE' });
+}
+
 export async function apiSetProperty(graphId: string, nodeId: string, key: string, value: string): Promise<void> {
   await apiFetch(`/api/v1/graph/${graphId}/node/${nodeId}/property`, {
     method: 'POST',

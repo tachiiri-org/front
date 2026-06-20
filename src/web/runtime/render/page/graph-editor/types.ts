@@ -49,6 +49,10 @@ export interface GraphEditorContext {
   childrenCache: Map<string | null, ExplorerNode[]>;
   propStore: Map<string, Record<string, string>>;
   allPropKeys: Set<string>;
+  // key → { colorId, code } for property key colors
+  allPropColors: Map<string, { colorId: string; code: string }>;
+  // m_color palette: id → code
+  colorPalette: Map<string, string>;
   columnVersion: number;
   tempNodeCounter: number;
   // While set, this id is filtered out of every column so a refetch cannot resurrect it.

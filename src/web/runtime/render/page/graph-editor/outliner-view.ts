@@ -4,6 +4,7 @@ import {
   fetchChildren, fetchBookmarks, fetchBookmarkedNodes, fetchAllNodes,
   apiCreateNode, apiUpdateNode, apiDeleteNode, apiMoveNode, apiMoveBookmark, apiToggleLink,
   apiSetProperty, apiRemoveProperty,
+  fetchColors, fetchPropertyColors, apiSetPropertyColor, apiRemovePropertyColor,
 } from './api';
 
 type ONode = {
@@ -222,9 +223,19 @@ export function createOutlinerView(ctx: GraphEditorContext): {
     const hasChildren = onode.childrenLoaded
       ? onode.children.length > 0
       : (ctx.childrenCache.get(onode.node.id)?.length ?? 1) > 0;
+    // Use first assigned property color, if any
+    const nodeProps = ctx.propStore.get(onode.node.id) ?? {};
+    const propColor = Object.keys(nodeProps)
+      .map(k => ctx.allPropColors.get(k)?.code)
+      .find(c => c != null);
     const filled = hasChildren && !onode.expanded;
-    m.style.background = filled ? TEXT_MID : 'transparent';
-    m.style.border = filled ? 'none' : `1.5px solid ${hasChildren ? TEXT_MID : TEXT_DIM}`;
+    if (propColor) {
+      m.style.background = propColor;
+      m.style.border = 'none';
+    } else {
+      m.style.background = filled ? TEXT_MID : 'transparent';
+      m.style.border = filled ? 'none' : `1.5px solid ${hasChildren ? TEXT_MID : TEXT_DIM}`;
+    }
     const wrap = m.parentElement;
     if (wrap) wrap.style.cursor = hasChildren ? 'pointer' : 'default';
   };
@@ -529,6 +540,51 @@ export function createOutlinerView(ctx: GraphEditorContext): {
     menu.dataset.propMenu = '1';
     menu.style.cssText = `position:fixed;left:${x}px;top:${y}px;z-index:100;min-width:220px;background:hsl(240,14%,9%);border:1px solid ${BORDER};border-radius:6px;padding:8px;font-size:13px;box-shadow:0 4px 16px rgba(0,0,0,.4);`;
 
+    // Color picker popover for a property key
+    const showColorPicker = (key: string, anchorEl: HTMLElement) => {
+      document.querySelector('[data-color-picker]')?.remove();
+      const picker = document.createElement('div');
+      picker.dataset.colorPicker = '1';
+      picker.style.cssText = `position:fixed;z-index:101;background:hsl(240,14%,12%);border:1px solid ${BORDER};border-radius:6px;padding:6px;display:grid;grid-template-columns:repeat(6,1fr);gap:4px;box-shadow:0 4px 12px rgba(0,0,0,.5);`;
+      const anchorRect = anchorEl.getBoundingClientRect();
+      picker.style.left = `${anchorRect.left}px`;
+      picker.style.top = `${anchorRect.bottom + 4}px`;
+
+      const current = ctx.allPropColors.get(key)?.colorId;
+      // "no color" button
+      const noneBtn = document.createElement('button');
+      noneBtn.title = '色なし';
+      noneBtn.style.cssText = `width:20px;height:20px;border-radius:4px;border:1.5px solid ${BORDER};background:transparent;cursor:pointer;grid-column:span 2;font-size:10px;color:${TEXT_DIM};`;
+      noneBtn.textContent = '×';
+      noneBtn.addEventListener('click', () => {
+        ctx.allPropColors.delete(key);
+        void apiRemovePropertyColor(ctx.gId, key);
+        picker.remove();
+        rebuild();
+        rowMap.forEach((_, id) => { const o = byId.get(id); if (o) updateExpandMarker(o); });
+      });
+      picker.appendChild(noneBtn);
+
+      for (const [id, code] of ctx.colorPalette) {
+        const btn = document.createElement('button');
+        btn.title = id;
+        btn.style.cssText = `width:20px;height:20px;border-radius:4px;border:${current === id ? `2px solid ${TEXT_HIGH}` : 'none'};background:${code};cursor:pointer;`;
+        btn.addEventListener('click', () => {
+          ctx.allPropColors.set(key, { colorId: id, code });
+          void apiSetPropertyColor(ctx.gId, key, id);
+          picker.remove();
+          rebuild();
+          rowMap.forEach((_, nid) => { const o = byId.get(nid); if (o) updateExpandMarker(o); });
+        });
+        picker.appendChild(btn);
+      }
+      document.body.appendChild(picker);
+      const closePicker = (e: MouseEvent) => {
+        if (!picker.contains(e.target as Node)) { picker.remove(); document.removeEventListener('click', closePicker, true); }
+      };
+      setTimeout(() => document.addEventListener('click', closePicker, true), 0);
+    };
+
     const rebuild = () => {
       menu.innerHTML = '';
 
@@ -539,34 +595,42 @@ export function createOutlinerView(ctx: GraphEditorContext): {
 
       const nodeProps = ctx.propStore.get(onode.node.id) ?? {};
 
-      // Show all globally known keys; assigned ones show ×, unassigned ones show +
+      // All globally known keys: checkbox on left, color swatch on right
       for (const key of ctx.allPropKeys) {
         const assigned = key in nodeProps;
-        const value = nodeProps[key];
+        const propColor = ctx.allPropColors.get(key);
 
         const row = document.createElement('div');
-        row.style.cssText = `display:flex;align-items:center;gap:6px;margin-bottom:4px;cursor:pointer;`;
+        row.style.cssText = `display:flex;align-items:center;gap:6px;margin-bottom:4px;`;
 
-        const labelEl = document.createElement('span');
-        labelEl.textContent = assigned && value !== '●' ? `${key}: ${value}` : key;
-        labelEl.style.cssText = `flex:1;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;color:${assigned ? TEXT_HIGH : TEXT_DIM};`;
-
-        const btn = document.createElement('button');
-        btn.textContent = assigned ? '×' : '+';
-        btn.style.cssText = `background:transparent;border:none;color:${assigned ? TEXT_MID : TEXT_DIM};cursor:pointer;padding:0 2px;font-size:12px;flex-shrink:0;`;
-        btn.addEventListener('click', (e) => {
-          e.stopPropagation();
-          if (assigned) {
-            syncPropChange(onode.node.id, p => { delete p[key]; });
-            void apiRemoveProperty(ctx.gId, onode.node.id, key);
-          } else {
+        // Checkbox
+        const cb = document.createElement('input');
+        cb.type = 'checkbox';
+        cb.checked = assigned;
+        cb.style.cssText = `flex-shrink:0;cursor:pointer;accent-color:${propColor?.code ?? TEXT_MID};`;
+        cb.addEventListener('change', () => {
+          if (cb.checked) {
             syncPropChange(onode.node.id, p => { p[key] = '●'; });
             void apiSetProperty(ctx.gId, onode.node.id, key, '●');
+          } else {
+            syncPropChange(onode.node.id, p => { delete p[key]; });
+            void apiRemoveProperty(ctx.gId, onode.node.id, key);
           }
+          updateExpandMarker(onode);
           rebuild();
         });
 
-        row.append(labelEl, btn);
+        const labelEl = document.createElement('span');
+        labelEl.textContent = key;
+        labelEl.style.cssText = `flex:1;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;color:${assigned ? (propColor?.code ?? TEXT_HIGH) : TEXT_DIM};cursor:pointer;`;
+        labelEl.addEventListener('click', () => { cb.checked = !cb.checked; cb.dispatchEvent(new Event('change')); });
+
+        // Color swatch button
+        const swatch = document.createElement('button');
+        swatch.style.cssText = `flex-shrink:0;width:14px;height:14px;border-radius:3px;border:1px solid ${BORDER};background:${propColor?.code ?? 'transparent'};cursor:pointer;`;
+        swatch.addEventListener('click', (e) => { e.stopPropagation(); showColorPicker(key, swatch); });
+
+        row.append(cb, labelEl, swatch);
         menu.appendChild(row);
       }
 
@@ -574,12 +638,12 @@ export function createOutlinerView(ctx: GraphEditorContext): {
       divider.style.cssText = `border-top:1px solid ${BORDER};margin:6px 0;`;
       menu.appendChild(divider);
 
-      // New key input: "例外" → key="例外" value="●", "key=val" → key+value
+      // New key input
       const addRow = document.createElement('div');
       addRow.style.cssText = `display:flex;align-items:center;gap:4px;`;
 
       const propIn = document.createElement('input');
-      propIn.placeholder = '新しいキー または key=value';
+      propIn.placeholder = '新しいキー';
       propIn.style.cssText = `flex:1;background:transparent;border:1px solid ${BORDER};border-radius:3px;padding:3px 5px;color:${TEXT_HIGH};font-size:12px;outline:none;font-family:inherit;min-width:0;`;
 
       const addBtn = document.createElement('button');
@@ -587,14 +651,10 @@ export function createOutlinerView(ctx: GraphEditorContext): {
       addBtn.style.cssText = `background:transparent;border:1px solid ${BORDER};border-radius:3px;color:${TEXT_MID};cursor:pointer;padding:2px 7px;font-size:13px;flex-shrink:0;`;
 
       const doAdd = () => {
-        const raw = propIn.value.trim(); if (!raw) return;
-        const eqIdx = raw.indexOf('=');
-        const k = eqIdx >= 0 ? raw.slice(0, eqIdx).trim() : raw;
-        const v = eqIdx >= 0 ? raw.slice(eqIdx + 1).trim() : '●';
-        if (!k) return;
+        const k = propIn.value.trim(); if (!k) return;
         ctx.allPropKeys.add(k);
-        syncPropChange(onode.node.id, p => { p[k] = v; });
-        void apiSetProperty(ctx.gId, onode.node.id, k, v);
+        syncPropChange(onode.node.id, p => { p[k] = '●'; });
+        void apiSetProperty(ctx.gId, onode.node.id, k, '●');
         propIn.value = '';
         rebuild();
       };
@@ -1010,6 +1070,18 @@ export function createOutlinerView(ctx: GraphEditorContext): {
     zoomStack.splice(0);
     baseDepth = 0;
     updateBreadcrumb();
+
+    // Load color palette and property key colors (parallel, best-effort)
+    if (ctx.colorPalette.size === 0) {
+      const [palette, propColors] = await Promise.all([
+        fetchColors(ctx.gId),
+        fetchPropertyColors(ctx.gId),
+      ]);
+      ctx.colorPalette.clear();
+      for (const { id, code } of palette) ctx.colorPalette.set(id, code);
+      ctx.allPropColors.clear();
+      for (const [key, val] of Object.entries(propColors)) ctx.allPropColors.set(key, val);
+    }
 
     let topNodes: ExplorerNode[];
     let parentId: string | null;
