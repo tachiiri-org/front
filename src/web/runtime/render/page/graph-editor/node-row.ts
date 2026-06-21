@@ -195,20 +195,33 @@ export function createNodeRowFns(ctx: GraphEditorContext): {
     inp.addEventListener('keydown', createNodeKeydownHandler(ctx, node, inp, row, colIndex, saveTimer));
 
     // ── Column DnD ───────────────────────────────────────────────────
+    // Drag is initiated ONLY from the marker dot (pointerdown → draggable=true)
+    // so textarea text-selection never conflicts with drag.
     const clearDndIndicators = () => {
       ctx.columnsEl.querySelectorAll<HTMLElement>('[data-node-id]:not(textarea),[data-col-drop-zone]').forEach(el => {
         el.style.boxShadow = '';
       });
     };
 
-    row.draggable = true;
+    let colDragReady = false;
+    marker.style.cursor = 'grab';
+    marker.addEventListener('pointerdown', (e) => {
+      if (e.pointerType !== 'mouse') return;
+      colDragReady = true;
+      row.draggable = true;
+    });
+    row.addEventListener('pointerup', () => {
+      if (!ctx.colDndNodeId) { row.draggable = false; colDragReady = false; }
+    });
     row.addEventListener('dragstart', (e) => {
+      if (!colDragReady) { e.preventDefault(); return; }
       ctx.colDndNodeId = node.id;
       ctx.colDndColIndex = colIndex;
       row.style.opacity = '0.5';
       if (e.dataTransfer) { e.dataTransfer.effectAllowed = 'move'; e.dataTransfer.setData('text/plain', node.id); }
     });
     row.addEventListener('dragend', () => {
+      row.draggable = false; colDragReady = false;
       ctx.colDndNodeId = null; ctx.colDndColIndex = -1;
       row.style.opacity = '';
       clearDndIndicators();
@@ -251,7 +264,6 @@ export function createNodeRowFns(ctx: GraphEditorContext): {
         const newParentId = node.id;
         if (srcParentId === newParentId) return;
         srcCol.nodes.splice(srcNodeIdx, 1);
-        // Invalidate target's children cache so next expansion fetches fresh
         ctx.childrenCache.delete(newParentId);
         if (srcParentId !== null) void apiToggleLink(ctx.gId, srcNodeId, srcParentId);
         void apiToggleLink(ctx.gId, srcNodeId, newParentId);
@@ -263,11 +275,9 @@ export function createNodeRowFns(ctx: GraphEditorContext): {
         const insertAt = before ? tgtIdx : tgtIdx + 1;
         srcCol.nodes.splice(srcNodeIdx, 1);
         if (srcCol === tgtCol) {
-          // Same column reorder
           const adjustedAt = srcNodeIdx < insertAt ? insertAt - 1 : insertAt;
           srcCol.nodes.splice(adjustedAt, 0, srcNode);
         } else {
-          // Cross-column move
           tgtCol.nodes.splice(insertAt, 0, srcNode);
           if (srcParentId !== tgtParentId) {
             if (srcParentId !== null) void apiToggleLink(ctx.gId, srcNodeId, srcParentId);
