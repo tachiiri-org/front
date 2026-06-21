@@ -770,8 +770,8 @@ export function createOutlinerView(ctx: GraphEditorContext, paneOpts?: OutlinerP
         if (cc) { const ci = cc.findIndex(n => n.id === mover.node.id); if (ci >= 0) cc.splice(ci, 1); }
       }
 
-      // Get target parent's sibling list (movers already removed if they were in it)
-      const newSibs: ONode[] = newParentId === null ? roots : (byId.get(newParentId)?.children ?? []);
+      // Get target parent's sibling list via getSiblings so pane-root nodes are handled correctly
+      const newSibs: ONode[] = getSiblings(onode);
       const targetIdx = newSibs.indexOf(onode);
       if (targetIdx === -1) return;
       const insertAt = before ? targetIdx : targetIdx + 1;

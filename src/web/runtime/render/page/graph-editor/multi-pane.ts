@@ -158,8 +158,10 @@ export function createMultiPaneView(ctx: GraphEditorContext): {
       paneFilterKeys: new Set(config.filterKeys),
       onNodeSelect: (nodeId) => onPaneSelect(config.id, nodeId),
       onContentWidthChange: (w) => {
-        const minForHeader = header.scrollWidth + 8;
-        const actualW = Math.max(w, minForHeader);
+        // Measure only non-flex-1 header children to avoid feedback loop
+        // (header.scrollWidth includes labelEl which stretches to container width)
+        const minHeaderW = srcBtn.offsetWidth + fltArea.scrollWidth + closeBtn.offsetWidth + 28;
+        const actualW = Math.max(w, minHeaderW);
         containerEl.style.width = `${actualW}px`;
         config.width = actualW;
       },
