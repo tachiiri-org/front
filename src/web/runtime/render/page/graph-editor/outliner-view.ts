@@ -202,7 +202,6 @@ export function createOutlinerView(ctx: GraphEditorContext, paneOpts?: OutlinerP
       const label = draftTa.value.trim();
       draftTa.value = ''; draftResize(); draftTa.style.color = TEXT_DIM;
       const parentId = paneParentSet ? paneParentId : (ctx.rootNodeId ?? null);
-      if (!parentId) return;
       const nn = await apiCreateNode(ctx.gId, parentId, ctx.state.lang, label);
       if (!nn) return;
       const o = make(nn, parentId, 0);
@@ -212,8 +211,8 @@ export function createOutlinerView(ctx: GraphEditorContext, paneOpts?: OutlinerP
       ctx.saveChildrenCache?.();
       render();
       focusRow(o);
-      // Node was appended to chain end by backend → move to front
-      void apiMoveNode(ctx.gId, nn.id, parentId, 'up', roots.map(r => r.node.id));
+      // Node was appended to chain end by backend → move to front (only when parent is known)
+      if (parentId) void apiMoveNode(ctx.gId, nn.id, parentId, 'up', roots.map(r => r.node.id));
     }
   });
   draftEl.append(draftSpacer, draftBtnWrap, draftTa);
@@ -1110,7 +1109,7 @@ export function createOutlinerView(ctx: GraphEditorContext, paneOpts?: OutlinerP
       const col = propColor?.code ?? TEXT_DIM;
 
       const row = document.createElement('div');
-      row.style.cssText = `display:flex;align-items:center;gap:5px;padding:1px 4px;border-radius:4px;cursor:pointer;border:2px solid transparent;`;
+      row.style.cssText = `display:flex;align-items:center;gap:4px;padding:0 4px;border-radius:3px;cursor:pointer;border:2px solid transparent;`;
       row.addEventListener('mouseenter', () => { row.style.background = 'rgba(255,255,255,.05)'; });
       row.addEventListener('mouseleave', () => { row.style.background = ''; });
       // Click on the row (empty area) → toggle property
@@ -1177,7 +1176,7 @@ export function createOutlinerView(ctx: GraphEditorContext, paneOpts?: OutlinerP
       // Colored pill
       const pill = document.createElement('span');
       pill.textContent = key;
-      pill.style.cssText = `display:inline-flex;align-items:center;padding:2px 8px;border-radius:4px;background:${col};color:#fff;font-size:12px;cursor:pointer;font-weight:500;white-space:nowrap;`;
+      pill.style.cssText = `display:inline-flex;align-items:center;padding:1px 6px;border-radius:3px;background:${col};color:#fff;font-size:11px;cursor:pointer;font-weight:500;white-space:nowrap;`;
       // pill click delegates to row's click handler (stop propagation to prevent double-fire)
       pill.addEventListener('click', (e) => { e.stopPropagation(); row.click(); });
 

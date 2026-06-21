@@ -88,16 +88,18 @@ export function createMultiPaneView(ctx: GraphEditorContext): {
     header.style.cssText = `
       flex-shrink:0;display:flex;align-items:center;gap:4px;
       padding:3px 6px;border-bottom:1px solid ${BORDER};
-      font-size:11px;color:${TEXT_MID};user-select:none;
+      font-size:11px;color:${TEXT_MID};
     `;
 
-    // Label (editable)
+    // Label (editable) — user-select:text overrides any parent user-select:none
     const labelEl = document.createElement('span');
     labelEl.textContent = config.label;
     labelEl.contentEditable = 'true';
     labelEl.spellcheck = false;
-    labelEl.style.cssText = `flex:1;outline:none;color:${TEXT_HIGH};font-size:12px;cursor:text;min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;`;
+    labelEl.style.cssText = `flex:1;outline:none;color:${TEXT_HIGH};font-size:12px;cursor:text;min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;user-select:text;border-bottom:1px solid transparent;`;
+    labelEl.addEventListener('focus', () => { labelEl.style.borderBottom = `1px solid ${TEXT_DIM}`; });
     labelEl.addEventListener('blur', () => {
+      labelEl.style.borderBottom = '1px solid transparent';
       config.label = labelEl.textContent?.trim() || config.label;
       saveAll();
     });
