@@ -51,7 +51,9 @@ export async function fetchChildren(graphId: string, nodeId: string, limit: numb
   // Defensive dedup by id: legacy parallel edges can return the same node twice,
   // which would render duplicate rows that all share one id (deleting one deletes all).
   const seen = new Set<string>();
-  return (data.nodes ?? []).filter((n) => (seen.has(n.id) ? false : (seen.add(n.id), true)));
+  return (data.nodes ?? [])
+    .filter((n) => (seen.has(n.id) ? false : (seen.add(n.id), true)))
+    .filter((n) => n.properties?.node_type !== 'root');
 }
 
 export async function apiCreateNode(
