@@ -2,12 +2,7 @@ import type { GraphEditorComponent } from '../../../../schema/component/kind/gra
 import type { ExplorerNode, ExplorerState, GraphEditorContext } from './types';
 import {
   BG, BORDER, TEXT_HIGH, TEXT_MID, SELECT_STRONG,
-  primaryLabel, fallbackLabel,
 } from './constants';
-import { fetchBookmarks } from './api';
-import { createColumnFns } from './column';
-import { createNodeRowFns } from './node-row';
-import { createDeleteFns } from './delete';
 import { createOutlinerView } from './outliner-view';
 import { createMultiPaneView } from './multi-pane';
 
@@ -23,11 +18,8 @@ export function renderGraphEditor(
     graphId: gId,
     lang: comp.lang ?? 'ja',
     limit,
-    columns: [],
     bookmarks: new Set(),
     showFallback: false,
-    linkSourceId: null,
-    linkedNodeIds: new Set(),
     searchQuery: '',
   };
 
@@ -79,15 +71,12 @@ export function renderGraphEditor(
   // ── View mode toggle ──────────────────────────────────────────────
   const VIEW_MODE_KEY = `graph-editor-view:${gId}`;
   const storedView = localStorage.getItem(VIEW_MODE_KEY);
-  let viewMode: 'columns' | 'outline' | 'panes' = (storedView === 'outline' || storedView === 'panes') ? storedView : 'columns';
+  let viewMode: 'outline' | 'panes' = storedView === 'outline' ? 'outline' : 'panes';
 
-  const makeViewBtnStyle = (mode: 'columns' | 'outline' | 'panes') => {
+  const makeViewBtnStyle = (mode: 'outline' | 'panes') => {
     const active = viewMode === mode;
     return `background:${active ? SELECT_STRONG : 'transparent'};border:1px solid ${active ? SELECT_STRONG : BORDER};color:${active ? TEXT_HIGH : TEXT_MID};cursor:pointer;font-size:11px;padding:1px 7px;border-radius:3px;line-height:1.5;`;
   };
-  const colViewBtn = document.createElement('button');
-  colViewBtn.textContent = '列';
-  colViewBtn.title = 'カラムビュー';
   const outlineViewBtn = document.createElement('button');
   outlineViewBtn.textContent = 'アウトライン';
   outlineViewBtn.title = 'アウトラインビュー';
@@ -96,7 +85,6 @@ export function renderGraphEditor(
   panesViewBtn.title = 'マルチパネルビュー';
 
   const refreshViewBtns = () => {
-    colViewBtn.style.cssText = makeViewBtnStyle('columns');
     outlineViewBtn.style.cssText = makeViewBtnStyle('outline');
     panesViewBtn.style.cssText = makeViewBtnStyle('panes');
   };
@@ -104,7 +92,6 @@ export function renderGraphEditor(
 
   const sep = document.createElement('span');
   sep.style.cssText = `width:1px;height:14px;background:${BORDER};margin:0 2px;flex-shrink:0;`;
-  topBar.appendChild(colViewBtn);
   topBar.appendChild(outlineViewBtn);
   topBar.appendChild(panesViewBtn);
   topBar.appendChild(sep);
@@ -157,11 +144,9 @@ export function renderGraphEditor(
     searchInput.focus();
   });
 
-  // doSearch is overwritten after outliner is created (see below)
+  // doSearch is overwritten after the views are created (see below)
   let doSearch = (q: string) => {
     state.searchQuery = q;
-    childrenCache.delete(null);
-    void ctx.loadColumn(null, 0);
   };
 
   let searchTimer: ReturnType<typeof setTimeout> | null = null;
@@ -192,60 +177,23 @@ export function renderGraphEditor(
     }
   }, true);
 
-  // ── Breadcrumb ───────────────────────────────────────────────────
-  const breadcrumbEl = document.createElement('div');
-  breadcrumbEl.style.cssText = `
-    padding:4px 12px;border-bottom:1px solid ${BORDER};flex-shrink:0;
-    font-size:12px;color:${TEXT_MID};white-space:nowrap;overflow:hidden;text-overflow:ellipsis;
-  `;
-  breadcrumbEl.textContent = 'ルート';
-  outer.appendChild(breadcrumbEl);
-
-  const refreshBreadcrumb = () => {
-    breadcrumbEl.innerHTML = '';
-    const addSpan = (text: string, highlight = false) => {
-      const s = document.createElement('span');
-      s.textContent = text;
-      s.style.color = highlight ? TEXT_HIGH : TEXT_MID;
-      breadcrumbEl.appendChild(s);
-    };
-    addSpan('ルート');
-    for (const col of state.columns) {
-      if (!col.selectedId) break;
-      const node = col.nodes.find((n) => n.id === col.selectedId);
-      if (!node) break;
-      addSpan(' › ', false);
-      addSpan(primaryLabel(node, state.lang) ?? fallbackLabel(node, state.lang), true);
-    }
-  };
-
-  // ── Columns area ──────────────────────────────────────────────────
-  const columnsEl = document.createElement('div');
-  columnsEl.style.cssText = `display:flex;flex:1;overflow-x:auto;overflow-y:hidden;`;
-  outer.appendChild(columnsEl);
-
-
   // ── Context assembly ──────────────────────────────────────────────
-  // The callback fields are filled in by the module factories below; until then the
-  // base object only carries config + shared mutable state. Every factory closes over
-  // `ctx` and resolves the other modules' callbacks lazily (at event time), which is
-  // what lets the mutually-recursive render functions live in separate files.
+  // The view modules (outliner / multi-pane) close over `ctx` for shared config and
+  // mutable state. The base object carries config + shared state; the views attach
+  // their own callbacks via the propChangeHooks array.
   const rootNodeId = comp.rootNodeId ?? null;
   const propStore = new Map<string, Record<string, string>>();
   const allPropKeys = new Set<string>();
   const allPropColors = new Map<string, { colorId: string; code: string }>();
   const colorPalette = new Map<string, string>();
   const ctx = {
-    gId, limit, rootNodeId, outer, columnsEl, state, childrenCache,
+    gId, limit, rootNodeId, outer, state, childrenCache,
     propStore, allPropKeys, allPropColors, colorPalette,
-    columnVersion: 0, tempNodeCounter: 0, pendingDeleteId: null,
+    tempNodeCounter: 0,
     propChangeHooks: [] as Array<() => void>,
     saveChildrenCache,
-    colDndNodeId: null, colDndColIndex: -1,
     paneDrag: null,
   } as unknown as GraphEditorContext;
-  Object.assign(ctx, createColumnFns(ctx), createNodeRowFns(ctx), createDeleteFns(ctx));
-  ctx.refreshBreadcrumb = refreshBreadcrumb;
 
   // ── Outliner view (needs ctx) ──────────────────────────────────────
   const outliner = createOutlinerView(ctx);
@@ -265,28 +213,23 @@ export function renderGraphEditor(
   topBar.insertBefore(filterBtnSep, fallbackBtn);
   topBar.insertBefore(filterBtnEl, filterBtnSep);
 
-  // Wire up search for all view modes now that outliner exists
+  // Wire up search for all view modes now that the views exist
   doSearch = (q: string) => {
     state.searchQuery = q;
     if (viewMode === 'outline') {
       void outliner.search(q);
-    } else if (viewMode === 'panes') {
-      void multiPane.search(q);
     } else {
-      childrenCache.delete(null);
-      void ctx.loadColumn(null, 0);
+      void multiPane.search(q);
     }
   };
 
-  const switchView = (mode: 'columns' | 'outline' | 'panes') => {
+  const switchView = (mode: 'outline' | 'panes') => {
     viewMode = mode;
     localStorage.setItem(VIEW_MODE_KEY, mode);
     refreshViewBtns();
     // Hide all views
     outliner.el.style.display = 'none';
     multiPane.el.style.display = 'none';
-    columnsEl.style.display = 'none';
-    breadcrumbEl.style.display = 'none';
     filterBtnEl.style.display = 'none';
     filterBtnSep.style.display = 'none';
 
@@ -296,21 +239,13 @@ export function renderGraphEditor(
       filterBtnEl.style.display = '';
       filterBtnSep.style.display = '';
       void outliner.load();
-    } else if (mode === 'panes') {
+    } else {
       multiPane.el.style.display = 'flex';
       void multiPane.load();
-    } else {
-      columnsEl.style.display = 'flex';
-      breadcrumbEl.style.display = '';
     }
   };
-  colViewBtn.addEventListener('click', () => switchView('columns'));
   outlineViewBtn.addEventListener('click', () => switchView('outline'));
   panesViewBtn.addEventListener('click', () => switchView('panes'));
-
-  // Restore saved view on load
-  if (viewMode === 'outline') switchView('outline');
-  else if (viewMode === 'panes') switchView('panes');
 
   // ── Language / fallback wiring (needs ctx) ─────────────────────────
   const switchLang = (l: 'en' | 'ja') => {
@@ -319,16 +254,9 @@ export function renderGraphEditor(
     fallbackBtn.style.cssText = makeFallbackBtnStyle();
     if (viewMode === 'outline') {
       outliner.refresh();
-    } else if (viewMode === 'panes') {
-      multiPane.refresh();
-    } else if (!state.showFallback) {
-      // Re-fetch col0 with new lang filter
-      childrenCache.delete(null);
-      void ctx.loadColumn(null, 0);
     } else {
-      ctx.rebuildAll();
+      multiPane.refresh();
     }
-    refreshBreadcrumb();
   };
   jaBtn.addEventListener('click', () => switchLang('ja'));
   enBtn.addEventListener('click', () => switchLang('en'));
@@ -339,19 +267,12 @@ export function renderGraphEditor(
     if (viewMode === 'outline') {
       void outliner.load();
     } else {
-      childrenCache.delete(null);
-      void ctx.loadColumn(null, 0);
+      void multiPane.load();
     }
   });
 
-  if (rootNodeId) {
-    void ctx.loadColumn(null, 0);
-  } else {
-    fetchBookmarks(gId).then((ids) => {
-      state.bookmarks = new Set(ids);
-      void ctx.loadColumn(null, 0);
-    });
-  }
+  // Show the initial view (default: panes)
+  switchView(viewMode);
 
   return outer;
 }

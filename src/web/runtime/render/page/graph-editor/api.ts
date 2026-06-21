@@ -83,16 +83,6 @@ export async function apiUpdateNode(
   });
 }
 
-export async function apiUpdateColor(
-  graphId: string, nodeId: string, color: string | null,
-): Promise<void> {
-  await apiFetch(`/api/v1/graph/${graphId}/node/${nodeId}`, {
-    method: 'PATCH',
-    headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify({ color }),
-  });
-}
-
 export async function apiDeleteNode(graphId: string, nodeId: string): Promise<void> {
   await apiFetch(`/api/v1/graph/${graphId}/node/${nodeId}`, { method: 'DELETE' });
 }
@@ -113,14 +103,6 @@ export async function fetchBookmarks(graphId: string): Promise<string[]> {
   if (!r.ok) return [];
   const data = await r.json() as { bookmarks: string[] };
   return data.bookmarks ?? [];
-}
-
-export async function apiAddBookmark(graphId: string, nodeId: string): Promise<void> {
-  await apiFetch(`/api/v1/graph/${graphId}/bookmarks/${nodeId}`, { method: 'POST' });
-}
-
-export async function apiRemoveBookmark(graphId: string, nodeId: string): Promise<void> {
-  await apiFetch(`/api/v1/graph/${graphId}/bookmarks/${nodeId}`, { method: 'DELETE' });
 }
 
 export async function apiMoveBookmark(graphId: string, nodeId: string, direction: 'up' | 'down'): Promise<void> {
