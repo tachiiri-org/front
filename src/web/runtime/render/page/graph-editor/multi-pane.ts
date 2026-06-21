@@ -275,7 +275,8 @@ export function createMultiPaneView(ctx: GraphEditorContext): {
     const config = inst?.config;
     if (!config) return;
 
-    const keys = [...ctx.allPropKeys].sort();
+    // Include already-selected filter keys even if not yet in allPropKeys (e.g. from localStorage)
+    const keys = [...new Set([...ctx.allPropKeys, ...config.filterKeys])].sort();
     if (keys.length === 0) {
       const empty = document.createElement('div');
       empty.textContent = 'プロパティキーがありません';
