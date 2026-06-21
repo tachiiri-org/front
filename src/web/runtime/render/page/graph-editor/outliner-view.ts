@@ -254,10 +254,10 @@ export function createOutlinerView(ctx: GraphEditorContext, paneOpts?: OutlinerP
 
   const clearSelection = () => { selAnchorId = null; selCurId = null; updateSelectionHighlight(); };
 
-  const lastDescRow = (onode: ONode): HTMLElement => {
+  const lastDescRow = (onode: ONode): HTMLElement | undefined => {
     if (onode.expanded && onode.children.length > 0)
       return lastDescRow(onode.children[onode.children.length - 1]);
-    return rowMap.get(onode.node.id)!;
+    return rowMap.get(onode.node.id);
   };
 
   const visibleRowGroup = (onode: ONode): HTMLElement[] => {
@@ -333,7 +333,8 @@ export function createOutlinerView(ctx: GraphEditorContext, paneOpts?: OutlinerP
   const expandInDom = (onode: ONode) => {
     onode.expanded = true;
     updateExpandMarker(onode);
-    let anchor = rowMap.get(onode.node.id)!;
+    let anchor = rowMap.get(onode.node.id);
+    if (!anchor) return;
     const insertSubtree = (list: ONode[]) => {
       for (const child of list) {
         const row = buildRow(child);
@@ -1239,7 +1240,8 @@ export function createOutlinerView(ctx: GraphEditorContext, paneOpts?: OutlinerP
       const displaced = sibs[minIdx - 1];
       sibs.splice(minIdx - 1, 1); sibs.splice(maxIdx, 0, displaced);
       const displacedRows = visibleRowGroup(displaced);
-      let anchor: HTMLElement = lastDescRow(sel[sel.length - 1]);
+      let anchor: HTMLElement | undefined = lastDescRow(sel[sel.length - 1]);
+      if (!anchor) return;
       for (const r of displacedRows) { anchor.insertAdjacentElement('afterend', r); anchor = r; }
       const cc = ctx.childrenCache.get(parentId);
       if (cc) { const order = new Map(sibs.map((n, i) => [n.node.id, i])); cc.sort((a, b) => (order.get(a.id) ?? 0) - (order.get(b.id) ?? 0)); }
@@ -1251,7 +1253,8 @@ export function createOutlinerView(ctx: GraphEditorContext, paneOpts?: OutlinerP
       const displaced = sibs[maxIdx + 1];
       sibs.splice(maxIdx + 1, 1); sibs.splice(minIdx, 0, displaced);
       const displacedRows = visibleRowGroup(displaced);
-      const firstGroupRow = rowMap.get(sel[0].node.id)!;
+      const firstGroupRow = rowMap.get(sel[0].node.id);
+      if (!firstGroupRow) return;
       for (const r of displacedRows) listEl.insertBefore(r, firstGroupRow);
       const cc = ctx.childrenCache.get(parentId);
       if (cc) { const order = new Map(sibs.map((n, i) => [n.node.id, i])); cc.sort((a, b) => (order.get(a.id) ?? 0) - (order.get(b.id) ?? 0)); }
@@ -1321,6 +1324,7 @@ export function createOutlinerView(ctx: GraphEditorContext, paneOpts?: OutlinerP
     no.childrenLoaded = true;
     sibs.splice(idx + 1, 0, no);
     const anchor = lastDescRow(onode);
+    if (!anchor) { sibs.splice(idx + 1, 1); return; }
     const newRow = buildRow(no);
     anchor.insertAdjacentElement('afterend', newRow);
     focusRow(no);
@@ -1369,11 +1373,13 @@ export function createOutlinerView(ctx: GraphEditorContext, paneOpts?: OutlinerP
       if (cc) { const ci = cc.findIndex(n => n.id === onode.node.id); if (ci >= 0) { cc.splice(ci, 1); cc.splice(newIdx, 0, onode.node); } }
       const group = visibleRowGroup(onode);
       if (direction === 'up') {
-        const neighborRow = rowMap.get(neighbor.node.id)!;
+        const neighborRow = rowMap.get(neighbor.node.id);
+        if (!neighborRow) return;
         for (const r of group) listEl.insertBefore(r, neighborRow);
       } else {
         const anchor = lastDescRow(neighbor);
-        let insertAfter = anchor;
+        if (!anchor) return;
+        let insertAfter: HTMLElement = anchor;
         for (const r of group) { insertAfter.insertAdjacentElement('afterend', r); insertAfter = r; }
       }
       focusRow(onode);
