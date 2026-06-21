@@ -202,6 +202,7 @@ export function createOutlinerView(ctx: GraphEditorContext, paneOpts?: OutlinerP
       const label = draftTa.value.trim();
       draftTa.value = ''; draftResize(); draftTa.style.color = TEXT_DIM;
       const parentId = paneParentSet ? paneParentId : (ctx.rootNodeId ?? null);
+      if (!parentId) return;
       const nn = await apiCreateNode(ctx.gId, parentId, ctx.state.lang, label);
       if (!nn) return;
       const o = make(nn, parentId, 0);
@@ -211,8 +212,8 @@ export function createOutlinerView(ctx: GraphEditorContext, paneOpts?: OutlinerP
       ctx.saveChildrenCache?.();
       render();
       focusRow(o);
-      // Node was appended to chain end by backend → move to front (only when parent is known)
-      if (parentId) void apiMoveNode(ctx.gId, nn.id, parentId, 'up', roots.map(r => r.node.id));
+      // Node was appended to chain end by backend → move to front
+      void apiMoveNode(ctx.gId, nn.id, parentId, 'up', roots.map(r => r.node.id));
     }
   });
   draftEl.append(draftSpacer, draftBtnWrap, draftTa);
@@ -312,8 +313,9 @@ export function createOutlinerView(ctx: GraphEditorContext, paneOpts?: OutlinerP
       });
     }
     for (const o of finalRender) listEl.appendChild(buildRow(o));
-    // Show draft row only when no nodes are displayed
-    draftEl.style.display = roots.length === 0 ? 'flex' : 'none';
+    // Show draft row only when list is empty AND a valid parent is known
+    const draftParentId = paneParentSet ? paneParentId : (ctx.rootNodeId ?? null);
+    draftEl.style.display = (roots.length === 0 && draftParentId !== null) ? 'flex' : 'none';
     updateSelectionHighlight();
     schedulePrefetch();
     if (paneOpts?.onContentWidthChange) scheduleWidthUpdate();
