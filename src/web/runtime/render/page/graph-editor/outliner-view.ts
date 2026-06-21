@@ -883,38 +883,65 @@ export function createOutlinerView(ctx: GraphEditorContext, paneOpts?: OutlinerP
       dragParentId = undefined;
       dragMultiIds = null;
       ctx.paneDrag = null;
-      // Clear indicators across ALL panes (a cross-pane drag leaves them in the target pane).
-      ctx.outer.querySelectorAll<HTMLElement>('[data-node-id]:not(textarea)').forEach(r => {
-        r.style.borderTop = '2px solid transparent'; r.style.borderBottom = '2px solid transparent';
+      // Clear indicators across ALL outliner panes (a cross-pane drag leaves them in the
+      // target pane). Scoped to outliner lists so column-view rows are untouched.
+      ctx.outer.querySelectorAll<HTMLElement>('[data-outliner-list] [data-node-id]:not(textarea)').forEach(r => {
+        r.style.border = '2px solid transparent';
       });
     });
+    // Drop zones by cursor Y: top 30% → before (same level), middle 40% → child of this
+    // node, bottom 30% → after (same level).
+    const dropZoneFor = (e: DragEvent): 'before' | 'child' | 'after' => {
+      const r = row.getBoundingClientRect();
+      const rel = (e.clientY - r.top) / r.height;
+      return rel < 0.3 ? 'before' : rel > 0.7 ? 'after' : 'child';
+    };
+    const showDropIndicator = (zone: 'before' | 'child' | 'after') => {
+      if (zone === 'child') { row.style.border = '2px solid #4a9eff'; return; }
+      row.style.border = '2px solid transparent';
+      if (zone === 'before') row.style.borderTop = '2px solid #4a9eff';
+      else row.style.borderBottom = '2px solid #4a9eff';
+    };
+    const clearDropIndicator = () => { row.style.border = '2px solid transparent'; };
     row.addEventListener('dragover', (e) => {
       const pd = ctx.paneDrag;
       if (!pd || dropBlockedBy(onode, pd)) return;
       e.preventDefault();
       if (e.dataTransfer) e.dataTransfer.dropEffect = 'move';
-      const before = e.clientY < row.getBoundingClientRect().top + row.getBoundingClientRect().height / 2;
-      row.style.borderTop = before ? '2px solid #4a9eff' : '2px solid transparent';
-      row.style.borderBottom = before ? '2px solid transparent' : '2px solid #4a9eff';
+      showDropIndicator(dropZoneFor(e));
     });
-    row.addEventListener('dragleave', () => {
-      row.style.borderTop = '2px solid transparent';
-      row.style.borderBottom = '2px solid transparent';
-    });
+    row.addEventListener('dragleave', clearDropIndicator);
     row.addEventListener('drop', (e) => { void dropHandler(e); });
     const dropHandler = async (e: DragEvent) => {
       e.preventDefault();
-      row.style.borderTop = '2px solid transparent';
-      row.style.borderBottom = '2px solid transparent';
+      clearDropIndicator();
       const pd = ctx.paneDrag;
       if (!pd || dropBlockedBy(onode, pd)) return;
 
-      const before = e.clientY < row.getBoundingClientRect().top + row.getBoundingClientRect().height / 2;
-      const newParentId = onode.parentId;
-      const newSibs: ONode[] = getSiblings(onode);
-      const targetIdx = newSibs.indexOf(onode);
-      if (targetIdx === -1) return;
-      const insertAt = before ? targetIdx : targetIdx + 1;
+      // Resolve the drop target: a sibling position next to `onode`, or `onode` itself
+      // as the new parent when dropping on the node body (middle zone).
+      const zone = dropZoneFor(e);
+      let newParentId: string | null;
+      let newSibs: ONode[];
+      let childDepth: number;
+      if (zone === 'child') {
+        await ensureChildren(onode);
+        onode.expanded = true;
+        newParentId = onode.node.id;
+        newSibs = onode.children;
+        childDepth = onode.depth + 1;
+      } else {
+        newParentId = onode.parentId;
+        newSibs = getSiblings(onode);
+        if (newSibs.indexOf(onode) === -1) return;
+        childDepth = onode.depth;
+      }
+      // insert index is recomputed after removals below; seed for cross-pane (no removals)
+      const insertAtFor = (): number => {
+        if (zone === 'child') return newSibs.length;
+        const tIdx = newSibs.indexOf(onode);
+        return zone === 'before' ? tIdx : tIdx + 1;
+      };
 
       if (pd.sourceToken === paneToken) {
         // ── Same-pane reorder / reparent (movers live in this pane's tree) ──
@@ -932,12 +959,11 @@ export function createOutlinerView(ctx: GraphEditorContext, paneOpts?: OutlinerP
           const cc = ctx.childrenCache.get(mover.parentId);
           if (cc) { const ci = cc.findIndex(n => n.id === mover.node.id); if (ci >= 0) cc.splice(ci, 1); }
         }
-        // Recompute insert index: removals above the target shift it left.
-        const tIdx = newSibs.indexOf(onode);
-        const at = before ? tIdx : tIdx + 1;
+        // Recompute insert index after removals (removals above the target shift it left).
+        const at = insertAtFor();
         for (let i = 0; i < movers.length; i++) {
           movers[i].parentId = newParentId;
-          fixDepths(movers[i], onode.depth);
+          fixDepths(movers[i], childDepth);
           newSibs.splice(at + i, 0, movers[i]);
         }
         const affectedParents = new Set([...oldParents.values(), newParentId]);
@@ -958,7 +984,7 @@ export function createOutlinerView(ctx: GraphEditorContext, paneOpts?: OutlinerP
         }
       } else {
         // ── Cross-pane move (movers came from another pane) ──
-        await moveAcrossPanes(pd, newParentId, newSibs, insertAt, onode.depth);
+        await moveAcrossPanes(pd, newParentId, newSibs, insertAtFor(), childDepth);
       }
     };
 
