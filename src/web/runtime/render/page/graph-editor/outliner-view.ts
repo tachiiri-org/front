@@ -178,15 +178,19 @@ export function createOutlinerView(ctx: GraphEditorContext, paneOpts?: OutlinerP
     setTimeout(() => document.addEventListener('click', close, true), 0);
   };
 
-  // Draft row at top — always visible, creates a new node at the start of the list
+  // Draft row — shown only when list is empty; structurally matches a node row at depth 0
   const draftEl = document.createElement('div');
-  draftEl.style.cssText = `display:flex;align-items:center;padding:1px 10px 1px 10px;flex-shrink:0;border-bottom:1px solid ${BORDER};gap:4px;`;
+  draftEl.style.cssText = `display:none;align-items:center;padding:0;border:2px solid transparent;border-radius:3px;`;
+  const draftSpacer = document.createElement('span');
+  draftSpacer.style.cssText = `flex-shrink:0;width:6px;`;
+  const draftBtnWrap = document.createElement('span');
+  draftBtnWrap.style.cssText = `flex-shrink:0;display:flex;align-items:center;justify-content:center;width:18px;`;
   const draftMarker = document.createElement('span');
-  draftMarker.style.cssText = `width:7px;height:7px;border-radius:1px;box-sizing:border-box;flex-shrink:0;background:transparent;border:1.5px solid ${TEXT_DIM};`;
+  draftMarker.style.cssText = `width:7px;height:7px;border-radius:1px;box-sizing:border-box;pointer-events:none;background:transparent;border:1.5px solid ${TEXT_DIM};`;
+  draftBtnWrap.appendChild(draftMarker);
   const draftTa = document.createElement('textarea');
   draftTa.rows = 1;
-  draftTa.placeholder = '新規ノード...';
-  draftTa.style.cssText = `flex:1;background:transparent;border:none;outline:none;resize:none;font-size:14px;font-family:inherit;line-height:1.5;padding:2px 4px;overflow:hidden;min-height:20px;color:${TEXT_DIM};`;
+  draftTa.style.cssText = `flex:1;background:transparent;border:none;outline:none;resize:none;font-size:14px;font-family:inherit;line-height:1.5;padding:0 4px 0 0;overflow:hidden;min-height:20px;color:${TEXT_DIM};`;
   const draftResize = () => { draftTa.style.height = 'auto'; draftTa.style.height = draftTa.scrollHeight + 'px'; };
   draftTa.addEventListener('focus', () => { draftTa.style.color = TEXT_HIGH; });
   draftTa.addEventListener('blur', () => { if (!draftTa.value.trim()) draftTa.style.color = TEXT_DIM; });
@@ -212,7 +216,7 @@ export function createOutlinerView(ctx: GraphEditorContext, paneOpts?: OutlinerP
       void apiMoveNode(ctx.gId, nn.id, parentId, 'up', roots.map(r => r.node.id));
     }
   });
-  draftEl.append(draftMarker, draftTa);
+  draftEl.append(draftSpacer, draftBtnWrap, draftTa);
   el.appendChild(draftEl);
 
   // Scrollable list
@@ -309,6 +313,8 @@ export function createOutlinerView(ctx: GraphEditorContext, paneOpts?: OutlinerP
       });
     }
     for (const o of finalRender) listEl.appendChild(buildRow(o));
+    // Show draft row only when no nodes are displayed
+    draftEl.style.display = roots.length === 0 ? 'flex' : 'none';
     updateSelectionHighlight();
     schedulePrefetch();
     if (paneOpts?.onContentWidthChange) scheduleWidthUpdate();
@@ -1104,9 +1110,30 @@ export function createOutlinerView(ctx: GraphEditorContext, paneOpts?: OutlinerP
       const col = propColor?.code ?? TEXT_DIM;
 
       const row = document.createElement('div');
-      row.style.cssText = `display:flex;align-items:center;gap:5px;padding:3px 4px;border-radius:4px;cursor:default;border:2px solid transparent;`;
+      row.style.cssText = `display:flex;align-items:center;gap:5px;padding:1px 4px;border-radius:4px;cursor:pointer;border:2px solid transparent;`;
       row.addEventListener('mouseenter', () => { row.style.background = 'rgba(255,255,255,.05)'; });
       row.addEventListener('mouseleave', () => { row.style.background = ''; });
+      // Click on the row (empty area) → toggle property
+      row.addEventListener('click', (e) => {
+        if (extOpts) { extOpts.onToggle(key); onRedraw(); return; }
+        if (mode === 'node' && nodeId) {
+          const onode = byId.get(nodeId);
+          if (active) {
+            syncPropChange(nodeId, p => { delete p[key]; });
+            void apiRemoveProperty(ctx.gId, nodeId, key);
+          } else {
+            syncPropChange(nodeId, p => { p[key] = '●'; });
+            void apiSetProperty(ctx.gId, nodeId, key, '●');
+          }
+          if (onode) updateExpandMarker(onode);
+          if (!e.shiftKey && onClose) { onClose(); return; }
+        } else if (mode === 'filter') {
+          if (active) filterKeys.delete(key); else filterKeys.add(key);
+          updateFilterBtn();
+          render();
+        }
+        onRedraw();
+      });
 
       // Square marker (filled=active, border-only=inactive) — replaces ⋯ + ⠿
       const sqBtn = document.createElement('span');
@@ -1140,10 +1167,10 @@ export function createOutlinerView(ctx: GraphEditorContext, paneOpts?: OutlinerP
         if (!sqPressTimer) return;
         if (Math.abs(e.clientX - sqPressX) > 5 || Math.abs(e.clientY - sqPressY) > 5) cancelSqPress();
       });
-      // Click on square → context menu (only when not dragging)
+      // Click on square → context menu only (stop propagation to prevent row toggle)
       sqBtn.addEventListener('click', (e) => {
-        if (sqDragStarted) return;
         e.stopPropagation();
+        if (sqDragStarted) return;
         showKeyContextMenu(key, sqBtn, onRedraw);
       });
 
@@ -1151,30 +1178,8 @@ export function createOutlinerView(ctx: GraphEditorContext, paneOpts?: OutlinerP
       const pill = document.createElement('span');
       pill.textContent = key;
       pill.style.cssText = `display:inline-flex;align-items:center;padding:2px 8px;border-radius:4px;background:${col};color:#fff;font-size:12px;cursor:pointer;font-weight:500;white-space:nowrap;`;
-      pill.addEventListener('click', (e) => {
-        if (extOpts) {
-          extOpts.onToggle(key);
-          onRedraw();
-          return;
-        }
-        if (mode === 'node' && nodeId) {
-          const onode = byId.get(nodeId);
-          if (active) {
-            syncPropChange(nodeId, p => { delete p[key]; });
-            void apiRemoveProperty(ctx.gId, nodeId, key);
-          } else {
-            syncPropChange(nodeId, p => { p[key] = '●'; });
-            void apiSetProperty(ctx.gId, nodeId, key, '●');
-          }
-          if (onode) updateExpandMarker(onode);
-          if (!e.shiftKey && onClose) { onClose(); return; }
-        } else if (mode === 'filter') {
-          if (active) filterKeys.delete(key); else filterKeys.add(key);
-          updateFilterBtn();
-          render();
-        }
-        onRedraw();
-      });
+      // pill click delegates to row's click handler (stop propagation to prevent double-fire)
+      pill.addEventListener('click', (e) => { e.stopPropagation(); row.click(); });
 
       // DnD for key reordering
       row.addEventListener('dragstart', (e) => {
