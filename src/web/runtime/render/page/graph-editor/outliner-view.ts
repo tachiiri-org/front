@@ -178,6 +178,43 @@ export function createOutlinerView(ctx: GraphEditorContext, paneOpts?: OutlinerP
     setTimeout(() => document.addEventListener('click', close, true), 0);
   };
 
+  // Draft row at top — always visible, creates a new node at the start of the list
+  const draftEl = document.createElement('div');
+  draftEl.style.cssText = `display:flex;align-items:center;padding:1px 10px 1px 10px;flex-shrink:0;border-bottom:1px solid ${BORDER};gap:4px;`;
+  const draftMarker = document.createElement('span');
+  draftMarker.style.cssText = `width:7px;height:7px;border-radius:1px;box-sizing:border-box;flex-shrink:0;background:transparent;border:1.5px solid ${TEXT_DIM};`;
+  const draftTa = document.createElement('textarea');
+  draftTa.rows = 1;
+  draftTa.placeholder = '新規ノード...';
+  draftTa.style.cssText = `flex:1;background:transparent;border:none;outline:none;resize:none;font-size:14px;font-family:inherit;line-height:1.5;padding:2px 4px;overflow:hidden;min-height:20px;color:${TEXT_DIM};`;
+  const draftResize = () => { draftTa.style.height = 'auto'; draftTa.style.height = draftTa.scrollHeight + 'px'; };
+  draftTa.addEventListener('focus', () => { draftTa.style.color = TEXT_HIGH; });
+  draftTa.addEventListener('blur', () => { if (!draftTa.value.trim()) draftTa.style.color = TEXT_DIM; });
+  draftTa.addEventListener('input', draftResize);
+  draftTa.addEventListener('keydown', async (e) => {
+    if (e.key === 'Escape') { draftTa.value = ''; draftTa.blur(); draftTa.style.color = TEXT_DIM; return; }
+    if (e.key === 'Enter' && !e.shiftKey) {
+      e.preventDefault();
+      const label = draftTa.value.trim();
+      draftTa.value = ''; draftResize(); draftTa.style.color = TEXT_DIM;
+      const parentId = paneParentSet ? paneParentId : (ctx.rootNodeId ?? null);
+      if (!parentId) return;
+      const nn = await apiCreateNode(ctx.gId, parentId, ctx.state.lang, label);
+      if (!nn) return;
+      const o = make(nn, parentId, 0);
+      roots.unshift(o);
+      const cc = ctx.childrenCache.get(parentId);
+      if (cc) cc.unshift(nn); else setCachedChildren(parentId, [nn]);
+      ctx.saveChildrenCache?.();
+      render();
+      focusRow(o);
+      // Node was appended to chain end by backend → move to front
+      void apiMoveNode(ctx.gId, nn.id, parentId, 'up', roots.map(r => r.node.id));
+    }
+  });
+  draftEl.append(draftMarker, draftTa);
+  el.appendChild(draftEl);
+
   // Scrollable list
   const listEl = document.createElement('div');
   listEl.dataset.outlinerList = '1';
@@ -706,7 +743,9 @@ export function createOutlinerView(ctx: GraphEditorContext, paneOpts?: OutlinerP
       }
 
       if (e.key === 'Enter' && !e.shiftKey && !e.ctrlKey && !e.metaKey) {
-        e.preventDefault(); clearSelection(); void doAddSibling(onode);
+        e.preventDefault(); clearSelection();
+        const before = ta.selectionStart === 0 && ta.selectionEnd === 0 && ta.value.length > 0;
+        void doAddSibling(onode, before);
       } else if (e.key === 'Backspace' && ta.value === '') {
         e.preventDefault(); clearSelection(); void doDelete(onode, i, vis);
       }
@@ -1076,23 +1115,34 @@ export function createOutlinerView(ctx: GraphEditorContext, paneOpts?: OutlinerP
         ${active ? `background:${col};border:none;` : `background:transparent;border:1.5px solid ${TEXT_DIM};`}
       `;
 
-      // Long press on square → enable DnD
+      // Drag on square → reorder key; mouse: immediate drag, touch: long press (350ms, 5px threshold)
       let sqPressTimer: ReturnType<typeof setTimeout> | null = null;
-      let sqDragActive = false;
-      sqBtn.addEventListener('pointerdown', () => {
-        sqDragActive = false;
-        sqPressTimer = setTimeout(() => {
-          sqDragActive = true;
+      let sqDragStarted = false;
+      let sqPressX = 0, sqPressY = 0;
+      sqBtn.addEventListener('pointerdown', (e) => {
+        sqDragStarted = false;
+        sqPressX = e.clientX; sqPressY = e.clientY;
+        if (e.pointerType === 'mouse') {
           row.draggable = true;
-          row.style.opacity = '0.4';
-        }, 350);
+        } else {
+          sqPressTimer = setTimeout(() => {
+            row.draggable = true;
+            row.style.opacity = '0.4';
+          }, 350);
+        }
       });
       const cancelSqPress = () => { if (sqPressTimer) { clearTimeout(sqPressTimer); sqPressTimer = null; } };
-      sqBtn.addEventListener('pointerup', cancelSqPress);
-      sqBtn.addEventListener('pointermove', cancelSqPress);
-      // Click on square → context menu
+      sqBtn.addEventListener('pointerup', () => {
+        cancelSqPress();
+        if (!sqDragStarted) row.draggable = false;
+      });
+      sqBtn.addEventListener('pointermove', (e) => {
+        if (!sqPressTimer) return;
+        if (Math.abs(e.clientX - sqPressX) > 5 || Math.abs(e.clientY - sqPressY) > 5) cancelSqPress();
+      });
+      // Click on square → context menu (only when not dragging)
       sqBtn.addEventListener('click', (e) => {
-        if (sqDragActive) { sqDragActive = false; return; }
+        if (sqDragStarted) return;
         e.stopPropagation();
         showKeyContextMenu(key, sqBtn, onRedraw);
       });
@@ -1126,15 +1176,16 @@ export function createOutlinerView(ctx: GraphEditorContext, paneOpts?: OutlinerP
         onRedraw();
       });
 
-      // DnD (activated by long press on square)
+      // DnD for key reordering
       row.addEventListener('dragstart', (e) => {
+        sqDragStarted = true;
         dragSrc = key;
         e.dataTransfer!.effectAllowed = 'move';
       });
       row.addEventListener('dragend', () => {
+        sqDragStarted = false;
         row.style.opacity = '';
         row.draggable = false;
-        sqDragActive = false;
         dragSrc = null;
       });
       row.addEventListener('dragover', (e) => {
@@ -1570,25 +1621,38 @@ export function createOutlinerView(ctx: GraphEditorContext, paneOpts?: OutlinerP
 
   // ── Node operations ───────────────────────────────────────────────────
 
-  const doAddSibling = async (onode: ONode) => {
+  const doAddSibling = async (onode: ONode, before = false) => {
     const tempId = `temp-${++ctx.tempNodeCounter}`;
     const tempNode: ExplorerNode = { id: tempId };
     const sibs = getSiblings(onode);
     const idx = sibs.indexOf(onode);
+    // Capture previous sibling before splice (needed when inserting before the first node)
+    const prevSibNode = before && idx > 0 ? sibs[idx - 1] : undefined;
     const no = make(tempNode, onode.parentId, onode.depth);
     no.childrenLoaded = true;
-    sibs.splice(idx + 1, 0, no);
-    const anchor = lastDescRow(onode);
-    if (!anchor) { sibs.splice(idx + 1, 1); return; }
-    const newRow = buildRow(no);
-    anchor.insertAdjacentElement('afterend', newRow);
+    sibs.splice(before ? idx : idx + 1, 0, no);
+
+    let newRow: HTMLElement;
+    if (before) {
+      const ownRow = rowMap.get(onode.node.id);
+      if (!ownRow) { sibs.splice(sibs.indexOf(no), 1); byId.delete(tempId); return; }
+      newRow = buildRow(no);
+      ownRow.insertAdjacentElement('beforebegin', newRow);
+    } else {
+      const anchor = lastDescRow(onode);
+      if (!anchor) { sibs.splice(sibs.indexOf(no), 1); byId.delete(tempId); return; }
+      newRow = buildRow(no);
+      anchor.insertAdjacentElement('afterend', newRow);
+    }
     focusRow(no);
 
     // Register promise so operations on this temp node can wait for the real ID
     let resolveTemp!: () => void;
     tempReady.set(tempId, new Promise<void>(res => { resolveTemp = res; }));
 
-    const nn = await apiCreateNode(ctx.gId, onode.parentId, ctx.state.lang, '', onode.node.id);
+    // For "before first node" (no prevSib), insertAfterId=undefined → backend appends, then reorder
+    const insertAfterId = before ? prevSibNode?.node.id : onode.node.id;
+    const nn = await apiCreateNode(ctx.gId, onode.parentId, ctx.state.lang, '', insertAfterId);
     if (!nn) {
       resolveTemp();
       tempReady.delete(tempId);
@@ -1607,7 +1671,14 @@ export function createOutlinerView(ctx: GraphEditorContext, paneOpts?: OutlinerP
     tempReady.delete(tempId);
 
     const cc = ctx.childrenCache.get(onode.parentId);
-    if (cc) { const ci = cc.findIndex(n => n.id === onode.node.id); if (ci >= 0) cc.splice(ci + 1, 0, nn); }
+    if (cc) { const ci = cc.findIndex(n => n.id === onode.node.id); if (ci >= 0) cc.splice(before ? ci : ci + 1, 0, nn); }
+
+    // If inserting before the first node, the backend appended it to chain end → move to front
+    if (before && !prevSibNode && onode.parentId !== null) {
+      void apiMoveNode(ctx.gId, nn.id, onode.parentId, 'up', sibs.map(n => n.node.id));
+    }
+
+    ctx.saveChildrenCache?.();
     if (typedText.trim()) void apiUpdateNode(ctx.gId, nn.id, ctx.state.lang, typedText);
   };
 

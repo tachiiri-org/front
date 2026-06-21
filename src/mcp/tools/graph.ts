@@ -175,28 +175,30 @@ export const GRAPH_TOOLS = [
   },
   {
     name: "graph_update_node",
-    description: "Update a node's Japanese and/or English label. Pass null to remove a label.",
+    description: "Update a node's Japanese and/or English label. Pass null to remove a label. Use node_ids (array) to update multiple nodes with the same labels in one call.",
     inputSchema: {
       type: "object",
       properties: {
         graph_id: { type: "string", description: "Word graph ID (e.g. 'word-graph-1')" },
-        node_id: { type: "string", description: "Node ID to update" },
+        node_id: { type: "string", description: "Node ID to update (use node_ids for bulk)" },
+        node_ids: { type: "array", items: { type: "string" }, description: "Multiple node IDs to update (alternative to node_id)" },
         ja: { type: "string", description: "New Japanese label (null to remove)" },
         en: { type: "string", description: "New English label (null to remove)" },
       },
-      required: ["graph_id", "node_id"],
+      required: ["graph_id"],
     },
   },
   {
     name: "graph_delete_node",
-    description: "Delete a node and all its edges from the graph.",
+    description: "Delete one or more nodes and all their edges from the graph. Use node_ids (array) to delete multiple nodes in one call.",
     inputSchema: {
       type: "object",
       properties: {
         graph_id: { type: "string", description: "Word graph ID (e.g. 'word-graph-1')" },
-        node_id: { type: "string", description: "Node ID to delete" },
+        node_id: { type: "string", description: "Node ID to delete (use node_ids for bulk)" },
+        node_ids: { type: "array", items: { type: "string" }, description: "Multiple node IDs to delete (alternative to node_id)" },
       },
-      required: ["graph_id", "node_id"],
+      required: ["graph_id"],
     },
   },
   {
@@ -243,29 +245,31 @@ export const GRAPH_TOOLS = [
   },
   {
     name: "graph_set_property",
-    description: "Upsert a metadata property on a node. Value is optional — omitting it sets a key-only tag (e.g. key='修正' with no value). Pass value to set a key-value pair (e.g. key='node_type', value='rule').",
+    description: "Upsert a metadata property on one or more nodes. Value is optional — omitting it sets a key-only tag (e.g. key='修正' with no value). Pass value to set a key-value pair (e.g. key='node_type', value='rule'). Use node_ids (array) to apply to multiple nodes in one call.",
     inputSchema: {
       type: "object",
       properties: {
         graph_id: { type: "string", description: "Word graph ID (e.g. 'word-graph-1')" },
-        node_id: { type: "string", description: "Target node ID" },
+        node_id: { type: "string", description: "Target node ID (use node_ids for bulk)" },
+        node_ids: { type: "array", items: { type: "string" }, description: "Multiple target node IDs (alternative to node_id)" },
         key: { type: "string", description: "Property key (e.g. 'node_type', '修正')" },
         value: { type: "string", description: "Property value (optional — omit for key-only tag)" },
       },
-      required: ["graph_id", "node_id", "key"],
+      required: ["graph_id", "key"],
     },
   },
   {
     name: "graph_remove_property",
-    description: "Remove a metadata property from a node by key.",
+    description: "Remove a metadata property from one or more nodes by key. Use node_ids (array) to remove from multiple nodes in one call.",
     inputSchema: {
       type: "object",
       properties: {
         graph_id: { type: "string", description: "Word graph ID (e.g. 'word-graph-1')" },
-        node_id: { type: "string", description: "Target node ID" },
+        node_id: { type: "string", description: "Target node ID (use node_ids for bulk)" },
+        node_ids: { type: "array", items: { type: "string" }, description: "Multiple target node IDs (alternative to node_id)" },
         key: { type: "string", description: "Property key to remove" },
       },
-      required: ["graph_id", "node_id", "key"],
+      required: ["graph_id", "key"],
     },
   },
 ];
@@ -336,20 +340,24 @@ export async function callGraphTool(
     }
 
     if (name === "graph_update_node") {
-      const nodeId = String(args.node_id);
+      const ids = Array.isArray(args.node_ids) ? (args.node_ids as string[]) : [String(args.node_id)];
       const body: Record<string, unknown> = {};
       if (args.ja !== undefined) body.ja = args.ja;
       if (args.en !== undefined) body.en = args.en;
-      const res = await graphFetch(env, graphId, `node/${encodeURIComponent(nodeId)}`, "PATCH", body);
-      if (!res.ok) throw new Error(`update_node_failed:${res.status}`);
-      return { content: [{ type: "text", text: `Updated [${nodeId}]` }] };
+      await Promise.all(ids.map(async (id) => {
+        const res = await graphFetch(env, graphId, `node/${encodeURIComponent(id)}`, "PATCH", body);
+        if (!res.ok) throw new Error(`update_node_failed:${res.status}:${id}`);
+      }));
+      return { content: [{ type: "text", text: ids.length === 1 ? `Updated [${ids[0]}]` : `Updated ${ids.length} nodes` }] };
     }
 
     if (name === "graph_delete_node") {
-      const nodeId = String(args.node_id);
-      const res = await graphFetch(env, graphId, `node/${encodeURIComponent(nodeId)}`, "DELETE");
-      if (!res.ok) throw new Error(`delete_node_failed:${res.status}`);
-      return { content: [{ type: "text", text: `Deleted [${nodeId}]` }] };
+      const ids = Array.isArray(args.node_ids) ? (args.node_ids as string[]) : [String(args.node_id)];
+      await Promise.all(ids.map(async (id) => {
+        const res = await graphFetch(env, graphId, `node/${encodeURIComponent(id)}`, "DELETE");
+        if (!res.ok) throw new Error(`delete_node_failed:${res.status}:${id}`);
+      }));
+      return { content: [{ type: "text", text: ids.length === 1 ? `Deleted [${ids[0]}]` : `Deleted ${ids.length} nodes` }] };
     }
 
     if (name === "graph_toggle_link") {
@@ -378,20 +386,25 @@ export async function callGraphTool(
     }
 
     if (name === "graph_set_property") {
-      const nodeId = String(args.node_id);
+      const ids = Array.isArray(args.node_ids) ? (args.node_ids as string[]) : [String(args.node_id)];
       const key = String(args.key);
       const value = args.value !== undefined && args.value !== "" ? String(args.value) : undefined;
-      const res = await graphFetch(env, graphId, `node/${encodeURIComponent(nodeId)}/property`, "POST", { key, ...(value !== undefined ? { value } : {}) });
-      if (!res.ok) throw new Error(`set_property_failed:${res.status}`);
-      return { content: [{ type: "text", text: value !== undefined ? `Set [${nodeId}] ${key}=${value}` : `Set [${nodeId}] ${key}` }] };
+      await Promise.all(ids.map(async (id) => {
+        const res = await graphFetch(env, graphId, `node/${encodeURIComponent(id)}/property`, "POST", { key, ...(value !== undefined ? { value } : {}) });
+        if (!res.ok) throw new Error(`set_property_failed:${res.status}:${id}`);
+      }));
+      const suffix = value !== undefined ? `${key}=${value}` : key;
+      return { content: [{ type: "text", text: ids.length === 1 ? `Set [${ids[0]}] ${suffix}` : `Set ${ids.length} nodes: ${suffix}` }] };
     }
 
     if (name === "graph_remove_property") {
-      const nodeId = String(args.node_id);
+      const ids = Array.isArray(args.node_ids) ? (args.node_ids as string[]) : [String(args.node_id)];
       const key = String(args.key);
-      const res = await graphFetch(env, graphId, `node/${encodeURIComponent(nodeId)}/property/${encodeURIComponent(key)}`, "DELETE");
-      if (!res.ok) throw new Error(`remove_property_failed:${res.status}`);
-      return { content: [{ type: "text", text: `Removed [${nodeId}] ${key}` }] };
+      await Promise.all(ids.map(async (id) => {
+        const res = await graphFetch(env, graphId, `node/${encodeURIComponent(id)}/property/${encodeURIComponent(key)}`, "DELETE");
+        if (!res.ok) throw new Error(`remove_property_failed:${res.status}:${id}`);
+      }));
+      return { content: [{ type: "text", text: ids.length === 1 ? `Removed [${ids[0]}] ${key}` : `Removed ${key} from ${ids.length} nodes` }] };
     }
 
     return { content: [{ type: "text", text: `Unknown graph tool: ${name}` }], isError: true };

@@ -33,7 +33,7 @@ export function createNodeKeydownHandler(
       return;
     }
 
-    // Enter → add new node below; Shift+Enter → newline (default)
+    // Enter → add new node below (or above if cursor at position 0); Shift+Enter → newline (default)
     if (e.key === 'Enter' && !e.shiftKey) {
       e.preventDefault();
       const col = state.columns[colIndex];
@@ -41,16 +41,26 @@ export function createNodeKeydownHandler(
       if (saveTimer.current) { clearTimeout(saveTimer.current); saveTimer.current = null; }
       void apiUpdateNode(gId, node.id, state.lang, inp.value.trim());
       ctx.childrenCache.delete(col.parentId);
-      // Optimistic: insert temp node below current node immediately
+      const insertBefore = inp.selectionStart === 0 && inp.selectionEnd === 0 && inp.value.length > 0;
+      const insertIdx = state.columns[colIndex].nodes.indexOf(node);
+      // Capture previous sibling ID before splice (needed for "insert before first" reorder)
+      const prevNodeId = insertBefore && insertIdx > 0 ? col.nodes[insertIdx - 1].id : undefined;
+      // Optimistic: insert temp node immediately
       const tempId = `temp-${++ctx.tempNodeCounter}`;
       const tempNode: ExplorerNode = { id: tempId };
       if (colIndex === 0) state.bookmarks.add(tempId);
-      const insertIdx = state.columns[colIndex].nodes.indexOf(node);
-      state.columns[colIndex].nodes.splice(insertIdx + 1, 0, tempNode);
+      const targetIdx = insertBefore ? insertIdx : insertIdx + 1;
+      state.columns[colIndex].nodes.splice(targetIdx, 0, tempNode);
       const tempRow = ctx.buildNodeRow(tempNode, colIndex);
-      row.insertAdjacentElement('afterend', tempRow);
+      if (insertBefore) {
+        row.insertAdjacentElement('beforebegin', tempRow);
+      } else {
+        row.insertAdjacentElement('afterend', tempRow);
+      }
       tempRow.querySelector<HTMLTextAreaElement>('textarea')?.focus();
-      const newNode = await apiCreateNode(gId, col.parentId, state.lang, '', col.parentId ? node.id : undefined);
+      // For "before first node", pass undefined → backend appends to end, then we reorder to front
+      const insertAfterId = insertBefore ? prevNodeId : (col.parentId ? node.id : undefined);
+      const newNode = await apiCreateNode(gId, col.parentId, state.lang, '', insertAfterId);
       if (!newNode || !state.columns[colIndex]) return;
       // Replace temp node with real node in-place
       const realIdx = state.columns[colIndex].nodes.indexOf(tempNode);
@@ -67,6 +77,11 @@ export function createNodeKeydownHandler(
       colEl?.querySelectorAll<HTMLElement>(`[data-node-id="${tempId}"]`).forEach((el) => {
         el.dataset.nodeId = newNode.id;
       });
+      // If inserting before the first node, the backend appended it to the chain end → move to front
+      if (insertBefore && !prevNodeId && col.parentId) {
+        const afterSwapSiblingIds = state.columns[colIndex].nodes.map((n) => n.id);
+        void apiMoveNode(gId, newNode.id, col.parentId, 'up', afterSwapSiblingIds);
+      }
       // Flush any text typed while the API call was in-flight.
       const newTextarea = colEl?.querySelector<HTMLTextAreaElement>(`textarea[data-node-id="${newNode.id}"]`);
       if (newTextarea?.value.trim()) {
