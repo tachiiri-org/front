@@ -28,6 +28,22 @@ export type OutlinerPaneOpts = {
   onContentWidthChange?: (width: number) => void;
 };
 
+function showToast(msg: string) {
+  const el = document.createElement('div');
+  el.textContent = msg;
+  el.style.cssText = [
+    'position:fixed', 'bottom:24px', 'left:50%', 'transform:translateX(-50%)',
+    'background:rgba(30,30,40,0.95)', 'color:#fff',
+    'border:1px solid rgba(255,255,255,0.15)',
+    'padding:6px 14px', 'border-radius:6px', 'font-size:12px',
+    'z-index:9999', 'white-space:nowrap', 'pointer-events:none',
+    'opacity:1', 'transition:opacity 0.4s ease',
+  ].join(';');
+  document.body.appendChild(el);
+  setTimeout(() => { el.style.opacity = '0'; }, 1400);
+  setTimeout(() => el.remove(), 1800);
+}
+
 export function createOutlinerView(ctx: GraphEditorContext, paneOpts?: OutlinerPaneOpts): {
   el: HTMLElement;
   filterBtn: HTMLElement;
@@ -476,6 +492,15 @@ export function createOutlinerView(ctx: GraphEditorContext, paneOpts?: OutlinerP
   let dragParentId: string | null | undefined = undefined;
   let dragMultiIds: string[] | null = null; // non-null when dragging a multi-selection
 
+  // Map from temp ID to promise that resolves once the real ID is assigned
+  const tempReady = new Map<string, Promise<void>>();
+
+  // Await a node's real ID if it still has a temp ID; resolves instantly for real nodes
+  const awaitRealId = (onode: ONode): Promise<void> => {
+    if (!onode.node.id.startsWith('temp-')) return Promise.resolve();
+    return tempReady.get(onode.node.id) ?? Promise.resolve();
+  };
+
   const buildRow = (onode: ONode): HTMLElement => {
     const row = document.createElement('div');
     row.dataset.nodeId = onode.node.id;
@@ -497,9 +522,7 @@ export function createOutlinerView(ctx: GraphEditorContext, paneOpts?: OutlinerP
     btnWrap.addEventListener('contextmenu', (e) => {
       e.preventDefault(); e.stopPropagation();
       const lbl = primaryLabel(onode.node, ctx.state.lang) ?? fallbackLabel(onode.node, ctx.state.lang) ?? '';
-      void navigator.clipboard.writeText(`[${onode.node.id}]${lbl}`);
-      marker.style.outline = '2px solid #4a9eff';
-      setTimeout(() => { marker.style.outline = ''; }, 500);
+      void navigator.clipboard.writeText(`[${onode.node.id}]${lbl}`).then(() => showToast('コピーしました'));
     });
     row.appendChild(btnWrap);
 
@@ -699,7 +722,8 @@ export function createOutlinerView(ctx: GraphEditorContext, paneOpts?: OutlinerP
       row.style.borderTop = '2px solid transparent';
       row.style.borderBottom = '2px solid transparent';
     });
-    row.addEventListener('drop', (e) => {
+    row.addEventListener('drop', (e) => { void dropHandler(e); });
+    const dropHandler = async (e: DragEvent) => {
       e.preventDefault();
       row.style.borderTop = '2px solid transparent';
       row.style.borderBottom = '2px solid transparent';
@@ -748,6 +772,9 @@ export function createOutlinerView(ctx: GraphEditorContext, paneOpts?: OutlinerP
 
       render();
 
+      // Wait for temp nodes to receive real IDs before API calls
+      await Promise.all(movers.map(m => awaitRealId(m)));
+
       // Toggle links for nodes that changed parent
       for (const mover of movers) {
         const oldPid = oldParents.get(mover.node.id) ?? null;
@@ -760,7 +787,7 @@ export function createOutlinerView(ctx: GraphEditorContext, paneOpts?: OutlinerP
       if (newParentId !== null) {
         void apiMoveNode(ctx.gId, movers[0].node.id, newParentId, 'down', newSibs.map(s => s.node.id));
       }
-    });
+    };
 
     row.insertBefore(triBtn, btnWrap);
     row.appendChild(ta);
@@ -1354,7 +1381,6 @@ export function createOutlinerView(ctx: GraphEditorContext, paneOpts?: OutlinerP
 
     // Cross-hierarchy: move group to adjacent uncle
     if (parentId === null) return;
-    if (sel.some(n => n.node.id.startsWith('temp-'))) return;
     const parentONode = byId.get(parentId);
     if (!parentONode) return;
     const parentSibs = getSiblings(parentONode);
@@ -1385,6 +1411,7 @@ export function createOutlinerView(ctx: GraphEditorContext, paneOpts?: OutlinerP
     render();
     if (sel[0]) focusRow(sel[0]);
 
+    await Promise.all(sel.map(n => awaitRealId(n)));
     for (const n of sel) {
       void apiToggleLink(ctx.gId, n.node.id, oldParentId);
       void apiToggleLink(ctx.gId, n.node.id, targetParent.node.id);
@@ -1419,8 +1446,14 @@ export function createOutlinerView(ctx: GraphEditorContext, paneOpts?: OutlinerP
     anchor.insertAdjacentElement('afterend', newRow);
     focusRow(no);
 
+    // Register promise so operations on this temp node can wait for the real ID
+    let resolveTemp!: () => void;
+    tempReady.set(tempId, new Promise<void>(res => { resolveTemp = res; }));
+
     const nn = await apiCreateNode(ctx.gId, onode.parentId, ctx.state.lang, '', onode.node.id);
     if (!nn) {
+      resolveTemp();
+      tempReady.delete(tempId);
       newRow.remove(); rowMap.delete(tempId);
       sibs.splice(sibs.indexOf(no), 1); byId.delete(tempId);
       focusRow(onode);
@@ -1432,6 +1465,8 @@ export function createOutlinerView(ctx: GraphEditorContext, paneOpts?: OutlinerP
     rowMap.delete(tempId); rowMap.set(nn.id, newRow);
     newRow.dataset.nodeId = nn.id;
     Object.assign(tempNode, nn);
+    resolveTemp();
+    tempReady.delete(tempId);
 
     const cc = ctx.childrenCache.get(onode.parentId);
     if (cc) { const ci = cc.findIndex(n => n.id === onode.node.id); if (ci >= 0) cc.splice(ci + 1, 0, nn); }
@@ -1480,7 +1515,6 @@ export function createOutlinerView(ctx: GraphEditorContext, paneOpts?: OutlinerP
 
     // Cross-hierarchy: move to adjacent uncle node
     if (onode.parentId === null) return;
-    if (onode.node.id.startsWith('temp-')) return;
     const parentONode = byId.get(onode.parentId);
     if (!parentONode) return;
     const parentSibs = getSiblings(parentONode);
@@ -1505,13 +1539,13 @@ export function createOutlinerView(ctx: GraphEditorContext, paneOpts?: OutlinerP
 
     render();
     focusRow(onode);
+    await awaitRealId(onode);
     void apiToggleLink(ctx.gId, onode.node.id, oldParentId);
     void apiToggleLink(ctx.gId, onode.node.id, targetParent.node.id);
   };
 
   const doIndent = async (onode: ONode, vis: ONode[], i: number) => {
     if (i === 0) return;
-    if (onode.node.id.startsWith('temp-')) return;
     const prev = vis[i - 1];
     const oldParentId = onode.parentId;
 
@@ -1531,13 +1565,13 @@ export function createOutlinerView(ctx: GraphEditorContext, paneOpts?: OutlinerP
     render();
     focusRow(onode);
 
+    await awaitRealId(onode);
     if (oldParentId !== null) void apiToggleLink(ctx.gId, onode.node.id, oldParentId);
     void apiToggleLink(ctx.gId, onode.node.id, prev.node.id);
   };
 
   const doDedent = async (onode: ONode) => {
     if (onode.parentId === null) return;
-    if (onode.node.id.startsWith('temp-')) return;
     const parent = byId.get(onode.parentId);
     if (!parent) return;
     const oldParentId = onode.parentId;
@@ -1555,6 +1589,7 @@ export function createOutlinerView(ctx: GraphEditorContext, paneOpts?: OutlinerP
     render();
     focusRow(onode);
 
+    await awaitRealId(onode);
     void apiToggleLink(ctx.gId, onode.node.id, oldParentId);
     if (onode.parentId !== null) void apiToggleLink(ctx.gId, onode.node.id, onode.parentId);
   };
