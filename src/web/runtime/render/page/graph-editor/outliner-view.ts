@@ -1303,26 +1303,61 @@ export function createOutlinerView(ctx: GraphEditorContext, paneOpts?: OutlinerP
     const menu = document.createElement('div');
     menu.dataset.keyMgmtMenu = '1';
     const ar = opts.anchor.getBoundingClientRect();
-    menu.style.cssText = `position:fixed;left:${ar.left}px;top:${ar.bottom + 2}px;z-index:200;width:220px;background:hsl(240,14%,9%);border:1px solid ${BORDER};border-radius:6px;padding:8px;font-size:13px;box-shadow:0 4px 16px rgba(0,0,0,.4);`;
+    menu.style.cssText = `position:fixed;left:${ar.left}px;top:${ar.bottom + 2}px;z-index:200;background:hsl(240,14%,9%);border:1px solid ${BORDER};border-radius:6px;padding:6px;font-size:13px;box-shadow:0 4px 16px rgba(0,0,0,.4);min-width:160px;`;
 
     const rebuild = () => {
       menu.innerHTML = '';
-      const searchIn = document.createElement('input');
-      searchIn.placeholder = '';
-      searchIn.style.cssText = `width:100%;box-sizing:border-box;background:transparent;border:1px solid ${BORDER};border-radius:3px;padding:4px 6px;color:${TEXT_HIGH};font-size:12px;outline:none;font-family:inherit;margin-bottom:4px;`;
+      const masterKeys = [...new Set([...keyOrder, ...ctx.allPropKeys])];
 
-      const divider = document.createElement('div');
-      divider.style.cssText = `border-top:1px solid ${BORDER};margin:2px 0 4px;`;
-
-      const listContainer = document.createElement('div');
-      listContainer.style.cssText = `max-height:220px;overflow-y:auto;`;
-
-      const ext = { isActive: opts.isActive, onToggle: opts.onToggle, getSuffix: opts.getSuffix };
-      searchIn.addEventListener('input', () => buildKeyList(listContainer, 'node', null, searchIn, rebuild, undefined, ext));
-      buildKeyList(listContainer, 'node', null, searchIn, rebuild, undefined, ext);
-
-      menu.append(searchIn, divider, listContainer);
-      searchIn.focus();
+      if (opts.mode === 'pane-filter') {
+        // フィルタモード: full property management (buildKeyList with drag/color/delete)
+        const searchIn = document.createElement('input');
+        searchIn.placeholder = '';
+        searchIn.style.cssText = `width:100%;box-sizing:border-box;background:transparent;border:1px solid ${BORDER};border-radius:3px;padding:4px 6px;color:${TEXT_HIGH};font-size:12px;outline:none;font-family:inherit;margin-bottom:4px;`;
+        const divider = document.createElement('div');
+        divider.style.cssText = `border-top:1px solid ${BORDER};margin:2px 0 4px;`;
+        const listContainer = document.createElement('div');
+        listContainer.style.cssText = `max-height:220px;overflow-y:auto;`;
+        const ext = { isActive: opts.isActive, onToggle: opts.onToggle };
+        searchIn.addEventListener('input', () => buildKeyList(listContainer, 'node', null, searchIn, rebuild, undefined, ext));
+        buildKeyList(listContainer, 'node', null, searchIn, rebuild, undefined, ext);
+        menu.append(searchIn, divider, listContainer);
+        searchIn.focus();
+      } else {
+        // 並び替えモード: シンプルなピル一覧のみ（プロパティ編集なし）
+        const listContainer = document.createElement('div');
+        listContainer.style.cssText = `max-height:280px;overflow-y:auto;`;
+        for (const key of masterKeys) {
+          const active = opts.isActive(key);
+          const col = ctx.allPropColors.get(key)?.code ?? TEXT_DIM;
+          const row = document.createElement('div');
+          row.style.cssText = `display:flex;align-items:center;justify-content:space-between;gap:8px;padding:3px 6px;border-radius:4px;cursor:pointer;`;
+          row.addEventListener('mouseenter', () => { row.style.background = 'rgba(255,255,255,.07)'; });
+          row.addEventListener('mouseleave', () => { row.style.background = ''; });
+          const pill = document.createElement('span');
+          pill.textContent = key;
+          pill.style.cssText = `padding:2px 8px;border-radius:4px;background:${col};color:#fff;font-size:12px;font-weight:500;white-space:nowrap;`;
+          row.appendChild(pill);
+          if (opts.getSuffix) {
+            const sf = opts.getSuffix(key);
+            if (sf) {
+              const sfEl = document.createElement('span');
+              sfEl.textContent = sf;
+              sfEl.style.cssText = `color:${TEXT_HIGH};font-size:12px;font-weight:700;`;
+              row.appendChild(sfEl);
+            }
+          }
+          row.addEventListener('click', () => { opts.onToggle(key); rebuild(); });
+          listContainer.appendChild(row);
+        }
+        if (masterKeys.length === 0) {
+          const empty = document.createElement('div');
+          empty.textContent = 'プロパティキーがありません';
+          empty.style.cssText = `padding:6px 8px;color:${TEXT_DIM};font-size:12px;`;
+          listContainer.appendChild(empty);
+        }
+        menu.appendChild(listContainer);
+      }
     };
 
     rebuild();
