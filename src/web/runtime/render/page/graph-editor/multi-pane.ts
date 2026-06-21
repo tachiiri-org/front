@@ -357,6 +357,7 @@ export function createMultiPaneView(ctx: GraphEditorContext): {
     const idx = panes.findIndex(p => p.config.id === paneId);
     if (idx === -1) return;
     const [removed] = panes.splice(idx, 1);
+    removed.view.unregister?.();
     removed.containerEl.remove();
     // Orphan dependent panes (reset source to null = root)
     for (const p of panes) {

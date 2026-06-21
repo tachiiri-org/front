@@ -706,8 +706,8 @@ export function createOutlinerView(ctx: GraphEditorContext, paneOpts?: OutlinerP
     });
     const o = byId.get(nodeId);
     if (o) o.node.properties = { ...props };
-    // Broadcast to all registered outliner views (other panes re-render to reflect filter changes)
-    ctx.propChangeHooks.forEach(h => h());
+    // Broadcast to all registered outliner views with the changed nodeId
+    ctx.propChangeHooks.forEach(h => h(nodeId));
   };
 
   // Shared color picker popover (callback called after color change to refresh caller UI)
@@ -1008,10 +1008,11 @@ export function createOutlinerView(ctx: GraphEditorContext, paneOpts?: OutlinerP
       menu.innerHTML = '';
       const nodeProps = ctx.propStore.get(onode.node.id) ?? {};
 
-      // Selected tags row
+      // Selected tags row (shows assigned properties; × unlinks from this node only)
       const tagsEl = document.createElement('div');
       tagsEl.style.cssText = `display:flex;flex-wrap:wrap;gap:4px;margin-bottom:6px;min-height:4px;`;
-      for (const key of keyOrder) {
+      const masterTagKeys = [...new Set([...keyOrder, ...ctx.allPropKeys])];
+      for (const key of masterTagKeys) {
         if (!(key in nodeProps)) continue;
         const col = ctx.allPropColors.get(key)?.code ?? TEXT_DIM;
         const tag = document.createElement('span');
@@ -1022,7 +1023,11 @@ export function createOutlinerView(ctx: GraphEditorContext, paneOpts?: OutlinerP
         xBtn.style.cssText = `background:transparent;border:none;color:#fff;opacity:.7;cursor:pointer;padding:0 0 0 3px;font-size:11px;line-height:1;`;
         xBtn.addEventListener('click', (e) => {
           e.stopPropagation();
-          deleteKey(key, rebuild);
+          // Unlink from this node only (NOT global delete)
+          syncPropChange(onode.node.id, p => { delete p[key]; });
+          void apiRemoveProperty(ctx.gId, onode.node.id, key);
+          updateExpandMarker(onode);
+          rebuild();
         });
         tag.append(namePart, xBtn);
         tagsEl.appendChild(tag);
@@ -1568,7 +1573,34 @@ export function createOutlinerView(ctx: GraphEditorContext, paneOpts?: OutlinerP
   };
 
   updateBreadcrumb(); // show "ルート" on initial render
-  // Register this view's render so other panes can trigger it via syncPropChange
-  ctx.propChangeHooks.push(render);
-  return { el, filterBtn, load, refresh: render, search, setParent, getSelectedId, setPaneFilterKeys };
+
+  // Register targeted hook: when a node's property changes, update or remove its row
+  const propHook = (changedId: string) => {
+    // Update expand marker if node is in this pane's tree
+    const onode = byId.get(changedId);
+    if (onode) updateExpandMarker(onode);
+
+    const activeFilter = paneFilterKeys.size > 0 ? paneFilterKeys : filterKeys.size > 0 ? filterKeys : null;
+    if (!activeFilter) return; // no filter → all rows stay visible regardless of prop change
+
+    const row = rowMap.get(changedId);
+    const props = ctx.propStore.get(changedId) ?? {};
+    const shouldShow = [...activeFilter].some(k => k in props);
+
+    if (row && !shouldShow) {
+      // Node visible but no longer matches filter → remove from DOM immediately
+      row.remove();
+      rowMap.delete(changedId);
+    } else if (!row && shouldShow && onode) {
+      // Node hidden but now matches filter → full render to re-add it
+      render();
+    }
+  };
+  ctx.propChangeHooks.push(propHook);
+  const unregister = () => {
+    const i = ctx.propChangeHooks.indexOf(propHook);
+    if (i >= 0) ctx.propChangeHooks.splice(i, 1);
+  };
+
+  return { el, filterBtn, load, refresh: render, search, setParent, getSelectedId, setPaneFilterKeys, unregister };
 }
