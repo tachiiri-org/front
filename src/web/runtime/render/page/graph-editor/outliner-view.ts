@@ -22,6 +22,8 @@ export type OutlinerPaneOpts = {
   paneParentId?: string | null;
   /** Only show nodes that have ALL of these property keys */
   paneFilterKeys?: Set<string>;
+  /** If true, sort nodes by property keyOrder ascending (stable sort) */
+  paneSortByProps?: boolean;
   /** Called when user focuses a node row (for inter-pane wiring) */
   onNodeSelect?: (nodeId: string | null) => void;
   /** Called after render with the content's natural width (px); used by multi-pane for auto-sizing */
@@ -54,13 +56,12 @@ export function createOutlinerView(ctx: GraphEditorContext, paneOpts?: OutlinerP
   getAncestorIds: (nodeId: string) => Set<string>;
   getSelectedId: () => string | null;
   setPaneFilterKeys: (keys: Set<string>) => void;
-  setPaneSortConfig: (key: string | null, dir: 'asc' | 'desc') => void;
+  setPaneSortByProps: (enabled: boolean) => void;
   openKeyMenu: (opts: {
     anchor: HTMLElement;
-    mode: 'pane-filter' | 'pane-sort';
+    mode: 'pane-filter';
     isActive: (key: string) => boolean;
     onToggle: (key: string) => void;
-    getSuffix?: (key: string) => string;
   }) => void;
   unregister: () => void;
 } {
@@ -193,8 +194,7 @@ export function createOutlinerView(ctx: GraphEditorContext, paneOpts?: OutlinerP
   let paneParentId: string | null = paneOpts?.paneParentId ?? null;
   let paneSelectedId: string | null = null;
   let paneFilterKeys: Set<string> = paneOpts?.paneFilterKeys ?? new Set();
-  let paneSortKey: string | null = null;
-  let paneSortDir: 'asc' | 'desc' = 'asc';
+  let paneSortByProps: boolean = paneOpts?.paneSortByProps ?? false;
 
   const setPaneSelected = (nodeId: string | null) => {
     paneSelectedId = nodeId;
@@ -253,16 +253,22 @@ export function createOutlinerView(ctx: GraphEditorContext, paneOpts?: OutlinerP
         })
       : base;
     let finalRender = toRender;
-    if (paneSortKey) {
-      const sk = paneSortKey;
-      const sd = paneSortDir;
+    if (paneSortByProps) {
+      // Stable multi-key sort by keyOrder: nodes with earlier keys come first,
+      // within the same key compare values asc, nodes without any property go last
+      const masterKeys = [...new Set([...keyOrder, ...ctx.allPropKeys])];
       finalRender = [...toRender].sort((a, b) => {
         const pa = ctx.propStore.get(a.node.id) ?? {};
         const pb = ctx.propStore.get(b.node.id) ?? {};
-        const va = sk in pa ? (pa[sk] || '') : '￿';
-        const vb = sk in pb ? (pb[sk] || '') : '￿';
-        const cmp = va.localeCompare(vb, undefined, { numeric: true, sensitivity: 'base' });
-        return sd === 'asc' ? cmp : -cmp;
+        for (const k of masterKeys) {
+          const hasA = k in pa, hasB = k in pb;
+          if (hasA !== hasB) return hasA ? -1 : 1;
+          if (hasA) {
+            const cmp = (pa[k] || '').localeCompare(pb[k] || '', undefined, { numeric: true, sensitivity: 'base' });
+            if (cmp !== 0) return cmp;
+          }
+        }
+        return 0;
       });
     }
     for (const o of finalRender) listEl.appendChild(buildRow(o));
@@ -1288,13 +1294,12 @@ export function createOutlinerView(ctx: GraphEditorContext, paneOpts?: OutlinerP
     setTimeout(() => { document.addEventListener('mousedown', onOutside); document.addEventListener('keydown', onKey); }, 0);
   };
 
-  // ── Key management menu for pane filter / sort (called from multi-pane) ─
+  // ── Key management menu for pane filter (called from multi-pane) ────
   const openKeyMenu = (opts: {
     anchor: HTMLElement;
-    mode: 'pane-filter' | 'pane-sort';
+    mode: 'pane-filter';
     isActive: (key: string) => boolean;
     onToggle: (key: string) => void;
-    getSuffix?: (key: string) => string;
   }) => {
     document.querySelector('[data-key-mgmt-menu]')?.remove();
     document.querySelector('[data-key-ctx-menu]')?.remove();
@@ -1303,61 +1308,22 @@ export function createOutlinerView(ctx: GraphEditorContext, paneOpts?: OutlinerP
     const menu = document.createElement('div');
     menu.dataset.keyMgmtMenu = '1';
     const ar = opts.anchor.getBoundingClientRect();
-    menu.style.cssText = `position:fixed;left:${ar.left}px;top:${ar.bottom + 2}px;z-index:200;background:hsl(240,14%,9%);border:1px solid ${BORDER};border-radius:6px;padding:6px;font-size:13px;box-shadow:0 4px 16px rgba(0,0,0,.4);min-width:160px;`;
+    menu.style.cssText = `position:fixed;left:${ar.left}px;top:${ar.bottom + 2}px;z-index:200;width:220px;background:hsl(240,14%,9%);border:1px solid ${BORDER};border-radius:6px;padding:8px;font-size:13px;box-shadow:0 4px 16px rgba(0,0,0,.4);`;
 
     const rebuild = () => {
       menu.innerHTML = '';
-      const masterKeys = [...new Set([...keyOrder, ...ctx.allPropKeys])];
-
-      if (opts.mode === 'pane-filter') {
-        // フィルタモード: full property management (buildKeyList with drag/color/delete)
-        const searchIn = document.createElement('input');
-        searchIn.placeholder = '';
-        searchIn.style.cssText = `width:100%;box-sizing:border-box;background:transparent;border:1px solid ${BORDER};border-radius:3px;padding:4px 6px;color:${TEXT_HIGH};font-size:12px;outline:none;font-family:inherit;margin-bottom:4px;`;
-        const divider = document.createElement('div');
-        divider.style.cssText = `border-top:1px solid ${BORDER};margin:2px 0 4px;`;
-        const listContainer = document.createElement('div');
-        listContainer.style.cssText = `max-height:220px;overflow-y:auto;`;
-        const ext = { isActive: opts.isActive, onToggle: opts.onToggle };
-        searchIn.addEventListener('input', () => buildKeyList(listContainer, 'node', null, searchIn, rebuild, undefined, ext));
-        buildKeyList(listContainer, 'node', null, searchIn, rebuild, undefined, ext);
-        menu.append(searchIn, divider, listContainer);
-        searchIn.focus();
-      } else {
-        // 並び替えモード: シンプルなピル一覧のみ（プロパティ編集なし）
-        const listContainer = document.createElement('div');
-        listContainer.style.cssText = `max-height:280px;overflow-y:auto;`;
-        for (const key of masterKeys) {
-          const active = opts.isActive(key);
-          const col = ctx.allPropColors.get(key)?.code ?? TEXT_DIM;
-          const row = document.createElement('div');
-          row.style.cssText = `display:flex;align-items:center;justify-content:space-between;gap:8px;padding:3px 6px;border-radius:4px;cursor:pointer;`;
-          row.addEventListener('mouseenter', () => { row.style.background = 'rgba(255,255,255,.07)'; });
-          row.addEventListener('mouseleave', () => { row.style.background = ''; });
-          const pill = document.createElement('span');
-          pill.textContent = key;
-          pill.style.cssText = `padding:2px 8px;border-radius:4px;background:${col};color:#fff;font-size:12px;font-weight:500;white-space:nowrap;`;
-          row.appendChild(pill);
-          if (opts.getSuffix) {
-            const sf = opts.getSuffix(key);
-            if (sf) {
-              const sfEl = document.createElement('span');
-              sfEl.textContent = sf;
-              sfEl.style.cssText = `color:${TEXT_HIGH};font-size:12px;font-weight:700;`;
-              row.appendChild(sfEl);
-            }
-          }
-          row.addEventListener('click', () => { opts.onToggle(key); rebuild(); });
-          listContainer.appendChild(row);
-        }
-        if (masterKeys.length === 0) {
-          const empty = document.createElement('div');
-          empty.textContent = 'プロパティキーがありません';
-          empty.style.cssText = `padding:6px 8px;color:${TEXT_DIM};font-size:12px;`;
-          listContainer.appendChild(empty);
-        }
-        menu.appendChild(listContainer);
-      }
+      const searchIn = document.createElement('input');
+      searchIn.placeholder = '';
+      searchIn.style.cssText = `width:100%;box-sizing:border-box;background:transparent;border:1px solid ${BORDER};border-radius:3px;padding:4px 6px;color:${TEXT_HIGH};font-size:12px;outline:none;font-family:inherit;margin-bottom:4px;`;
+      const divider = document.createElement('div');
+      divider.style.cssText = `border-top:1px solid ${BORDER};margin:2px 0 4px;`;
+      const listContainer = document.createElement('div');
+      listContainer.style.cssText = `max-height:220px;overflow-y:auto;`;
+      const ext = { isActive: opts.isActive, onToggle: opts.onToggle };
+      searchIn.addEventListener('input', () => buildKeyList(listContainer, 'node', null, searchIn, rebuild, undefined, ext));
+      buildKeyList(listContainer, 'node', null, searchIn, rebuild, undefined, ext);
+      menu.append(searchIn, divider, listContainer);
+      searchIn.focus();
     };
 
     rebuild();
@@ -1881,7 +1847,7 @@ export function createOutlinerView(ctx: GraphEditorContext, paneOpts?: OutlinerP
 
   const getSelectedId = () => paneSelectedId;
   const setPaneFilterKeys = (keys: Set<string>) => { paneFilterKeys = keys; render(); };
-  const setPaneSortConfig = (key: string | null, dir: 'asc' | 'desc') => { paneSortKey = key; paneSortDir = dir; render(); };
+  const setPaneSortByProps = (enabled: boolean) => { paneSortByProps = enabled; render(); };
 
   const search = async (query: string) => {
     if (!query) { await load(); return; }
@@ -1924,5 +1890,5 @@ export function createOutlinerView(ctx: GraphEditorContext, paneOpts?: OutlinerP
     if (i >= 0) ctx.propChangeHooks.splice(i, 1);
   };
 
-  return { el, filterBtn, load, refresh: render, search, setParent, getAncestorIds, getSelectedId, setPaneFilterKeys, setPaneSortConfig, openKeyMenu, unregister };
+  return { el, filterBtn, load, refresh: render, search, setParent, getAncestorIds, getSelectedId, setPaneFilterKeys, setPaneSortByProps, openKeyMenu, unregister };
 }

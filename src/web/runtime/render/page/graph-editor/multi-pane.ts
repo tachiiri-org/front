@@ -7,8 +7,7 @@ type PaneConfig = {
   label: string;
   sourceId: string | null;   // null = root; or another pane id
   filterKeys: string[];      // property keys that must be present (ALL)
-  sortKey: string | null;    // property key to sort by (null = no sort)
-  sortDir: 'asc' | 'desc';  // sort direction
+  sortByProps: boolean;      // true = sort by property keyOrder ascending
   width: number;             // px
 };
 
@@ -22,8 +21,7 @@ type PaneInstance = {
 };
 
 const STORAGE_KEY = (gId: string) => `graph-editor-panes:${gId}`;
-const DEFAULT_WIDTH = () => Math.max(280, Math.round(window.innerWidth * 0.20));
-const MIN_PANE_WIDTH = () => Math.max(200, Math.round(window.innerWidth * 0.15));
+const PANE_WIDTH = () => Math.max(280, Math.round(window.innerWidth * 0.20));
 
 function savePanes(gId: string, configs: PaneConfig[]) {
   localStorage.setItem(STORAGE_KEY(gId), JSON.stringify(configs));
@@ -34,7 +32,7 @@ function loadPanes(gId: string): PaneConfig[] | null {
     const raw = localStorage.getItem(STORAGE_KEY(gId));
     if (!raw) return null;
     const arr = JSON.parse(raw) as Partial<PaneConfig>[];
-    return arr.map(c => ({ ...c, sortKey: c.sortKey ?? null, sortDir: c.sortDir ?? 'asc' })) as PaneConfig[];
+    return arr.map(c => ({ ...c, sortByProps: c.sortByProps ?? false })) as PaneConfig[];
   } catch { return null; }
 }
 
@@ -44,9 +42,8 @@ function newPaneConfig(label: string): PaneConfig {
     label,
     sourceId: null,
     filterKeys: [],
-    sortKey: null,
-    sortDir: 'asc',
-    width: DEFAULT_WIDTH(),
+    sortByProps: false,
+    width: PANE_WIDTH(),
   };
 }
 
@@ -172,58 +169,22 @@ export function createMultiPaneView(ctx: GraphEditorContext): {
     });
     header.appendChild(fltArea);
 
-    // Sort area — shows active sort key with direction
-    const sortArea = document.createElement('div');
-    sortArea.style.cssText = `display:flex;align-items:center;gap:3px;cursor:pointer;flex-shrink:0;`;
-    sortArea.title = '並び替えを設定';
+    // Sort toggle button — press to sort by property keyOrder ascending, press again to cancel
+    const sortBtn = document.createElement('button');
     const updateSortBtn = () => {
-      sortArea.innerHTML = '';
-      if (config.sortKey) {
-        const col = ctx.allPropColors.get(config.sortKey)?.code ?? TEXT_DIM;
-        const tag = document.createElement('span');
-        tag.style.cssText = `display:inline-flex;align-items:center;gap:2px;padding:1px 5px;border-radius:3px;background:${col};color:#fff;font-size:10px;white-space:nowrap;`;
-        tag.textContent = `${config.sortKey} ${config.sortDir === 'asc' ? '↑' : '↓'}`;
-        sortArea.appendChild(tag);
-      } else {
-        const placeholder = document.createElement('span');
-        placeholder.textContent = '並び替え';
-        placeholder.style.cssText = `color:${TEXT_DIM};font-size:10px;padding:1px 3px;border:1px solid ${BORDER};border-radius:3px;flex-shrink:0;`;
-        sortArea.appendChild(placeholder);
-      }
+      sortBtn.textContent = '並び替え';
+      sortBtn.style.cssText = `background:transparent;border:1px solid ${config.sortByProps ? TEXT_MID : BORDER};color:${config.sortByProps ? TEXT_HIGH : TEXT_DIM};cursor:pointer;font-size:10px;padding:1px 5px;border-radius:3px;flex-shrink:0;`;
     };
     updateSortBtn();
-    sortArea.addEventListener('click', (e) => {
+    sortBtn.addEventListener('click', (e) => {
       e.stopPropagation();
+      config.sortByProps = !config.sortByProps;
+      saveAll();
       const inst = panes.find(p => p.config.id === config.id);
-      if (!inst) return;
-      let menuSortKey = config.sortKey;
-      let menuSortDir = config.sortDir;
-      inst.view.openKeyMenu({
-        anchor: sortArea,
-        mode: 'pane-sort',
-        isActive: (key) => key === menuSortKey,
-        onToggle: (key) => {
-          if (key === menuSortKey) {
-            menuSortDir = menuSortDir === 'asc' ? 'desc' : 'asc';
-            if (menuSortDir === 'asc') {
-              // Second toggle back to asc clears sort
-              menuSortKey = null;
-              menuSortDir = 'asc';
-            }
-          } else {
-            menuSortKey = key;
-            menuSortDir = 'asc';
-          }
-          config.sortKey = menuSortKey;
-          config.sortDir = menuSortDir;
-          saveAll();
-          inst.view.setPaneSortConfig(menuSortKey, menuSortDir);
-          inst.updateSortBtn();
-        },
-        getSuffix: (key) => key === menuSortKey ? (menuSortDir === 'asc' ? '↑' : '↓') : '',
-      });
+      inst?.view.setPaneSortByProps(config.sortByProps);
+      updateSortBtn();
     });
-    header.appendChild(sortArea);
+    header.appendChild(sortBtn);
 
     // Close button
     const closeBtn = document.createElement('button');
@@ -242,11 +203,12 @@ export function createMultiPaneView(ctx: GraphEditorContext): {
     const view = createOutlinerView(ctx, {
       paneParentId,
       paneFilterKeys: new Set(config.filterKeys),
+      paneSortByProps: config.sortByProps,
       onNodeSelect: (nodeId) => onPaneSelect(config.id, nodeId),
       onContentWidthChange: (w) => {
         // Measure only non-flex-1 header children to avoid feedback loop
         // (header.scrollWidth includes labelEl which stretches to container width)
-        const minHeaderW = srcBtn.offsetWidth + fltArea.scrollWidth + sortArea.scrollWidth + closeBtn.offsetWidth + 36;
+        const minHeaderW = srcBtn.offsetWidth + fltArea.scrollWidth + sortBtn.offsetWidth + closeBtn.offsetWidth + 36;
         const actualW = Math.max(w, minHeaderW);
         containerEl.style.width = `${actualW}px`;
         config.width = actualW;
@@ -269,7 +231,7 @@ export function createMultiPaneView(ctx: GraphEditorContext): {
       const startX = e.clientX;
       const startW = config.width;
       const onMove = (ev: MouseEvent) => {
-        config.width = Math.max(MIN_PANE_WIDTH(), startW + ev.clientX - startX);
+        config.width = Math.max(PANE_WIDTH(), startW + ev.clientX - startX);
         containerEl.style.width = `${config.width}px`;
       };
       const onUp = () => {
