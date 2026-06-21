@@ -322,11 +322,17 @@ export function createOutlinerView(ctx: GraphEditorContext, paneOpts?: OutlinerP
     return rows;
   };
 
+  // Wraps fetchChildren and strips the graph root node (appears as a neighbor via undirected edges)
+  const fetchChildrenFiltered = async (nodeId: string) => {
+    const nodes = await fetchChildren(ctx.gId, nodeId, ctx.limit);
+    return ctx.rootNodeId ? nodes.filter(n => n.id !== ctx.rootNodeId) : nodes;
+  };
+
   const ensureChildren = async (onode: ONode) => {
     if (onode.childrenLoaded) return;
     let cached = ctx.childrenCache.get(onode.node.id);
     if (!cached) {
-      cached = await fetchChildren(ctx.gId, onode.node.id, ctx.limit);
+      cached = await fetchChildrenFiltered(onode.node.id);
       ctx.childrenCache.set(onode.node.id, cached);
     }
     seedPropStore(cached);
@@ -1662,7 +1668,7 @@ export function createOutlinerView(ctx: GraphEditorContext, paneOpts?: OutlinerP
       if (paneParentId !== null) {
         let cached = ctx.childrenCache.get(paneParentId);
         if (!cached) {
-          cached = await fetchChildren(ctx.gId, paneParentId, ctx.limit);
+          cached = await fetchChildrenFiltered(paneParentId);
           ctx.childrenCache.set(paneParentId, cached);
         }
         seedPropStore(cached);
@@ -1681,7 +1687,7 @@ export function createOutlinerView(ctx: GraphEditorContext, paneOpts?: OutlinerP
       // Use same cache key (null) as column view so both views share the same root node list
       let cached = ctx.childrenCache.get(null);
       if (!cached) {
-        cached = await fetchChildren(ctx.gId, ctx.rootNodeId, ctx.limit);
+        cached = await fetchChildrenFiltered(ctx.rootNodeId);
         ctx.childrenCache.set(null, cached);
       }
       seedPropStore(cached);
@@ -1712,7 +1718,7 @@ export function createOutlinerView(ctx: GraphEditorContext, paneOpts?: OutlinerP
     if (nodeId !== null) {
       let cached = ctx.childrenCache.get(nodeId);
       if (!cached) {
-        cached = await fetchChildren(ctx.gId, nodeId, ctx.limit);
+        cached = await fetchChildrenFiltered(nodeId);
         ctx.childrenCache.set(nodeId, cached);
       }
       seedPropStore(cached);
