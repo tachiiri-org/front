@@ -1486,6 +1486,8 @@ export function createOutlinerView(ctx: GraphEditorContext, paneOpts?: OutlinerP
       ctx.allPropColors.clear();
       for (const [key, val] of Object.entries(propColors)) ctx.allPropColors.set(key, val);
       keyOrder = savedOrder.filter(k => k.length > 0);
+      // Ensure allPropKeys is always a superset of keyOrder (it's shared across panes)
+      for (const k of keyOrder) ctx.allPropKeys.add(k);
     }
 
     // Pane-specific parent override
