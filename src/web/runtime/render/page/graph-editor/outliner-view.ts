@@ -471,9 +471,10 @@ export function createOutlinerView(ctx: GraphEditorContext, paneOpts?: OutlinerP
   };
 
   // ── Row builder ──────────────────────────────────────────────────────
-  // Active drag state for node reordering
+  // Active drag state for node reordering / reparenting
   let dragNodeId: string | null = null;
   let dragParentId: string | null | undefined = undefined;
+  let dragMultiIds: string[] | null = null; // non-null when dragging a multi-selection
 
   const buildRow = (onode: ONode): HTMLElement => {
     const row = document.createElement('div');
@@ -493,6 +494,13 @@ export function createOutlinerView(ctx: GraphEditorContext, paneOpts?: OutlinerP
     marker.style.cssText = `width:7px;height:7px;border-radius:1px;box-sizing:border-box;pointer-events:none;`;
     btnWrap.appendChild(marker);
     btnWrap.addEventListener('click', (e) => { e.stopPropagation(); showPropertyMenu(onode, e.clientX, e.clientY); });
+    btnWrap.addEventListener('contextmenu', (e) => {
+      e.preventDefault(); e.stopPropagation();
+      const lbl = primaryLabel(onode.node, ctx.state.lang) ?? fallbackLabel(onode.node, ctx.state.lang) ?? '';
+      void navigator.clipboard.writeText(`[${onode.node.id}]${lbl}`);
+      marker.style.outline = '2px solid #4a9eff';
+      setTimeout(() => { marker.style.outline = ''; }, 500);
+    });
     row.appendChild(btnWrap);
 
     const label = primaryLabel(onode.node, ctx.state.lang) ?? fallbackLabel(onode.node, ctx.state.lang);
@@ -663,6 +671,9 @@ export function createOutlinerView(ctx: GraphEditorContext, paneOpts?: OutlinerP
       if (!dragReady) { e.preventDefault(); return; }
       dragNodeId = onode.node.id;
       dragParentId = onode.parentId;
+      const sel = getSelectedONodes();
+      dragMultiIds = (sel.length > 1 && sel.some(o => o.node.id === onode.node.id))
+        ? sel.map(o => o.node.id) : null;
       if (e.dataTransfer) { e.dataTransfer.effectAllowed = 'move'; e.dataTransfer.setData('text/plain', onode.node.id); }
     });
     row.addEventListener('dragend', () => {
@@ -671,10 +682,13 @@ export function createOutlinerView(ctx: GraphEditorContext, paneOpts?: OutlinerP
       dragReady = false;
       dragNodeId = null;
       dragParentId = undefined;
+      dragMultiIds = null;
       listEl.querySelectorAll<HTMLElement>('[data-node-id]').forEach(r => { r.style.borderTop = '2px solid transparent'; r.style.borderBottom = '2px solid transparent'; });
     });
     row.addEventListener('dragover', (e) => {
-      if (!dragNodeId || dragNodeId === onode.node.id || onode.parentId !== dragParentId) return;
+      if (!dragNodeId || dragNodeId === onode.node.id) return;
+      const src = byId.get(dragNodeId);
+      if (src && isInSubtree(onode, src)) return;
       e.preventDefault();
       if (e.dataTransfer) e.dataTransfer.dropEffect = 'move';
       const before = e.clientY < row.getBoundingClientRect().top + row.getBoundingClientRect().height / 2;
@@ -689,19 +703,63 @@ export function createOutlinerView(ctx: GraphEditorContext, paneOpts?: OutlinerP
       e.preventDefault();
       row.style.borderTop = '2px solid transparent';
       row.style.borderBottom = '2px solid transparent';
-      if (!dragNodeId || dragNodeId === onode.node.id || onode.parentId !== dragParentId) return;
+      if (!dragNodeId || dragNodeId === onode.node.id) return;
       const srcONode = byId.get(dragNodeId);
-      if (!srcONode) return;
+      if (!srcONode || isInSubtree(onode, srcONode)) return;
+
       const before = e.clientY < row.getBoundingClientRect().top + row.getBoundingClientRect().height / 2;
-      const sibs = getSiblings(onode);
-      const newOrder = sibs.filter(s => s.node.id !== dragNodeId);
-      const targetIdx = newOrder.findIndex(s => s.node.id === onode.node.id);
+      const newParentId = onode.parentId;
+
+      // Collect nodes to move (multi-select or single)
+      const movers: ONode[] = dragMultiIds
+        ? (dragMultiIds.map(id => byId.get(id)).filter((o): o is ONode =>
+            !!o && o.node.id !== onode.node.id && !isInSubtree(onode, o)))
+        : [srcONode];
+      if (movers.length === 0) return;
+
+      // Save old parents before modifying state
+      const oldParents = new Map(movers.map(o => [o.node.id, o.parentId]));
+
+      // Remove movers from their current sibling lists
+      for (const mover of movers) {
+        const sibs = getSiblings(mover);
+        const idx = sibs.indexOf(mover);
+        if (idx >= 0) sibs.splice(idx, 1);
+        const cc = ctx.childrenCache.get(mover.parentId);
+        if (cc) { const ci = cc.findIndex(n => n.id === mover.node.id); if (ci >= 0) cc.splice(ci, 1); }
+      }
+
+      // Get target parent's sibling list (movers already removed if they were in it)
+      const newSibs: ONode[] = newParentId === null ? roots : (byId.get(newParentId)?.children ?? []);
+      const targetIdx = newSibs.indexOf(onode);
       if (targetIdx === -1) return;
-      newOrder.splice(before ? targetIdx : targetIdx + 1, 0, srcONode);
-      const parentONode = onode.parentId ? byId.get(onode.parentId) : null;
-      if (parentONode) parentONode.children = newOrder; else roots = newOrder;
+      const insertAt = before ? targetIdx : targetIdx + 1;
+
+      // Insert movers at the new position and fix depths
+      for (let i = 0; i < movers.length; i++) {
+        movers[i].parentId = newParentId;
+        fixDepths(movers[i], onode.depth);
+        newSibs.splice(insertAt + i, 0, movers[i]);
+      }
+
+      // Invalidate caches for all affected parents
+      const affectedParents = new Set([...oldParents.values(), newParentId]);
+      for (const pid of affectedParents) { if (pid !== null) ctx.childrenCache.delete(pid); }
+
       render();
-      if (onode.parentId) void apiMoveNode(ctx.gId, dragNodeId!, onode.parentId, 'down', newOrder.map(s => s.node.id));
+
+      // Toggle links for nodes that changed parent
+      for (const mover of movers) {
+        const oldPid = oldParents.get(mover.node.id) ?? null;
+        if (oldPid !== newParentId) {
+          if (oldPid !== null) void apiToggleLink(ctx.gId, mover.node.id, oldPid);
+          if (newParentId !== null) void apiToggleLink(ctx.gId, mover.node.id, newParentId);
+        }
+      }
+      // Update sibling order in backend
+      if (newParentId !== null) {
+        void apiMoveNode(ctx.gId, movers[0].node.id, newParentId, 'down', newSibs.map(s => s.node.id));
+      }
     });
 
     row.insertBefore(triBtn, btnWrap);
@@ -716,6 +774,11 @@ export function createOutlinerView(ctx: GraphEditorContext, paneOpts?: OutlinerP
   const fixDepths = (o: ONode, d: number) => {
     o.depth = d;
     o.children.forEach(c => fixDepths(c, d + 1));
+  };
+
+  const isInSubtree = (target: ONode, root: ONode): boolean => {
+    if (target.node.id === root.node.id) return true;
+    return root.children.some(c => isInSubtree(target, c));
   };
 
   // ── Property menu (right-click on expand marker) ─────────────────────
@@ -1291,6 +1354,7 @@ export function createOutlinerView(ctx: GraphEditorContext, paneOpts?: OutlinerP
 
     // Cross-hierarchy: move group to adjacent uncle
     if (parentId === null) return;
+    if (sel.some(n => n.node.id.startsWith('temp-'))) return;
     const parentONode = byId.get(parentId);
     if (!parentONode) return;
     const parentSibs = getSiblings(parentONode);
@@ -1416,6 +1480,7 @@ export function createOutlinerView(ctx: GraphEditorContext, paneOpts?: OutlinerP
 
     // Cross-hierarchy: move to adjacent uncle node
     if (onode.parentId === null) return;
+    if (onode.node.id.startsWith('temp-')) return;
     const parentONode = byId.get(onode.parentId);
     if (!parentONode) return;
     const parentSibs = getSiblings(parentONode);
@@ -1446,6 +1511,7 @@ export function createOutlinerView(ctx: GraphEditorContext, paneOpts?: OutlinerP
 
   const doIndent = async (onode: ONode, vis: ONode[], i: number) => {
     if (i === 0) return;
+    if (onode.node.id.startsWith('temp-')) return;
     const prev = vis[i - 1];
     const oldParentId = onode.parentId;
 
@@ -1471,6 +1537,7 @@ export function createOutlinerView(ctx: GraphEditorContext, paneOpts?: OutlinerP
 
   const doDedent = async (onode: ONode) => {
     if (onode.parentId === null) return;
+    if (onode.node.id.startsWith('temp-')) return;
     const parent = byId.get(onode.parentId);
     if (!parent) return;
     const oldParentId = onode.parentId;
