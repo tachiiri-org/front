@@ -203,16 +203,35 @@ export function createOutlinerView(ctx: GraphEditorContext, paneOpts?: OutlinerP
       draftTa.value = ''; draftResize(); draftTa.style.color = TEXT_DIM;
       const parentId = paneParentSet ? paneParentId : (ctx.rootNodeId ?? null);
       if (!parentId) return;
-      const nn = await apiCreateNode(ctx.gId, parentId, ctx.state.lang, label);
-      if (!nn) return;
-      const o = make(nn, parentId, 0);
+      // Optimistic: insert temp node immediately (same pattern as doAddSibling)
+      const tempId = `temp-${++ctx.tempNodeCounter}`;
+      const tempNode: ExplorerNode = { id: tempId, [ctx.state.lang]: label };
+      const o = make(tempNode, parentId, 0);
+      o.childrenLoaded = true;
       roots.unshift(o);
+      let resolveTemp!: () => void;
+      tempReady.set(tempId, new Promise<void>(res => { resolveTemp = res; }));
+      render(); // hides draft row, shows temp node at top
+      focusRow(o);
+      const nn = await apiCreateNode(ctx.gId, parentId, ctx.state.lang, label);
+      if (!nn) {
+        resolveTemp(); tempReady.delete(tempId);
+        roots.splice(roots.indexOf(o), 1); byId.delete(tempId);
+        rowMap.get(tempId)?.remove(); rowMap.delete(tempId);
+        render(); // restore draft row
+        return;
+      }
+      const typedText = rowMap.get(tempId)?.querySelector<HTMLTextAreaElement>('textarea')?.value ?? '';
+      byId.delete(tempId); byId.set(nn.id, o);
+      const tempRowEl = rowMap.get(tempId);
+      rowMap.delete(tempId); if (tempRowEl) { rowMap.set(nn.id, tempRowEl); tempRowEl.dataset.nodeId = nn.id; }
+      Object.assign(tempNode, nn);
+      resolveTemp(); tempReady.delete(tempId);
       const cc = ctx.childrenCache.get(parentId);
       if (cc) cc.unshift(nn); else setCachedChildren(parentId, [nn]);
       ctx.saveChildrenCache?.();
-      render();
-      focusRow(o);
-      // Node was appended to chain end by backend → move to front
+      if (typedText.trim() && typedText.trim() !== label) void apiUpdateNode(ctx.gId, nn.id, ctx.state.lang, typedText.trim());
+      // Move to front in backend (was appended to chain end)
       void apiMoveNode(ctx.gId, nn.id, parentId, 'up', roots.map(r => r.node.id));
     }
   });
