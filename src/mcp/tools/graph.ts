@@ -92,7 +92,7 @@ function clampDepth(raw: unknown): number {
 const nodeLabel = (n: ApiNode): string => [n.en, n.ja].filter(Boolean).join(" / ");
 const nodeLine = (n: ApiNode): string => {
   const props = n.properties ?? {};
-  const propStr = Object.entries(props).map(([k, v]) => `${k}=${v}`).join(", ");
+  const propStr = Object.entries(props).map(([k, v]) => v ? `${k}=${v}` : k).join(", ");
   return `[${n.id}] ${nodeLabel(n)}${propStr ? ` {${propStr}}` : ""}`;
 };
 
@@ -243,16 +243,16 @@ export const GRAPH_TOOLS = [
   },
   {
     name: "graph_set_property",
-    description: "Upsert a key-value metadata property on a node (e.g. key='node_type', value='rule').",
+    description: "Upsert a metadata property on a node. Value is optional — omitting it sets a key-only tag (e.g. key='修正' with no value). Pass value to set a key-value pair (e.g. key='node_type', value='rule').",
     inputSchema: {
       type: "object",
       properties: {
         graph_id: { type: "string", description: "Word graph ID (e.g. 'word-graph-1')" },
         node_id: { type: "string", description: "Target node ID" },
-        key: { type: "string", description: "Property key (e.g. 'node_type', 'status')" },
-        value: { type: "string", description: "Property value" },
+        key: { type: "string", description: "Property key (e.g. 'node_type', '修正')" },
+        value: { type: "string", description: "Property value (optional — omit for key-only tag)" },
       },
-      required: ["graph_id", "node_id", "key", "value"],
+      required: ["graph_id", "node_id", "key"],
     },
   },
   {
@@ -378,10 +378,10 @@ export async function callGraphTool(
     if (name === "graph_set_property") {
       const nodeId = String(args.node_id);
       const key = String(args.key);
-      const value = String(args.value);
-      const res = await graphFetch(env, graphId, `node/${encodeURIComponent(nodeId)}/property`, "POST", { key, value });
+      const value = args.value !== undefined && args.value !== "" ? String(args.value) : undefined;
+      const res = await graphFetch(env, graphId, `node/${encodeURIComponent(nodeId)}/property`, "POST", { key, ...(value !== undefined ? { value } : {}) });
       if (!res.ok) throw new Error(`set_property_failed:${res.status}`);
-      return { content: [{ type: "text", text: `Set [${nodeId}] ${key}=${value}` }] };
+      return { content: [{ type: "text", text: value !== undefined ? `Set [${nodeId}] ${key}=${value}` : `Set [${nodeId}] ${key}` }] };
     }
 
     if (name === "graph_remove_property") {
