@@ -94,13 +94,8 @@ export function createOutlinerView(ctx: GraphEditorContext): {
       }
       menu.appendChild(tagsEl);
 
-      const subTitle = document.createElement('div');
-      subTitle.textContent = 'フィルタするオプションを選択または作成';
-      subTitle.style.cssText = `color:${TEXT_DIM};font-size:11px;margin-bottom:4px;`;
-      menu.appendChild(subTitle);
-
       const searchIn = document.createElement('input');
-      searchIn.placeholder = '検索 または 新規作成...';
+      searchIn.placeholder = '';
       searchIn.style.cssText = `width:100%;box-sizing:border-box;background:transparent;border:1px solid ${BORDER};border-radius:3px;padding:4px 6px;color:${TEXT_HIGH};font-size:12px;outline:none;font-family:inherit;margin-bottom:4px;`;
       menu.appendChild(searchIn);
 
@@ -111,6 +106,18 @@ export function createOutlinerView(ctx: GraphEditorContext): {
       const listContainer = document.createElement('div');
       listContainer.style.cssText = `max-height:220px;overflow-y:auto;`;
       searchIn.addEventListener('input', () => buildKeyList(listContainer, 'filter', null, searchIn, rebuildFilterMenu));
+      searchIn.addEventListener('keydown', (e) => {
+        if (e.key !== 'Enter') return;
+        const val = searchIn.value.trim();
+        if (!val) return;
+        if (!keyOrder.includes(val)) {
+          addKeyToOrder(val);
+          void apiSavePropertyOrder(ctx.gId, keyOrder);
+        }
+        if (!filterKeys.has(val)) { filterKeys.add(val); updateFilterBtn(); render(); }
+        searchIn.value = '';
+        rebuildFilterMenu();
+      });
       buildKeyList(listContainer, 'filter', null, searchIn, rebuildFilterMenu);
       menu.appendChild(listContainer);
     };
@@ -842,7 +849,7 @@ export function createOutlinerView(ctx: GraphEditorContext): {
       // Colored pill
       const pill = document.createElement('span');
       pill.textContent = key;
-      pill.style.cssText = `padding:3px 10px;border-radius:4px;background:${col};color:#fff;font-size:12px;cursor:pointer;font-weight:500;white-space:nowrap;${active ? 'outline:2px solid rgba(255,255,255,.6);outline-offset:-1px;' : ''}`;
+      pill.style.cssText = `display:inline-flex;align-items:center;padding:2px 8px;border-radius:4px;background:${col};color:#fff;font-size:12px;cursor:pointer;font-weight:500;white-space:nowrap;${active ? 'box-shadow:inset 0 0 0 2px rgba(255,255,255,.55);' : ''}`;
       pill.addEventListener('click', () => {
         if (mode === 'node' && nodeId) {
           const onode = byId.get(nodeId);
@@ -896,7 +903,7 @@ export function createOutlinerView(ctx: GraphEditorContext): {
         onRedraw();
       });
 
-      row.append(handle, pill, dotsBtn);
+      row.append(dotsBtn, handle, pill);
       container.appendChild(row);
     }
 
@@ -970,13 +977,8 @@ export function createOutlinerView(ctx: GraphEditorContext): {
       menu.appendChild(tagsEl);
 
       // Search / create input
-      const subTitle = document.createElement('div');
-      subTitle.textContent = 'オプションを選択または作成';
-      subTitle.style.cssText = `color:${TEXT_DIM};font-size:11px;margin-bottom:4px;`;
-      menu.appendChild(subTitle);
-
       const searchIn = document.createElement('input');
-      searchIn.placeholder = '検索 または 新規作成...';
+      searchIn.placeholder = '';
       searchIn.style.cssText = `width:100%;box-sizing:border-box;background:transparent;border:1px solid ${BORDER};border-radius:3px;padding:4px 6px;color:${TEXT_HIGH};font-size:12px;outline:none;font-family:inherit;margin-bottom:4px;`;
       menu.appendChild(searchIn);
 
@@ -988,6 +990,23 @@ export function createOutlinerView(ctx: GraphEditorContext): {
       const listContainer = document.createElement('div');
       listContainer.style.cssText = `max-height:220px;overflow-y:auto;`;
       searchIn.addEventListener('input', () => buildKeyList(listContainer, 'node', onode.node.id, searchIn, rebuild));
+      searchIn.addEventListener('keydown', (e) => {
+        if (e.key !== 'Enter') return;
+        const val = searchIn.value.trim();
+        if (!val) return;
+        if (!keyOrder.includes(val)) {
+          addKeyToOrder(val);
+          void apiSavePropertyOrder(ctx.gId, keyOrder);
+        }
+        const nodeProps = ctx.propStore.get(onode.node.id) ?? {};
+        if (!(val in nodeProps)) {
+          syncPropChange(onode.node.id, p => { p[val] = '●'; });
+          void apiSetProperty(ctx.gId, onode.node.id, val, '●');
+          updateExpandMarker(onode);
+        }
+        searchIn.value = '';
+        rebuild();
+      });
       buildKeyList(listContainer, 'node', onode.node.id, searchIn, rebuild);
       menu.appendChild(listContainer);
     };
