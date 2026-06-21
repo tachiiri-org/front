@@ -1,6 +1,6 @@
 import type { ExplorerNode, GraphEditorContext } from './types';
 import { TEXT_HIGH, TEXT_MID, TEXT_DIM, SELECT_STRONG, primaryLabel, fallbackLabel } from './constants';
-import { apiUpdateNode, apiAddBookmark, apiRemoveBookmark, apiToggleLink, apiMoveNode, fetchChildren } from './api';
+import { apiUpdateNode, apiAddBookmark, apiRemoveBookmark, apiToggleLink, fetchChildren } from './api';
 import { showColorPicker } from './color-picker';
 import { createNodeKeydownHandler, type SaveTimerRef } from './keyboard';
 
@@ -194,18 +194,13 @@ export function createNodeRowFns(ctx: GraphEditorContext): {
 
     inp.addEventListener('keydown', createNodeKeydownHandler(ctx, node, inp, row, colIndex, saveTimer));
 
-    // ── Column DnD ───────────────────────────────────────────────────
-    // Drag is initiated ONLY from the marker dot (pointerdown → draggable=true)
-    // so textarea text-selection never conflicts with drag.
-    const clearDndIndicators = () => {
-      ctx.columnsEl.querySelectorAll<HTMLElement>('[data-node-id]:not(textarea),[data-col-drop-zone]').forEach(el => {
-        el.style.boxShadow = '';
-      });
-    };
-
+    // ── Column DnD: drag initiation only ─────────────────────────────
+    // Drop handling lives at the column (list) level in column.ts, so the
+    // ENTIRE column is a drop surface (gaps/padding included) and the cursor
+    // never shows "forbidden" between rows. Here we only start the drag.
     let colDragReady = false;
-    // Drag handle: anywhere on the row except the textarea (text editing) and the star (bookmark toggle).
-    // This covers the marker dot, gaps, and any other non-interactive area.
+    // Drag handle: anywhere on the row except the textarea (text editing) and
+    // the star (bookmark toggle). Covers marker dot, gaps, non-interactive areas.
     row.addEventListener('pointerdown', (e) => {
       const t = e.target as HTMLElement;
       if (t.tagName === 'TEXTAREA' || t === star) return;
@@ -213,12 +208,11 @@ export function createNodeRowFns(ctx: GraphEditorContext): {
       colDragReady = true;
       row.draggable = true;
     });
-    row.addEventListener('pointerup', () => {
+    const resetDraggable = () => {
       if (!ctx.colDndNodeId) { row.draggable = false; colDragReady = false; }
-    });
-    row.addEventListener('pointercancel', () => {
-      if (!ctx.colDndNodeId) { row.draggable = false; colDragReady = false; }
-    });
+    };
+    row.addEventListener('pointerup', resetDraggable);
+    row.addEventListener('pointercancel', resetDraggable);
     row.addEventListener('dragstart', (e) => {
       if (!colDragReady) { e.preventDefault(); return; }
       ctx.colDndNodeId = node.id;
@@ -230,77 +224,9 @@ export function createNodeRowFns(ctx: GraphEditorContext): {
       row.draggable = false; colDragReady = false;
       ctx.colDndNodeId = null; ctx.colDndColIndex = -1;
       row.style.opacity = '';
-      clearDndIndicators();
-    });
-    row.addEventListener('dragover', (e) => {
-      if (!ctx.colDndNodeId) return;
-      // Block only same-column same-node (can't drop on itself).
-      // Cross-column: same node id may appear in both columns (shared child) — still allow.
-      if (ctx.colDndColIndex === colIndex && ctx.colDndNodeId === node.id) return;
-      e.preventDefault();
-      if (e.dataTransfer) e.dataTransfer.dropEffect = 'move';
-      const rect = row.getBoundingClientRect();
-      const relY = (e.clientY - rect.top) / rect.height;
-      clearDndIndicators();
-      if (relY < 0.3) row.style.boxShadow = '0 -2px 0 0 #4a9eff';
-      else if (relY > 0.7) row.style.boxShadow = '0 2px 0 0 #4a9eff';
-      else row.style.boxShadow = 'inset 0 0 0 2px rgba(74,158,255,0.5)';
-    });
-    row.addEventListener('dragleave', () => { row.style.boxShadow = ''; });
-    row.addEventListener('drop', (e) => {
-      e.preventDefault();
-      clearDndIndicators();
-      const srcNodeId = ctx.colDndNodeId;
-      const srcColIdx = ctx.colDndColIndex;
-      ctx.colDndNodeId = null; ctx.colDndColIndex = -1;
-      if (!srcNodeId) return;
-      // Block same-column same-node (self-drop)
-      if (srcColIdx === colIndex && srcNodeId === node.id) return;
-
-      const srcCol = ctx.state.columns[srcColIdx];
-      const tgtCol = ctx.state.columns[colIndex];
-      if (!srcCol || !tgtCol) return;
-
-      const srcNodeIdx = srcCol.nodes.findIndex(n => n.id === srcNodeId);
-      if (srcNodeIdx === -1) return;
-      const srcNode = srcCol.nodes[srcNodeIdx];
-      const srcParentId = srcCol.parentId;
-      const tgtParentId = tgtCol.parentId;
-
-      const rect = row.getBoundingClientRect();
-      const relY = (e.clientY - rect.top) / rect.height;
-
-      if (relY >= 0.3 && relY <= 0.7) {
-        // Drop ON node → become child of target node
-        const newParentId = node.id;
-        if (srcParentId === newParentId) return;
-        srcCol.nodes.splice(srcNodeIdx, 1);
-        ctx.childrenCache.delete(newParentId);
-        if (srcParentId !== null) void apiToggleLink(ctx.gId, srcNodeId, srcParentId);
-        void apiToggleLink(ctx.gId, srcNodeId, newParentId);
-      } else {
-        // Drop between nodes → sibling reorder or cross-column move
-        const before = relY < 0.3;
-        const tgtIdx = tgtCol.nodes.findIndex(n => n.id === node.id);
-        if (tgtIdx === -1) return;
-        const insertAt = before ? tgtIdx : tgtIdx + 1;
-        srcCol.nodes.splice(srcNodeIdx, 1);
-        if (srcCol === tgtCol) {
-          const adjustedAt = srcNodeIdx < insertAt ? insertAt - 1 : insertAt;
-          srcCol.nodes.splice(adjustedAt, 0, srcNode);
-        } else {
-          tgtCol.nodes.splice(insertAt, 0, srcNode);
-          if (srcParentId !== tgtParentId) {
-            if (srcParentId !== null) void apiToggleLink(ctx.gId, srcNodeId, srcParentId);
-            if (tgtParentId !== null) void apiToggleLink(ctx.gId, srcNodeId, tgtParentId);
-          }
-        }
-        if (tgtParentId !== null) {
-          void apiMoveNode(ctx.gId, srcNodeId, tgtParentId, 'down', tgtCol.nodes.map(n => n.id));
-        }
-      }
-      ctx.saveChildrenCache?.();
-      ctx.rebuildAll();
+      ctx.columnsEl.querySelectorAll<HTMLElement>('[data-node-id]:not(textarea),[data-col-drop-zone]').forEach(el => {
+        el.style.boxShadow = '';
+      });
     });
 
     row.addEventListener('mousedown', (e: MouseEvent) => {

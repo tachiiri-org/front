@@ -290,46 +290,119 @@ export function createColumnFns(ctx: GraphEditorContext): {
         list.appendChild(moreBtnWrapper);
       }
     }
-    // Drop zone at bottom of list — allows dropping after all nodes
-    const dropZoneEl = document.createElement('div');
-    dropZoneEl.dataset.colDropZone = '1';
-    dropZoneEl.style.cssText = `flex:1;min-height:60px;`;
-    dropZoneEl.addEventListener('dragover', (e) => {
+    // ── Column-level drop surface ─────────────────────────────────────
+    // The drop handler lives on the whole list (not per-row) so ANY part of
+    // the column — rows, gaps, padding, the empty area below — accepts a drop
+    // and never shows the "forbidden" cursor mid-drag. The target row + zone
+    // (before / child / after) are computed from the cursor Y position.
+    // A trailing spacer keeps the list tall enough to drop after the last row.
+    const dropSpacer = document.createElement('div');
+    dropSpacer.dataset.colDropZone = '1';
+    dropSpacer.style.cssText = `flex:1;min-height:60px;`;
+    list.appendChild(dropSpacer);
+
+    const clearColIndicators = () => {
+      ctx.columnsEl.querySelectorAll<HTMLElement>('[data-node-id]:not(textarea),[data-col-drop-zone]').forEach((el) => {
+        el.style.boxShadow = '';
+      });
+    };
+
+    // Direct-child node rows of this list (excludes draft row / more button / spacer)
+    const nodeRowEls = (): HTMLElement[] =>
+      Array.from(list.querySelectorAll<HTMLElement>(':scope > [data-node-id]'));
+
+    type DropTarget = { el: HTMLElement; nodeId: string; zone: 'before' | 'child' | 'after' } | null;
+    const computeTarget = (clientY: number): DropTarget => {
+      const els = nodeRowEls();
+      for (const el of els) {
+        const r = el.getBoundingClientRect();
+        if (clientY >= r.top && clientY <= r.bottom) {
+          const rel = (clientY - r.top) / r.height;
+          const zone = rel < 0.3 ? 'before' : rel > 0.7 ? 'after' : 'child';
+          return { el, nodeId: el.dataset.nodeId!, zone };
+        }
+      }
+      return null; // below all rows → append to end
+    };
+
+    list.addEventListener('dragenter', (e) => {
+      if (ctx.colDndNodeId) e.preventDefault();
+    });
+    list.addEventListener('dragover', (e) => {
+      if (!ctx.colDndNodeId) return;
+      e.preventDefault(); // always allow drop anywhere in the column
+      if (e.dataTransfer) e.dataTransfer.dropEffect = 'move';
+      clearColIndicators();
+      const t = computeTarget(e.clientY);
+      if (t) {
+        // Don't draw an indicator on the source node itself (same col, same node)
+        if (ctx.colDndColIndex === colIndex && t.nodeId === ctx.colDndNodeId) return;
+        if (t.zone === 'before') t.el.style.boxShadow = '0 -2px 0 0 #4a9eff';
+        else if (t.zone === 'after') t.el.style.boxShadow = '0 2px 0 0 #4a9eff';
+        else t.el.style.boxShadow = 'inset 0 0 0 2px rgba(74,158,255,0.5)';
+      } else {
+        dropSpacer.style.boxShadow = 'inset 0 2px 0 0 #4a9eff';
+      }
+    });
+    list.addEventListener('dragleave', (e) => {
+      if (!list.contains(e.relatedTarget as Node | null)) clearColIndicators();
+    });
+    list.addEventListener('drop', (e) => {
       if (!ctx.colDndNodeId) return;
       e.preventDefault();
-      if (e.dataTransfer) e.dataTransfer.dropEffect = 'move';
-      dropZoneEl.style.boxShadow = 'inset 0 2px 0 0 #4a9eff';
-    });
-    dropZoneEl.addEventListener('dragleave', () => { dropZoneEl.style.boxShadow = ''; });
-    dropZoneEl.addEventListener('drop', (e) => {
-      e.preventDefault();
-      dropZoneEl.style.boxShadow = '';
+      clearColIndicators();
       const srcNodeId = ctx.colDndNodeId;
       const srcColIdx = ctx.colDndColIndex;
       ctx.colDndNodeId = null; ctx.colDndColIndex = -1;
-      if (!srcNodeId) return;
+
       const srcCol = ctx.state.columns[srcColIdx];
-      if (!srcCol) return;
-      const srcNodeIdx = srcCol.nodes.findIndex(n => n.id === srcNodeId);
+      const tgtCol = ctx.state.columns[colIndex];
+      if (!srcCol || !tgtCol) return;
+      const srcNodeIdx = srcCol.nodes.findIndex((n) => n.id === srcNodeId);
       if (srcNodeIdx === -1) return;
       const srcNode = srcCol.nodes[srcNodeIdx];
       const srcParentId = srcCol.parentId;
-      const tgtParentId = col.parentId;
-      srcCol.nodes.splice(srcNodeIdx, 1);
-      if (srcCol === col) {
-        col.nodes.push(srcNode);
+      const tgtParentId = tgtCol.parentId;
+
+      const t = computeTarget(e.clientY);
+
+      if (t && t.zone === 'child') {
+        // Drop ON a node → make it that node's child
+        const newParentId = t.nodeId;
+        if (newParentId === srcNodeId || srcParentId === newParentId) return;
+        srcCol.nodes.splice(srcNodeIdx, 1);
+        ctx.childrenCache.delete(newParentId);
+        if (srcParentId !== null) void apiToggleLink(ctx.gId, srcNodeId, srcParentId);
+        void apiToggleLink(ctx.gId, srcNodeId, newParentId);
       } else {
-        col.nodes.push(srcNode);
-        if (srcParentId !== tgtParentId) {
-          if (srcParentId !== null) void apiToggleLink(ctx.gId, srcNodeId, srcParentId);
-          if (tgtParentId !== null) void apiToggleLink(ctx.gId, srcNodeId, tgtParentId);
+        // Sibling insert (before/after a node, or appended at the end)
+        let insertAt: number;
+        if (t) {
+          if (t.nodeId === srcNodeId && srcCol === tgtCol) return; // onto itself → no-op
+          const tgtIdx = tgtCol.nodes.findIndex((n) => n.id === t.nodeId);
+          if (tgtIdx === -1) return;
+          insertAt = t.zone === 'before' ? tgtIdx : tgtIdx + 1;
+        } else {
+          insertAt = tgtCol.nodes.length; // end of column
+        }
+        srcCol.nodes.splice(srcNodeIdx, 1);
+        if (srcCol === tgtCol) {
+          const adjustedAt = srcNodeIdx < insertAt ? insertAt - 1 : insertAt;
+          tgtCol.nodes.splice(adjustedAt, 0, srcNode);
+        } else {
+          tgtCol.nodes.splice(insertAt, 0, srcNode);
+          if (srcParentId !== tgtParentId) {
+            if (srcParentId !== null) void apiToggleLink(ctx.gId, srcNodeId, srcParentId);
+            if (tgtParentId !== null) void apiToggleLink(ctx.gId, srcNodeId, tgtParentId);
+          }
+        }
+        if (tgtParentId !== null) {
+          void apiMoveNode(ctx.gId, srcNodeId, tgtParentId, 'down', tgtCol.nodes.map((n) => n.id));
         }
       }
-      if (tgtParentId !== null) void apiMoveNode(ctx.gId, srcNodeId, tgtParentId, 'down', col.nodes.map(n => n.id));
       ctx.saveChildrenCache?.();
       ctx.rebuildAll();
     });
-    list.appendChild(dropZoneEl);
 
     colEl.appendChild(list);
     return colEl;
