@@ -837,14 +837,14 @@ export function createOutlinerView(ctx: GraphEditorContext): {
 
       const row = document.createElement('div');
       row.draggable = true;
-      row.style.cssText = `display:flex;align-items:center;gap:6px;padding:3px 4px;border-radius:4px;cursor:default;border:2px solid transparent;`;
+      row.style.cssText = `display:flex;align-items:center;gap:3px;padding:3px 4px;border-radius:4px;cursor:default;border:2px solid transparent;`;
       row.addEventListener('mouseenter', () => { row.style.background = 'rgba(255,255,255,.05)'; });
       row.addEventListener('mouseleave', () => { row.style.background = ''; });
 
       // ⠿ drag handle
       const handle = document.createElement('span');
       handle.textContent = '⠿';
-      handle.style.cssText = `color:${TEXT_DIM};cursor:grab;font-size:13px;flex-shrink:0;user-select:none;`;
+      handle.style.cssText = `color:${TEXT_DIM};cursor:grab;font-size:11px;flex-shrink:0;user-select:none;`;
 
       // Colored pill
       const pill = document.createElement('span');
@@ -873,7 +873,7 @@ export function createOutlinerView(ctx: GraphEditorContext): {
       // ⋯ button
       const dotsBtn = document.createElement('button');
       dotsBtn.textContent = '···';
-      dotsBtn.style.cssText = `background:transparent;border:none;color:${TEXT_DIM};cursor:pointer;font-size:15px;padding:0 2px;flex-shrink:0;line-height:1;`;
+      dotsBtn.style.cssText = `background:transparent;border:none;color:${TEXT_DIM};cursor:pointer;font-size:13px;padding:0 1px;flex-shrink:0;line-height:1;`;
       dotsBtn.addEventListener('click', (e) => {
         e.stopPropagation();
         showKeyContextMenu(key, dotsBtn, onRedraw);
