@@ -17,12 +17,24 @@ type ONode = {
   children: ONode[];
 };
 
-export function createOutlinerView(ctx: GraphEditorContext): {
+export type OutlinerPaneOpts = {
+  /** If set, this pane shows children of this node (null = empty until setParent called) */
+  paneParentId?: string | null;
+  /** Only show nodes that have ALL of these property keys */
+  paneFilterKeys?: Set<string>;
+  /** Called when user focuses a node row (for inter-pane wiring) */
+  onNodeSelect?: (nodeId: string | null) => void;
+};
+
+export function createOutlinerView(ctx: GraphEditorContext, paneOpts?: OutlinerPaneOpts): {
   el: HTMLElement;
   filterBtn: HTMLElement;
   load: () => Promise<void>;
   refresh: () => void;
   search: (query: string) => Promise<void>;
+  setParent: (nodeId: string | null) => Promise<void>;
+  getSelectedId: () => string | null;
+  setPaneFilterKeys: (keys: Set<string>) => void;
 } {
   // Outer wrapper (returned as el)
   const el = document.createElement('div');
@@ -148,6 +160,20 @@ export function createOutlinerView(ctx: GraphEditorContext): {
   const byId = new Map<string, ONode>();
   const rowMap = new Map<string, HTMLElement>();
 
+  // Pane state
+  let paneParentSet = paneOpts?.paneParentId !== undefined;
+  let paneParentId: string | null = paneOpts?.paneParentId ?? null;
+  let paneSelectedId: string | null = null;
+  let paneFilterKeys: Set<string> = paneOpts?.paneFilterKeys ?? new Set();
+
+  const setPaneSelected = (nodeId: string | null) => {
+    paneSelectedId = nodeId;
+    rowMap.forEach((row, id) => {
+      row.style.outline = id === paneSelectedId ? `1px solid rgba(99,102,241,.6)` : '';
+    });
+    paneOpts?.onNodeSelect?.(nodeId);
+  };
+
   // Zoom stack: ONodes we've zoomed into (innermost last)
   const zoomStack: ONode[] = [];
 
@@ -181,18 +207,32 @@ export function createOutlinerView(ctx: GraphEditorContext): {
   const render = () => {
     rowMap.clear();
     listEl.innerHTML = '';
+    let base: ONode[];
     if (filterKeys.size > 0) {
       const matched: ONode[] = [];
       byId.forEach(o => {
         const props = ctx.propStore.get(o.node.id) ?? {};
         if ([...filterKeys].some(k => k in props)) matched.push(o);
       });
-      for (const o of matched) listEl.appendChild(buildRow(o));
+      base = matched;
     } else {
-      for (const o of flatVisible()) listEl.appendChild(buildRow(o));
+      base = flatVisible();
     }
+    // Apply per-pane filter (ALL keys must be present)
+    const toRender = paneFilterKeys.size > 0
+      ? base.filter(o => {
+          const props = ctx.propStore.get(o.node.id) ?? {};
+          return [...paneFilterKeys].every(k => k in props);
+        })
+      : base;
+    for (const o of toRender) listEl.appendChild(buildRow(o));
     updateSelectionHighlight();
     schedulePrefetch();
+    // Restore pane selection highlight after render
+    if (paneSelectedId) {
+      const row = rowMap.get(paneSelectedId);
+      if (row) row.style.outline = `1px solid rgba(99,102,241,.6)`;
+    }
   };
 
   const focusRow = (onode: ONode) => {
@@ -445,6 +485,7 @@ export function createOutlinerView(ctx: GraphEditorContext): {
     const resize = () => { ta.style.height = 'auto'; ta.style.height = ta.scrollHeight + 'px'; };
     requestAnimationFrame(resize);
     ta.addEventListener('input', resize);
+    ta.addEventListener('focus', () => setPaneSelected(onode.node.id));
 
     ta.addEventListener('blur', () => {
       const old = primaryLabel(onode.node, ctx.state.lang) ?? fallbackLabel(onode.node, ctx.state.lang);
@@ -1430,8 +1471,24 @@ export function createOutlinerView(ctx: GraphEditorContext): {
       for (const { id, code } of palette) ctx.colorPalette.set(id, code);
       ctx.allPropColors.clear();
       for (const [key, val] of Object.entries(propColors)) ctx.allPropColors.set(key, val);
-      // Set keyOrder from persisted order; unknown keys will be appended by seedPropStore
       keyOrder = savedOrder.filter(k => k.length > 0);
+    }
+
+    // Pane-specific parent override
+    if (paneParentSet) {
+      if (paneParentId !== null) {
+        let cached = ctx.childrenCache.get(paneParentId);
+        if (!cached) {
+          cached = await fetchChildren(ctx.gId, paneParentId, ctx.limit);
+          ctx.childrenCache.set(paneParentId, cached);
+        }
+        seedPropStore(cached);
+        roots = cached.map(n => make(n, paneParentId, 0));
+      } else {
+        roots = [];
+      }
+      render();
+      return;
     }
 
     let topNodes: ExplorerNode[];
@@ -1461,6 +1518,31 @@ export function createOutlinerView(ctx: GraphEditorContext): {
     render();
   };
 
+  const setParent = async (nodeId: string | null) => {
+    paneParentSet = true;
+    paneParentId = nodeId;
+    paneSelectedId = null;
+    byId.clear();
+    zoomStack.splice(0);
+    baseDepth = 0;
+    updateBreadcrumb();
+    if (nodeId !== null) {
+      let cached = ctx.childrenCache.get(nodeId);
+      if (!cached) {
+        cached = await fetchChildren(ctx.gId, nodeId, ctx.limit);
+        ctx.childrenCache.set(nodeId, cached);
+      }
+      seedPropStore(cached);
+      roots = cached.map(n => make(n, nodeId, 0));
+    } else {
+      roots = [];
+    }
+    render();
+  };
+
+  const getSelectedId = () => paneSelectedId;
+  const setPaneFilterKeys = (keys: Set<string>) => { paneFilterKeys = keys; render(); };
+
   const search = async (query: string) => {
     if (!query) { await load(); return; }
     byId.clear(); zoomStack.splice(0); baseDepth = 0;
@@ -1473,5 +1555,5 @@ export function createOutlinerView(ctx: GraphEditorContext): {
   };
 
   updateBreadcrumb(); // show "ルート" on initial render
-  return { el, filterBtn, load, refresh: render, search };
+  return { el, filterBtn, load, refresh: render, search, setParent, getSelectedId, setPaneFilterKeys };
 }

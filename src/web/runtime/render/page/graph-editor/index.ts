@@ -9,6 +9,7 @@ import { createColumnFns } from './column';
 import { createNodeRowFns } from './node-row';
 import { createDeleteFns } from './delete';
 import { createOutlinerView } from './outliner-view';
+import { createMultiPaneView } from './multi-pane';
 
 export function renderGraphEditor(
   id: string,
@@ -54,9 +55,9 @@ export function renderGraphEditor(
   // ── View mode toggle ──────────────────────────────────────────────
   const VIEW_MODE_KEY = `graph-editor-view:${gId}`;
   const storedView = localStorage.getItem(VIEW_MODE_KEY);
-  let viewMode: 'columns' | 'outline' = storedView === 'outline' ? 'outline' : 'columns';
+  let viewMode: 'columns' | 'outline' | 'panes' = (storedView === 'outline' || storedView === 'panes') ? storedView : 'columns';
 
-  const makeViewBtnStyle = (mode: 'columns' | 'outline') => {
+  const makeViewBtnStyle = (mode: 'columns' | 'outline' | 'panes') => {
     const active = viewMode === mode;
     return `background:${active ? SELECT_STRONG : 'transparent'};border:1px solid ${active ? SELECT_STRONG : BORDER};color:${active ? TEXT_HIGH : TEXT_MID};cursor:pointer;font-size:11px;padding:1px 7px;border-radius:3px;line-height:1.5;`;
   };
@@ -66,10 +67,14 @@ export function renderGraphEditor(
   const outlineViewBtn = document.createElement('button');
   outlineViewBtn.textContent = 'アウトライン';
   outlineViewBtn.title = 'アウトラインビュー';
+  const panesViewBtn = document.createElement('button');
+  panesViewBtn.textContent = 'パネル';
+  panesViewBtn.title = 'マルチパネルビュー';
 
   const refreshViewBtns = () => {
     colViewBtn.style.cssText = makeViewBtnStyle('columns');
     outlineViewBtn.style.cssText = makeViewBtnStyle('outline');
+    panesViewBtn.style.cssText = makeViewBtnStyle('panes');
   };
   refreshViewBtns();
 
@@ -77,6 +82,7 @@ export function renderGraphEditor(
   sep.style.cssText = `width:1px;height:14px;background:${BORDER};margin:0 2px;flex-shrink:0;`;
   topBar.appendChild(colViewBtn);
   topBar.appendChild(outlineViewBtn);
+  topBar.appendChild(panesViewBtn);
   topBar.appendChild(sep);
 
   const makeLangBtnStyle = (l: 'en' | 'ja') => {
@@ -218,6 +224,11 @@ export function renderGraphEditor(
   outliner.el.style.display = 'none';
   outer.appendChild(outliner.el);
 
+  // ── Multi-pane view (needs ctx) ────────────────────────────────────
+  const multiPane = createMultiPaneView(ctx);
+  multiPane.el.style.display = 'none';
+  outer.appendChild(multiPane.el);
+
   // Insert filter button into topBar, left of 他言語 toggle (outline mode only)
   const filterBtnSep = document.createElement('span');
   filterBtnSep.style.cssText = `width:1px;height:14px;background:${BORDER};margin:0 2px;flex-shrink:0;display:none;`;
@@ -226,42 +237,52 @@ export function renderGraphEditor(
   topBar.insertBefore(filterBtnSep, fallbackBtn);
   topBar.insertBefore(filterBtnEl, filterBtnSep);
 
-  // Wire up search for both view modes now that outliner exists
+  // Wire up search for all view modes now that outliner exists
   doSearch = (q: string) => {
     state.searchQuery = q;
     if (viewMode === 'outline') {
       void outliner.search(q);
+    } else if (viewMode === 'panes') {
+      void multiPane.search(q);
     } else {
       childrenCache.delete(null);
       void ctx.loadColumn(null, 0);
     }
   };
 
-  const switchView = (mode: 'columns' | 'outline') => {
+  const switchView = (mode: 'columns' | 'outline' | 'panes') => {
     viewMode = mode;
     localStorage.setItem(VIEW_MODE_KEY, mode);
     refreshViewBtns();
+    // Hide all views
+    outliner.el.style.display = 'none';
+    multiPane.el.style.display = 'none';
+    columnsEl.style.display = 'none';
+    breadcrumbEl.style.display = 'none';
+    filterBtnEl.style.display = 'none';
+    filterBtnSep.style.display = 'none';
+
     if (mode === 'outline') {
-      columnsEl.style.display = 'none';
-      breadcrumbEl.style.display = 'none';
       outliner.el.style.display = 'flex';
       outliner.el.style.flexDirection = 'column';
       filterBtnEl.style.display = '';
       filterBtnSep.style.display = '';
       void outliner.load();
+    } else if (mode === 'panes') {
+      multiPane.el.style.display = 'flex';
+      void multiPane.load();
     } else {
-      outliner.el.style.display = 'none';
       columnsEl.style.display = 'flex';
       breadcrumbEl.style.display = '';
-      filterBtnEl.style.display = 'none';
-      filterBtnSep.style.display = 'none';
     }
   };
   colViewBtn.addEventListener('click', () => switchView('columns'));
   outlineViewBtn.addEventListener('click', () => switchView('outline'));
+  panesViewBtn.addEventListener('click', () => switchView('panes'));
 
   // Restore saved view on load
   if (viewMode === 'outline') switchView('outline');
+  else if (viewMode === 'panes') switchView('panes');
 
   // ── Language / fallback wiring (needs ctx) ─────────────────────────
   const switchLang = (l: 'en' | 'ja') => {
@@ -270,6 +291,8 @@ export function renderGraphEditor(
     fallbackBtn.style.cssText = makeFallbackBtnStyle();
     if (viewMode === 'outline') {
       outliner.refresh();
+    } else if (viewMode === 'panes') {
+      multiPane.refresh();
     } else if (!state.showFallback) {
       // Re-fetch col0 with new lang filter
       childrenCache.delete(null);
