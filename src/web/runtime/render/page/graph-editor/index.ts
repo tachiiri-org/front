@@ -34,6 +34,30 @@ export function renderGraphEditor(
   // In-memory cache: null key = all-nodes (col 0), string key = children of nodeId
   const childrenCache = new Map<string | null, ExplorerNode[]>();
 
+  // ── Persistent children cache (localStorage) ──────────────────────
+  const CACHE_KEY = `ge-cache:${gId}`;
+  try {
+    const raw = localStorage.getItem(CACHE_KEY);
+    if (raw) {
+      const saved: { ts: number; entries: [string | null, ExplorerNode[]][] } = JSON.parse(raw);
+      // Use cached data for up to 12 hours
+      if (Date.now() - saved.ts < 12 * 60 * 60 * 1000) {
+        for (const [k, v] of saved.entries) childrenCache.set(k, v);
+      }
+    }
+  } catch {}
+
+  let _cacheTimer: ReturnType<typeof setTimeout> | null = null;
+  const saveChildrenCache = () => {
+    if (_cacheTimer) clearTimeout(_cacheTimer);
+    _cacheTimer = setTimeout(() => {
+      try {
+        localStorage.setItem(CACHE_KEY, JSON.stringify({ ts: Date.now(), entries: [...childrenCache.entries()] }));
+      } catch {}
+      _cacheTimer = null;
+    }, 1500);
+  };
+
   const outer = document.createElement('div');
   outer.id = id;
   outer.style.cssText = `position:relative;display:flex;flex-direction:column;height:100%;background:${BG};color:${TEXT_HIGH};font-family:sans-serif;font-size:13px;line-height:1.5;overflow:hidden;`;
@@ -216,6 +240,7 @@ export function renderGraphEditor(
     propStore, allPropKeys, allPropColors, colorPalette,
     columnVersion: 0, tempNodeCounter: 0, pendingDeleteId: null,
     propChangeHooks: [] as Array<() => void>,
+    saveChildrenCache,
   } as unknown as GraphEditorContext;
   Object.assign(ctx, createColumnFns(ctx), createNodeRowFns(ctx), createDeleteFns(ctx));
   ctx.refreshBreadcrumb = refreshBreadcrumb;

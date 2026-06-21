@@ -50,7 +50,8 @@ export function createOutlinerView(ctx: GraphEditorContext, paneOpts?: OutlinerP
   load: () => Promise<void>;
   refresh: () => void;
   search: (query: string) => Promise<void>;
-  setParent: (nodeId: string | null) => Promise<void>;
+  setParent: (nodeId: string | null, excludeIds?: Set<string>) => Promise<void>;
+  getAncestorIds: (nodeId: string) => Set<string>;
   getSelectedId: () => string | null;
   setPaneFilterKeys: (keys: Set<string>) => void;
   setPaneSortConfig: (key: string | null, dir: 'asc' | 'desc') => void;
@@ -351,12 +352,18 @@ export function createOutlinerView(ctx: GraphEditorContext, paneOpts?: OutlinerP
     return ctx.rootNodeId ? nodes.filter(n => n.id !== ctx.rootNodeId) : nodes;
   };
 
+  // Sets childrenCache and triggers localStorage persistence
+  const setCachedChildren = (key: string | null, val: ExplorerNode[]) => {
+    ctx.childrenCache.set(key, val);
+    ctx.saveChildrenCache?.();
+  };
+
   const ensureChildren = async (onode: ONode) => {
     if (onode.childrenLoaded) return;
     let cached = ctx.childrenCache.get(onode.node.id);
     if (!cached) {
       cached = await fetchChildrenFiltered(onode.node.id);
-      ctx.childrenCache.set(onode.node.id, cached);
+      setCachedChildren(onode.node.id, cached);
     }
     seedPropStore(cached);
     const excl = ancestorIds(onode); excl.add(onode.node.id);
@@ -1764,10 +1771,11 @@ export function createOutlinerView(ctx: GraphEditorContext, paneOpts?: OutlinerP
         let cached = ctx.childrenCache.get(paneParentId);
         if (!cached) {
           cached = await fetchChildrenFiltered(paneParentId);
-          ctx.childrenCache.set(paneParentId, cached);
+          setCachedChildren(paneParentId, cached);
         }
         seedPropStore(cached);
-        roots = cached.map(n => make(n, paneParentId, 0));
+        // Exclude the pane parent itself (appears via undirected edges)
+        roots = cached.filter(n => n.id !== paneParentId).map(n => make(n, paneParentId, 0));
       } else {
         roots = [];
       }
@@ -1783,7 +1791,7 @@ export function createOutlinerView(ctx: GraphEditorContext, paneOpts?: OutlinerP
       let cached = ctx.childrenCache.get(null);
       if (!cached) {
         cached = await fetchChildrenFiltered(ctx.rootNodeId);
-        ctx.childrenCache.set(null, cached);
+        setCachedChildren(null, cached);
       }
       seedPropStore(cached);
       topNodes = cached; parentId = ctx.rootNodeId;
@@ -1802,7 +1810,17 @@ export function createOutlinerView(ctx: GraphEditorContext, paneOpts?: OutlinerP
     render();
   };
 
-  const setParent = async (nodeId: string | null) => {
+  const getAncestorIds = (nodeId: string): Set<string> => {
+    const result = new Set<string>();
+    let current = byId.get(nodeId);
+    while (current?.parentId) {
+      result.add(current.parentId);
+      current = byId.get(current.parentId);
+    }
+    return result;
+  };
+
+  const setParent = async (nodeId: string | null, excludeIds?: Set<string>) => {
     paneParentSet = true;
     paneParentId = nodeId;
     paneSelectedId = null;
@@ -1814,10 +1832,12 @@ export function createOutlinerView(ctx: GraphEditorContext, paneOpts?: OutlinerP
       let cached = ctx.childrenCache.get(nodeId);
       if (!cached) {
         cached = await fetchChildrenFiltered(nodeId);
-        ctx.childrenCache.set(nodeId, cached);
+        setCachedChildren(nodeId, cached);
       }
       seedPropStore(cached);
-      roots = cached.map(n => make(n, nodeId, 0));
+      // Exclude the pane parent itself and any specified ancestors (they appear via undirected edges)
+      const excl = new Set([nodeId, ...(excludeIds ?? [])]);
+      roots = cached.filter(n => !excl.has(n.id)).map(n => make(n, nodeId, 0));
     } else {
       roots = [];
     }
@@ -1869,5 +1889,5 @@ export function createOutlinerView(ctx: GraphEditorContext, paneOpts?: OutlinerP
     if (i >= 0) ctx.propChangeHooks.splice(i, 1);
   };
 
-  return { el, filterBtn, load, refresh: render, search, setParent, getSelectedId, setPaneFilterKeys, setPaneSortConfig, openKeyMenu, unregister };
+  return { el, filterBtn, load, refresh: render, search, setParent, getAncestorIds, getSelectedId, setPaneFilterKeys, setPaneSortConfig, openKeyMenu, unregister };
 }

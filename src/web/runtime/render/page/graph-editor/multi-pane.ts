@@ -22,7 +22,8 @@ type PaneInstance = {
 };
 
 const STORAGE_KEY = (gId: string) => `graph-editor-panes:${gId}`;
-const DEFAULT_WIDTH = 300;
+const DEFAULT_WIDTH = () => Math.max(280, Math.round(window.innerWidth * 0.20));
+const MIN_PANE_WIDTH = () => Math.max(200, Math.round(window.innerWidth * 0.15));
 
 function savePanes(gId: string, configs: PaneConfig[]) {
   localStorage.setItem(STORAGE_KEY(gId), JSON.stringify(configs));
@@ -45,7 +46,7 @@ function newPaneConfig(label: string): PaneConfig {
     filterKeys: [],
     sortKey: null,
     sortDir: 'asc',
-    width: DEFAULT_WIDTH,
+    width: DEFAULT_WIDTH(),
   };
 }
 
@@ -62,9 +63,15 @@ export function createMultiPaneView(ctx: GraphEditorContext): {
 
   // ── Inter-pane wiring ──────────────────────────────────────────────
   const onPaneSelect = (paneId: string, selectedNodeId: string | null) => {
+    // Get ancestors of the selected node from the source pane to exclude from child panes
+    // (graph edges are undirected so ancestors appear as neighbors; filtering prevents backward nav)
+    const srcPane = panes.find(p => p.config.id === paneId);
+    const ancestorIds = selectedNodeId && srcPane
+      ? srcPane.view.getAncestorIds(selectedNodeId)
+      : new Set<string>();
     for (const p of panes) {
       if (p.config.sourceId === paneId) {
-        void p.view.setParent(selectedNodeId);
+        void p.view.setParent(selectedNodeId, ancestorIds);
       }
     }
   };
@@ -179,7 +186,7 @@ export function createMultiPaneView(ctx: GraphEditorContext): {
         sortArea.appendChild(tag);
       } else {
         const placeholder = document.createElement('span');
-        placeholder.textContent = '順';
+        placeholder.textContent = '並び替え';
         placeholder.style.cssText = `color:${TEXT_DIM};font-size:10px;padding:1px 3px;border:1px solid ${BORDER};border-radius:3px;flex-shrink:0;`;
         sortArea.appendChild(placeholder);
       }
@@ -262,7 +269,7 @@ export function createMultiPaneView(ctx: GraphEditorContext): {
       const startX = e.clientX;
       const startW = config.width;
       const onMove = (ev: MouseEvent) => {
-        config.width = Math.max(180, startW + ev.clientX - startX);
+        config.width = Math.max(MIN_PANE_WIDTH(), startW + ev.clientX - startX);
         containerEl.style.width = `${config.width}px`;
       };
       const onUp = () => {
@@ -357,6 +364,8 @@ export function createMultiPaneView(ctx: GraphEditorContext): {
   `;
   addPaneBtn.addEventListener('click', () => {
     const config = newPaneConfig(`パネル ${panes.length + 1}`);
+    // Default source = rightmost existing pane (1つ左のカラム)
+    if (panes.length > 0) config.sourceId = panes[panes.length - 1].config.id;
     const inst = createPane(config);
     panes.push(inst);
     el.insertBefore(inst.containerEl, addPaneBtn);

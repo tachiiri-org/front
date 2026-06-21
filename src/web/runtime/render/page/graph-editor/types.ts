@@ -76,6 +76,9 @@ export interface GraphEditorContext {
   // Outliner views register a callback here; syncPropChange passes the changed nodeId
   // so each pane can do targeted row removal instead of a full re-render.
   propChangeHooks: Array<(nodeId: string) => void>;
+  // ── Persistence ──
+  // Called after childrenCache is updated so callers can persist it to localStorage
+  saveChildrenCache?: () => void;
   // ── Delete module ──
   deleteNode: (node: ExplorerNode, colIndex: number, focusNodeId?: string) => void;
 }
