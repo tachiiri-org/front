@@ -162,6 +162,13 @@ export async function fetchPropertyOrder(graphId: string): Promise<string[]> {
   return data.keys ?? [];
 }
 
+export async function fetchAllPropertyKeys(graphId: string): Promise<string[]> {
+  const r = await apiFetch(`/api/v1/graph/${graphId}/property-keys`);
+  if (!r.ok) return [];
+  const data = await r.json() as { keys: string[] };
+  return data.keys ?? [];
+}
+
 export async function apiSavePropertyOrder(graphId: string, keys: string[]): Promise<void> {
   await apiFetch(`/api/v1/graph/${graphId}/property-order`, {
     method: 'PUT',

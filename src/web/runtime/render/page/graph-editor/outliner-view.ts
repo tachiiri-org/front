@@ -5,7 +5,7 @@ import {
   apiCreateNode, apiUpdateNode, apiDeleteNode, apiMoveNode, apiMoveBookmark, apiToggleLink,
   apiSetProperty, apiRemoveProperty, apiDeletePropertyKey,
   fetchColors, fetchPropertyColors, apiSetPropertyColor, apiRemovePropertyColor,
-  fetchPropertyOrder, apiSavePropertyOrder,
+  fetchPropertyOrder, apiSavePropertyOrder, fetchAllPropertyKeys,
 } from './api';
 
 type ONode = {
@@ -1484,18 +1484,23 @@ export function createOutlinerView(ctx: GraphEditorContext, paneOpts?: OutlinerP
 
     // Load color palette, property key colors, and key order (parallel, best-effort)
     if (ctx.colorPalette.size === 0) {
-      const [palette, propColors, savedOrder] = await Promise.all([
+      const [palette, propColors, savedOrder, allKeys] = await Promise.all([
         fetchColors(ctx.gId),
         fetchPropertyColors(ctx.gId),
         fetchPropertyOrder(ctx.gId),
+        fetchAllPropertyKeys(ctx.gId),
       ]);
       ctx.colorPalette.clear();
       for (const { id, code } of palette) ctx.colorPalette.set(id, code);
       ctx.allPropColors.clear();
       for (const [key, val] of Object.entries(propColors)) ctx.allPropColors.set(key, val);
       keyOrder = savedOrder.filter(k => k.length > 0);
-      // Ensure allPropKeys is always a superset of keyOrder (it's shared across panes)
+      // Seed allPropKeys from both saved order and all keys actually present on nodes
       for (const k of keyOrder) ctx.allPropKeys.add(k);
+      for (const k of allKeys) {
+        if (!keyOrder.includes(k)) keyOrder.push(k);
+        ctx.allPropKeys.add(k);
+      }
     }
 
     // Pane-specific parent override
