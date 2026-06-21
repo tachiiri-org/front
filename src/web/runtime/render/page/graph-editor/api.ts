@@ -155,6 +155,21 @@ export async function apiRemovePropertyColor(graphId: string, key: string): Prom
   await apiFetch(`/api/v1/graph/${graphId}/property-color/${encodeURIComponent(key)}`, { method: 'DELETE' });
 }
 
+export async function fetchPropertyOrder(graphId: string): Promise<string[]> {
+  const r = await apiFetch(`/api/v1/graph/${graphId}/property-order`);
+  if (!r.ok) return [];
+  const data = await r.json() as { keys: string[] };
+  return data.keys ?? [];
+}
+
+export async function apiSavePropertyOrder(graphId: string, keys: string[]): Promise<void> {
+  await apiFetch(`/api/v1/graph/${graphId}/property-order`, {
+    method: 'PUT',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ keys }),
+  });
+}
+
 export async function apiDeletePropertyKey(graphId: string, key: string): Promise<void> {
   await apiFetch(`/api/v1/graph/${graphId}/property-key/${encodeURIComponent(key)}`, { method: 'DELETE' });
 }

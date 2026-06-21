@@ -5,6 +5,7 @@ import {
   apiCreateNode, apiUpdateNode, apiDeleteNode, apiMoveNode, apiMoveBookmark, apiToggleLink,
   apiSetProperty, apiRemoveProperty, apiDeletePropertyKey,
   fetchColors, fetchPropertyColors, apiSetPropertyColor, apiRemovePropertyColor,
+  fetchPropertyOrder, apiSavePropertyOrder,
 } from './api';
 
 type ONode = {
@@ -35,6 +36,14 @@ export function createOutlinerView(ctx: GraphEditorContext): {
   // Active property key filters
   const filterKeys = new Set<string>();
 
+  // Ordered list of all known property keys (persisted to backend)
+  let keyOrder: string[] = [];
+
+  const addKeyToOrder = (key: string) => {
+    if (!keyOrder.includes(key)) keyOrder.push(key);
+    ctx.allPropKeys.add(key);
+  };
+
   // filterBtn is placed in topBar by index.ts (returned as part of createOutlinerView result)
   const filterBtn = document.createElement('button');
   filterBtn.textContent = 'フィルタ';
@@ -52,92 +61,58 @@ export function createOutlinerView(ctx: GraphEditorContext): {
 
   const showFilterMenu = (x: number, y: number) => {
     document.querySelector('[data-filter-menu]')?.remove();
+    document.querySelector('[data-key-ctx-menu]')?.remove();
+    document.querySelector('[data-color-picker]')?.remove();
     const menu = document.createElement('div');
     menu.dataset.filterMenu = '1';
-    menu.style.cssText = `position:fixed;left:${x}px;top:${y}px;z-index:100;min-width:240px;background:hsl(240,14%,9%);border:1px solid ${BORDER};border-radius:6px;padding:8px;font-size:13px;box-shadow:0 4px 16px rgba(0,0,0,.4);`;
+    menu.style.cssText = `position:fixed;left:${x}px;top:${y}px;z-index:100;width:260px;background:hsl(240,14%,9%);border:1px solid ${BORDER};border-radius:6px;padding:8px;font-size:13px;box-shadow:0 4px 16px rgba(0,0,0,.4);`;
 
     const rebuildFilterMenu = () => {
       menu.innerHTML = '';
 
-      const title = document.createElement('div');
-      title.textContent = 'プロパティ';
-      title.style.cssText = `color:${TEXT_DIM};font-size:11px;margin-bottom:6px;letter-spacing:.05em;`;
-      menu.appendChild(title);
-
-      for (const key of ctx.allPropKeys) {
-        const propColor = ctx.allPropColors.get(key);
-        const row = document.createElement('div');
-        row.style.cssText = `display:flex;align-items:center;gap:6px;margin-bottom:4px;`;
-
-        const cb = document.createElement('input');
-        cb.type = 'checkbox';
-        cb.checked = filterKeys.has(key);
-        cb.style.cssText = `flex-shrink:0;cursor:pointer;`;
-        cb.addEventListener('change', () => {
-          if (cb.checked) filterKeys.add(key); else filterKeys.delete(key);
-          updateFilterBtn();
-          render();
-        });
-
-        const labelEl = document.createElement('span');
-        labelEl.textContent = key;
-        labelEl.style.cssText = `flex:1;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;color:${propColor?.code ?? TEXT_HIGH};cursor:pointer;`;
-        labelEl.addEventListener('click', () => { cb.checked = !cb.checked; cb.dispatchEvent(new Event('change')); });
-
-        const swatch = document.createElement('button');
-        swatch.style.cssText = `flex-shrink:0;width:16px;height:16px;border-radius:3px;border:1px solid ${BORDER};background:${propColor?.code ?? TEXT_DIM};cursor:pointer;`;
-        swatch.addEventListener('click', (e) => { e.stopPropagation(); showColorPickerFor(key, swatch, rebuildFilterMenu); });
-
-        const delLink = document.createElement('button');
-        delLink.textContent = '削除';
-        delLink.style.cssText = `background:transparent;border:none;color:${TEXT_DIM};cursor:pointer;font-size:11px;padding:0;flex-shrink:0;text-decoration:underline;`;
-        delLink.addEventListener('click', (e) => {
+      // Active filter tags
+      const tagsEl = document.createElement('div');
+      tagsEl.style.cssText = `display:flex;flex-wrap:wrap;gap:4px;margin-bottom:6px;min-height:4px;`;
+      for (const key of keyOrder) {
+        if (!filterKeys.has(key)) continue;
+        const col = ctx.allPropColors.get(key)?.code ?? TEXT_DIM;
+        const tag = document.createElement('span');
+        tag.style.cssText = `display:inline-flex;align-items:center;gap:3px;padding:2px 8px;border-radius:4px;background:${col};color:#fff;font-size:12px;font-weight:500;`;
+        const namePart = document.createElement('span'); namePart.textContent = key;
+        const xBtn = document.createElement('button');
+        xBtn.textContent = '×';
+        xBtn.style.cssText = `background:transparent;border:none;color:#fff;opacity:.7;cursor:pointer;padding:0 0 0 3px;font-size:11px;line-height:1;`;
+        xBtn.addEventListener('click', (e) => {
           e.stopPropagation();
-          ctx.allPropKeys.delete(key);
-          ctx.allPropColors.delete(key);
           filterKeys.delete(key);
-          ctx.propStore.forEach((props, nid) => {
-            if (key in props) {
-              delete props[key];
-              const o = byId.get(nid);
-              if (o) { o.node.properties = { ...props }; updateExpandMarker(o); }
-            }
-          });
-          ctx.childrenCache.forEach(nodes => {
-            for (const n of nodes) { if (n.properties && key in n.properties) delete n.properties[key]; }
-          });
-          void apiDeletePropertyKey(ctx.gId, key);
           updateFilterBtn();
           render();
           rebuildFilterMenu();
         });
-
-        row.append(cb, swatch, labelEl, delLink);
-        menu.appendChild(row);
+        tag.append(namePart, xBtn);
+        tagsEl.appendChild(tag);
       }
+      menu.appendChild(tagsEl);
+
+      const subTitle = document.createElement('div');
+      subTitle.textContent = 'フィルタするオプションを選択または作成';
+      subTitle.style.cssText = `color:${TEXT_DIM};font-size:11px;margin-bottom:4px;`;
+      menu.appendChild(subTitle);
+
+      const searchIn = document.createElement('input');
+      searchIn.placeholder = '検索 または 新規作成...';
+      searchIn.style.cssText = `width:100%;box-sizing:border-box;background:transparent;border:1px solid ${BORDER};border-radius:3px;padding:4px 6px;color:${TEXT_HIGH};font-size:12px;outline:none;font-family:inherit;margin-bottom:4px;`;
+      menu.appendChild(searchIn);
 
       const divider = document.createElement('div');
-      divider.style.cssText = `border-top:1px solid ${BORDER};margin:6px 0;`;
+      divider.style.cssText = `border-top:1px solid ${BORDER};margin:2px 0 4px;`;
       menu.appendChild(divider);
 
-      const addRow = document.createElement('div');
-      addRow.style.cssText = `display:flex;align-items:center;gap:4px;`;
-      const propIn = document.createElement('input');
-      propIn.placeholder = '新しいキー';
-      propIn.style.cssText = `flex:1;background:transparent;border:1px solid ${BORDER};border-radius:3px;padding:3px 5px;color:${TEXT_HIGH};font-size:12px;outline:none;font-family:inherit;min-width:0;`;
-      const addBtn = document.createElement('button');
-      addBtn.textContent = '+';
-      addBtn.style.cssText = `background:transparent;border:1px solid ${BORDER};border-radius:3px;color:${TEXT_MID};cursor:pointer;padding:2px 7px;font-size:13px;flex-shrink:0;`;
-      const doAdd = () => {
-        const k = propIn.value.trim(); if (!k) return;
-        ctx.allPropKeys.add(k);
-        propIn.value = '';
-        rebuildFilterMenu();
-      };
-      addBtn.addEventListener('click', doAdd);
-      propIn.addEventListener('keydown', (e) => { if (e.key === 'Enter') doAdd(); });
-      addRow.append(propIn, addBtn);
-      menu.appendChild(addRow);
+      const listContainer = document.createElement('div');
+      listContainer.style.cssText = `max-height:220px;overflow-y:auto;`;
+      searchIn.addEventListener('input', () => buildKeyList(listContainer, 'filter', null, searchIn, rebuildFilterMenu));
+      buildKeyList(listContainer, 'filter', null, searchIn, rebuildFilterMenu);
+      menu.appendChild(listContainer);
     };
 
     rebuildFilterMenu();
@@ -148,16 +123,12 @@ export function createOutlinerView(ctx: GraphEditorContext): {
       if (r.bottom > window.innerHeight) menu.style.top = `${y - r.height}px`;
     });
     const close = (e: MouseEvent) => {
-      if (!menu.contains(e.target as Node)) { menu.remove(); document.removeEventListener('click', close, true); }
+      const t = e.target as Element;
+      if (!menu.contains(t) && !t?.closest('[data-key-ctx-menu]') && !t?.closest('[data-color-picker]'))
+        { menu.remove(); document.removeEventListener('click', close, true); }
     };
     setTimeout(() => document.addEventListener('click', close, true), 0);
   };
-
-  filterBtn.addEventListener('click', (e) => {
-    const r = filterBtn.getBoundingClientRect();
-    showFilterMenu(r.left, r.bottom + 4);
-    e.stopPropagation();
-  });
 
   // Scrollable list
   const listEl = document.createElement('div');
@@ -600,7 +571,7 @@ export function createOutlinerView(ctx: GraphEditorContext): {
     updater(props);
     if (Object.keys(props).length > 0) ctx.propStore.set(nodeId, props);
     else ctx.propStore.delete(nodeId);
-    for (const k of Object.keys(props)) ctx.allPropKeys.add(k);
+    for (const k of Object.keys(props)) addKeyToOrder(k);
     // Also sync to ExplorerNode instances already in memory
     ctx.childrenCache.forEach(nodes => {
       for (const n of nodes) { if (n.id === nodeId) n.properties = { ...props }; }
@@ -651,103 +622,245 @@ export function createOutlinerView(ctx: GraphEditorContext): {
     setTimeout(() => document.addEventListener('click', closePicker, true), 0);
   };
 
+  // Delete a property key globally from all nodes + memory
+  const deleteKey = (key: string, onDone: () => void) => {
+    keyOrder = keyOrder.filter(k => k !== key);
+    ctx.allPropKeys.delete(key);
+    ctx.allPropColors.delete(key);
+    filterKeys.delete(key);
+    ctx.propStore.forEach((props, nid) => {
+      if (key in props) {
+        delete props[key];
+        const o = byId.get(nid);
+        if (o) { o.node.properties = { ...props }; updateExpandMarker(o); }
+      }
+    });
+    ctx.childrenCache.forEach(nodes => {
+      for (const n of nodes) { if (n.properties && key in n.properties) delete n.properties[key]; }
+    });
+    void apiDeletePropertyKey(ctx.gId, key);
+    void apiSavePropertyOrder(ctx.gId, keyOrder);
+    updateFilterBtn();
+    render();
+    onDone();
+  };
+
+  // ⋯ context menu per key: color change + delete
+  const showKeyContextMenu = (key: string, anchor: HTMLElement, onDone: () => void) => {
+    document.querySelector('[data-key-ctx-menu]')?.remove();
+    const m = document.createElement('div');
+    m.dataset.keyCtxMenu = '1';
+    m.style.cssText = `position:fixed;z-index:102;background:hsl(240,14%,9%);border:1px solid ${BORDER};border-radius:6px;padding:4px;font-size:12px;box-shadow:0 4px 12px rgba(0,0,0,.4);min-width:120px;`;
+    const ar = anchor.getBoundingClientRect();
+    m.style.left = `${ar.left}px`;
+    m.style.top = `${ar.bottom + 2}px`;
+    const mkItem = (text: string, color?: string) => {
+      const item = document.createElement('div');
+      item.textContent = text;
+      item.style.cssText = `padding:5px 10px;cursor:pointer;border-radius:4px;color:${color ?? TEXT_HIGH};`;
+      item.addEventListener('mouseenter', () => { item.style.background = 'rgba(255,255,255,.08)'; });
+      item.addEventListener('mouseleave', () => { item.style.background = ''; });
+      return item;
+    };
+    const colorItem = mkItem('色を変更');
+    colorItem.addEventListener('click', () => { m.remove(); showColorPickerFor(key, anchor, onDone); });
+    const deleteItem = mkItem('削除', '#e57373');
+    deleteItem.addEventListener('click', () => { m.remove(); deleteKey(key, onDone); });
+    m.append(colorItem, deleteItem);
+    document.body.appendChild(m);
+    requestAnimationFrame(() => {
+      const r = m.getBoundingClientRect();
+      if (r.right > window.innerWidth) m.style.left = `${window.innerWidth - r.width - 8}px`;
+      if (r.bottom > window.innerHeight) m.style.top = `${ar.top - r.height - 2}px`;
+    });
+    const close = (e: MouseEvent) => {
+      if (!m.contains(e.target as Node)) { m.remove(); document.removeEventListener('click', close, true); }
+    };
+    setTimeout(() => document.addEventListener('click', close, true), 0);
+  };
+
+  // Build a Notion-style key list (shared by property menu and filter menu)
+  // mode 'node': click pill toggles assignment on nodeId; mode 'filter': click pill toggles filterKeys
+  const buildKeyList = (
+    container: HTMLElement,
+    mode: 'node' | 'filter',
+    nodeId: string | null,
+    searchIn: HTMLInputElement,
+    onRedraw: () => void,
+  ) => {
+    container.innerHTML = '';
+    let dragSrc: string | null = null;
+    const nodeProps = nodeId ? (ctx.propStore.get(nodeId) ?? {}) : {};
+    const filter = searchIn.value.trim().toLowerCase();
+    const keys = filter ? keyOrder.filter(k => k.toLowerCase().includes(filter)) : keyOrder;
+
+    for (const key of keys) {
+      const active = mode === 'node' ? key in nodeProps : filterKeys.has(key);
+      const propColor = ctx.allPropColors.get(key);
+      const col = propColor?.code ?? TEXT_DIM;
+
+      const row = document.createElement('div');
+      row.draggable = true;
+      row.style.cssText = `display:flex;align-items:center;gap:6px;padding:3px 4px;border-radius:4px;cursor:default;border:2px solid transparent;`;
+      row.addEventListener('mouseenter', () => { row.style.background = 'rgba(255,255,255,.05)'; });
+      row.addEventListener('mouseleave', () => { row.style.background = ''; });
+
+      // ⠿ drag handle
+      const handle = document.createElement('span');
+      handle.textContent = '⠿';
+      handle.style.cssText = `color:${TEXT_DIM};cursor:grab;font-size:13px;flex-shrink:0;user-select:none;`;
+
+      // Colored pill
+      const pill = document.createElement('span');
+      pill.textContent = key;
+      pill.style.cssText = `flex:1;padding:3px 10px;border-radius:4px;background:${col};color:#fff;font-size:12px;cursor:pointer;font-weight:500;${active ? 'outline:2px solid rgba(255,255,255,.6);outline-offset:-1px;' : ''}`;
+      pill.addEventListener('click', () => {
+        if (mode === 'node' && nodeId) {
+          const onode = byId.get(nodeId);
+          if (active) {
+            syncPropChange(nodeId, p => { delete p[key]; });
+            void apiRemoveProperty(ctx.gId, nodeId, key);
+          } else {
+            syncPropChange(nodeId, p => { p[key] = '●'; });
+            void apiSetProperty(ctx.gId, nodeId, key, '●');
+          }
+          if (onode) updateExpandMarker(onode);
+        } else if (mode === 'filter') {
+          if (active) filterKeys.delete(key); else filterKeys.add(key);
+          updateFilterBtn();
+          render();
+        }
+        onRedraw();
+      });
+
+      // ⋯ button
+      const dotsBtn = document.createElement('button');
+      dotsBtn.textContent = '···';
+      dotsBtn.style.cssText = `background:transparent;border:none;color:${TEXT_DIM};cursor:pointer;font-size:15px;padding:0 2px;flex-shrink:0;line-height:1;`;
+      dotsBtn.addEventListener('click', (e) => {
+        e.stopPropagation();
+        showKeyContextMenu(key, dotsBtn, onRedraw);
+      });
+
+      // DnD
+      row.addEventListener('dragstart', (e) => {
+        dragSrc = key; row.style.opacity = '0.4';
+        e.dataTransfer!.effectAllowed = 'move';
+      });
+      row.addEventListener('dragend', () => { row.style.opacity = ''; dragSrc = null; });
+      row.addEventListener('dragover', (e) => {
+        e.preventDefault();
+        row.style.borderTop = `2px solid ${TEXT_MID}`;
+        row.style.borderBottom = 'none';
+      });
+      row.addEventListener('dragleave', () => { row.style.borderTop = ''; });
+      row.addEventListener('drop', (e) => {
+        e.preventDefault(); row.style.borderTop = '';
+        if (dragSrc && dragSrc !== key) {
+          const fi = keyOrder.indexOf(dragSrc), ti = keyOrder.indexOf(key);
+          if (fi >= 0 && ti >= 0) {
+            keyOrder.splice(fi, 1);
+            keyOrder.splice(ti, 0, dragSrc);
+            void apiSavePropertyOrder(ctx.gId, keyOrder);
+          }
+        }
+        onRedraw();
+      });
+
+      row.append(handle, pill, dotsBtn);
+      container.appendChild(row);
+    }
+
+    // Create option if search text doesn't match existing key
+    const val = searchIn.value.trim();
+    if (val && !keyOrder.includes(val)) {
+      const createRow = document.createElement('div');
+      createRow.style.cssText = `display:flex;align-items:center;gap:6px;padding:3px 4px;border-radius:4px;cursor:pointer;`;
+      createRow.addEventListener('mouseenter', () => { createRow.style.background = 'rgba(255,255,255,.05)'; });
+      createRow.addEventListener('mouseleave', () => { createRow.style.background = ''; });
+      const handle2 = document.createElement('span');
+      handle2.style.cssText = `width:13px;flex-shrink:0;`;
+      const createPill = document.createElement('span');
+      createPill.style.cssText = `flex:1;padding:3px 10px;border-radius:4px;background:${TEXT_DIM};color:#fff;font-size:12px;font-weight:500;`;
+      createPill.textContent = `「${val}」を作成`;
+      createRow.append(handle2, createPill);
+      createRow.addEventListener('click', () => {
+        addKeyToOrder(val);
+        if (mode === 'node' && nodeId) {
+          syncPropChange(nodeId, p => { p[val] = '●'; });
+          void apiSetProperty(ctx.gId, nodeId, val, '●');
+          const onode = byId.get(nodeId);
+          if (onode) updateExpandMarker(onode);
+        } else if (mode === 'filter') {
+          filterKeys.add(val);
+          updateFilterBtn();
+          render();
+        }
+        searchIn.value = '';
+        onRedraw();
+      });
+      container.appendChild(createRow);
+    }
+  };
+
   const showPropertyMenu = (onode: ONode, x: number, y: number) => {
     document.querySelector('[data-prop-menu]')?.remove();
+    document.querySelector('[data-key-ctx-menu]')?.remove();
+    document.querySelector('[data-color-picker]')?.remove();
 
     const menu = document.createElement('div');
     menu.dataset.propMenu = '1';
-    menu.style.cssText = `position:fixed;left:${x}px;top:${y}px;z-index:100;min-width:200px;background:hsl(240,14%,9%);border:1px solid ${BORDER};border-radius:6px;padding:8px;font-size:13px;box-shadow:0 4px 16px rgba(0,0,0,.4);`;
+    menu.style.cssText = `position:fixed;left:${x}px;top:${y}px;z-index:100;width:260px;background:hsl(240,14%,9%);border:1px solid ${BORDER};border-radius:6px;padding:8px;font-size:13px;box-shadow:0 4px 16px rgba(0,0,0,.4);`;
 
     const rebuild = () => {
       menu.innerHTML = '';
-      const title = document.createElement('div');
-      title.textContent = 'プロパティ';
-      title.style.cssText = `color:${TEXT_DIM};font-size:11px;margin-bottom:6px;letter-spacing:.05em;`;
-      menu.appendChild(title);
-
       const nodeProps = ctx.propStore.get(onode.node.id) ?? {};
-      for (const key of ctx.allPropKeys) {
-        const assigned = key in nodeProps;
-        const propColor = ctx.allPropColors.get(key);
-        const row = document.createElement('div');
-        row.style.cssText = `display:flex;align-items:center;gap:6px;margin-bottom:4px;`;
 
-        const cb = document.createElement('input');
-        cb.type = 'checkbox'; cb.checked = assigned;
-        cb.style.cssText = `flex-shrink:0;cursor:pointer;`;
-        cb.addEventListener('change', () => {
-          if (cb.checked) {
-            syncPropChange(onode.node.id, p => { p[key] = '●'; });
-            void apiSetProperty(ctx.gId, onode.node.id, key, '●');
-          } else {
-            syncPropChange(onode.node.id, p => { delete p[key]; });
-            void apiRemoveProperty(ctx.gId, onode.node.id, key);
-          }
+      // Selected tags row
+      const tagsEl = document.createElement('div');
+      tagsEl.style.cssText = `display:flex;flex-wrap:wrap;gap:4px;margin-bottom:6px;min-height:4px;`;
+      for (const key of keyOrder) {
+        if (!(key in nodeProps)) continue;
+        const col = ctx.allPropColors.get(key)?.code ?? TEXT_DIM;
+        const tag = document.createElement('span');
+        tag.style.cssText = `display:inline-flex;align-items:center;gap:3px;padding:2px 8px;border-radius:4px;background:${col};color:#fff;font-size:12px;font-weight:500;`;
+        const namePart = document.createElement('span'); namePart.textContent = key;
+        const xBtn = document.createElement('button');
+        xBtn.textContent = '×';
+        xBtn.style.cssText = `background:transparent;border:none;color:#fff;opacity:.7;cursor:pointer;padding:0 0 0 3px;font-size:11px;line-height:1;`;
+        xBtn.addEventListener('click', (e) => {
+          e.stopPropagation();
+          syncPropChange(onode.node.id, p => { delete p[key]; });
+          void apiRemoveProperty(ctx.gId, onode.node.id, key);
           updateExpandMarker(onode);
           rebuild();
         });
-
-        const labelEl = document.createElement('span');
-        labelEl.textContent = key;
-        labelEl.style.cssText = `flex:1;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;color:${assigned ? (propColor?.code ?? TEXT_HIGH) : TEXT_DIM};cursor:pointer;`;
-        labelEl.addEventListener('click', () => { cb.checked = !cb.checked; cb.dispatchEvent(new Event('change')); });
-
-        const swatch = document.createElement('button');
-        swatch.style.cssText = `flex-shrink:0;width:16px;height:16px;border-radius:3px;border:1px solid ${BORDER};background:${propColor?.code ?? TEXT_DIM};cursor:pointer;`;
-        swatch.addEventListener('click', (e) => { e.stopPropagation(); showColorPickerFor(key, swatch, rebuild); });
-
-        const delLink = document.createElement('button');
-        delLink.textContent = '削除';
-        delLink.style.cssText = `background:transparent;border:none;color:${TEXT_DIM};cursor:pointer;font-size:11px;padding:0;flex-shrink:0;text-decoration:underline;`;
-        delLink.addEventListener('click', (e) => {
-          e.stopPropagation();
-          ctx.allPropKeys.delete(key);
-          ctx.allPropColors.delete(key);
-          filterKeys.delete(key);
-          ctx.propStore.forEach((props, nid) => {
-            if (key in props) {
-              delete props[key];
-              const o = byId.get(nid);
-              if (o) { o.node.properties = { ...props }; updateExpandMarker(o); }
-            }
-          });
-          ctx.childrenCache.forEach(nodes => {
-            for (const n of nodes) { if (n.properties && key in n.properties) delete n.properties[key]; }
-          });
-          void apiDeletePropertyKey(ctx.gId, key);
-          updateFilterBtn();
-          render();
-          rebuild();
-        });
-
-        row.append(cb, swatch, labelEl, delLink);
-        menu.appendChild(row);
+        tag.append(namePart, xBtn);
+        tagsEl.appendChild(tag);
       }
+      menu.appendChild(tagsEl);
+
+      // Search / create input
+      const subTitle = document.createElement('div');
+      subTitle.textContent = 'オプションを選択または作成';
+      subTitle.style.cssText = `color:${TEXT_DIM};font-size:11px;margin-bottom:4px;`;
+      menu.appendChild(subTitle);
+
+      const searchIn = document.createElement('input');
+      searchIn.placeholder = '検索 または 新規作成...';
+      searchIn.style.cssText = `width:100%;box-sizing:border-box;background:transparent;border:1px solid ${BORDER};border-radius:3px;padding:4px 6px;color:${TEXT_HIGH};font-size:12px;outline:none;font-family:inherit;margin-bottom:4px;`;
+      menu.appendChild(searchIn);
 
       const divider = document.createElement('div');
-      divider.style.cssText = `border-top:1px solid ${BORDER};margin:6px 0;`;
+      divider.style.cssText = `border-top:1px solid ${BORDER};margin:2px 0 4px;`;
       menu.appendChild(divider);
 
-      const addRow = document.createElement('div');
-      addRow.style.cssText = `display:flex;align-items:center;gap:4px;`;
-      const propIn = document.createElement('input');
-      propIn.placeholder = '新しいキー';
-      propIn.style.cssText = `flex:1;background:transparent;border:1px solid ${BORDER};border-radius:3px;padding:3px 5px;color:${TEXT_HIGH};font-size:12px;outline:none;font-family:inherit;min-width:0;`;
-      const addBtn = document.createElement('button');
-      addBtn.textContent = '+';
-      addBtn.style.cssText = `background:transparent;border:1px solid ${BORDER};border-radius:3px;color:${TEXT_MID};cursor:pointer;padding:2px 7px;font-size:13px;flex-shrink:0;`;
-      const doAdd = () => {
-        const k = propIn.value.trim(); if (!k) return;
-        ctx.allPropKeys.add(k);
-        syncPropChange(onode.node.id, p => { p[k] = '●'; });
-        void apiSetProperty(ctx.gId, onode.node.id, k, '●');
-        propIn.value = '';
-        rebuild();
-      };
-      addBtn.addEventListener('click', doAdd);
-      propIn.addEventListener('keydown', (e) => { if (e.key === 'Enter') doAdd(); });
-      addRow.append(propIn, addBtn);
-      menu.appendChild(addRow);
+      // Key list
+      const listContainer = document.createElement('div');
+      listContainer.style.cssText = `max-height:220px;overflow-y:auto;`;
+      searchIn.addEventListener('input', () => buildKeyList(listContainer, 'node', onode.node.id, searchIn, rebuild));
+      buildKeyList(listContainer, 'node', onode.node.id, searchIn, rebuild);
+      menu.appendChild(listContainer);
     };
 
     rebuild();
@@ -758,11 +871,16 @@ export function createOutlinerView(ctx: GraphEditorContext): {
       if (r.bottom > window.innerHeight) menu.style.top = `${y - r.height}px`;
     });
     const onOutside = (e: MouseEvent) => {
-      if (!menu.contains(e.target as Node) && !(e.target as Element)?.closest('[data-color-picker]'))
+      const t = e.target as Element;
+      if (!menu.contains(t) && !t?.closest('[data-key-ctx-menu]') && !t?.closest('[data-color-picker]'))
         { menu.remove(); document.removeEventListener('mousedown', onOutside); }
     };
     const onKey = (e: KeyboardEvent) => {
-      if (e.key === 'Escape') { menu.remove(); document.removeEventListener('keydown', onKey); }
+      if (e.key === 'Escape') {
+        document.querySelector('[data-key-ctx-menu]')?.remove();
+        document.querySelector('[data-color-picker]')?.remove();
+        menu.remove(); document.removeEventListener('keydown', onKey);
+      }
     };
     setTimeout(() => { document.addEventListener('mousedown', onOutside); document.addEventListener('keydown', onKey); }, 0);
   };
@@ -1143,7 +1261,7 @@ export function createOutlinerView(ctx: GraphEditorContext): {
     for (const n of nodes) {
       if (n.properties && Object.keys(n.properties).length > 0) {
         ctx.propStore.set(n.id, { ...ctx.propStore.get(n.id), ...n.properties });
-        for (const k of Object.keys(n.properties)) ctx.allPropKeys.add(k);
+        for (const k of Object.keys(n.properties)) addKeyToOrder(k);
       }
     }
   };
@@ -1154,16 +1272,19 @@ export function createOutlinerView(ctx: GraphEditorContext): {
     baseDepth = 0;
     updateBreadcrumb();
 
-    // Load color palette and property key colors (parallel, best-effort)
+    // Load color palette, property key colors, and key order (parallel, best-effort)
     if (ctx.colorPalette.size === 0) {
-      const [palette, propColors] = await Promise.all([
+      const [palette, propColors, savedOrder] = await Promise.all([
         fetchColors(ctx.gId),
         fetchPropertyColors(ctx.gId),
+        fetchPropertyOrder(ctx.gId),
       ]);
       ctx.colorPalette.clear();
       for (const { id, code } of palette) ctx.colorPalette.set(id, code);
       ctx.allPropColors.clear();
       for (const [key, val] of Object.entries(propColors)) ctx.allPropColors.set(key, val);
+      // Set keyOrder from persisted order; unknown keys will be appended by seedPropStore
+      keyOrder = savedOrder.filter(k => k.length > 0);
     }
 
     let topNodes: ExplorerNode[];
