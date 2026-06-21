@@ -18,6 +18,7 @@ type ONode = {
 
 export function createOutlinerView(ctx: GraphEditorContext): {
   el: HTMLElement;
+  filterBtn: HTMLElement;
   load: () => Promise<void>;
   refresh: () => void;
   search: (query: string) => Promise<void>;
@@ -34,41 +35,20 @@ export function createOutlinerView(ctx: GraphEditorContext): {
   // Active property key filters
   const filterKeys = new Set<string>();
 
-  const filterEl = document.createElement('div');
-  filterEl.style.cssText = `display:flex;align-items:center;gap:6px;padding:3px 8px 3px 10px;border-bottom:1px solid ${BORDER};flex-shrink:0;`;
-
+  // filterBtn is placed in topBar by index.ts (returned as part of createOutlinerView result)
   const filterBtn = document.createElement('button');
   filterBtn.textContent = 'フィルタ';
-  filterBtn.style.cssText = `background:transparent;border:none;color:${TEXT_DIM};font-size:11px;cursor:pointer;padding:0;flex-shrink:0;`;
 
-  const filterChips = document.createElement('span');
-  filterChips.style.cssText = `flex:1;display:flex;gap:4px;flex-wrap:wrap;`;
-
-  const filterClearBtn = document.createElement('button');
-  filterClearBtn.textContent = '×';
-  filterClearBtn.title = 'フィルタをクリア';
-  filterClearBtn.style.cssText = `background:transparent;border:none;color:${TEXT_DIM};cursor:pointer;font-size:13px;padding:0 2px;display:none;flex-shrink:0;`;
-  filterClearBtn.addEventListener('click', () => {
-    filterKeys.clear();
-    filterClearBtn.style.display = 'none';
-    updateFilterChips();
-    render();
-  });
-
-  filterEl.append(filterBtn, filterChips, filterClearBtn);
-  el.appendChild(filterEl);
-
-  const updateFilterChips = () => {
-    filterChips.innerHTML = '';
-    for (const key of filterKeys) {
-      const chip = document.createElement('span');
-      const col = ctx.allPropColors.get(key)?.code;
-      chip.style.cssText = `font-size:11px;padding:1px 6px;border-radius:10px;background:${col ?? TEXT_DIM};color:#fff;`;
-      chip.textContent = key;
-      filterChips.appendChild(chip);
-    }
-    filterClearBtn.style.display = filterKeys.size > 0 ? '' : 'none';
+  const updateFilterBtn = () => {
+    const n = filterKeys.size;
+    filterBtn.textContent = n > 0 ? `フィルタ (${n})` : 'フィルタ';
   };
+
+  filterBtn.addEventListener('click', (e) => {
+    const r = filterBtn.getBoundingClientRect();
+    showFilterMenu(r.left, r.bottom + 4);
+    e.stopPropagation();
+  });
 
   const showFilterMenu = (x: number, y: number) => {
     document.querySelector('[data-filter-menu]')?.remove();
@@ -95,7 +75,7 @@ export function createOutlinerView(ctx: GraphEditorContext): {
         cb.style.cssText = `flex-shrink:0;cursor:pointer;`;
         cb.addEventListener('change', () => {
           if (cb.checked) filterKeys.add(key); else filterKeys.delete(key);
-          updateFilterChips();
+          updateFilterBtn();
           render();
         });
 
@@ -105,7 +85,7 @@ export function createOutlinerView(ctx: GraphEditorContext): {
         labelEl.addEventListener('click', () => { cb.checked = !cb.checked; cb.dispatchEvent(new Event('change')); });
 
         const swatch = document.createElement('button');
-        swatch.style.cssText = `flex-shrink:0;width:14px;height:14px;border-radius:3px;border:1px solid ${BORDER};background:${propColor?.code ?? TEXT_DIM};cursor:pointer;`;
+        swatch.style.cssText = `flex-shrink:0;width:16px;height:16px;border-radius:3px;border:1px solid ${BORDER};background:${propColor?.code ?? TEXT_DIM};cursor:pointer;`;
         swatch.addEventListener('click', (e) => { e.stopPropagation(); showColorPickerFor(key, swatch, rebuildFilterMenu); });
 
         const delLink = document.createElement('button');
@@ -127,12 +107,12 @@ export function createOutlinerView(ctx: GraphEditorContext): {
             for (const n of nodes) { if (n.properties && key in n.properties) delete n.properties[key]; }
           });
           void apiDeletePropertyKey(ctx.gId, key);
-          updateFilterChips();
+          updateFilterBtn();
           render();
           rebuildFilterMenu();
         });
 
-        row.append(cb, labelEl, swatch, delLink);
+        row.append(cb, swatch, labelEl, delLink);
         menu.appendChild(row);
       }
 
@@ -713,7 +693,7 @@ export function createOutlinerView(ctx: GraphEditorContext): {
         labelEl.addEventListener('click', () => { cb.checked = !cb.checked; cb.dispatchEvent(new Event('change')); });
 
         const swatch = document.createElement('button');
-        swatch.style.cssText = `flex-shrink:0;width:14px;height:14px;border-radius:3px;border:1px solid ${BORDER};background:${propColor?.code ?? TEXT_DIM};cursor:pointer;`;
+        swatch.style.cssText = `flex-shrink:0;width:16px;height:16px;border-radius:3px;border:1px solid ${BORDER};background:${propColor?.code ?? TEXT_DIM};cursor:pointer;`;
         swatch.addEventListener('click', (e) => { e.stopPropagation(); showColorPickerFor(key, swatch, rebuild); });
 
         const delLink = document.createElement('button');
@@ -735,12 +715,12 @@ export function createOutlinerView(ctx: GraphEditorContext): {
             for (const n of nodes) { if (n.properties && key in n.properties) delete n.properties[key]; }
           });
           void apiDeletePropertyKey(ctx.gId, key);
-          updateFilterChips();
+          updateFilterBtn();
           render();
           rebuild();
         });
 
-        row.append(cb, labelEl, swatch, delLink);
+        row.append(cb, swatch, labelEl, delLink);
         menu.appendChild(row);
       }
 
@@ -1225,5 +1205,5 @@ export function createOutlinerView(ctx: GraphEditorContext): {
   };
 
   updateBreadcrumb(); // show "ルート" on initial render
-  return { el, load, refresh: render, search };
+  return { el, filterBtn, load, refresh: render, search };
 }

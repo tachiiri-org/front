@@ -218,6 +218,14 @@ export function renderGraphEditor(
   outliner.el.style.display = 'none';
   outer.appendChild(outliner.el);
 
+  // Insert filter button into topBar, left of 他言語 toggle (outline mode only)
+  const filterBtnSep = document.createElement('span');
+  filterBtnSep.style.cssText = `width:1px;height:14px;background:${BORDER};margin:0 2px;flex-shrink:0;display:none;`;
+  const filterBtnEl = outliner.filterBtn;
+  filterBtnEl.style.cssText = `background:transparent;border:1px solid ${BORDER};color:${TEXT_MID};cursor:pointer;font-size:11px;padding:1px 7px;border-radius:3px;line-height:1.5;display:none;`;
+  topBar.insertBefore(filterBtnSep, fallbackBtn);
+  topBar.insertBefore(filterBtnEl, filterBtnSep);
+
   // Wire up search for both view modes now that outliner exists
   doSearch = (q: string) => {
     state.searchQuery = q;
@@ -238,11 +246,15 @@ export function renderGraphEditor(
       breadcrumbEl.style.display = 'none';
       outliner.el.style.display = 'flex';
       outliner.el.style.flexDirection = 'column';
+      filterBtnEl.style.display = '';
+      filterBtnSep.style.display = '';
       void outliner.load();
     } else {
       outliner.el.style.display = 'none';
       columnsEl.style.display = 'flex';
       breadcrumbEl.style.display = '';
+      filterBtnEl.style.display = 'none';
+      filterBtnSep.style.display = 'none';
     }
   };
   colViewBtn.addEventListener('click', () => switchView('columns'));
