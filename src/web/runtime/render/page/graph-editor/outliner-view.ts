@@ -53,6 +53,7 @@ export function createOutlinerView(ctx: GraphEditorContext, paneOpts?: OutlinerP
   setParent: (nodeId: string | null) => Promise<void>;
   getSelectedId: () => string | null;
   setPaneFilterKeys: (keys: Set<string>) => void;
+  unregister: () => void;
 } {
   // Outer wrapper (returned as el)
   const el = document.createElement('div');
@@ -375,13 +376,14 @@ export function createOutlinerView(ctx: GraphEditorContext, paneOpts?: OutlinerP
   const expandInDom = (onode: ONode) => {
     onode.expanded = true;
     updateExpandMarker(onode);
-    let anchor = rowMap.get(onode.node.id);
+    let anchor: HTMLElement | undefined = rowMap.get(onode.node.id);
     if (!anchor) return;
+    let anchorEl: HTMLElement = anchor;
     const insertSubtree = (list: ONode[]) => {
       for (const child of list) {
         const row = buildRow(child);
-        anchor.insertAdjacentElement('afterend', row);
-        anchor = row;
+        anchorEl.insertAdjacentElement('afterend', row);
+        anchorEl = row;
         if (child.expanded) insertSubtree(child.children);
       }
     };

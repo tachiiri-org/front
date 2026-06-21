@@ -14,6 +14,8 @@ type PaneInstance = {
   config: PaneConfig;
   view: ReturnType<typeof createOutlinerView>;
   containerEl: HTMLElement;   // the outer div (header + body)
+  updateSrcBtn: () => void;
+  updateFltBtn: () => void;
 };
 
 const STORAGE_KEY = (gId: string) => `graph-editor-panes:${gId}`;
@@ -192,11 +194,7 @@ export function createMultiPaneView(ctx: GraphEditorContext): {
     });
     containerEl.appendChild(resizeHandle);
 
-    const instance: PaneInstance = { config, view, containerEl };
-
-    // Store update functions so menus can refresh them
-    (instance as unknown as Record<string, unknown>)._updateSrcBtn = updateSrcBtn;
-    (instance as unknown as Record<string, unknown>)._updateFltBtn = updateFltBtn;
+    const instance: PaneInstance = { config, view, containerEl, updateSrcBtn, updateFltBtn };
 
     return instance;
   };
@@ -233,7 +231,7 @@ export function createMultiPaneView(ctx: GraphEditorContext): {
         menu.remove();
         // Update source button label
         const inst = panes.find(p => p.config.id === paneId);
-        if (inst) (inst as unknown as Record<string, unknown>)._updateSrcBtn?.();
+        if (inst) inst.updateSrcBtn();
         // Trigger load from new source
         if (value === null) {
           // Reset pane to root (no external parent)
@@ -320,7 +318,7 @@ export function createMultiPaneView(ctx: GraphEditorContext): {
         }
         saveAll();
         inst?.view.setPaneFilterKeys(new Set(config.filterKeys));
-        (inst as unknown as Record<string, unknown>)._updateFltBtn?.();
+        inst?.updateFltBtn();
         menu.remove();
         showFilterMenu(paneId, anchor); // reopen with updated state
       });
@@ -363,7 +361,7 @@ export function createMultiPaneView(ctx: GraphEditorContext): {
     const idx = panes.findIndex(p => p.config.id === paneId);
     if (idx === -1) return;
     const [removed] = panes.splice(idx, 1);
-    removed.view.unregister?.();
+    removed.view.unregister();
     removed.containerEl.remove();
     // Orphan dependent panes (reset source to null = root)
     for (const p of panes) {
@@ -378,7 +376,7 @@ export function createMultiPaneView(ctx: GraphEditorContext): {
 
   const updateAllSrcBtns = () => {
     for (const p of panes) {
-      (p as unknown as Record<string, unknown>)._updateSrcBtn?.();
+      p.updateSrcBtn();
     }
   };
 
