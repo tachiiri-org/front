@@ -204,13 +204,19 @@ export function createNodeRowFns(ctx: GraphEditorContext): {
     };
 
     let colDragReady = false;
-    marker.style.cursor = 'grab';
-    marker.addEventListener('pointerdown', (e) => {
+    // Drag handle: anywhere on the row except the textarea (text editing) and the star (bookmark toggle).
+    // This covers the marker dot, gaps, and any other non-interactive area.
+    row.addEventListener('pointerdown', (e) => {
+      const t = e.target as HTMLElement;
+      if (t.tagName === 'TEXTAREA' || t === star) return;
       if (e.pointerType !== 'mouse') return;
       colDragReady = true;
       row.draggable = true;
     });
     row.addEventListener('pointerup', () => {
+      if (!ctx.colDndNodeId) { row.draggable = false; colDragReady = false; }
+    });
+    row.addEventListener('pointercancel', () => {
       if (!ctx.colDndNodeId) { row.draggable = false; colDragReady = false; }
     });
     row.addEventListener('dragstart', (e) => {
@@ -227,7 +233,10 @@ export function createNodeRowFns(ctx: GraphEditorContext): {
       clearDndIndicators();
     });
     row.addEventListener('dragover', (e) => {
-      if (!ctx.colDndNodeId || ctx.colDndNodeId === node.id) return;
+      if (!ctx.colDndNodeId) return;
+      // Block only same-column same-node (can't drop on itself).
+      // Cross-column: same node id may appear in both columns (shared child) — still allow.
+      if (ctx.colDndColIndex === colIndex && ctx.colDndNodeId === node.id) return;
       e.preventDefault();
       if (e.dataTransfer) e.dataTransfer.dropEffect = 'move';
       const rect = row.getBoundingClientRect();
@@ -244,7 +253,9 @@ export function createNodeRowFns(ctx: GraphEditorContext): {
       const srcNodeId = ctx.colDndNodeId;
       const srcColIdx = ctx.colDndColIndex;
       ctx.colDndNodeId = null; ctx.colDndColIndex = -1;
-      if (!srcNodeId || srcNodeId === node.id) return;
+      if (!srcNodeId) return;
+      // Block same-column same-node (self-drop)
+      if (srcColIdx === colIndex && srcNodeId === node.id) return;
 
       const srcCol = ctx.state.columns[srcColIdx];
       const tgtCol = ctx.state.columns[colIndex];
