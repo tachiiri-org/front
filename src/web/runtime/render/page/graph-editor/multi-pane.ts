@@ -107,32 +107,30 @@ export function createMultiPaneView(ctx: GraphEditorContext): {
     fltArea.title = 'フィルタを設定';
     const updateFltBtn = () => {
       fltArea.innerHTML = '';
-      if (config.filterKeys.length === 0) {
-        const placeholder = document.createElement('span');
-        placeholder.textContent = 'フィルタ';
-        placeholder.style.cssText = `color:${TEXT_DIM};font-size:10px;padding:1px 3px;border:1px solid ${BORDER};border-radius:3px;`;
-        fltArea.appendChild(placeholder);
-      } else {
-        for (const key of config.filterKeys) {
-          const col = ctx.allPropColors.get(key)?.code ?? TEXT_DIM;
-          const tag = document.createElement('span');
-          tag.style.cssText = `display:inline-flex;align-items:center;gap:2px;padding:1px 5px;border-radius:3px;background:${col};color:#fff;font-size:10px;white-space:nowrap;`;
-          const labelSpan = document.createElement('span');
-          labelSpan.textContent = key;
-          const xSpan = document.createElement('span');
-          xSpan.textContent = '×';
-          xSpan.style.cssText = `cursor:pointer;font-size:11px;line-height:1;opacity:0.8;`;
-          xSpan.addEventListener('click', (e) => {
-            e.stopPropagation();
-            config.filterKeys = config.filterKeys.filter(k => k !== key);
-            saveAll();
-            const inst = panes.find(p => p.config.id === config.id);
-            inst?.view.setPaneFilterKeys(new Set(config.filterKeys));
-            updateFltBtn();
-          });
-          tag.append(labelSpan, xSpan);
-          fltArea.appendChild(tag);
-        }
+      // "フィルタ" label is always shown
+      const placeholder = document.createElement('span');
+      placeholder.textContent = 'フィルタ';
+      placeholder.style.cssText = `color:${config.filterKeys.length > 0 ? TEXT_MID : TEXT_DIM};font-size:10px;padding:1px 3px;border:1px solid ${BORDER};border-radius:3px;flex-shrink:0;`;
+      fltArea.appendChild(placeholder);
+      for (const key of config.filterKeys) {
+        const col = ctx.allPropColors.get(key)?.code ?? TEXT_DIM;
+        const tag = document.createElement('span');
+        tag.style.cssText = `display:inline-flex;align-items:center;gap:2px;padding:1px 5px;border-radius:3px;background:${col};color:#fff;font-size:10px;white-space:nowrap;`;
+        const labelSpan = document.createElement('span');
+        labelSpan.textContent = key;
+        const xSpan = document.createElement('span');
+        xSpan.textContent = '×';
+        xSpan.style.cssText = `cursor:pointer;font-size:11px;line-height:1;opacity:0.8;`;
+        xSpan.addEventListener('click', (e) => {
+          e.stopPropagation();
+          config.filterKeys = config.filterKeys.filter(k => k !== key);
+          saveAll();
+          const inst = panes.find(p => p.config.id === config.id);
+          inst?.view.setPaneFilterKeys(new Set(config.filterKeys));
+          updateFltBtn();
+        });
+        tag.append(labelSpan, xSpan);
+        fltArea.appendChild(tag);
       }
     };
     updateFltBtn();

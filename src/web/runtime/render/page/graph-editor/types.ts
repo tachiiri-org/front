@@ -72,6 +72,10 @@ export interface GraphEditorContext {
   refreshAllNodeText: () => void;
   // ── Breadcrumb (index) ──
   refreshBreadcrumb: () => void;
+  // ── Property change broadcast ──
+  // Outliner views register a render callback here. syncPropChange fires all of them
+  // so filtered panes react immediately when any pane adds/removes a property.
+  propChangeHooks: Array<() => void>;
   // ── Delete module ──
   deleteNode: (node: ExplorerNode, colIndex: number, focusNodeId?: string) => void;
 }

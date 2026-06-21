@@ -215,6 +215,7 @@ export function renderGraphEditor(
     gId, limit, rootNodeId, outer, columnsEl, state, childrenCache,
     propStore, allPropKeys, allPropColors, colorPalette,
     columnVersion: 0, tempNodeCounter: 0, pendingDeleteId: null,
+    propChangeHooks: [] as Array<() => void>,
   } as unknown as GraphEditorContext;
   Object.assign(ctx, createColumnFns(ctx), createNodeRowFns(ctx), createDeleteFns(ctx));
   ctx.refreshBreadcrumb = refreshBreadcrumb;

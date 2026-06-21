@@ -219,7 +219,7 @@ export function createOutlinerView(ctx: GraphEditorContext, paneOpts?: OutlinerP
     const toRender = paneFilterKeys.size > 0
       ? base.filter(o => {
           const props = ctx.propStore.get(o.node.id) ?? {};
-          return [...paneFilterKeys].every(k => k in props);
+          return [...paneFilterKeys].some(k => k in props);
         })
       : base;
     for (const o of toRender) listEl.appendChild(buildRow(o));
@@ -706,6 +706,8 @@ export function createOutlinerView(ctx: GraphEditorContext, paneOpts?: OutlinerP
     });
     const o = byId.get(nodeId);
     if (o) o.node.properties = { ...props };
+    // Broadcast to all registered outliner views (other panes re-render to reflect filter changes)
+    ctx.propChangeHooks.forEach(h => h());
   };
 
   // Shared color picker popover (callback called after color change to refresh caller UI)
@@ -861,7 +863,9 @@ export function createOutlinerView(ctx: GraphEditorContext, paneOpts?: OutlinerP
     let dragSrc: string | null = null;
     const nodeProps = nodeId ? (ctx.propStore.get(nodeId) ?? {}) : {};
     const filter = searchIn.value.trim().toLowerCase();
-    const keys = filter ? keyOrder.filter(k => k.toLowerCase().includes(filter)) : keyOrder;
+    // Use ctx.allPropKeys as master (shared across all panes); keyOrder provides sort order
+    const masterKeys = [...new Set([...keyOrder, ...ctx.allPropKeys])];
+    const keys = filter ? masterKeys.filter(k => k.toLowerCase().includes(filter)) : masterKeys;
 
     for (const key of keys) {
       const active = mode === 'node' ? key in nodeProps : filterKeys.has(key);
@@ -1565,5 +1569,7 @@ export function createOutlinerView(ctx: GraphEditorContext, paneOpts?: OutlinerP
   };
 
   updateBreadcrumb(); // show "ルート" on initial render
+  // Register this view's render so other panes can trigger it via syncPropChange
+  ctx.propChangeHooks.push(render);
   return { el, filterBtn, load, refresh: render, search, setParent, getSelectedId, setPaneFilterKeys };
 }
