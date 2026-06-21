@@ -51,8 +51,11 @@ export function createOutlinerView(ctx: GraphEditorContext, paneOpts?: OutlinerP
   // Ordered list of all known property keys (persisted to backend)
   let keyOrder: string[] = [];
 
-  const addKeyToOrder = (key: string) => {
-    if (!keyOrder.includes(key)) keyOrder.push(key);
+  const addKeyToOrder = (key: string, persist = false) => {
+    if (!keyOrder.includes(key)) {
+      keyOrder.push(key);
+      if (persist) void apiSavePropertyOrder(ctx.gId, keyOrder);
+    }
     ctx.allPropKeys.add(key);
   };
 
@@ -122,10 +125,7 @@ export function createOutlinerView(ctx: GraphEditorContext, paneOpts?: OutlinerP
         if (e.key !== 'Enter') return;
         const val = searchIn.value.trim();
         if (!val) return;
-        if (!keyOrder.includes(val)) {
-          addKeyToOrder(val);
-          void apiSavePropertyOrder(ctx.gId, keyOrder);
-        }
+        addKeyToOrder(val, true);
         if (!filterKeys.has(val)) { filterKeys.add(val); updateFilterBtn(); render(); }
         searchIn.value = '';
         rebuildFilterMenu();
@@ -977,7 +977,7 @@ export function createOutlinerView(ctx: GraphEditorContext, paneOpts?: OutlinerP
       createPill.textContent = `「${val}」を作成`;
       createRow.append(handle2, createPill);
       createRow.addEventListener('click', () => {
-        addKeyToOrder(val);
+        addKeyToOrder(val, true);
         if (mode === 'node' && nodeId) {
           syncPropChange(nodeId, p => { p[val] = '●'; });
           void apiSetProperty(ctx.gId, nodeId, val, '●');
@@ -1048,10 +1048,7 @@ export function createOutlinerView(ctx: GraphEditorContext, paneOpts?: OutlinerP
         if (e.key !== 'Enter') return;
         const val = searchIn.value.trim();
         if (!val) return;
-        if (!keyOrder.includes(val)) {
-          addKeyToOrder(val);
-          void apiSavePropertyOrder(ctx.gId, keyOrder);
-        }
+        addKeyToOrder(val, true);
         const nodeProps = ctx.propStore.get(onode.node.id) ?? {};
         if (!(val in nodeProps)) {
           syncPropChange(onode.node.id, p => { p[val] = '●'; });
