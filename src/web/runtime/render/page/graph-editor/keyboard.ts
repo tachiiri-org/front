@@ -119,6 +119,7 @@ export function createNodeKeydownHandler(
           const afterSwapSiblingIds = col.nodes.map((n) => n.id);
           void apiMoveNode(gId, node.id, col.parentId, direction, afterSwapSiblingIds);
         }
+        ctx.saveChildrenCache?.();
       }
       const colEl = ctx.columnsEl.children[colIndex] as HTMLElement | undefined;
       if (colEl) {

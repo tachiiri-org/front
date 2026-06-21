@@ -837,6 +837,7 @@ export function createOutlinerView(ctx: GraphEditorContext, paneOpts?: OutlinerP
       // Invalidate caches for all affected parents
       const affectedParents = new Set([...oldParents.values(), newParentId]);
       for (const pid of affectedParents) { if (pid !== null) ctx.childrenCache.delete(pid); }
+      ctx.saveChildrenCache?.();
 
       render();
 
@@ -1498,6 +1499,7 @@ export function createOutlinerView(ctx: GraphEditorContext, paneOpts?: OutlinerP
       if (cc) { const order = new Map(sibs.map((n, i) => [n.node.id, i])); cc.sort((a, b) => (order.get(a.id) ?? 0) - (order.get(b.id) ?? 0)); }
       updateSelectionHighlight();
       if (parentId !== null) void apiMoveNode(ctx.gId, sel[0].node.id, parentId, direction, sibs.map(n => n.node.id));
+      ctx.saveChildrenCache?.();
       return;
     }
     if (direction === 'down' && maxIdx < sibs.length - 1) {
@@ -1511,6 +1513,7 @@ export function createOutlinerView(ctx: GraphEditorContext, paneOpts?: OutlinerP
       if (cc) { const order = new Map(sibs.map((n, i) => [n.node.id, i])); cc.sort((a, b) => (order.get(a.id) ?? 0) - (order.get(b.id) ?? 0)); }
       updateSelectionHighlight();
       if (parentId !== null) void apiMoveNode(ctx.gId, sel[0].node.id, parentId, direction, sibs.map(n => n.node.id));
+      ctx.saveChildrenCache?.();
       return;
     }
 
@@ -1645,6 +1648,7 @@ export function createOutlinerView(ctx: GraphEditorContext, paneOpts?: OutlinerP
       focusRow(onode);
       if (onode.parentId === null) void apiMoveBookmark(ctx.gId, onode.node.id, direction);
       else void apiMoveNode(ctx.gId, onode.node.id, onode.parentId, direction, sibs.map(n => n.node.id));
+      ctx.saveChildrenCache?.();
       return;
     }
 
