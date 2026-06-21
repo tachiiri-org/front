@@ -3,7 +3,7 @@ import { BORDER, TEXT_HIGH, TEXT_MID, TEXT_DIM, primaryLabel, fallbackLabel } fr
 import {
   fetchChildren, fetchBookmarks, fetchBookmarkedNodes, fetchAllNodes,
   apiCreateNode, apiUpdateNode, apiDeleteNode, apiMoveNode, apiMoveBookmark, apiToggleLink,
-  apiSetProperty, apiRemoveProperty,
+  apiSetProperty, apiRemoveProperty, apiDeletePropertyKey,
   fetchColors, fetchPropertyColors, apiSetPropertyColor, apiRemovePropertyColor,
 } from './api';
 
@@ -630,7 +630,31 @@ export function createOutlinerView(ctx: GraphEditorContext): {
         swatch.style.cssText = `flex-shrink:0;width:14px;height:14px;border-radius:3px;border:1px solid ${BORDER};background:${propColor?.code ?? TEXT_DIM};cursor:pointer;`;
         swatch.addEventListener('click', (e) => { e.stopPropagation(); showColorPicker(key, swatch); });
 
-        row.append(cb, labelEl, swatch);
+        // Delete key button
+        const delBtn = document.createElement('button');
+        delBtn.textContent = '🗑';
+        delBtn.title = 'キーを削除';
+        delBtn.style.cssText = `background:transparent;border:none;color:${TEXT_DIM};cursor:pointer;padding:0 2px;font-size:11px;flex-shrink:0;`;
+        delBtn.addEventListener('click', (e) => {
+          e.stopPropagation();
+          ctx.allPropKeys.delete(key);
+          ctx.allPropColors.delete(key);
+          // Remove from propStore for all nodes in memory
+          ctx.propStore.forEach((props, nid) => {
+            if (key in props) {
+              delete props[key];
+              const o = byId.get(nid);
+              if (o) { o.node.properties = { ...props }; updateExpandMarker(o); }
+            }
+          });
+          ctx.childrenCache.forEach(nodes => {
+            for (const n of nodes) { if (n.properties && key in n.properties) delete n.properties[key]; }
+          });
+          void apiDeletePropertyKey(ctx.gId, key);
+          rebuild();
+        });
+
+        row.append(cb, labelEl, swatch, delBtn);
         menu.appendChild(row);
       }
 
