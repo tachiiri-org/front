@@ -18,6 +18,7 @@ type PaneInstance = {
   updateSrcBtn: () => void;
   updateFltBtn: () => void;
   updateSortBtn: () => void;
+  updateFsBtn: () => void;
 };
 
 const STORAGE_KEY = (gId: string) => `graph-editor-panes:${gId}`;
@@ -57,6 +58,27 @@ export function createMultiPaneView(ctx: GraphEditorContext): {
   el.style.cssText = `display:flex;flex-direction:row;flex:1;overflow-x:auto;overflow-y:hidden;`;
 
   const panes: PaneInstance[] = [];
+  let fullscreenPaneId: string | null = null;
+
+  const applyFullscreenLayout = () => {
+    const isFs = fullscreenPaneId !== null;
+    addPaneBtn.style.display = isFs ? 'none' : '';
+    for (const p of panes) {
+      const isThis = p.config.id === fullscreenPaneId;
+      if (!isFs) {
+        p.containerEl.style.display = '';
+        p.containerEl.style.width = `${p.config.width}px`;
+        p.containerEl.style.flex = '';
+      } else if (isThis) {
+        p.containerEl.style.display = '';
+        p.containerEl.style.flex = '1';
+        p.containerEl.style.width = '';
+      } else {
+        p.containerEl.style.display = 'none';
+      }
+      p.updateFsBtn();
+    }
+  };
 
   // ── Inter-pane wiring ──────────────────────────────────────────────
   const onPaneSelect = (paneId: string, selectedNodeId: string | null) => {
@@ -188,6 +210,21 @@ export function createMultiPaneView(ctx: GraphEditorContext): {
     });
     header.appendChild(sortBtn);
 
+    // Fullscreen toggle button
+    const fsBtn = document.createElement('button');
+    const updateFsBtn = () => {
+      const isThis = fullscreenPaneId === config.id;
+      fsBtn.textContent = isThis ? '⤡' : '⤢';
+      fsBtn.title = isThis ? '全幅表示を解除' : '全幅表示';
+      fsBtn.style.cssText = `background:transparent;border:none;color:${isThis ? TEXT_HIGH : TEXT_DIM};cursor:pointer;font-size:13px;padding:0 2px;line-height:1;flex-shrink:0;`;
+    };
+    updateFsBtn();
+    fsBtn.addEventListener('click', () => {
+      fullscreenPaneId = fullscreenPaneId === config.id ? null : config.id;
+      applyFullscreenLayout();
+    });
+    header.appendChild(fsBtn);
+
     // Close button
     const closeBtn = document.createElement('button');
     closeBtn.textContent = '×';
@@ -210,16 +247,13 @@ export function createMultiPaneView(ctx: GraphEditorContext): {
       onContentWidthChange: (w) => {
         // Measure only non-flex-1 header children to avoid feedback loop
         // (header.scrollWidth includes labelEl which stretches to container width)
-        const minHeaderW = srcBtn.offsetWidth + fltArea.scrollWidth + sortBtn.offsetWidth + closeBtn.offsetWidth + 36;
+        const minHeaderW = srcBtn.offsetWidth + fltArea.scrollWidth + sortBtn.offsetWidth + fsBtn.offsetWidth + closeBtn.offsetWidth + 36;
         const actualW = Math.max(w, minHeaderW);
         containerEl.style.width = `${actualW}px`;
         config.width = actualW;
       },
     });
     view.el.style.flex = '1';
-    // Hide the breadcrumb bar inside pane (compact)
-    const bcEl = view.el.querySelector<HTMLElement>('div:first-child');
-    if (bcEl) bcEl.style.display = 'none';
     containerEl.appendChild(view.el);
 
     // ── Resize handle ────────────────────────────────────────────────
@@ -246,7 +280,7 @@ export function createMultiPaneView(ctx: GraphEditorContext): {
     });
     containerEl.appendChild(resizeHandle);
 
-    const instance: PaneInstance = { config, view, containerEl, updateSrcBtn, updateFltBtn, updateSortBtn };
+    const instance: PaneInstance = { config, view, containerEl, updateSrcBtn, updateFltBtn, updateSortBtn, updateFsBtn };
 
     return instance;
   };
@@ -344,6 +378,10 @@ export function createMultiPaneView(ctx: GraphEditorContext): {
     const [removed] = panes.splice(idx, 1);
     removed.view.unregister();
     removed.containerEl.remove();
+    if (fullscreenPaneId === paneId) {
+      fullscreenPaneId = null;
+      applyFullscreenLayout();
+    }
     // Orphan dependent panes (reset source to null = root)
     for (const p of panes) {
       if (p.config.sourceId === paneId) {
