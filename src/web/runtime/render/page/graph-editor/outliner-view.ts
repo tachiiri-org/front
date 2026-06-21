@@ -282,13 +282,12 @@ export function createOutlinerView(ctx: GraphEditorContext): {
     const propColor = Object.keys(nodeProps)
       .map(k => ctx.allPropColors.get(k)?.code)
       .find(c => c != null);
-    const filled = hasChildren && !onode.expanded;
     if (propColor) {
       m.style.background = propColor;
       m.style.border = 'none';
     } else {
-      m.style.background = filled ? TEXT_MID : 'transparent';
-      m.style.border = filled ? 'none' : `1.5px solid ${hasChildren ? TEXT_MID : TEXT_DIM}`;
+      m.style.background = hasChildren && !onode.expanded ? TEXT_MID : TEXT_DIM;
+      m.style.border = 'none';
     }
     // Triangle expand button (right side)
     const tri = row.querySelector<HTMLElement>('[data-expand-triangle]');
@@ -645,8 +644,8 @@ export function createOutlinerView(ctx: GraphEditorContext): {
       if (onode.parentId) void apiMoveNode(ctx.gId, dragNodeId!, onode.parentId, 'down', newOrder.map(s => s.node.id));
     });
 
+    row.insertBefore(triBtn, btnWrap);
     row.appendChild(ta);
-    row.appendChild(triBtn);
     updateExpandMarker(onode);
     return row;
   };
@@ -823,6 +822,7 @@ export function createOutlinerView(ctx: GraphEditorContext): {
     nodeId: string | null,
     searchIn: HTMLInputElement,
     onRedraw: () => void,
+    onClose?: () => void,
   ) => {
     container.innerHTML = '';
     let dragSrc: string | null = null;
@@ -850,7 +850,7 @@ export function createOutlinerView(ctx: GraphEditorContext): {
       const pill = document.createElement('span');
       pill.textContent = key;
       pill.style.cssText = `display:inline-flex;align-items:center;padding:2px 8px;border-radius:4px;background:${col};color:#fff;font-size:12px;cursor:pointer;font-weight:500;white-space:nowrap;${active ? 'box-shadow:inset 0 0 0 2px rgba(255,255,255,.55);' : ''}`;
-      pill.addEventListener('click', () => {
+      pill.addEventListener('click', (e) => {
         if (mode === 'node' && nodeId) {
           const onode = byId.get(nodeId);
           if (active) {
@@ -861,6 +861,7 @@ export function createOutlinerView(ctx: GraphEditorContext): {
             void apiSetProperty(ctx.gId, nodeId, key, '●');
           }
           if (onode) updateExpandMarker(onode);
+          if (!e.shiftKey && onClose) { onClose(); return; }
         } else if (mode === 'filter') {
           if (active) filterKeys.delete(key); else filterKeys.add(key);
           updateFilterBtn();
@@ -966,10 +967,7 @@ export function createOutlinerView(ctx: GraphEditorContext): {
         xBtn.style.cssText = `background:transparent;border:none;color:#fff;opacity:.7;cursor:pointer;padding:0 0 0 3px;font-size:11px;line-height:1;`;
         xBtn.addEventListener('click', (e) => {
           e.stopPropagation();
-          syncPropChange(onode.node.id, p => { delete p[key]; });
-          void apiRemoveProperty(ctx.gId, onode.node.id, key);
-          updateExpandMarker(onode);
-          rebuild();
+          deleteKey(key, rebuild);
         });
         tag.append(namePart, xBtn);
         tagsEl.appendChild(tag);
@@ -989,7 +987,8 @@ export function createOutlinerView(ctx: GraphEditorContext): {
       // Key list
       const listContainer = document.createElement('div');
       listContainer.style.cssText = `max-height:220px;overflow-y:auto;`;
-      searchIn.addEventListener('input', () => buildKeyList(listContainer, 'node', onode.node.id, searchIn, rebuild));
+      const closeMenu = () => { menu.remove(); };
+      searchIn.addEventListener('input', () => buildKeyList(listContainer, 'node', onode.node.id, searchIn, rebuild, closeMenu));
       searchIn.addEventListener('keydown', (e) => {
         if (e.key !== 'Enter') return;
         const val = searchIn.value.trim();
@@ -1007,7 +1006,7 @@ export function createOutlinerView(ctx: GraphEditorContext): {
         searchIn.value = '';
         rebuild();
       });
-      buildKeyList(listContainer, 'node', onode.node.id, searchIn, rebuild);
+      buildKeyList(listContainer, 'node', onode.node.id, searchIn, rebuild, closeMenu);
       menu.appendChild(listContainer);
     };
 
