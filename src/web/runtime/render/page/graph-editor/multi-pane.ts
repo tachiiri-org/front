@@ -1,5 +1,5 @@
 import type { GraphEditorContext } from './types';
-import { BORDER, TEXT_HIGH, TEXT_MID, TEXT_DIM, SELECT_STRONG } from './constants';
+import { BORDER, TEXT_HIGH, TEXT_MID, TEXT_DIM } from './constants';
 import { createOutlinerView } from './outliner-view';
 
 type PaneConfig = {
@@ -7,6 +7,8 @@ type PaneConfig = {
   label: string;
   sourceId: string | null;   // null = root; or another pane id
   filterKeys: string[];      // property keys that must be present (ALL)
+  sortKey: string | null;    // property key to sort by (null = no sort)
+  sortDir: 'asc' | 'desc';  // sort direction
   width: number;             // px
 };
 
@@ -16,6 +18,7 @@ type PaneInstance = {
   containerEl: HTMLElement;   // the outer div (header + body)
   updateSrcBtn: () => void;
   updateFltBtn: () => void;
+  updateSortBtn: () => void;
 };
 
 const STORAGE_KEY = (gId: string) => `graph-editor-panes:${gId}`;
@@ -28,7 +31,9 @@ function savePanes(gId: string, configs: PaneConfig[]) {
 function loadPanes(gId: string): PaneConfig[] | null {
   try {
     const raw = localStorage.getItem(STORAGE_KEY(gId));
-    return raw ? JSON.parse(raw) as PaneConfig[] : null;
+    if (!raw) return null;
+    const arr = JSON.parse(raw) as Partial<PaneConfig>[];
+    return arr.map(c => ({ ...c, sortKey: c.sortKey ?? null, sortDir: c.sortDir ?? 'asc' })) as PaneConfig[];
   } catch { return null; }
 }
 
@@ -38,6 +43,8 @@ function newPaneConfig(label: string): PaneConfig {
     label,
     sourceId: null,
     filterKeys: [],
+    sortKey: null,
+    sortDir: 'asc',
     width: DEFAULT_WIDTH,
   };
 }
@@ -136,8 +143,80 @@ export function createMultiPaneView(ctx: GraphEditorContext): {
       }
     };
     updateFltBtn();
-    fltArea.addEventListener('click', (e) => { e.stopPropagation(); showFilterMenu(config.id, fltArea); });
+    fltArea.addEventListener('click', (e) => {
+      e.stopPropagation();
+      const inst = panes.find(p => p.config.id === config.id);
+      if (!inst) return;
+      inst.view.openKeyMenu({
+        anchor: fltArea,
+        mode: 'pane-filter',
+        isActive: (key) => config.filterKeys.includes(key),
+        onToggle: (key) => {
+          if (config.filterKeys.includes(key)) {
+            config.filterKeys = config.filterKeys.filter(k => k !== key);
+          } else {
+            config.filterKeys.push(key);
+          }
+          saveAll();
+          inst.view.setPaneFilterKeys(new Set(config.filterKeys));
+          updateFltBtn();
+        },
+      });
+    });
     header.appendChild(fltArea);
+
+    // Sort area — shows active sort key with direction
+    const sortArea = document.createElement('div');
+    sortArea.style.cssText = `display:flex;align-items:center;gap:3px;cursor:pointer;flex-shrink:0;`;
+    sortArea.title = '並び替えを設定';
+    const updateSortBtn = () => {
+      sortArea.innerHTML = '';
+      if (config.sortKey) {
+        const col = ctx.allPropColors.get(config.sortKey)?.code ?? TEXT_DIM;
+        const tag = document.createElement('span');
+        tag.style.cssText = `display:inline-flex;align-items:center;gap:2px;padding:1px 5px;border-radius:3px;background:${col};color:#fff;font-size:10px;white-space:nowrap;`;
+        tag.textContent = `${config.sortKey} ${config.sortDir === 'asc' ? '↑' : '↓'}`;
+        sortArea.appendChild(tag);
+      } else {
+        const placeholder = document.createElement('span');
+        placeholder.textContent = '順';
+        placeholder.style.cssText = `color:${TEXT_DIM};font-size:10px;padding:1px 3px;border:1px solid ${BORDER};border-radius:3px;flex-shrink:0;`;
+        sortArea.appendChild(placeholder);
+      }
+    };
+    updateSortBtn();
+    sortArea.addEventListener('click', (e) => {
+      e.stopPropagation();
+      const inst = panes.find(p => p.config.id === config.id);
+      if (!inst) return;
+      let menuSortKey = config.sortKey;
+      let menuSortDir = config.sortDir;
+      inst.view.openKeyMenu({
+        anchor: sortArea,
+        mode: 'pane-sort',
+        isActive: (key) => key === menuSortKey,
+        onToggle: (key) => {
+          if (key === menuSortKey) {
+            menuSortDir = menuSortDir === 'asc' ? 'desc' : 'asc';
+            if (menuSortDir === 'asc') {
+              // Second toggle back to asc clears sort
+              menuSortKey = null;
+              menuSortDir = 'asc';
+            }
+          } else {
+            menuSortKey = key;
+            menuSortDir = 'asc';
+          }
+          config.sortKey = menuSortKey;
+          config.sortDir = menuSortDir;
+          saveAll();
+          inst.view.setPaneSortConfig(menuSortKey, menuSortDir);
+          inst.updateSortBtn();
+        },
+        getSuffix: (key) => key === menuSortKey ? (menuSortDir === 'asc' ? '↑' : '↓') : '',
+      });
+    });
+    header.appendChild(sortArea);
 
     // Close button
     const closeBtn = document.createElement('button');
@@ -160,7 +239,7 @@ export function createMultiPaneView(ctx: GraphEditorContext): {
       onContentWidthChange: (w) => {
         // Measure only non-flex-1 header children to avoid feedback loop
         // (header.scrollWidth includes labelEl which stretches to container width)
-        const minHeaderW = srcBtn.offsetWidth + fltArea.scrollWidth + closeBtn.offsetWidth + 28;
+        const minHeaderW = srcBtn.offsetWidth + fltArea.scrollWidth + sortArea.scrollWidth + closeBtn.offsetWidth + 36;
         const actualW = Math.max(w, minHeaderW);
         containerEl.style.width = `${actualW}px`;
         config.width = actualW;
@@ -196,7 +275,7 @@ export function createMultiPaneView(ctx: GraphEditorContext): {
     });
     containerEl.appendChild(resizeHandle);
 
-    const instance: PaneInstance = { config, view, containerEl, updateSrcBtn, updateFltBtn };
+    const instance: PaneInstance = { config, view, containerEl, updateSrcBtn, updateFltBtn, updateSortBtn };
 
     return instance;
   };
@@ -265,79 +344,6 @@ export function createMultiPaneView(ctx: GraphEditorContext): {
     setTimeout(() => document.addEventListener('mousedown', onOut), 0);
   };
 
-  // ── Filter key selector popover ──────────────────────────────────
-  const showFilterMenu = (paneId: string, anchor: HTMLElement) => {
-    document.querySelector('[data-pane-flt-menu]')?.remove();
-    const menu = document.createElement('div');
-    menu.dataset.paneFltMenu = '1';
-    const ar = anchor.getBoundingClientRect();
-    menu.style.cssText = `
-      position:fixed;left:${ar.left}px;top:${ar.bottom + 2}px;
-      z-index:200;background:hsl(240,14%,9%);border:1px solid ${BORDER};
-      border-radius:6px;padding:4px;font-size:12px;box-shadow:0 4px 12px rgba(0,0,0,.4);
-      min-width:160px;max-height:280px;overflow-y:auto;
-    `;
-    const inst = panes.find(p => p.config.id === paneId);
-    const config = inst?.config;
-    if (!config) return;
-
-    // Include already-selected filter keys even if not yet in allPropKeys (e.g. from localStorage)
-    const keys = [...new Set([...ctx.allPropKeys, ...config.filterKeys])].sort();
-    if (keys.length === 0) {
-      const empty = document.createElement('div');
-      empty.textContent = 'プロパティキーがありません';
-      empty.style.cssText = `padding:6px 8px;color:${TEXT_DIM};`;
-      menu.appendChild(empty);
-    }
-    for (const key of keys) {
-      const item = document.createElement('div');
-      const active = config.filterKeys.includes(key);
-      const col = ctx.allPropColors.get(key)?.code ?? TEXT_DIM;
-      item.style.cssText = `
-        display:flex;align-items:center;gap:6px;padding:4px 8px;
-        border-radius:4px;cursor:pointer;
-      `;
-      item.addEventListener('mouseenter', () => { item.style.background = 'rgba(255,255,255,.07)'; });
-      item.addEventListener('mouseleave', () => { item.style.background = ''; });
-
-      const pill = document.createElement('span');
-      pill.textContent = key;
-      pill.style.cssText = `
-        display:inline-flex;align-items:center;padding:1px 7px;border-radius:4px;
-        background:${col};color:#fff;font-size:11px;font-weight:500;
-        ${active ? 'box-shadow:inset 0 0 0 2px rgba(255,255,255,.5);' : ''}
-      `;
-      const check = document.createElement('span');
-      check.textContent = active ? '✓' : '';
-      check.style.cssText = `color:${SELECT_STRONG};font-size:11px;margin-left:auto;`;
-      item.append(pill, check);
-
-      item.addEventListener('click', () => {
-        if (active) {
-          config.filterKeys = config.filterKeys.filter(k => k !== key);
-        } else {
-          config.filterKeys.push(key);
-        }
-        saveAll();
-        inst?.view.setPaneFilterKeys(new Set(config.filterKeys));
-        inst?.updateFltBtn();
-        menu.remove();
-        showFilterMenu(paneId, anchor); // reopen with updated state
-      });
-      menu.appendChild(item);
-    }
-
-    document.body.appendChild(menu);
-    requestAnimationFrame(() => {
-      const r = menu.getBoundingClientRect();
-      if (r.right > window.innerWidth) menu.style.left = `${window.innerWidth - r.width - 8}px`;
-      if (r.bottom > window.innerHeight) menu.style.top = `${ar.top - r.height - 2}px`;
-    });
-    const onOut = (e: MouseEvent) => {
-      if (!menu.contains(e.target as Element) && e.target !== anchor) { menu.remove(); document.removeEventListener('mousedown', onOut); }
-    };
-    setTimeout(() => document.addEventListener('mousedown', onOut), 0);
-  };
 
   // ── Pane add / remove ────────────────────────────────────────────
   const addPaneBtn = document.createElement('button');

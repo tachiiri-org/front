@@ -53,6 +53,14 @@ export function createOutlinerView(ctx: GraphEditorContext, paneOpts?: OutlinerP
   setParent: (nodeId: string | null) => Promise<void>;
   getSelectedId: () => string | null;
   setPaneFilterKeys: (keys: Set<string>) => void;
+  setPaneSortConfig: (key: string | null, dir: 'asc' | 'desc') => void;
+  openKeyMenu: (opts: {
+    anchor: HTMLElement;
+    mode: 'pane-filter' | 'pane-sort';
+    isActive: (key: string) => boolean;
+    onToggle: (key: string) => void;
+    getSuffix?: (key: string) => string;
+  }) => void;
   unregister: () => void;
 } {
   // Outer wrapper (returned as el)
@@ -184,6 +192,8 @@ export function createOutlinerView(ctx: GraphEditorContext, paneOpts?: OutlinerP
   let paneParentId: string | null = paneOpts?.paneParentId ?? null;
   let paneSelectedId: string | null = null;
   let paneFilterKeys: Set<string> = paneOpts?.paneFilterKeys ?? new Set();
+  let paneSortKey: string | null = null;
+  let paneSortDir: 'asc' | 'desc' = 'asc';
 
   const setPaneSelected = (nodeId: string | null) => {
     paneSelectedId = nodeId;
@@ -241,7 +251,20 @@ export function createOutlinerView(ctx: GraphEditorContext, paneOpts?: OutlinerP
           return [...paneFilterKeys].some(k => k in props);
         })
       : base;
-    for (const o of toRender) listEl.appendChild(buildRow(o));
+    let finalRender = toRender;
+    if (paneSortKey) {
+      const sk = paneSortKey;
+      const sd = paneSortDir;
+      finalRender = [...toRender].sort((a, b) => {
+        const pa = ctx.propStore.get(a.node.id) ?? {};
+        const pb = ctx.propStore.get(b.node.id) ?? {};
+        const va = sk in pa ? (pa[sk] || '') : '￿';
+        const vb = sk in pb ? (pb[sk] || '') : '￿';
+        const cmp = va.localeCompare(vb, undefined, { numeric: true, sensitivity: 'base' });
+        return sd === 'asc' ? cmp : -cmp;
+      });
+    }
+    for (const o of finalRender) listEl.appendChild(buildRow(o));
     updateSelectionHighlight();
     schedulePrefetch();
     if (paneOpts?.onContentWidthChange) scheduleWidthUpdate();
@@ -1000,6 +1023,7 @@ export function createOutlinerView(ctx: GraphEditorContext, paneOpts?: OutlinerP
 
   // Build a Notion-style key list (shared by property menu and filter menu)
   // mode 'node': click pill toggles assignment on nodeId; mode 'filter': click pill toggles filterKeys
+  // extOpts: when provided, overrides active/toggle behaviour for external callers (pane-filter / pane-sort)
   const buildKeyList = (
     container: HTMLElement,
     mode: 'node' | 'filter',
@@ -1007,6 +1031,11 @@ export function createOutlinerView(ctx: GraphEditorContext, paneOpts?: OutlinerP
     searchIn: HTMLInputElement,
     onRedraw: () => void,
     onClose?: () => void,
+    extOpts?: {
+      isActive: (key: string) => boolean;
+      onToggle: (key: string) => void;
+      getSuffix?: (key: string) => string;
+    },
   ) => {
     container.innerHTML = '';
     let dragSrc: string | null = null;
@@ -1017,7 +1046,7 @@ export function createOutlinerView(ctx: GraphEditorContext, paneOpts?: OutlinerP
     const keys = filter ? masterKeys.filter(k => k.toLowerCase().includes(filter)) : masterKeys;
 
     for (const key of keys) {
-      const active = mode === 'node' ? key in nodeProps : filterKeys.has(key);
+      const active = extOpts ? extOpts.isActive(key) : (mode === 'node' ? key in nodeProps : filterKeys.has(key));
       const propColor = ctx.allPropColors.get(key);
       const col = propColor?.code ?? TEXT_DIM;
 
@@ -1059,6 +1088,11 @@ export function createOutlinerView(ctx: GraphEditorContext, paneOpts?: OutlinerP
       pill.textContent = key;
       pill.style.cssText = `display:inline-flex;align-items:center;padding:2px 8px;border-radius:4px;background:${col};color:#fff;font-size:12px;cursor:pointer;font-weight:500;white-space:nowrap;`;
       pill.addEventListener('click', (e) => {
+        if (extOpts) {
+          extOpts.onToggle(key);
+          onRedraw();
+          return;
+        }
         if (mode === 'node' && nodeId) {
           const onode = byId.get(nodeId);
           if (active) {
@@ -1109,12 +1143,21 @@ export function createOutlinerView(ctx: GraphEditorContext, paneOpts?: OutlinerP
       });
 
       row.append(sqBtn, pill);
+      if (extOpts?.getSuffix) {
+        const sf = extOpts.getSuffix(key);
+        if (sf) {
+          const sfEl = document.createElement('span');
+          sfEl.textContent = sf;
+          sfEl.style.cssText = `margin-left:auto;color:${TEXT_HIGH};font-size:11px;font-weight:600;padding-right:2px;`;
+          row.appendChild(sfEl);
+        }
+      }
       container.appendChild(row);
     }
 
-    // Create option if search text doesn't match existing key
+    // Create option if search text doesn't match existing key (not shown for external callers)
     const val = searchIn.value.trim();
-    if (val && !keyOrder.includes(val)) {
+    if (val && !keyOrder.includes(val) && !extOpts) {
       const createRow = document.createElement('div');
       createRow.style.cssText = `display:flex;align-items:center;gap:6px;padding:3px 4px;border-radius:4px;cursor:pointer;`;
       createRow.addEventListener('mouseenter', () => { createRow.style.background = 'rgba(255,255,255,.05)'; });
@@ -1236,6 +1279,58 @@ export function createOutlinerView(ctx: GraphEditorContext, paneOpts?: OutlinerP
       }
     };
     setTimeout(() => { document.addEventListener('mousedown', onOutside); document.addEventListener('keydown', onKey); }, 0);
+  };
+
+  // ── Key management menu for pane filter / sort (called from multi-pane) ─
+  const openKeyMenu = (opts: {
+    anchor: HTMLElement;
+    mode: 'pane-filter' | 'pane-sort';
+    isActive: (key: string) => boolean;
+    onToggle: (key: string) => void;
+    getSuffix?: (key: string) => string;
+  }) => {
+    document.querySelector('[data-key-mgmt-menu]')?.remove();
+    document.querySelector('[data-key-ctx-menu]')?.remove();
+    document.querySelector('[data-color-picker]')?.remove();
+
+    const menu = document.createElement('div');
+    menu.dataset.keyMgmtMenu = '1';
+    const ar = opts.anchor.getBoundingClientRect();
+    menu.style.cssText = `position:fixed;left:${ar.left}px;top:${ar.bottom + 2}px;z-index:200;width:220px;background:hsl(240,14%,9%);border:1px solid ${BORDER};border-radius:6px;padding:8px;font-size:13px;box-shadow:0 4px 16px rgba(0,0,0,.4);`;
+
+    const rebuild = () => {
+      menu.innerHTML = '';
+      const searchIn = document.createElement('input');
+      searchIn.placeholder = '';
+      searchIn.style.cssText = `width:100%;box-sizing:border-box;background:transparent;border:1px solid ${BORDER};border-radius:3px;padding:4px 6px;color:${TEXT_HIGH};font-size:12px;outline:none;font-family:inherit;margin-bottom:4px;`;
+
+      const divider = document.createElement('div');
+      divider.style.cssText = `border-top:1px solid ${BORDER};margin:2px 0 4px;`;
+
+      const listContainer = document.createElement('div');
+      listContainer.style.cssText = `max-height:220px;overflow-y:auto;`;
+
+      const ext = { isActive: opts.isActive, onToggle: opts.onToggle, getSuffix: opts.getSuffix };
+      searchIn.addEventListener('input', () => buildKeyList(listContainer, 'node', null, searchIn, rebuild, undefined, ext));
+      buildKeyList(listContainer, 'node', null, searchIn, rebuild, undefined, ext);
+
+      menu.append(searchIn, divider, listContainer);
+      searchIn.focus();
+    };
+
+    rebuild();
+    document.body.appendChild(menu);
+    requestAnimationFrame(() => {
+      const r = menu.getBoundingClientRect();
+      if (r.right > window.innerWidth) menu.style.left = `${window.innerWidth - r.width - 8}px`;
+      if (r.bottom > window.innerHeight) menu.style.top = `${ar.top - r.height - 2}px`;
+    });
+    const onOutside = (e: MouseEvent) => {
+      const t = e.target as Element;
+      if (!menu.contains(t) && !t?.closest('[data-key-ctx-menu]') && !t?.closest('[data-color-picker]'))
+        { menu.remove(); document.removeEventListener('mousedown', onOutside); }
+    };
+    setTimeout(() => document.addEventListener('mousedown', onOutside), 0);
   };
 
   // ── Link-search (/) ──────────────────────────────────────────────────
@@ -1731,6 +1826,7 @@ export function createOutlinerView(ctx: GraphEditorContext, paneOpts?: OutlinerP
 
   const getSelectedId = () => paneSelectedId;
   const setPaneFilterKeys = (keys: Set<string>) => { paneFilterKeys = keys; render(); };
+  const setPaneSortConfig = (key: string | null, dir: 'asc' | 'desc') => { paneSortKey = key; paneSortDir = dir; render(); };
 
   const search = async (query: string) => {
     if (!query) { await load(); return; }
@@ -1773,5 +1869,5 @@ export function createOutlinerView(ctx: GraphEditorContext, paneOpts?: OutlinerP
     if (i >= 0) ctx.propChangeHooks.splice(i, 1);
   };
 
-  return { el, filterBtn, load, refresh: render, search, setParent, getSelectedId, setPaneFilterKeys, unregister };
+  return { el, filterBtn, load, refresh: render, search, setParent, getSelectedId, setPaneFilterKeys, setPaneSortConfig, openKeyMenu, unregister };
 }
