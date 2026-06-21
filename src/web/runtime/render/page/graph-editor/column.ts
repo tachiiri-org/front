@@ -2,7 +2,7 @@ import type { ExplorerNode, GraphEditorContext } from './types';
 import { BORDER, TEXT_HIGH, TEXT_MID, TEXT_DIM, SELECT_STRONG, primaryLabel } from './constants';
 import {
   fetchAllNodes, fetchBookmarkedNodes, fetchChildren,
-  apiCreateNode, apiAddBookmark, apiUpdateNode,
+  apiCreateNode, apiAddBookmark, apiUpdateNode, apiMoveNode, apiToggleLink,
 } from './api';
 
 export function createColumnFns(ctx: GraphEditorContext): {
@@ -290,6 +290,47 @@ export function createColumnFns(ctx: GraphEditorContext): {
         list.appendChild(moreBtnWrapper);
       }
     }
+    // Drop zone at bottom of list — allows dropping after all nodes
+    const dropZoneEl = document.createElement('div');
+    dropZoneEl.dataset.colDropZone = '1';
+    dropZoneEl.style.cssText = `flex:1;min-height:60px;`;
+    dropZoneEl.addEventListener('dragover', (e) => {
+      if (!ctx.colDndNodeId) return;
+      e.preventDefault();
+      if (e.dataTransfer) e.dataTransfer.dropEffect = 'move';
+      dropZoneEl.style.boxShadow = 'inset 0 2px 0 0 #4a9eff';
+    });
+    dropZoneEl.addEventListener('dragleave', () => { dropZoneEl.style.boxShadow = ''; });
+    dropZoneEl.addEventListener('drop', (e) => {
+      e.preventDefault();
+      dropZoneEl.style.boxShadow = '';
+      const srcNodeId = ctx.colDndNodeId;
+      const srcColIdx = ctx.colDndColIndex;
+      ctx.colDndNodeId = null; ctx.colDndColIndex = -1;
+      if (!srcNodeId) return;
+      const srcCol = ctx.state.columns[srcColIdx];
+      if (!srcCol) return;
+      const srcNodeIdx = srcCol.nodes.findIndex(n => n.id === srcNodeId);
+      if (srcNodeIdx === -1) return;
+      const srcNode = srcCol.nodes[srcNodeIdx];
+      const srcParentId = srcCol.parentId;
+      const tgtParentId = col.parentId;
+      srcCol.nodes.splice(srcNodeIdx, 1);
+      if (srcCol === col) {
+        col.nodes.push(srcNode);
+      } else {
+        col.nodes.push(srcNode);
+        if (srcParentId !== tgtParentId) {
+          if (srcParentId !== null) void apiToggleLink(ctx.gId, srcNodeId, srcParentId);
+          if (tgtParentId !== null) void apiToggleLink(ctx.gId, srcNodeId, tgtParentId);
+        }
+      }
+      if (tgtParentId !== null) void apiMoveNode(ctx.gId, srcNodeId, tgtParentId, 'down', col.nodes.map(n => n.id));
+      ctx.saveChildrenCache?.();
+      ctx.rebuildAll();
+    });
+    list.appendChild(dropZoneEl);
+
     colEl.appendChild(list);
     return colEl;
   };

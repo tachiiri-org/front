@@ -1,6 +1,6 @@
 import type { ExplorerNode, GraphEditorContext } from './types';
 import { TEXT_HIGH, TEXT_MID, TEXT_DIM, SELECT_STRONG, primaryLabel, fallbackLabel } from './constants';
-import { apiUpdateNode, apiAddBookmark, apiRemoveBookmark, apiToggleLink, fetchChildren } from './api';
+import { apiUpdateNode, apiAddBookmark, apiRemoveBookmark, apiToggleLink, apiMoveNode, fetchChildren } from './api';
 import { showColorPicker } from './color-picker';
 import { createNodeKeydownHandler, type SaveTimerRef } from './keyboard';
 
@@ -193,6 +193,94 @@ export function createNodeRowFns(ctx: GraphEditorContext): {
     });
 
     inp.addEventListener('keydown', createNodeKeydownHandler(ctx, node, inp, row, colIndex, saveTimer));
+
+    // ── Column DnD ───────────────────────────────────────────────────
+    const clearDndIndicators = () => {
+      ctx.columnsEl.querySelectorAll<HTMLElement>('[data-node-id]:not(textarea),[data-col-drop-zone]').forEach(el => {
+        el.style.boxShadow = '';
+      });
+    };
+
+    row.draggable = true;
+    row.addEventListener('dragstart', (e) => {
+      ctx.colDndNodeId = node.id;
+      ctx.colDndColIndex = colIndex;
+      row.style.opacity = '0.5';
+      if (e.dataTransfer) { e.dataTransfer.effectAllowed = 'move'; e.dataTransfer.setData('text/plain', node.id); }
+    });
+    row.addEventListener('dragend', () => {
+      ctx.colDndNodeId = null; ctx.colDndColIndex = -1;
+      row.style.opacity = '';
+      clearDndIndicators();
+    });
+    row.addEventListener('dragover', (e) => {
+      if (!ctx.colDndNodeId || ctx.colDndNodeId === node.id) return;
+      e.preventDefault();
+      if (e.dataTransfer) e.dataTransfer.dropEffect = 'move';
+      const rect = row.getBoundingClientRect();
+      const relY = (e.clientY - rect.top) / rect.height;
+      clearDndIndicators();
+      if (relY < 0.3) row.style.boxShadow = '0 -2px 0 0 #4a9eff';
+      else if (relY > 0.7) row.style.boxShadow = '0 2px 0 0 #4a9eff';
+      else row.style.boxShadow = 'inset 0 0 0 2px rgba(74,158,255,0.5)';
+    });
+    row.addEventListener('dragleave', () => { row.style.boxShadow = ''; });
+    row.addEventListener('drop', (e) => {
+      e.preventDefault();
+      clearDndIndicators();
+      const srcNodeId = ctx.colDndNodeId;
+      const srcColIdx = ctx.colDndColIndex;
+      ctx.colDndNodeId = null; ctx.colDndColIndex = -1;
+      if (!srcNodeId || srcNodeId === node.id) return;
+
+      const srcCol = ctx.state.columns[srcColIdx];
+      const tgtCol = ctx.state.columns[colIndex];
+      if (!srcCol || !tgtCol) return;
+
+      const srcNodeIdx = srcCol.nodes.findIndex(n => n.id === srcNodeId);
+      if (srcNodeIdx === -1) return;
+      const srcNode = srcCol.nodes[srcNodeIdx];
+      const srcParentId = srcCol.parentId;
+      const tgtParentId = tgtCol.parentId;
+
+      const rect = row.getBoundingClientRect();
+      const relY = (e.clientY - rect.top) / rect.height;
+
+      if (relY >= 0.3 && relY <= 0.7) {
+        // Drop ON node → become child of target node
+        const newParentId = node.id;
+        if (srcParentId === newParentId) return;
+        srcCol.nodes.splice(srcNodeIdx, 1);
+        // Invalidate target's children cache so next expansion fetches fresh
+        ctx.childrenCache.delete(newParentId);
+        if (srcParentId !== null) void apiToggleLink(ctx.gId, srcNodeId, srcParentId);
+        void apiToggleLink(ctx.gId, srcNodeId, newParentId);
+      } else {
+        // Drop between nodes → sibling reorder or cross-column move
+        const before = relY < 0.3;
+        const tgtIdx = tgtCol.nodes.findIndex(n => n.id === node.id);
+        if (tgtIdx === -1) return;
+        const insertAt = before ? tgtIdx : tgtIdx + 1;
+        srcCol.nodes.splice(srcNodeIdx, 1);
+        if (srcCol === tgtCol) {
+          // Same column reorder
+          const adjustedAt = srcNodeIdx < insertAt ? insertAt - 1 : insertAt;
+          srcCol.nodes.splice(adjustedAt, 0, srcNode);
+        } else {
+          // Cross-column move
+          tgtCol.nodes.splice(insertAt, 0, srcNode);
+          if (srcParentId !== tgtParentId) {
+            if (srcParentId !== null) void apiToggleLink(ctx.gId, srcNodeId, srcParentId);
+            if (tgtParentId !== null) void apiToggleLink(ctx.gId, srcNodeId, tgtParentId);
+          }
+        }
+        if (tgtParentId !== null) {
+          void apiMoveNode(ctx.gId, srcNodeId, tgtParentId, 'down', tgtCol.nodes.map(n => n.id));
+        }
+      }
+      ctx.saveChildrenCache?.();
+      ctx.rebuildAll();
+    });
 
     row.addEventListener('mousedown', (e: MouseEvent) => {
       if (!e.shiftKey) return;

@@ -241,6 +241,7 @@ export function renderGraphEditor(
     columnVersion: 0, tempNodeCounter: 0, pendingDeleteId: null,
     propChangeHooks: [] as Array<() => void>,
     saveChildrenCache,
+    colDndNodeId: null, colDndColIndex: -1,
   } as unknown as GraphEditorContext;
   Object.assign(ctx, createColumnFns(ctx), createNodeRowFns(ctx), createDeleteFns(ctx));
   ctx.refreshBreadcrumb = refreshBreadcrumb;
