@@ -156,8 +156,10 @@ export function createMultiPaneView(ctx: GraphEditorContext): {
       paneFilterKeys: new Set(config.filterKeys),
       onNodeSelect: (nodeId) => onPaneSelect(config.id, nodeId),
       onContentWidthChange: (w) => {
-        containerEl.style.width = `${w}px`;
-        config.width = w;
+        const minForHeader = header.scrollWidth + 8;
+        const actualW = Math.max(w, minForHeader);
+        containerEl.style.width = `${actualW}px`;
+        config.width = actualW;
       },
     });
     view.el.style.flex = '1';

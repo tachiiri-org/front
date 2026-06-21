@@ -534,7 +534,10 @@ export function createOutlinerView(ctx: GraphEditorContext, paneOpts?: OutlinerP
 
     const resize = () => { ta.style.height = 'auto'; ta.style.height = ta.scrollHeight + 'px'; };
     requestAnimationFrame(resize);
-    ta.addEventListener('input', resize);
+    ta.addEventListener('input', () => {
+      resize();
+      if (paneOpts?.onContentWidthChange) scheduleWidthUpdate();
+    });
     ta.addEventListener('focus', () => setPaneSelected(onode.node.id));
 
     ta.addEventListener('blur', () => {
@@ -676,22 +679,34 @@ export function createOutlinerView(ctx: GraphEditorContext, paneOpts?: OutlinerP
       const t = e.target as HTMLElement;
       if (t.closest('button') || t.tagName === 'TEXTAREA') return;
       pressStartX = e.clientX; pressStartY = e.clientY;
-      dragReady = false;
-      pressTimer = setTimeout(() => {
+      if (e.pointerType === 'mouse') {
+        // Mouse: browser distinguishes click vs drag natively via movement threshold
         dragReady = true;
         row.draggable = true;
-        row.style.opacity = '0.6';
-      }, 350);
+      } else {
+        // Touch: long press to avoid conflicting with scroll/tap
+        dragReady = false;
+        pressTimer = setTimeout(() => {
+          dragReady = true;
+          row.draggable = true;
+          row.style.opacity = '0.6';
+        }, 350);
+      }
     });
     row.addEventListener('pointermove', (e) => {
       if (!pressTimer) return;
       if (Math.abs(e.clientX - pressStartX) > 5 || Math.abs(e.clientY - pressStartY) > 5) cancelPress();
     });
-    row.addEventListener('pointerup', cancelPress);
-    row.addEventListener('pointercancel', cancelPress);
+    row.addEventListener('pointerup', () => {
+      cancelPress();
+      // If click (no drag started), reset draggable so it doesn't interfere with next interaction
+      if (!dragNodeId) { row.draggable = false; dragReady = false; }
+    });
+    row.addEventListener('pointercancel', () => { cancelPress(); row.draggable = false; dragReady = false; });
 
     row.addEventListener('dragstart', (e) => {
       if (!dragReady) { e.preventDefault(); return; }
+      row.style.opacity = '0.6';
       dragNodeId = onode.node.id;
       dragParentId = onode.parentId;
       const sel = getSelectedONodes();
