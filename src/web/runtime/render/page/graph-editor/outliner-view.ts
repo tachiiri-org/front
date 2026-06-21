@@ -266,7 +266,9 @@ export function createOutlinerView(ctx: GraphEditorContext, paneOpts?: OutlinerP
         const textW = Math.ceil(c.measureText(ta.value).width);
         maxW = Math.max(maxW, spacerW + 18 + textW + 24);
       });
-      paneOpts!.onContentWidthChange!(Math.min(Math.max(180, maxW), 600));
+      const minW = Math.round(window.innerWidth * 0.15);
+      const maxCap = Math.round(window.innerWidth * 0.40);
+      paneOpts!.onContentWidthChange!(Math.min(Math.max(minW, maxW), maxCap));
     });
   };
 
