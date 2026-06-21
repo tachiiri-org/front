@@ -33,7 +33,7 @@ select:mcp__front-production__graph_read_nodes_from,mcp__front-production__graph
 ルートノード ID: `6427e286-9195-4826-8498-6a79a5c29fb7`（graph_id: `word-graph-1`）。**2層構造**: ルート → ドメイン(`システム`/`インフラ`/`ビジネス`)＋`_ガイド`＋`fix` → カテゴリ → 知識ノード。各ノードに `node_type`(root/domain/guide/category/rule/fact/goal/issue) が付き、read 結果に `{node_type=...}` で表示される。
 
 1. **最初に `_ガイド` を読む**（AI運用ルール集）。`graph_read_nodes_from(node_id: ルートID, depth: 1)` でドメイン目次、`depth: 2` でカテゴリ一覧を取得。
-2. タスクに関連するカテゴリを `graph_read_nodes_from(node_id: <category_id>, depth: 1)` または `graph_read_texts_by_word(word: "<カテゴリ名>")` で知識を読む。
+2. タスクに関連するカテゴリを `graph_read_nodes_from(node_id: <category_id>, depth: 1)` または `graph_read_texts_by_word(word: "<ノードの正確なラベル>")` で知識を読む（`graph_read_texts_by_word` はブックマーク不問・全ノード対象）。
 3. 知識の追加は `graph_add_node`(`parent_node_id`=所属カテゴリ)＋`graph_set_property(key:"node_type",...)`、修正は `graph_update_node`、リンク調整は `graph_toggle_link`。
 
 ---
