@@ -1,5 +1,24 @@
 export type ExplorerNode = { id: string; en?: string; ja?: string; color?: string; properties?: Record<string, string> };
 
+// Cross-pane drag state for the multi-pane (パネル) view. Each pane is an independent
+// outliner instance with its own closure scope, so the source pane records the dragged
+// node(s) here on dragstart and the target pane reads them on drop — letting a node be
+// dragged from one pane and dropped into another.
+export type PaneDragState = {
+  // Identity of the source pane (object reference). Lets the drop target tell whether
+  // the drag started in the same pane (use its local tree logic) or a different one.
+  sourceToken: object;
+  // Node ids at dragstart — used for self-drop / subtree guards during dragover.
+  nodeIds: string[];
+  // The dragged nodes with the parent each had at dragstart (for link toggling).
+  movers: { node: ExplorerNode; oldParentId: string | null }[];
+  // Remove the moved nodes from the source pane's local tree and re-render it.
+  detachFromSource: (nodes: ExplorerNode[]) => void;
+  // Resolves once every dragged node has a real (non-temp) id, so cross-pane API
+  // calls never send a temp id to the backend.
+  awaitRealIds: () => Promise<void>;
+};
+
 export type ExplorerColumn = {
   parentId: string | null; // null for column 0 (all-nodes view)
   nodes: ExplorerNode[];
@@ -79,6 +98,9 @@ export interface GraphEditorContext {
   // ── Column DnD shared state ──
   colDndNodeId: string | null;
   colDndColIndex: number;
+  // ── Cross-pane (multi-pane outliner) DnD shared state ──
+  // Set by the source pane on dragstart, read by the target pane on drop; null when idle.
+  paneDrag: PaneDragState | null;
   // ── Persistence ──
   // Called after childrenCache is updated so callers can persist it to localStorage
   saveChildrenCache?: () => void;

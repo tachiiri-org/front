@@ -242,6 +242,7 @@ export function renderGraphEditor(
     propChangeHooks: [] as Array<() => void>,
     saveChildrenCache,
     colDndNodeId: null, colDndColIndex: -1,
+    paneDrag: null,
   } as unknown as GraphEditorContext;
   Object.assign(ctx, createColumnFns(ctx), createNodeRowFns(ctx), createDeleteFns(ctx));
   ctx.refreshBreadcrumb = refreshBreadcrumb;

@@ -607,6 +607,9 @@ export function createOutlinerView(ctx: GraphEditorContext, paneOpts?: OutlinerP
   let dragNodeId: string | null = null;
   let dragParentId: string | null | undefined = undefined;
   let dragMultiIds: string[] | null = null; // non-null when dragging a multi-selection
+  // Unique identity for this pane instance; lets the drop target distinguish a drag
+  // that started in this same pane from one that started in another pane.
+  const paneToken = {};
 
   // Map from temp ID to promise that resolves once the real ID is assigned
   const tempReady = new Map<string, Promise<void>>();
@@ -615,6 +618,34 @@ export function createOutlinerView(ctx: GraphEditorContext, paneOpts?: OutlinerP
   const awaitRealId = (onode: ONode): Promise<void> => {
     if (!onode.node.id.startsWith('temp-')) return Promise.resolve();
     return tempReady.get(onode.node.id) ?? Promise.resolve();
+  };
+
+  // Remove the given nodes from THIS pane's local tree + caches and re-render.
+  // Called on the source pane after a cross-pane drop moves nodes out of it.
+  const detachNodes = (nodes: ExplorerNode[]) => {
+    for (const node of nodes) {
+      const o = byId.get(node.id);
+      if (!o) continue;
+      const sibs = getSiblings(o);
+      const idx = sibs.indexOf(o);
+      if (idx >= 0) sibs.splice(idx, 1);
+      byId.delete(node.id);
+      const cc = ctx.childrenCache.get(o.parentId);
+      if (cc) { const ci = cc.findIndex(n => n.id === node.id); if (ci >= 0) cc.splice(ci, 1); }
+    }
+    ctx.saveChildrenCache?.();
+    render();
+  };
+
+  // Drop target guard shared by dragover + drop: true when `onode` is one of the
+  // dragged nodes, or (same-pane) sits inside a dragged node's subtree.
+  const dropBlockedBy = (onode: ONode, pd: NonNullable<typeof ctx.paneDrag>): boolean => {
+    if (pd.nodeIds.includes(onode.node.id)) return true;
+    for (const id of pd.nodeIds) {
+      const o = byId.get(id);
+      if (o && isInSubtree(onode, o)) return true;
+    }
+    return false;
   };
 
   const buildRow = (onode: ONode): HTMLElement => {
@@ -830,6 +861,18 @@ export function createOutlinerView(ctx: GraphEditorContext, paneOpts?: OutlinerP
       const sel = getSelectedONodes();
       dragMultiIds = (sel.length > 1 && sel.some(o => o.node.id === onode.node.id))
         ? sel.map(o => o.node.id) : null;
+      // Populate the shared cross-pane drag state so a different pane can resolve the
+      // dragged node(s) on drop. Movers carry their node + parent-at-dragstart.
+      const dragONodes: ONode[] = dragMultiIds
+        ? dragMultiIds.map(id => byId.get(id)).filter((o): o is ONode => !!o)
+        : [onode];
+      ctx.paneDrag = {
+        sourceToken: paneToken,
+        nodeIds: dragONodes.map(o => o.node.id),
+        movers: dragONodes.map(o => ({ node: o.node, oldParentId: o.parentId })),
+        detachFromSource: (nodes) => detachNodes(nodes),
+        awaitRealIds: () => Promise.all(dragONodes.map(o => awaitRealId(o))).then(() => {}),
+      };
       if (e.dataTransfer) { e.dataTransfer.effectAllowed = 'move'; e.dataTransfer.setData('text/plain', onode.node.id); }
     });
     row.addEventListener('dragend', () => {
@@ -839,12 +882,15 @@ export function createOutlinerView(ctx: GraphEditorContext, paneOpts?: OutlinerP
       dragNodeId = null;
       dragParentId = undefined;
       dragMultiIds = null;
-      listEl.querySelectorAll<HTMLElement>('[data-node-id]').forEach(r => { r.style.borderTop = '2px solid transparent'; r.style.borderBottom = '2px solid transparent'; });
+      ctx.paneDrag = null;
+      // Clear indicators across ALL panes (a cross-pane drag leaves them in the target pane).
+      ctx.outer.querySelectorAll<HTMLElement>('[data-node-id]:not(textarea)').forEach(r => {
+        r.style.borderTop = '2px solid transparent'; r.style.borderBottom = '2px solid transparent';
+      });
     });
     row.addEventListener('dragover', (e) => {
-      if (!dragNodeId || dragNodeId === onode.node.id) return;
-      const src = byId.get(dragNodeId);
-      if (src && isInSubtree(onode, src)) return;
+      const pd = ctx.paneDrag;
+      if (!pd || dropBlockedBy(onode, pd)) return;
       e.preventDefault();
       if (e.dataTransfer) e.dataTransfer.dropEffect = 'move';
       const before = e.clientY < row.getBoundingClientRect().top + row.getBoundingClientRect().height / 2;
@@ -860,66 +906,59 @@ export function createOutlinerView(ctx: GraphEditorContext, paneOpts?: OutlinerP
       e.preventDefault();
       row.style.borderTop = '2px solid transparent';
       row.style.borderBottom = '2px solid transparent';
-      if (!dragNodeId || dragNodeId === onode.node.id) return;
-      const srcONode = byId.get(dragNodeId);
-      if (!srcONode || isInSubtree(onode, srcONode)) return;
+      const pd = ctx.paneDrag;
+      if (!pd || dropBlockedBy(onode, pd)) return;
 
       const before = e.clientY < row.getBoundingClientRect().top + row.getBoundingClientRect().height / 2;
       const newParentId = onode.parentId;
-
-      // Collect nodes to move (multi-select or single)
-      const movers: ONode[] = dragMultiIds
-        ? (dragMultiIds.map(id => byId.get(id)).filter((o): o is ONode =>
-            !!o && o.node.id !== onode.node.id && !isInSubtree(onode, o)))
-        : [srcONode];
-      if (movers.length === 0) return;
-
-      // Save old parents before modifying state
-      const oldParents = new Map(movers.map(o => [o.node.id, o.parentId]));
-
-      // Remove movers from their current sibling lists
-      for (const mover of movers) {
-        const sibs = getSiblings(mover);
-        const idx = sibs.indexOf(mover);
-        if (idx >= 0) sibs.splice(idx, 1);
-        const cc = ctx.childrenCache.get(mover.parentId);
-        if (cc) { const ci = cc.findIndex(n => n.id === mover.node.id); if (ci >= 0) cc.splice(ci, 1); }
-      }
-
-      // Get target parent's sibling list via getSiblings so pane-root nodes are handled correctly
       const newSibs: ONode[] = getSiblings(onode);
       const targetIdx = newSibs.indexOf(onode);
       if (targetIdx === -1) return;
       const insertAt = before ? targetIdx : targetIdx + 1;
 
-      // Insert movers at the new position and fix depths
-      for (let i = 0; i < movers.length; i++) {
-        movers[i].parentId = newParentId;
-        fixDepths(movers[i], onode.depth);
-        newSibs.splice(insertAt + i, 0, movers[i]);
-      }
+      if (pd.sourceToken === paneToken) {
+        // ── Same-pane reorder / reparent (movers live in this pane's tree) ──
+        const movers: ONode[] = (dragMultiIds
+          ? dragMultiIds.map(id => byId.get(id)).filter((o): o is ONode => !!o)
+          : [byId.get(pd.nodeIds[0])].filter((o): o is ONode => !!o))
+          .filter(o => o.node.id !== onode.node.id && !isInSubtree(onode, o));
+        if (movers.length === 0) return;
 
-      // Invalidate caches for all affected parents
-      const affectedParents = new Set([...oldParents.values(), newParentId]);
-      for (const pid of affectedParents) { if (pid !== null) ctx.childrenCache.delete(pid); }
-      ctx.saveChildrenCache?.();
-
-      render();
-
-      // Wait for temp nodes to receive real IDs before API calls
-      await Promise.all(movers.map(m => awaitRealId(m)));
-
-      // Toggle links for nodes that changed parent
-      for (const mover of movers) {
-        const oldPid = oldParents.get(mover.node.id) ?? null;
-        if (oldPid !== newParentId) {
-          if (oldPid !== null) void apiToggleLink(ctx.gId, mover.node.id, oldPid);
-          if (newParentId !== null) void apiToggleLink(ctx.gId, mover.node.id, newParentId);
+        const oldParents = new Map(movers.map(o => [o.node.id, o.parentId]));
+        for (const mover of movers) {
+          const sibs = getSiblings(mover);
+          const idx = sibs.indexOf(mover);
+          if (idx >= 0) sibs.splice(idx, 1);
+          const cc = ctx.childrenCache.get(mover.parentId);
+          if (cc) { const ci = cc.findIndex(n => n.id === mover.node.id); if (ci >= 0) cc.splice(ci, 1); }
         }
-      }
-      // Update sibling order in backend
-      if (newParentId !== null) {
-        void apiMoveNode(ctx.gId, movers[0].node.id, newParentId, 'down', newSibs.map(s => s.node.id));
+        // Recompute insert index: removals above the target shift it left.
+        const tIdx = newSibs.indexOf(onode);
+        const at = before ? tIdx : tIdx + 1;
+        for (let i = 0; i < movers.length; i++) {
+          movers[i].parentId = newParentId;
+          fixDepths(movers[i], onode.depth);
+          newSibs.splice(at + i, 0, movers[i]);
+        }
+        const affectedParents = new Set([...oldParents.values(), newParentId]);
+        for (const pid of affectedParents) { if (pid !== null) ctx.childrenCache.delete(pid); }
+        ctx.saveChildrenCache?.();
+        render();
+
+        await Promise.all(movers.map(m => awaitRealId(m)));
+        for (const mover of movers) {
+          const oldPid = oldParents.get(mover.node.id) ?? null;
+          if (oldPid !== newParentId) {
+            if (oldPid !== null) void apiToggleLink(ctx.gId, mover.node.id, oldPid);
+            if (newParentId !== null) void apiToggleLink(ctx.gId, mover.node.id, newParentId);
+          }
+        }
+        if (newParentId !== null) {
+          void apiMoveNode(ctx.gId, movers[0].node.id, newParentId, 'down', newSibs.map(s => s.node.id));
+        }
+      } else {
+        // ── Cross-pane move (movers came from another pane) ──
+        await moveAcrossPanes(pd, newParentId, newSibs, insertAt, onode.depth);
       }
     };
 
@@ -941,6 +980,74 @@ export function createOutlinerView(ctx: GraphEditorContext, paneOpts?: OutlinerP
     if (target.node.id === root.node.id) return true;
     return root.children.some(c => isInSubtree(target, c));
   };
+
+  // Insert nodes dragged from ANOTHER pane into this pane's tree at the given sibling
+  // position, then reparent them in the graph. Source pane is updated via detachFromSource.
+  const moveAcrossPanes = async (
+    pd: NonNullable<typeof ctx.paneDrag>,
+    newParentId: string | null,
+    newSibs: ONode[],
+    insertAt: number,
+    targetDepth: number,
+  ) => {
+    const movers = pd.movers;
+    if (movers.length === 0) return;
+
+    const inserted: ONode[] = [];
+    for (const m of movers) {
+      byId.delete(m.node.id); // drop any stale ONode for the same id, then rebuild
+      inserted.push(make(m.node, newParentId, targetDepth));
+    }
+    seedPropStore(movers.map(m => m.node));
+    for (let i = 0; i < inserted.length; i++) newSibs.splice(insertAt + i, 0, inserted[i]);
+
+    // Invalidate caches for source + target parents so other views refetch fresh data.
+    const affected = new Set<string | null>([newParentId]);
+    for (const m of movers) affected.add(m.oldParentId);
+    for (const pid of affected) { if (pid !== null) ctx.childrenCache.delete(pid); }
+    ctx.saveChildrenCache?.();
+    render();
+
+    // Remove the nodes from the source pane (re-renders it).
+    pd.detachFromSource(movers.map(m => m.node));
+
+    // Resolve any temp ids before hitting the API.
+    await pd.awaitRealIds();
+    for (const m of movers) {
+      const oldPid = m.oldParentId;
+      if (oldPid !== newParentId) {
+        if (oldPid !== null) void apiToggleLink(ctx.gId, m.node.id, oldPid);
+        if (newParentId !== null) void apiToggleLink(ctx.gId, m.node.id, newParentId);
+      }
+    }
+    if (newParentId !== null) {
+      void apiMoveNode(ctx.gId, movers[0].node.id, newParentId, 'down', newSibs.map(s => s.node.id));
+    }
+  };
+
+  // List-level drop surface: a cross-pane drag that lands in the empty area / below the
+  // last row (or onto an empty pane) appends the node(s) to this pane's root level.
+  const isOverRow = (t: EventTarget | null) => !!(t as HTMLElement | null)?.closest?.('[data-node-id]');
+  listEl.addEventListener('dragover', (e) => {
+    const pd = ctx.paneDrag;
+    if (!pd || pd.sourceToken === paneToken) return; // same-pane handled by rows
+    if (isOverRow(e.target)) return;                 // a row handles its own zone
+    e.preventDefault();
+    if (e.dataTransfer) e.dataTransfer.dropEffect = 'move';
+    listEl.style.boxShadow = 'inset 0 -2px 0 0 #4a9eff';
+  });
+  listEl.addEventListener('dragleave', (e) => {
+    if (!listEl.contains(e.relatedTarget as Node | null)) listEl.style.boxShadow = '';
+  });
+  listEl.addEventListener('drop', (e) => {
+    const pd = ctx.paneDrag;
+    listEl.style.boxShadow = '';
+    if (!pd || pd.sourceToken === paneToken) return;
+    if (isOverRow(e.target)) return; // the row's own drop handler takes it
+    e.preventDefault();
+    const targetParentId = paneParentSet ? paneParentId : null;
+    void moveAcrossPanes(pd, targetParentId, roots, roots.length, baseDepth);
+  });
 
   // ── Property menu (right-click on expand marker) ─────────────────────
 
