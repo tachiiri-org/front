@@ -283,8 +283,13 @@ export function createOutlinerView(ctx: GraphEditorContext): {
       m.style.background = filled ? TEXT_MID : 'transparent';
       m.style.border = filled ? 'none' : `1.5px solid ${hasChildren ? TEXT_MID : TEXT_DIM}`;
     }
-    const wrap = m.parentElement;
-    if (wrap) wrap.style.cursor = hasChildren ? 'pointer' : 'default';
+    // Triangle expand button (right side)
+    const tri = row.querySelector<HTMLElement>('[data-expand-triangle]');
+    if (tri) {
+      tri.textContent = onode.expanded ? '▾' : '▸';
+      tri.style.opacity = hasChildren ? '1' : '0';
+      tri.style.pointerEvents = hasChildren ? 'auto' : 'none';
+    }
   };
 
   const expandInDom = (onode: ONode) => {
@@ -401,31 +406,34 @@ export function createOutlinerView(ctx: GraphEditorContext): {
   };
 
   // ── Row builder ──────────────────────────────────────────────────────
+  // Active drag state for node reordering
+  let dragNodeId: string | null = null;
+  let dragParentId: string | null | undefined = undefined;
+
   const buildRow = (onode: ONode): HTMLElement => {
     const row = document.createElement('div');
     row.dataset.nodeId = onode.node.id;
-    row.style.cssText = `display:flex;align-items:stretch;padding:1px 0;`;
+    row.style.cssText = `display:flex;align-items:center;padding:0;border:2px solid transparent;border-radius:3px;`;
     rowMap.set(onode.node.id, row);
 
     const spacer = document.createElement('span');
     spacer.style.cssText = `flex-shrink:0;width:${(onode.depth - baseDepth) * 20 + 6}px;`;
     row.appendChild(spacer);
 
+    // Left square: click → property menu
     const btnWrap = document.createElement('span');
-    btnWrap.style.cssText = `flex-shrink:0;display:flex;align-items:center;justify-content:center;width:18px;`;
-    btnWrap.addEventListener('click', () => void toggleExpand(onode));
+    btnWrap.style.cssText = `flex-shrink:0;display:flex;align-items:center;justify-content:center;width:18px;cursor:pointer;`;
     const marker = document.createElement('span');
     marker.dataset.expandMarker = '1';
     marker.style.cssText = `width:7px;height:7px;border-radius:1px;box-sizing:border-box;pointer-events:none;`;
     btnWrap.appendChild(marker);
-    btnWrap.addEventListener('contextmenu', (e) => { e.preventDefault(); showPropertyMenu(onode, e.clientX, e.clientY); });
+    btnWrap.addEventListener('click', (e) => { e.stopPropagation(); showPropertyMenu(onode, e.clientX, e.clientY); });
     row.appendChild(btnWrap);
-    updateExpandMarker(onode);
 
     const label = primaryLabel(onode.node, ctx.state.lang) ?? fallbackLabel(onode.node, ctx.state.lang);
     const ta = document.createElement('textarea');
     ta.value = label;
-    ta.style.cssText = `flex:1;background:transparent;border:none;outline:none;resize:none;font-size:15px;font-family:inherit;line-height:1.8;padding:0 4px 4px 0;overflow:hidden;min-height:20px;color:${onode.node.color ?? TEXT_HIGH};`;
+    ta.style.cssText = `flex:1;background:transparent;border:none;outline:none;resize:none;font-size:14px;font-family:inherit;line-height:1.5;padding:0 4px 0 0;overflow:hidden;min-height:20px;color:${onode.node.color ?? TEXT_HIGH};`;
     ta.rows = 1;
 
     const resize = () => { ta.style.height = 'auto'; ta.style.height = ta.scrollHeight + 'px'; };
@@ -551,7 +559,88 @@ export function createOutlinerView(ctx: GraphEditorContext): {
       }
     });
 
+    // Triangle expand button (right side)
+    const triBtn = document.createElement('button');
+    triBtn.dataset.expandTriangle = '1';
+    triBtn.textContent = '▸';
+    triBtn.style.cssText = `flex-shrink:0;background:transparent;border:none;color:${TEXT_DIM};cursor:pointer;font-size:10px;padding:0 4px;opacity:0;pointer-events:none;line-height:1;`;
+    triBtn.addEventListener('click', (e) => { e.stopPropagation(); void toggleExpand(onode); });
+
+    // Long press (350ms) on row body → enable drag
+    let pressTimer: ReturnType<typeof setTimeout> | null = null;
+    let pressStartX = 0, pressStartY = 0;
+    let dragReady = false;
+
+    const cancelPress = () => {
+      if (pressTimer) { clearTimeout(pressTimer); pressTimer = null; }
+    };
+
+    row.addEventListener('pointerdown', (e) => {
+      const t = e.target as HTMLElement;
+      if (t.closest('button') || t.tagName === 'TEXTAREA') return;
+      pressStartX = e.clientX; pressStartY = e.clientY;
+      dragReady = false;
+      pressTimer = setTimeout(() => {
+        dragReady = true;
+        row.draggable = true;
+        row.style.opacity = '0.6';
+      }, 350);
+    });
+    row.addEventListener('pointermove', (e) => {
+      if (!pressTimer) return;
+      if (Math.abs(e.clientX - pressStartX) > 5 || Math.abs(e.clientY - pressStartY) > 5) cancelPress();
+    });
+    row.addEventListener('pointerup', cancelPress);
+    row.addEventListener('pointercancel', cancelPress);
+
+    row.addEventListener('dragstart', (e) => {
+      if (!dragReady) { e.preventDefault(); return; }
+      dragNodeId = onode.node.id;
+      dragParentId = onode.parentId;
+      if (e.dataTransfer) { e.dataTransfer.effectAllowed = 'move'; e.dataTransfer.setData('text/plain', onode.node.id); }
+    });
+    row.addEventListener('dragend', () => {
+      row.draggable = false;
+      row.style.opacity = '';
+      dragReady = false;
+      dragNodeId = null;
+      dragParentId = undefined;
+      listEl.querySelectorAll<HTMLElement>('[data-node-id]').forEach(r => { r.style.borderTop = '2px solid transparent'; r.style.borderBottom = '2px solid transparent'; });
+    });
+    row.addEventListener('dragover', (e) => {
+      if (!dragNodeId || dragNodeId === onode.node.id || onode.parentId !== dragParentId) return;
+      e.preventDefault();
+      if (e.dataTransfer) e.dataTransfer.dropEffect = 'move';
+      const before = e.clientY < row.getBoundingClientRect().top + row.getBoundingClientRect().height / 2;
+      row.style.borderTop = before ? '2px solid #4a9eff' : '2px solid transparent';
+      row.style.borderBottom = before ? '2px solid transparent' : '2px solid #4a9eff';
+    });
+    row.addEventListener('dragleave', () => {
+      row.style.borderTop = '2px solid transparent';
+      row.style.borderBottom = '2px solid transparent';
+    });
+    row.addEventListener('drop', (e) => {
+      e.preventDefault();
+      row.style.borderTop = '2px solid transparent';
+      row.style.borderBottom = '2px solid transparent';
+      if (!dragNodeId || dragNodeId === onode.node.id || onode.parentId !== dragParentId) return;
+      const srcONode = byId.get(dragNodeId);
+      if (!srcONode) return;
+      const before = e.clientY < row.getBoundingClientRect().top + row.getBoundingClientRect().height / 2;
+      const sibs = getSiblings(onode);
+      const newOrder = sibs.filter(s => s.node.id !== dragNodeId);
+      const targetIdx = newOrder.findIndex(s => s.node.id === onode.node.id);
+      if (targetIdx === -1) return;
+      newOrder.splice(before ? targetIdx : targetIdx + 1, 0, srcONode);
+      const parentONode = onode.parentId ? byId.get(onode.parentId) : null;
+      if (parentONode) parentONode.children = newOrder; else roots = newOrder;
+      render();
+      if (onode.parentId) void apiMoveNode(ctx.gId, dragNodeId!, onode.parentId, 'down', newOrder.map(s => s.node.id));
+    });
+
     row.appendChild(ta);
+    row.appendChild(triBtn);
+    updateExpandMarker(onode);
     return row;
   };
 
