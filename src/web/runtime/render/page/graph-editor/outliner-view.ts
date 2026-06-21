@@ -24,6 +24,8 @@ export type OutlinerPaneOpts = {
   paneFilterKeys?: Set<string>;
   /** Called when user focuses a node row (for inter-pane wiring) */
   onNodeSelect?: (nodeId: string | null) => void;
+  /** Called after render with the content's natural width (px); used by multi-pane for auto-sizing */
+  onContentWidthChange?: (width: number) => void;
 };
 
 export function createOutlinerView(ctx: GraphEditorContext, paneOpts?: OutlinerPaneOpts): {
@@ -225,6 +227,30 @@ export function createOutlinerView(ctx: GraphEditorContext, paneOpts?: OutlinerP
     for (const o of toRender) listEl.appendChild(buildRow(o));
     updateSelectionHighlight();
     schedulePrefetch();
+    if (paneOpts?.onContentWidthChange) scheduleWidthUpdate();
+  };
+
+  // Canvas-based text width measurement — called after render to auto-size the pane width
+  const scheduleWidthUpdate = () => {
+    requestAnimationFrame(() => {
+      const rows = listEl.querySelectorAll<HTMLElement>('[data-node-id]');
+      if (rows.length === 0) { paneOpts!.onContentWidthChange!(180); return; }
+      const firstTa = rows[0].querySelector<HTMLTextAreaElement>('textarea');
+      const font = firstTa ? getComputedStyle(firstTa).font : '14px sans-serif';
+      const canvas = document.createElement('canvas');
+      const c = canvas.getContext('2d')!;
+      c.font = font;
+      let maxW = 0;
+      rows.forEach(row => {
+        const spacer = row.querySelector<HTMLElement>('span');
+        const ta = row.querySelector<HTMLTextAreaElement>('textarea');
+        if (!ta) return;
+        const spacerW = spacer?.offsetWidth ?? 0;
+        const textW = Math.ceil(c.measureText(ta.value).width);
+        maxW = Math.max(maxW, spacerW + 18 + textW + 24);
+      });
+      paneOpts!.onContentWidthChange!(Math.min(Math.max(180, maxW), 600));
+    });
   };
 
   const focusRow = (onode: ONode) => {

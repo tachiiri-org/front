@@ -155,6 +155,10 @@ export function createMultiPaneView(ctx: GraphEditorContext): {
       paneParentId,
       paneFilterKeys: new Set(config.filterKeys),
       onNodeSelect: (nodeId) => onPaneSelect(config.id, nodeId),
+      onContentWidthChange: (w) => {
+        containerEl.style.width = `${w}px`;
+        config.width = w;
+      },
     });
     view.el.style.flex = '1';
     // Hide the breadcrumb bar inside pane (compact)
