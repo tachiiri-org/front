@@ -269,6 +269,13 @@ export function createOutlinerView(ctx: GraphEditorContext, paneOpts?: OutlinerP
       const minW = Math.round(window.innerWidth * 0.15);
       const maxCap = Math.round(window.innerWidth * 0.40);
       paneOpts!.onContentWidthChange!(Math.min(Math.max(minW, maxW), maxCap));
+      // Column width changed → textarea wrapping changed → re-measure heights
+      requestAnimationFrame(() => {
+        listEl.querySelectorAll<HTMLTextAreaElement>('textarea').forEach(ta => {
+          ta.style.height = 'auto';
+          ta.style.height = ta.scrollHeight + 'px';
+        });
+      });
     });
   };
 
