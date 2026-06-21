@@ -101,16 +101,43 @@ export function createMultiPaneView(ctx: GraphEditorContext): {
     srcBtn.addEventListener('click', (e) => { e.stopPropagation(); showSourceMenu(config.id, srcBtn); });
     header.appendChild(srcBtn);
 
-    // Filter button
-    const fltBtn = document.createElement('button');
-    fltBtn.style.cssText = `background:transparent;border:1px solid ${BORDER};color:${TEXT_MID};cursor:pointer;font-size:10px;padding:1px 5px;border-radius:3px;flex-shrink:0;`;
+    // Filter area — shows active filter keys as colored pills
+    const fltArea = document.createElement('div');
+    fltArea.style.cssText = `display:flex;align-items:center;gap:3px;flex-wrap:wrap;cursor:pointer;min-width:0;`;
+    fltArea.title = 'フィルタを設定';
     const updateFltBtn = () => {
-      fltBtn.textContent = config.filterKeys.length > 0 ? `F(${config.filterKeys.length})` : 'フィルタ';
-      fltBtn.style.color = config.filterKeys.length > 0 ? TEXT_HIGH : TEXT_MID;
+      fltArea.innerHTML = '';
+      if (config.filterKeys.length === 0) {
+        const placeholder = document.createElement('span');
+        placeholder.textContent = 'フィルタ';
+        placeholder.style.cssText = `color:${TEXT_DIM};font-size:10px;padding:1px 3px;border:1px solid ${BORDER};border-radius:3px;`;
+        fltArea.appendChild(placeholder);
+      } else {
+        for (const key of config.filterKeys) {
+          const col = ctx.allPropColors.get(key)?.code ?? TEXT_DIM;
+          const tag = document.createElement('span');
+          tag.style.cssText = `display:inline-flex;align-items:center;gap:2px;padding:1px 5px;border-radius:3px;background:${col};color:#fff;font-size:10px;white-space:nowrap;`;
+          const labelSpan = document.createElement('span');
+          labelSpan.textContent = key;
+          const xSpan = document.createElement('span');
+          xSpan.textContent = '×';
+          xSpan.style.cssText = `cursor:pointer;font-size:11px;line-height:1;opacity:0.8;`;
+          xSpan.addEventListener('click', (e) => {
+            e.stopPropagation();
+            config.filterKeys = config.filterKeys.filter(k => k !== key);
+            saveAll();
+            const inst = panes.find(p => p.config.id === config.id);
+            inst?.view.setPaneFilterKeys(new Set(config.filterKeys));
+            updateFltBtn();
+          });
+          tag.append(labelSpan, xSpan);
+          fltArea.appendChild(tag);
+        }
+      }
     };
     updateFltBtn();
-    fltBtn.addEventListener('click', (e) => { e.stopPropagation(); showFilterMenu(config.id, fltBtn); });
-    header.appendChild(fltBtn);
+    fltArea.addEventListener('click', (e) => { e.stopPropagation(); showFilterMenu(config.id, fltArea); });
+    header.appendChild(fltArea);
 
     // Close button
     const closeBtn = document.createElement('button');

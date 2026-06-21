@@ -168,9 +168,6 @@ export function createOutlinerView(ctx: GraphEditorContext, paneOpts?: OutlinerP
 
   const setPaneSelected = (nodeId: string | null) => {
     paneSelectedId = nodeId;
-    rowMap.forEach((row, id) => {
-      row.style.outline = id === paneSelectedId ? `1px solid rgba(99,102,241,.6)` : '';
-    });
     paneOpts?.onNodeSelect?.(nodeId);
   };
 
@@ -228,11 +225,6 @@ export function createOutlinerView(ctx: GraphEditorContext, paneOpts?: OutlinerP
     for (const o of toRender) listEl.appendChild(buildRow(o));
     updateSelectionHighlight();
     schedulePrefetch();
-    // Restore pane selection highlight after render
-    if (paneSelectedId) {
-      const row = rowMap.get(paneSelectedId);
-      if (row) row.style.outline = `1px solid rgba(99,102,241,.6)`;
-    }
   };
 
   const focusRow = (onode: ONode) => {
@@ -877,20 +869,42 @@ export function createOutlinerView(ctx: GraphEditorContext, paneOpts?: OutlinerP
       const col = propColor?.code ?? TEXT_DIM;
 
       const row = document.createElement('div');
-      row.draggable = true;
-      row.style.cssText = `display:flex;align-items:center;gap:3px;padding:3px 4px;border-radius:4px;cursor:default;border:2px solid transparent;`;
+      row.style.cssText = `display:flex;align-items:center;gap:5px;padding:3px 4px;border-radius:4px;cursor:default;border:2px solid transparent;`;
       row.addEventListener('mouseenter', () => { row.style.background = 'rgba(255,255,255,.05)'; });
       row.addEventListener('mouseleave', () => { row.style.background = ''; });
 
-      // ⠿ drag handle
-      const handle = document.createElement('span');
-      handle.textContent = '⠿';
-      handle.style.cssText = `color:${TEXT_DIM};cursor:grab;font-size:11px;flex-shrink:0;user-select:none;`;
+      // Square marker (filled=active, border-only=inactive) — replaces ⋯ + ⠿
+      const sqBtn = document.createElement('span');
+      sqBtn.style.cssText = `
+        width:8px;height:8px;border-radius:1px;box-sizing:border-box;flex-shrink:0;cursor:pointer;
+        ${active ? `background:${col};border:none;` : `background:transparent;border:1.5px solid ${TEXT_DIM};`}
+      `;
+
+      // Long press on square → enable DnD
+      let sqPressTimer: ReturnType<typeof setTimeout> | null = null;
+      let sqDragActive = false;
+      sqBtn.addEventListener('pointerdown', () => {
+        sqDragActive = false;
+        sqPressTimer = setTimeout(() => {
+          sqDragActive = true;
+          row.draggable = true;
+          row.style.opacity = '0.4';
+        }, 350);
+      });
+      const cancelSqPress = () => { if (sqPressTimer) { clearTimeout(sqPressTimer); sqPressTimer = null; } };
+      sqBtn.addEventListener('pointerup', cancelSqPress);
+      sqBtn.addEventListener('pointermove', cancelSqPress);
+      // Click on square → context menu
+      sqBtn.addEventListener('click', (e) => {
+        if (sqDragActive) { sqDragActive = false; return; }
+        e.stopPropagation();
+        showKeyContextMenu(key, sqBtn, onRedraw);
+      });
 
       // Colored pill
       const pill = document.createElement('span');
       pill.textContent = key;
-      pill.style.cssText = `display:inline-flex;align-items:center;padding:2px 8px;border-radius:4px;background:${col};color:#fff;font-size:12px;cursor:pointer;font-weight:500;white-space:nowrap;${active ? 'box-shadow:inset 0 0 0 2px rgba(255,255,255,.55);' : ''}`;
+      pill.style.cssText = `display:inline-flex;align-items:center;padding:2px 8px;border-radius:4px;background:${col};color:#fff;font-size:12px;cursor:pointer;font-weight:500;white-space:nowrap;`;
       pill.addEventListener('click', (e) => {
         if (mode === 'node' && nodeId) {
           const onode = byId.get(nodeId);
@@ -911,21 +925,17 @@ export function createOutlinerView(ctx: GraphEditorContext, paneOpts?: OutlinerP
         onRedraw();
       });
 
-      // ⋯ button
-      const dotsBtn = document.createElement('button');
-      dotsBtn.textContent = '···';
-      dotsBtn.style.cssText = `background:transparent;border:none;color:${TEXT_DIM};cursor:pointer;font-size:13px;padding:0 1px;flex-shrink:0;line-height:1;`;
-      dotsBtn.addEventListener('click', (e) => {
-        e.stopPropagation();
-        showKeyContextMenu(key, dotsBtn, onRedraw);
-      });
-
-      // DnD
+      // DnD (activated by long press on square)
       row.addEventListener('dragstart', (e) => {
-        dragSrc = key; row.style.opacity = '0.4';
+        dragSrc = key;
         e.dataTransfer!.effectAllowed = 'move';
       });
-      row.addEventListener('dragend', () => { row.style.opacity = ''; dragSrc = null; });
+      row.addEventListener('dragend', () => {
+        row.style.opacity = '';
+        row.draggable = false;
+        sqDragActive = false;
+        dragSrc = null;
+      });
       row.addEventListener('dragover', (e) => {
         e.preventDefault();
         row.style.borderTop = `2px solid ${TEXT_MID}`;
@@ -945,7 +955,7 @@ export function createOutlinerView(ctx: GraphEditorContext, paneOpts?: OutlinerP
         onRedraw();
       });
 
-      row.append(dotsBtn, handle, pill);
+      row.append(sqBtn, pill);
       container.appendChild(row);
     }
 
