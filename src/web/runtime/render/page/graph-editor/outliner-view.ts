@@ -645,28 +645,68 @@ export function createOutlinerView(ctx: GraphEditorContext): {
     onDone();
   };
 
-  // ⋯ context menu per key: color change + delete
+  // ⋯ context menu per key: inline color palette + delete
   const showKeyContextMenu = (key: string, anchor: HTMLElement, onDone: () => void) => {
     document.querySelector('[data-key-ctx-menu]')?.remove();
     const m = document.createElement('div');
     m.dataset.keyCtxMenu = '1';
-    m.style.cssText = `position:fixed;z-index:102;background:hsl(240,14%,9%);border:1px solid ${BORDER};border-radius:6px;padding:4px;font-size:12px;box-shadow:0 4px 12px rgba(0,0,0,.4);min-width:120px;`;
+    m.style.cssText = `position:fixed;z-index:102;background:hsl(240,14%,9%);border:1px solid ${BORDER};border-radius:6px;padding:8px;font-size:12px;box-shadow:0 4px 12px rgba(0,0,0,.4);min-width:160px;`;
     const ar = anchor.getBoundingClientRect();
     m.style.left = `${ar.left}px`;
-    m.style.top = `${ar.bottom + 2}px`;
-    const mkItem = (text: string, color?: string) => {
-      const item = document.createElement('div');
-      item.textContent = text;
-      item.style.cssText = `padding:5px 10px;cursor:pointer;border-radius:4px;color:${color ?? TEXT_HIGH};`;
-      item.addEventListener('mouseenter', () => { item.style.background = 'rgba(255,255,255,.08)'; });
-      item.addEventListener('mouseleave', () => { item.style.background = ''; });
-      return item;
-    };
-    const colorItem = mkItem('色を変更');
-    colorItem.addEventListener('click', () => { m.remove(); showColorPickerFor(key, anchor, onDone); });
-    const deleteItem = mkItem('削除', '#e57373');
-    deleteItem.addEventListener('click', () => { m.remove(); deleteKey(key, onDone); });
-    m.append(colorItem, deleteItem);
+    m.style.top = `${ar.bottom + 4}px`;
+
+    // Color palette header
+    const colorLabel = document.createElement('div');
+    colorLabel.textContent = '色';
+    colorLabel.style.cssText = `color:${TEXT_DIM};font-size:11px;margin-bottom:6px;`;
+    m.appendChild(colorLabel);
+
+    // Color grid
+    const grid = document.createElement('div');
+    grid.style.cssText = `display:grid;grid-template-columns:repeat(6,1fr);gap:4px;margin-bottom:8px;`;
+
+    const current = ctx.allPropColors.get(key)?.colorId;
+    // No-color button
+    const noneBtn = document.createElement('button');
+    noneBtn.title = '色なし'; noneBtn.textContent = '×';
+    noneBtn.style.cssText = `width:22px;height:22px;border-radius:4px;border:1.5px solid ${BORDER};background:transparent;cursor:pointer;font-size:11px;color:${TEXT_DIM};grid-column:span 2;`;
+    noneBtn.addEventListener('click', () => {
+      ctx.allPropColors.delete(key);
+      void apiRemovePropertyColor(ctx.gId, key);
+      m.remove();
+      onDone();
+      rowMap.forEach((_, id) => { const o = byId.get(id); if (o) updateExpandMarker(o); });
+    });
+    grid.appendChild(noneBtn);
+
+    for (const [id, code] of ctx.colorPalette) {
+      const btn = document.createElement('button');
+      btn.title = id;
+      btn.style.cssText = `width:22px;height:22px;border-radius:4px;border:${current === id ? `2px solid ${TEXT_HIGH}` : 'none'};background:${code};cursor:pointer;`;
+      btn.addEventListener('click', () => {
+        ctx.allPropColors.set(key, { colorId: id, code });
+        void apiSetPropertyColor(ctx.gId, key, id);
+        m.remove();
+        onDone();
+        rowMap.forEach((_, nid) => { const o = byId.get(nid); if (o) updateExpandMarker(o); });
+      });
+      grid.appendChild(btn);
+    }
+    m.appendChild(grid);
+
+    // Divider + delete
+    const div = document.createElement('div');
+    div.style.cssText = `border-top:1px solid ${BORDER};margin:0 0 6px;`;
+    m.appendChild(div);
+
+    const deleteBtn = document.createElement('div');
+    deleteBtn.textContent = '削除';
+    deleteBtn.style.cssText = `padding:4px 6px;cursor:pointer;border-radius:4px;color:#e57373;`;
+    deleteBtn.addEventListener('mouseenter', () => { deleteBtn.style.background = 'rgba(255,255,255,.08)'; });
+    deleteBtn.addEventListener('mouseleave', () => { deleteBtn.style.background = ''; });
+    deleteBtn.addEventListener('click', () => { m.remove(); deleteKey(key, onDone); });
+    m.appendChild(deleteBtn);
+
     document.body.appendChild(m);
     requestAnimationFrame(() => {
       const r = m.getBoundingClientRect();
@@ -713,7 +753,7 @@ export function createOutlinerView(ctx: GraphEditorContext): {
       // Colored pill
       const pill = document.createElement('span');
       pill.textContent = key;
-      pill.style.cssText = `flex:1;padding:3px 10px;border-radius:4px;background:${col};color:#fff;font-size:12px;cursor:pointer;font-weight:500;${active ? 'outline:2px solid rgba(255,255,255,.6);outline-offset:-1px;' : ''}`;
+      pill.style.cssText = `padding:3px 10px;border-radius:4px;background:${col};color:#fff;font-size:12px;cursor:pointer;font-weight:500;white-space:nowrap;${active ? 'outline:2px solid rgba(255,255,255,.6);outline-offset:-1px;' : ''}`;
       pill.addEventListener('click', () => {
         if (mode === 'node' && nodeId) {
           const onode = byId.get(nodeId);
