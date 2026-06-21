@@ -48,12 +48,40 @@ async function getNeighbors(
   return res.json() as Promise<{ nodes: ApiNode[]; truncated?: boolean; count?: number }>;
 }
 
-async function getNeighborsByWord(env: AuthorizeEnv, graphId: string, word: string, depth: number): Promise<ApiNode[] | null> {
-  const res = await graphFetch(env, graphId, `neighbors?word=${encodeURIComponent(word)}&depth=${depth}`);
+async function getNeighborsByWord(
+  env: AuthorizeEnv,
+  graphId: string,
+  word: string,
+  depth: number,
+  opts?: { filter?: Record<string, string | string[]>; limit?: number },
+): Promise<{ nodes: ApiNode[]; truncated?: boolean; count?: number } | null> {
+  const params = new URLSearchParams({ depth: String(depth) });
+  if (opts?.filter) {
+    for (const [key, val] of Object.entries(opts.filter)) {
+      params.set(`filter[${key}]`, Array.isArray(val) ? val.join(",") : val);
+    }
+  }
+  if (opts?.limit != null) params.set("limit", String(opts.limit));
+  const res = await graphFetch(env, graphId, `neighbors?word=${encodeURIComponent(word)}&${params.toString()}`);
   if (res.status === 404) return null;
   if (!res.ok) throw new Error(`get_neighbors_by_word_failed:${res.status}`);
-  const data = (await res.json()) as { nodes: ApiNode[] };
-  return data.nodes ?? [];
+  return res.json() as Promise<{ nodes: ApiNode[]; truncated?: boolean; count?: number }>;
+}
+
+async function searchNodesByProperty(
+  env: AuthorizeEnv,
+  graphId: string,
+  filter: Record<string, string | string[]>,
+  limit?: number,
+): Promise<{ nodes: ApiNode[]; truncated?: boolean; count?: number }> {
+  const params = new URLSearchParams();
+  for (const [key, val] of Object.entries(filter)) {
+    params.set(`filter[${key}]`, Array.isArray(val) ? val.join(",") : val);
+  }
+  if (limit != null) params.set("limit", String(limit));
+  const res = await graphFetch(env, graphId, `nodes/search?${params.toString()}`);
+  if (!res.ok) throw new Error(`search_nodes_failed:${res.status}`);
+  return res.json() as Promise<{ nodes: ApiNode[]; truncated?: boolean; count?: number }>;
 }
 
 function clampDepth(raw: unknown): number {
@@ -74,15 +102,39 @@ export const GRAPH_TOOLS = [
   {
     name: "graph_read_texts_by_word",
     description:
-      "Traverse the graph from any node whose label exactly matches `word` (en or ja), returning all nodes reachable within `depth` hops (default 2, max 5). Loop-safe.",
+      "Traverse the graph from any node whose label exactly matches `word` (en or ja), returning all nodes reachable within `depth` hops (default 2, max 5). Supports optional `filter` to narrow results by property (AND condition). Loop-safe.",
     inputSchema: {
       type: "object",
       properties: {
         graph_id: { type: "string", description: "Word graph ID (e.g. 'word-graph-1')" },
         word: { type: "string", description: "Exact en or ja label of any node to start from" },
         depth: { type: "number", description: "Hops to traverse (default 2, max 5)" },
+        filter: {
+          type: "object",
+          description: "Narrow returned nodes by property (AND with text match). Keys are property names (e.g. 'node_type'); values are string or array (OR match).",
+          additionalProperties: { oneOf: [{ type: "string" }, { type: "array", items: { type: "string" } }] },
+        },
+        limit: { type: "number", description: "Max nodes to return (default 100, max 500)." },
       },
       required: ["graph_id", "word"],
+    },
+  },
+  {
+    name: "graph_search_nodes",
+    description:
+      "Search all nodes in the graph by property filter alone (no starting node or label required). Returns up to `limit` nodes matching all specified filters. Use when you want to find nodes by type or other metadata without a known label or ID.",
+    inputSchema: {
+      type: "object",
+      properties: {
+        graph_id: { type: "string", description: "Word graph ID (e.g. 'word-graph-1')" },
+        filter: {
+          type: "object",
+          description: "Property filters (AND across keys, OR across values per key). E.g. {node_type: 'issue'} or {node_type: ['rule', 'fact']}.",
+          additionalProperties: { oneOf: [{ type: "string" }, { type: "array", items: { type: "string" } }] },
+        },
+        limit: { type: "number", description: "Max nodes to return (default 100, max 500)." },
+      },
+      required: ["graph_id", "filter"],
     },
   },
   {
@@ -231,11 +283,25 @@ export async function callGraphTool(
     if (name === "graph_read_texts_by_word") {
       const word = String(args.word);
       const depth = clampDepth(args.depth);
-      const nodes = await getNeighborsByWord(env, graphId, word, depth);
-      if (nodes === null) {
+      const filter = args.filter as Record<string, string | string[]> | undefined;
+      const rawLimit = typeof args.limit === "number" ? args.limit : undefined;
+      const result = await getNeighborsByWord(env, graphId, word, depth, { filter, limit: rawLimit });
+      if (result === null) {
         return { content: [{ type: "text", text: `No node found matching: ${word}` }], isError: true };
       }
-      const text = nodes.map(nodeLine).join("\n") || "(no nodes)";
+      const nodes = result.nodes ?? [];
+      let text = nodes.map(nodeLine).join("\n") || "(no nodes)";
+      if (result.truncated) text += `\n[truncated: ${result.count} nodes returned, more exist — reduce depth or add filter]`;
+      return { content: [{ type: "text", text }] };
+    }
+
+    if (name === "graph_search_nodes") {
+      const filter = args.filter as Record<string, string | string[]>;
+      const rawLimit = typeof args.limit === "number" ? args.limit : undefined;
+      const result = await searchNodesByProperty(env, graphId, filter, rawLimit);
+      const nodes = result.nodes ?? [];
+      let text = nodes.map(nodeLine).join("\n") || "(no nodes)";
+      if (result.truncated) text += `\n[truncated: ${result.count} nodes returned, more exist — add more specific filter or reduce limit]`;
       return { content: [{ type: "text", text }] };
     }
 
