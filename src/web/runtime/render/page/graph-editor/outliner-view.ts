@@ -607,7 +607,7 @@ export function createOutlinerView(ctx: GraphEditorContext): {
         const cb = document.createElement('input');
         cb.type = 'checkbox';
         cb.checked = assigned;
-        cb.style.cssText = `flex-shrink:0;cursor:pointer;accent-color:${propColor?.code ?? TEXT_MID};`;
+        cb.style.cssText = `flex-shrink:0;cursor:pointer;`;
         cb.addEventListener('change', () => {
           if (cb.checked) {
             syncPropChange(onode.node.id, p => { p[key] = '●'; });
