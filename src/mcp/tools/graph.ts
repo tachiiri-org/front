@@ -330,6 +330,8 @@ export async function callGraphTool(
       const res = await graphFetch(env, graphId, "node", "POST", body);
       if (!res.ok) throw new Error(`add_node_failed:${res.status}`);
       const data = (await res.json()) as { id: string; en?: string; ja?: string };
+      // Auto-tag all AI-created nodes
+      await graphFetch(env, graphId, `node/${encodeURIComponent(data.id)}/property`, "POST", { key: "AI" });
       return { content: [{ type: "text", text: `Created [${data.id}] ${[data.en, data.ja].filter(Boolean).join(" / ")}` }] };
     }
 
