@@ -3,7 +3,6 @@ import type { ExplorerNode, ExplorerState, GraphEditorContext } from './types';
 import {
   BG, BORDER, TEXT_HIGH, TEXT_MID, SELECT_STRONG,
 } from './constants';
-import { createOutlinerView } from './outliner-view';
 import { createMultiPaneView } from './multi-pane';
 
 export function renderGraphEditor(
@@ -64,37 +63,9 @@ export function renderGraphEditor(
   `;
   outer.appendChild(style);
 
-  // ── Language switcher ─────────────────────────────────────────────
+  // ── Top bar ───────────────────────────────────────────────────────
   const topBar = document.createElement('div');
   topBar.style.cssText = `display:flex;align-items:center;padding:3px 8px;border-bottom:1px solid ${BORDER};flex-shrink:0;gap:4px;`;
-
-  // ── View mode toggle ──────────────────────────────────────────────
-  const VIEW_MODE_KEY = `graph-editor-view:${gId}`;
-  const storedView = localStorage.getItem(VIEW_MODE_KEY);
-  let viewMode: 'outline' | 'panes' = storedView === 'outline' ? 'outline' : 'panes';
-
-  const makeViewBtnStyle = (mode: 'outline' | 'panes') => {
-    const active = viewMode === mode;
-    return `background:${active ? SELECT_STRONG : 'transparent'};border:1px solid ${active ? SELECT_STRONG : BORDER};color:${active ? TEXT_HIGH : TEXT_MID};cursor:pointer;font-size:11px;padding:1px 7px;border-radius:3px;line-height:1.5;`;
-  };
-  const outlineViewBtn = document.createElement('button');
-  outlineViewBtn.textContent = 'アウトライン';
-  outlineViewBtn.title = 'アウトラインビュー';
-  const panesViewBtn = document.createElement('button');
-  panesViewBtn.textContent = 'パネル';
-  panesViewBtn.title = 'マルチパネルビュー';
-
-  const refreshViewBtns = () => {
-    outlineViewBtn.style.cssText = makeViewBtnStyle('outline');
-    panesViewBtn.style.cssText = makeViewBtnStyle('panes');
-  };
-  refreshViewBtns();
-
-  const sep = document.createElement('span');
-  sep.style.cssText = `width:1px;height:14px;background:${BORDER};margin:0 2px;flex-shrink:0;`;
-  topBar.appendChild(outlineViewBtn);
-  topBar.appendChild(panesViewBtn);
-  topBar.appendChild(sep);
 
   const makeLangBtnStyle = (l: 'en' | 'ja') => {
     const active = state.lang === l;
@@ -144,7 +115,7 @@ export function renderGraphEditor(
     searchInput.focus();
   });
 
-  // doSearch is overwritten after the views are created (see below)
+  // doSearch is overwritten after the view is created (see below)
   let doSearch = (q: string) => {
     state.searchQuery = q;
   };
@@ -178,9 +149,6 @@ export function renderGraphEditor(
   }, true);
 
   // ── Context assembly ──────────────────────────────────────────────
-  // The view modules (outliner / multi-pane) close over `ctx` for shared config and
-  // mutable state. The base object carries config + shared state; the views attach
-  // their own callbacks via the propChangeHooks array.
   const rootNodeId = comp.rootNodeId ?? null;
   const propStore = new Map<string, Record<string, string>>();
   const allPropKeys = new Set<string>();
@@ -195,84 +163,37 @@ export function renderGraphEditor(
     paneDrag: null,
   } as unknown as GraphEditorContext;
 
-  // ── Outliner view (needs ctx) ──────────────────────────────────────
-  const outliner = createOutlinerView(ctx);
-  outliner.el.style.display = 'none';
-  outer.appendChild(outliner.el);
-
-  // ── Multi-pane view (needs ctx) ────────────────────────────────────
+  // ── Multi-pane view ───────────────────────────────────────────────
   const multiPane = createMultiPaneView(ctx);
-  multiPane.el.style.display = 'none';
+  multiPane.el.style.display = 'flex';
   outer.appendChild(multiPane.el);
 
-  // Insert filter button into topBar, left of 他言語 toggle (outline mode only)
-  const filterBtnSep = document.createElement('span');
-  filterBtnSep.style.cssText = `width:1px;height:14px;background:${BORDER};margin:0 2px;flex-shrink:0;display:none;`;
-  const filterBtnEl = outliner.filterBtn;
-  filterBtnEl.style.cssText = `background:transparent;border:1px solid ${BORDER};color:${TEXT_MID};cursor:pointer;font-size:11px;padding:1px 7px;border-radius:3px;line-height:1.5;display:none;`;
-  topBar.insertBefore(filterBtnSep, fallbackBtn);
-  topBar.insertBefore(filterBtnEl, filterBtnSep);
-
-  // Wire up search for all view modes now that the views exist
   doSearch = (q: string) => {
     state.searchQuery = q;
-    if (viewMode === 'outline') {
-      void outliner.search(q);
-    } else {
-      void multiPane.search(q);
-    }
+    void multiPane.search(q);
   };
 
-  const switchView = (mode: 'outline' | 'panes') => {
-    viewMode = mode;
-    localStorage.setItem(VIEW_MODE_KEY, mode);
-    refreshViewBtns();
-    // Hide all views
-    outliner.el.style.display = 'none';
-    multiPane.el.style.display = 'none';
-    filterBtnEl.style.display = 'none';
-    filterBtnSep.style.display = 'none';
-
-    if (mode === 'outline') {
-      outliner.el.style.display = 'flex';
-      outliner.el.style.flexDirection = 'column';
-      filterBtnEl.style.display = '';
-      filterBtnSep.style.display = '';
-      void outliner.load();
-    } else {
-      multiPane.el.style.display = 'flex';
-      void multiPane.load();
-    }
-  };
-  outlineViewBtn.addEventListener('click', () => switchView('outline'));
-  panesViewBtn.addEventListener('click', () => switchView('panes'));
-
-  // ── Language / fallback wiring (needs ctx) ─────────────────────────
-  const switchLang = (l: 'en' | 'ja') => {
-    state.lang = l;
+  // ── Language / fallback wiring ─────────────────────────────────────
+  jaBtn.addEventListener('click', () => {
+    state.lang = 'ja';
     refreshLangBtns();
     fallbackBtn.style.cssText = makeFallbackBtnStyle();
-    if (viewMode === 'outline') {
-      outliner.refresh();
-    } else {
-      multiPane.refresh();
-    }
-  };
-  jaBtn.addEventListener('click', () => switchLang('ja'));
-  enBtn.addEventListener('click', () => switchLang('en'));
+    multiPane.refresh();
+  });
+  enBtn.addEventListener('click', () => {
+    state.lang = 'en';
+    refreshLangBtns();
+    fallbackBtn.style.cssText = makeFallbackBtnStyle();
+    multiPane.refresh();
+  });
 
   fallbackBtn.addEventListener('click', () => {
     state.showFallback = !state.showFallback;
     fallbackBtn.style.cssText = makeFallbackBtnStyle();
-    if (viewMode === 'outline') {
-      void outliner.load();
-    } else {
-      void multiPane.load();
-    }
+    void multiPane.load();
   });
 
-  // Show the initial view (default: panes)
-  switchView(viewMode);
+  void multiPane.load();
 
   return outer;
 }
