@@ -363,7 +363,9 @@ export function createOutlinerView(ctx: GraphEditorContext, paneOpts?: OutlinerP
         const textW = Math.ceil(c.measureText(ta.value).width);
         maxW = Math.max(maxW, spacerW + 18 + textW + 48);
       });
-      const minW = Math.round(window.innerWidth * 0.15);
+      // Start wide by default (matches the initial PANE_WIDTH baseline); shrink only when
+      // every row's text is shorter than this, grow up to maxCap when text is long.
+      const minW = Math.max(280, Math.round(window.innerWidth * 0.20));
       const maxCap = Math.round(window.innerWidth * 0.40);
       paneOpts!.onContentWidthChange!(Math.min(Math.max(minW, maxW), maxCap));
       // Column width changed → textarea wrapping changed → re-measure heights
