@@ -17,9 +17,14 @@ type ONode = {
   children: ONode[];
 };
 
+/** One breadcrumb hop: the node id and its display label, root-first. */
+export type PathEntry = { id: string | null; label: string };
+
 export type OutlinerPaneOpts = {
   /** If set, this pane shows children of this node (null = empty until setParent called) */
   paneParentId?: string | null;
+  /** Breadcrumb path (root-first) to paneParentId, for panel-sourced panes */
+  panePath?: PathEntry[];
   /** Only show nodes that have ALL of these property keys */
   paneFilterKeys?: Set<string>;
   /** If true, sort nodes by property keyOrder ascending (stable sort) */
@@ -52,8 +57,9 @@ export function createOutlinerView(ctx: GraphEditorContext, paneOpts?: OutlinerP
   load: () => Promise<void>;
   refresh: () => void;
   search: (query: string) => Promise<void>;
-  setParent: (nodeId: string | null, excludeIds?: Set<string>) => Promise<void>;
+  setParent: (nodeId: string | null, excludeIds?: Set<string>, path?: PathEntry[]) => Promise<void>;
   getAncestorIds: (nodeId: string) => Set<string>;
+  getNodePath: (nodeId: string) => PathEntry[];
   getSelectedId: () => string | null;
   setPaneFilterKeys: (keys: Set<string>) => void;
   setPaneSortByProps: (enabled: boolean) => void;
@@ -259,6 +265,35 @@ export function createOutlinerView(ctx: GraphEditorContext, paneOpts?: OutlinerP
   let paneSelectedId: string | null = null;
   let paneFilterKeys: Set<string> = paneOpts?.paneFilterKeys ?? new Set();
   let paneSortByProps: boolean = paneOpts?.paneSortByProps ?? false;
+  // Breadcrumb path (root-first, inclusive of paneParentId) for panel-sourced panes
+  let externalPath: PathEntry[] = paneOpts?.panePath ?? [];
+
+  const labelOf = (node: ExplorerNode): string =>
+    primaryLabel(node, ctx.state.lang) ?? fallbackLabel(node, ctx.state.lang) ?? node.id.slice(0, 8);
+
+  // Path (root-first, inclusive) to the node whose children form this pane's top-level rows.
+  const selfPathPrefix = (): PathEntry[] => {
+    const base: PathEntry[] = paneParentSet
+      ? [...externalPath]
+      : (ctx.rootNodeId ? [{ id: ctx.rootNodeId, label: 'ルート' }] : []);
+    for (const z of zoomStack) base.push({ id: z.node.id, label: labelOf(z.node) });
+    return base;
+  };
+
+  // Full breadcrumb path (root-first, inclusive) to a node currently visible in this pane.
+  const getNodePath = (nodeId: string): PathEntry[] => {
+    const rootParentId = zoomStack.length
+      ? zoomStack[zoomStack.length - 1].node.id
+      : (paneParentSet ? paneParentId : ctx.rootNodeId);
+    const chain: PathEntry[] = [];
+    let cur = byId.get(nodeId);
+    while (cur) {
+      chain.unshift({ id: cur.node.id, label: labelOf(cur.node) });
+      if (cur.parentId === rootParentId || cur.parentId == null) break;
+      cur = byId.get(cur.parentId);
+    }
+    return [...selfPathPrefix(), ...chain];
+  };
 
   const setPaneSelected = (nodeId: string | null) => {
     paneSelectedId = nodeId;
@@ -540,6 +575,9 @@ export function createOutlinerView(ctx: GraphEditorContext, paneOpts?: OutlinerP
     }
     if (next && onode.children.length === 0) { updateExpandMarker(onode); focusRow(onode); return; }
     if (next) expandInDom(onode); else collapseInDom(onode);
+    // expand/collapse mutate the DOM directly (no full render), so re-measure the pane
+    // width here — otherwise collapsing long rows leaves the column stuck at its wide size.
+    if (paneOpts?.onContentWidthChange) scheduleWidthUpdate();
     focusRow(onode);
   };
 
@@ -550,28 +588,41 @@ export function createOutlinerView(ctx: GraphEditorContext, paneOpts?: OutlinerP
     const btnStyle = (active: boolean) =>
       `background:transparent;border:none;color:${active ? TEXT_HIGH : TEXT_MID};cursor:${active ? 'default' : 'pointer'};font-size:12px;padding:0 2px;white-space:nowrap;max-width:120px;overflow:hidden;text-overflow:ellipsis;`;
 
-    if (zoomStack.length === 0) {
-      const span = document.createElement('span');
-      span.textContent = 'ルート';
-      span.style.cssText = `color:${TEXT_HIGH};font-size:12px;padding:0 2px;`;
-      bcEl.appendChild(span);
-      return;
-    }
-
-    const homeBtn = document.createElement('button');
-    homeBtn.textContent = 'ルート';
-    homeBtn.style.cssText = btnStyle(false);
-    homeBtn.addEventListener('click', () => void doZoomTo(0));
-    bcEl.appendChild(homeBtn);
-
-    zoomStack.forEach((on, i) => {
+    const appendSep = () => {
       const sep = document.createElement('span');
       sep.textContent = ' › ';
       sep.style.color = TEXT_DIM;
       bcEl.appendChild(sep);
+    };
+    const appendLabel = (text: string, active: boolean) => {
+      const span = document.createElement('span');
+      span.textContent = text;
+      span.title = text;
+      span.style.cssText = `color:${active ? TEXT_HIGH : TEXT_MID};font-size:12px;padding:0 2px;white-space:nowrap;max-width:120px;overflow:hidden;text-overflow:ellipsis;`;
+      bcEl.appendChild(span);
+    };
 
+    // Panel-sourced pane: prepend the (display-only) path inherited from the source pane.
+    const usesExternal = paneParentSet && externalPath.length > 0;
+    if (usesExternal) {
+      externalPath.forEach((e, i) => {
+        if (i > 0) appendSep();
+        appendLabel(e.label, zoomStack.length === 0 && i === externalPath.length - 1);
+      });
+    } else {
+      // Root-sourced (or panel-sourced before a selection): clickable "ルート" home.
+      if (zoomStack.length === 0) { appendLabel('ルート', true); return; }
+      const homeBtn = document.createElement('button');
+      homeBtn.textContent = 'ルート';
+      homeBtn.style.cssText = btnStyle(false);
+      homeBtn.addEventListener('click', () => void doZoomTo(0));
+      bcEl.appendChild(homeBtn);
+    }
+
+    zoomStack.forEach((on, i) => {
+      appendSep();
       const btn = document.createElement('button');
-      const lbl = primaryLabel(on.node, ctx.state.lang) ?? fallbackLabel(on.node, ctx.state.lang) ?? on.node.id.slice(0, 8);
+      const lbl = labelOf(on.node);
       btn.textContent = lbl;
       btn.title = lbl;
       btn.style.cssText = btnStyle(i === zoomStack.length - 1);
@@ -2157,9 +2208,10 @@ export function createOutlinerView(ctx: GraphEditorContext, paneOpts?: OutlinerP
     return result;
   };
 
-  const setParent = async (nodeId: string | null, excludeIds?: Set<string>) => {
+  const setParent = async (nodeId: string | null, excludeIds?: Set<string>, path?: PathEntry[]) => {
     paneParentSet = true;
     paneParentId = nodeId;
+    externalPath = path ?? [];
     paneSelectedId = null;
     byId.clear();
     zoomStack.splice(0);
@@ -2230,5 +2282,5 @@ export function createOutlinerView(ctx: GraphEditorContext, paneOpts?: OutlinerP
     if (i >= 0) ctx.propChangeHooks.splice(i, 1);
   };
 
-  return { el, filterBtn, load, refresh: render, search, setParent, getAncestorIds, getSelectedId, setPaneFilterKeys, setPaneSortByProps, openKeyMenu, unregister };
+  return { el, filterBtn, load, refresh: render, search, setParent, getAncestorIds, getNodePath, getSelectedId, setPaneFilterKeys, setPaneSortByProps, openKeyMenu, unregister };
 }

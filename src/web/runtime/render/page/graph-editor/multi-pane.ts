@@ -88,9 +88,10 @@ export function createMultiPaneView(ctx: GraphEditorContext): {
     const ancestorIds = selectedNodeId && srcPane
       ? srcPane.view.getAncestorIds(selectedNodeId)
       : new Set<string>();
+    const path = selectedNodeId && srcPane ? srcPane.view.getNodePath(selectedNodeId) : [];
     for (const p of panes) {
       if (p.config.sourceId === paneId) {
-        void p.view.setParent(selectedNodeId, ancestorIds);
+        void p.view.setParent(selectedNodeId, ancestorIds, path);
       }
     }
   };
@@ -194,6 +195,18 @@ export function createMultiPaneView(ctx: GraphEditorContext): {
     });
     header.appendChild(sortBtn);
 
+    // Reload button — re-fetch this pane's nodes from the backend
+    const reloadBtn = document.createElement('button');
+    reloadBtn.textContent = '⟳';
+    reloadBtn.title = 'パネル内のノードを再読み込み';
+    reloadBtn.style.cssText = `background:transparent;border:none;color:${TEXT_DIM};cursor:pointer;font-size:13px;padding:0 2px;line-height:1;flex-shrink:0;`;
+    reloadBtn.addEventListener('click', (e) => {
+      e.stopPropagation();
+      reloadBtn.style.color = TEXT_HIGH;
+      void view.load().finally(() => { reloadBtn.style.color = TEXT_DIM; });
+    });
+    header.appendChild(reloadBtn);
+
     // Fullscreen toggle button
     const fsBtn = document.createElement('button');
     const updateFsBtn = () => {
@@ -222,16 +235,19 @@ export function createMultiPaneView(ctx: GraphEditorContext): {
     const sourcePane = panes.find(p => p.config.id === config.sourceId);
     const initParent = sourcePane ? (sourcePane.view.getSelectedId() ?? null) : null;
     const paneParentId = config.sourceId !== null ? initParent : undefined;
+    const panePath = (config.sourceId !== null && initParent && sourcePane)
+      ? sourcePane.view.getNodePath(initParent) : [];
 
     const view = createOutlinerView(ctx, {
       paneParentId,
+      panePath,
       paneFilterKeys: new Set(config.filterKeys),
       paneSortByProps: config.sortByProps,
       onNodeSelect: (nodeId) => onPaneSelect(config.id, nodeId),
       onContentWidthChange: (w) => {
         // Measure only non-flex-1 header children to avoid feedback loop
         // (header.scrollWidth includes labelEl which stretches to container width)
-        const minHeaderW = srcBtn.offsetWidth + fltArea.scrollWidth + sortBtn.offsetWidth + fsBtn.offsetWidth + closeBtn.offsetWidth + 36;
+        const minHeaderW = srcBtn.offsetWidth + fltArea.scrollWidth + sortBtn.offsetWidth + reloadBtn.offsetWidth + fsBtn.offsetWidth + closeBtn.offsetWidth + 36;
         const actualW = Math.max(w, minHeaderW);
         containerEl.style.width = `${actualW}px`;
         config.width = actualW;
@@ -310,7 +326,8 @@ export function createMultiPaneView(ctx: GraphEditorContext): {
         } else {
           const srcInst = panes.find(p => p.config.id === value);
           const selId = srcInst ? (srcInst.view.getSelectedId() ?? null) : null;
-          void inst?.view.setParent(selId);
+          const path = selId && srcInst ? srcInst.view.getNodePath(selId) : [];
+          void inst?.view.setParent(selId, undefined, path);
         }
       });
       menu.appendChild(item);
