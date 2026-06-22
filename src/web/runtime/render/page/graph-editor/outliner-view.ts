@@ -248,6 +248,10 @@ export function createOutlinerView(ctx: GraphEditorContext, paneOpts?: OutlinerP
   let baseDepth = 0; // depth of current root level (for relative indent display)
   const byId = new Map<string, ONode>();
   const rowMap = new Map<string, HTMLElement>();
+  // Cache keys whose children we've fetched (or revalidated) from the backend THIS page load.
+  // Entries hydrated from localStorage are stale until revalidated, so the first access of an
+  // unvalidated key refetches before use — keeping reloads fast without serving stale data.
+  const validated = new Set<string | null>();
 
   // Pane state
   let paneParentSet = paneOpts?.paneParentId !== undefined;
@@ -429,10 +433,15 @@ export function createOutlinerView(ctx: GraphEditorContext, paneOpts?: OutlinerP
 
   const ensureChildren = async (onode: ONode) => {
     if (onode.childrenLoaded) return;
-    let cached = ctx.childrenCache.get(onode.node.id);
-    if (!cached) {
-      cached = await fetchChildrenFiltered(onode.node.id);
-      setCachedChildren(onode.node.id, cached);
+    const id = onode.node.id;
+    let cached = ctx.childrenCache.get(id);
+    // Refetch when missing OR when only a stale (unvalidated) localStorage entry exists.
+    // ensureChildren runs before the subtree is rendered, so awaiting fresh data here keeps
+    // expanded children in sync with the backend without any in-place rebuild.
+    if (!cached || !validated.has(id)) {
+      cached = await fetchChildrenFiltered(id);
+      setCachedChildren(id, cached);
+      validated.add(id);
     }
     seedPropStore(cached);
     const excl = ancestorIds(onode); excl.add(onode.node.id);
@@ -1972,6 +1981,47 @@ export function createOutlinerView(ctx: GraphEditorContext, paneOpts?: OutlinerP
     }
   };
 
+  // Shallow structural comparison of two child lists — detects whether a revalidation
+  // fetch returned anything that affects rendering (order, labels, color, properties).
+  const childrenDiffer = (a: ExplorerNode[], b: ExplorerNode[]): boolean => {
+    if (a.length !== b.length) return true;
+    for (let i = 0; i < a.length; i++) {
+      const x = a[i], y = b[i];
+      if (x.id !== y.id || (x.en ?? '') !== (y.en ?? '') || (x.ja ?? '') !== (y.ja ?? '') || (x.color ?? '') !== (y.color ?? '')) return true;
+      const xk = Object.keys(x.properties ?? {}).sort();
+      const yk = Object.keys(y.properties ?? {}).sort();
+      if (xk.length !== yk.length) return true;
+      for (let j = 0; j < xk.length; j++) {
+        if (xk[j] !== yk[j] || (x.properties as Record<string, string>)[xk[j]] !== (y.properties as Record<string, string>)[yk[j]]) return true;
+      }
+    }
+    return false;
+  };
+
+  // Stale-while-revalidate: after the caller paints from the (possibly stale) localStorage
+  // cache for an instant reload, fetch fresh children from the backend and re-render if the
+  // data changed. Without this, edits persisted to the backend appear to "revert" on reload
+  // because the editor renders from a cache that is never revalidated. Bails on a likely
+  // transient fetch error (empty result replacing a non-empty cache) to avoid blanking the
+  // tree, and skips the re-render while the user is mid-edit so focus isn't clobbered.
+  const revalidate = async (
+    cacheKey: string | null,
+    fetchId: string,
+    painted: ExplorerNode[] | undefined,
+    toRoots: (nodes: ExplorerNode[]) => ONode[],
+  ) => {
+    const fresh = await fetchChildrenFiltered(fetchId);
+    if (fresh.length === 0 && painted && painted.length > 0) return; // suspected transient error
+    setCachedChildren(cacheKey, fresh);
+    validated.add(cacheKey);
+    seedPropStore(fresh);
+    if (painted && !childrenDiffer(painted, fresh)) return; // nothing changed since the paint
+    if (listEl.contains(document.activeElement)) return;     // don't clobber an active edit
+    byId.clear();
+    roots = toRoots(fresh);
+    render();
+  };
+
   const load = async () => {
     byId.clear();
     zoomStack.splice(0);
@@ -2002,45 +2052,48 @@ export function createOutlinerView(ctx: GraphEditorContext, paneOpts?: OutlinerP
     // Pane-specific parent override
     if (paneParentSet) {
       if (paneParentId !== null) {
-        let cached = ctx.childrenCache.get(paneParentId);
-        if (!cached) {
-          cached = await fetchChildrenFiltered(paneParentId);
-          setCachedChildren(paneParentId, cached);
-        }
-        seedPropStore(cached);
+        const pid = paneParentId;
         // Exclude the pane parent itself (appears via undirected edges)
-        roots = cached.filter(n => n.id !== paneParentId).map(n => make(n, paneParentId, 0));
+        const toRoots = (nodes: ExplorerNode[]) => nodes.filter(n => n.id !== pid).map(n => make(n, pid, 0));
+        const cached = ctx.childrenCache.get(pid);
+        if (cached) {
+          seedPropStore(cached);
+          roots = toRoots(cached);
+          render();
+        }
+        await revalidate(pid, pid, cached, toRoots);
       } else {
         roots = [];
+        render();
       }
-      render();
       return;
     }
 
-    let topNodes: ExplorerNode[];
-    let parentId: string | null;
-
     if (ctx.rootNodeId) {
+      const rootId = ctx.rootNodeId;
+      const toRoots = (nodes: ExplorerNode[]) => nodes.map(n => make(n, rootId, 0));
       // Use same cache key (null) as column view so both views share the same root node list
-      let cached = ctx.childrenCache.get(null);
-      if (!cached) {
-        cached = await fetchChildrenFiltered(ctx.rootNodeId);
-        setCachedChildren(null, cached);
+      const cached = ctx.childrenCache.get(null);
+      if (cached) {
+        seedPropStore(cached);
+        roots = toRoots(cached);
+        render();
       }
-      seedPropStore(cached);
-      topNodes = cached; parentId = ctx.rootNodeId;
-    } else {
-      if (ctx.state.bookmarks.size === 0) {
-        const ids = await fetchBookmarks(ctx.gId);
-        ctx.state.bookmarks = new Set(ids);
-      }
-      const lang = ctx.state.showFallback ? undefined : ctx.state.lang;
-      const { nodes } = await fetchBookmarkedNodes(ctx.gId, [...ctx.state.bookmarks], lang);
-      seedPropStore(nodes);
-      topNodes = nodes; parentId = null;
+      // Stale-while-revalidate against the backend so edits persisted since the cache was
+      // written are reflected on reload (rather than reverting to the cached snapshot).
+      await revalidate(null, rootId, cached, toRoots);
+      return;
     }
 
-    roots = topNodes.map(n => make(n, parentId, 0));
+    // Bookmarks root (no rootNodeId): always fetched fresh, no persistent cache.
+    if (ctx.state.bookmarks.size === 0) {
+      const ids = await fetchBookmarks(ctx.gId);
+      ctx.state.bookmarks = new Set(ids);
+    }
+    const lang = ctx.state.showFallback ? undefined : ctx.state.lang;
+    const { nodes } = await fetchBookmarkedNodes(ctx.gId, [...ctx.state.bookmarks], lang);
+    seedPropStore(nodes);
+    roots = nodes.map(n => make(n, null, 0));
     render();
   };
 
@@ -2063,19 +2116,21 @@ export function createOutlinerView(ctx: GraphEditorContext, paneOpts?: OutlinerP
     baseDepth = 0;
     updateBreadcrumb();
     if (nodeId !== null) {
-      let cached = ctx.childrenCache.get(nodeId);
-      if (!cached) {
-        cached = await fetchChildrenFiltered(nodeId);
-        setCachedChildren(nodeId, cached);
-      }
-      seedPropStore(cached);
+      const nid = nodeId;
       // Exclude the pane parent itself and any specified ancestors (they appear via undirected edges)
-      const excl = new Set([nodeId, ...(excludeIds ?? [])]);
-      roots = cached.filter(n => !excl.has(n.id)).map(n => make(n, nodeId, 0));
+      const excl = new Set([nid, ...(excludeIds ?? [])]);
+      const toRoots = (nodes: ExplorerNode[]) => nodes.filter(n => !excl.has(n.id)).map(n => make(n, nid, 0));
+      const cached = ctx.childrenCache.get(nid);
+      if (cached) {
+        seedPropStore(cached);
+        roots = toRoots(cached);
+        render();
+      }
+      await revalidate(nid, nid, cached, toRoots);
     } else {
       roots = [];
+      render();
     }
-    render();
   };
 
   const getSelectedId = () => paneSelectedId;
