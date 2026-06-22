@@ -1425,10 +1425,13 @@ export function createOutlinerView(ctx: GraphEditorContext, paneOpts?: OutlinerP
       row.addEventListener('drop', (e) => {
         e.preventDefault(); row.style.borderTop = '';
         if (dragSrc && dragSrc !== key) {
-          const fi = keyOrder.indexOf(dragSrc), ti = keyOrder.indexOf(key);
-          if (fi >= 0 && ti >= 0) {
-            keyOrder.splice(fi, 1);
-            keyOrder.splice(ti, 0, dragSrc);
+          // Rebuild from the full displayed order (so keys not yet in keyOrder are handled)
+          // and insert dragSrc immediately before the drop target — matching the top border.
+          const order = [...new Set([...keyOrder, ...ctx.allPropKeys])].filter(k => k !== dragSrc);
+          const ti = order.indexOf(key);
+          if (ti >= 0) {
+            order.splice(ti, 0, dragSrc);
+            keyOrder = order;
             void apiSavePropertyOrder(ctx.gId, keyOrder);
           }
         }
