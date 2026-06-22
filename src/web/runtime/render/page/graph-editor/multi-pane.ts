@@ -138,37 +138,21 @@ export function createMultiPaneView(ctx: GraphEditorContext): {
     srcBtn.addEventListener('click', (e) => { e.stopPropagation(); showSourceMenu(config.id, srcBtn); });
     header.appendChild(srcBtn);
 
-    // Filter area — shows active filter keys as colored pills
+    // Filter area — the "フィルタ" button is tinted when a filter is active (active keys are
+    // toggled via the menu that opens on click, so no per-key pills are shown here)
     const fltArea = document.createElement('div');
     fltArea.style.cssText = `display:flex;align-items:center;gap:3px;flex-wrap:wrap;cursor:pointer;min-width:0;`;
-    fltArea.title = 'フィルタを設定';
     const updateFltBtn = () => {
       fltArea.innerHTML = '';
-      // "フィルタ" label is always shown
+      const active = config.filterKeys.length > 0;
+      const col = active ? (ctx.allPropColors.get(config.filterKeys[0])?.code ?? TEXT_MID) : null;
       const placeholder = document.createElement('span');
       placeholder.textContent = 'フィルタ';
-      placeholder.style.cssText = `color:${config.filterKeys.length > 0 ? TEXT_MID : TEXT_DIM};font-size:10px;padding:1px 3px;border:1px solid ${BORDER};border-radius:3px;flex-shrink:0;`;
+      placeholder.style.cssText = active
+        ? `color:#fff;background:${col};font-size:10px;padding:1px 5px;border:1px solid ${col};border-radius:3px;flex-shrink:0;`
+        : `color:${TEXT_DIM};font-size:10px;padding:1px 3px;border:1px solid ${BORDER};border-radius:3px;flex-shrink:0;`;
       fltArea.appendChild(placeholder);
-      for (const key of config.filterKeys) {
-        const col = ctx.allPropColors.get(key)?.code ?? TEXT_DIM;
-        const tag = document.createElement('span');
-        tag.style.cssText = `display:inline-flex;align-items:center;gap:2px;padding:1px 5px;border-radius:3px;background:${col};color:#fff;font-size:10px;white-space:nowrap;`;
-        const labelSpan = document.createElement('span');
-        labelSpan.textContent = key;
-        const xSpan = document.createElement('span');
-        xSpan.textContent = '×';
-        xSpan.style.cssText = `cursor:pointer;font-size:11px;line-height:1;opacity:0.8;`;
-        xSpan.addEventListener('click', (e) => {
-          e.stopPropagation();
-          config.filterKeys = config.filterKeys.filter(k => k !== key);
-          saveAll();
-          const inst = panes.find(p => p.config.id === config.id);
-          inst?.view.setPaneFilterKeys(new Set(config.filterKeys));
-          updateFltBtn();
-        });
-        tag.append(labelSpan, xSpan);
-        fltArea.appendChild(tag);
-      }
+      fltArea.title = active ? `フィルタ: ${config.filterKeys.join(', ')}` : 'フィルタを設定';
     };
     updateFltBtn();
     fltArea.addEventListener('click', (e) => {
