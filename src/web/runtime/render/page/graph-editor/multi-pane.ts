@@ -1,5 +1,5 @@
 import type { GraphEditorContext } from './types';
-import { BORDER, TEXT_HIGH, TEXT_MID, TEXT_DIM } from './constants';
+import { BORDER, TEXT_HIGH, TEXT_MID, TEXT_DIM, SELECT_STRONG } from './constants';
 import { createOutlinerView } from './outliner-view';
 
 type PaneConfig = {
@@ -9,6 +9,8 @@ type PaneConfig = {
   filterKeys: string[];      // property keys that must be present (ALL)
   sortByProps: boolean;      // true = sort by property keyOrder ascending
   width: number;             // px
+  pinned?: boolean;          // true = frozen: ignore source-pane selection changes
+  pinnedParentId?: string | null; // parent snapshot to restore the frozen view on reload
 };
 
 type PaneInstance = {
@@ -19,6 +21,7 @@ type PaneInstance = {
   updateFltBtn: () => void;
   updateSortBtn: () => void;
   updateFsBtn: () => void;
+  updatePinBtn: () => void;
 };
 
 const STORAGE_KEY = (gId: string) => `graph-editor-panes:${gId}`;
@@ -60,6 +63,11 @@ export function createMultiPaneView(ctx: GraphEditorContext): {
   const panes: PaneInstance[] = [];
   let fullscreenPaneId: string | null = null;
   let draggingPaneId: string | null = null;
+
+  // Clear the pane-reorder drop indicator (blue vertical line) from every pane.
+  const clearPaneDropIndicators = () => {
+    for (const p of panes) p.containerEl.style.boxShadow = '';
+  };
 
   // Reorder panes via header drag-and-drop. `before` = drop on the left half of the target.
   const reorderPane = (draggedId: string, targetId: string, before: boolean) => {
@@ -106,7 +114,8 @@ export function createMultiPaneView(ctx: GraphEditorContext): {
       : new Set<string>();
     const path = selectedNodeId && srcPane ? srcPane.view.getNodePath(selectedNodeId) : [];
     for (const p of panes) {
-      if (p.config.sourceId === paneId) {
+      // Pinned panes are frozen — they ignore changes to their source pane's selection.
+      if (p.config.sourceId === paneId && !p.config.pinned) {
         void p.view.setParent(selectedNodeId, ancestorIds, path);
       }
     }
@@ -141,14 +150,23 @@ export function createMultiPaneView(ctx: GraphEditorContext): {
       e.dataTransfer?.setData('text/plain', config.id);
       if (e.dataTransfer) e.dataTransfer.effectAllowed = 'move';
     });
-    grip.addEventListener('dragend', () => { draggingPaneId = null; });
+    grip.addEventListener('dragend', () => { draggingPaneId = null; clearPaneDropIndicators(); });
     header.appendChild(grip);
 
-    // Header is the drop zone (body has its own node drag-and-drop; guard on draggingPaneId)
+    // Header is the drop zone (body has its own node drag-and-drop; guard on draggingPaneId).
+    // Show a blue vertical line on the side the dragged pane will be inserted (left/right half),
+    // matching the node-reorder insertion indicator.
     header.addEventListener('dragover', (e) => {
       if (!draggingPaneId || draggingPaneId === config.id) return;
       e.preventDefault();
       if (e.dataTransfer) e.dataTransfer.dropEffect = 'move';
+      const rect = containerEl.getBoundingClientRect();
+      const before = (e.clientX - rect.left) < rect.width / 2;
+      clearPaneDropIndicators();
+      containerEl.style.boxShadow = before ? 'inset 2px 0 0 0 #4a9eff' : 'inset -2px 0 0 0 #4a9eff';
+    });
+    header.addEventListener('dragleave', (e) => {
+      if (!containerEl.contains(e.relatedTarget as Node | null)) containerEl.style.boxShadow = '';
     });
     header.addEventListener('drop', (e) => {
       if (!draggingPaneId || draggingPaneId === config.id) return;
@@ -156,6 +174,7 @@ export function createMultiPaneView(ctx: GraphEditorContext): {
       const rect = containerEl.getBoundingClientRect();
       reorderPane(draggingPaneId, config.id, (e.clientX - rect.left) < rect.width / 2);
       draggingPaneId = null;
+      clearPaneDropIndicators();
     });
 
     // Label (editable) — user-select:text overrides any parent user-select:none
@@ -182,6 +201,39 @@ export function createMultiPaneView(ctx: GraphEditorContext): {
     };
     srcBtn.addEventListener('click', (e) => { e.stopPropagation(); showSourceMenu(config.id, srcBtn); });
     header.appendChild(srcBtn);
+
+    // Pin (固定) toggle — when on, this pane stops following its source pane's selection,
+    // freezing the currently-displayed nodes. Only meaningful when source is another pane.
+    const pinBtn = document.createElement('button');
+    const updatePinBtn = () => {
+      const on = !!config.pinned;
+      pinBtn.textContent = '固定';
+      pinBtn.title = on ? '固定中（ソースの選択に追従しない）。クリックで解除' : '表示を固定（ソースの選択に追従しない）';
+      pinBtn.style.cssText = on
+        ? `background:${SELECT_STRONG};border:1px solid ${SELECT_STRONG};color:#fff;cursor:pointer;font-size:10px;padding:1px 5px;border-radius:3px;flex-shrink:0;`
+        : `background:transparent;border:1px solid ${BORDER};color:${TEXT_DIM};cursor:pointer;font-size:10px;padding:1px 5px;border-radius:3px;flex-shrink:0;`;
+    };
+    updatePinBtn();
+    pinBtn.addEventListener('click', (e) => {
+      e.stopPropagation();
+      config.pinned = !config.pinned;
+      if (config.pinned) {
+        // Snapshot the current parent so the frozen view can be restored on reload.
+        config.pinnedParentId = view.getPaneParentId();
+      } else {
+        config.pinnedParentId = undefined;
+        // Resume following: re-sync to the source pane's current selection.
+        if (config.sourceId !== null) {
+          const srcInst = panes.find(p => p.config.id === config.sourceId);
+          const selId = srcInst ? (srcInst.view.getSelectedId() ?? null) : null;
+          const srcPath = selId && srcInst ? srcInst.view.getNodePath(selId) : [];
+          void view.setParent(selId, undefined, srcPath);
+        }
+      }
+      saveAll();
+      updatePinBtn();
+    });
+    header.appendChild(pinBtn);
 
     // Filter area — the "フィルタ" button is tinted when a filter is active (active keys are
     // toggled via the menu that opens on click, so no per-key pills are shown here)
@@ -276,7 +328,12 @@ export function createMultiPaneView(ctx: GraphEditorContext): {
 
     // ── Outliner body ────────────────────────────────────────────────
     const sourcePane = panes.find(p => p.config.id === config.sourceId);
-    const initParent = sourcePane ? (sourcePane.view.getSelectedId() ?? null) : null;
+    // Pinned pane restores its frozen parent snapshot; otherwise it derives from the
+    // source pane's current selection.
+    const pinnedActive = config.sourceId !== null && config.pinned && config.pinnedParentId !== undefined;
+    const initParent = pinnedActive
+      ? (config.pinnedParentId ?? null)
+      : (sourcePane ? (sourcePane.view.getSelectedId() ?? null) : null);
     const paneParentId = config.sourceId !== null ? initParent : undefined;
     const panePath = (config.sourceId !== null && initParent && sourcePane)
       ? sourcePane.view.getNodePath(initParent) : [];
@@ -290,7 +347,7 @@ export function createMultiPaneView(ctx: GraphEditorContext): {
       onContentWidthChange: (w) => {
         // Measure only non-flex-1 header children to avoid feedback loop
         // (header.scrollWidth includes labelEl which stretches to container width)
-        const minHeaderW = srcBtn.offsetWidth + fltArea.scrollWidth + sortBtn.offsetWidth + reloadBtn.offsetWidth + fsBtn.offsetWidth + closeBtn.offsetWidth + 36;
+        const minHeaderW = srcBtn.offsetWidth + pinBtn.offsetWidth + fltArea.scrollWidth + sortBtn.offsetWidth + reloadBtn.offsetWidth + fsBtn.offsetWidth + closeBtn.offsetWidth + 36;
         const actualW = Math.max(w, minHeaderW);
         containerEl.style.width = `${actualW}px`;
         config.width = actualW;
@@ -323,7 +380,7 @@ export function createMultiPaneView(ctx: GraphEditorContext): {
     });
     containerEl.appendChild(resizeHandle);
 
-    const instance: PaneInstance = { config, view, containerEl, updateSrcBtn, updateFltBtn, updateSortBtn, updateFsBtn };
+    const instance: PaneInstance = { config, view, containerEl, updateSrcBtn, updateFltBtn, updateSortBtn, updateFsBtn, updatePinBtn };
 
     return instance;
   };
@@ -356,11 +413,14 @@ export function createMultiPaneView(ctx: GraphEditorContext): {
       item.addEventListener('mouseleave', () => { item.style.background = active ? 'rgba(255,255,255,.07)' : 'transparent'; });
       item.addEventListener('click', () => {
         config.sourceId = value;
+        // Changing the source invalidates any frozen snapshot — unpin so it follows the new source.
+        config.pinned = false;
+        config.pinnedParentId = undefined;
         saveAll();
         menu.remove();
         // Update source button label
         const inst = panes.find(p => p.config.id === paneId);
-        if (inst) inst.updateSrcBtn();
+        if (inst) { inst.updateSrcBtn(); inst.updatePinBtn(); }
         // Trigger load from new source
         if (value === null) {
           // Reset pane to root (clears any stale pane-parent so root children show)

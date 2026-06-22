@@ -61,6 +61,7 @@ export function createOutlinerView(ctx: GraphEditorContext, paneOpts?: OutlinerP
   getAncestorIds: (nodeId: string) => Set<string>;
   getNodePath: (nodeId: string) => PathEntry[];
   getSelectedId: () => string | null;
+  getPaneParentId: () => string | null;
   setPaneFilterKeys: (keys: Set<string>) => void;
   setPaneSortByProps: (enabled: boolean) => void;
   setSourceRoot: () => Promise<void>;
@@ -960,6 +961,7 @@ export function createOutlinerView(ctx: GraphEditorContext, paneOpts?: OutlinerP
       ctx.outer.querySelectorAll<HTMLElement>('[data-outliner-list] [data-node-id]:not(textarea)').forEach(r => {
         r.style.border = '2px solid transparent';
       });
+      ctx.outer.querySelectorAll<HTMLElement>('[data-outliner-list] [data-drop-line]').forEach(l => l.remove());
     });
     // Drop zones by cursor Y: top 30% → before (same level), middle 40% → child of this
     // node, bottom 30% → after (same level).
@@ -968,13 +970,25 @@ export function createOutlinerView(ctx: GraphEditorContext, paneOpts?: OutlinerP
       const rel = (e.clientY - r.top) / r.height;
       return rel < 0.3 ? 'before' : rel > 0.7 ? 'after' : 'child';
     };
-    const showDropIndicator = (zone: 'before' | 'child' | 'after') => {
-      if (zone === 'child') { row.style.border = '2px solid #4a9eff'; return; }
+    let dropLine: HTMLElement | null = null;
+    const clearDropIndicator = () => {
       row.style.border = '2px solid transparent';
-      if (zone === 'before') row.style.borderTop = '2px solid #4a9eff';
-      else row.style.borderBottom = '2px solid #4a9eff';
+      if (dropLine) { dropLine.remove(); dropLine = null; }
     };
-    const clearDropIndicator = () => { row.style.border = '2px solid transparent'; };
+    const showDropIndicator = (zone: 'before' | 'child' | 'after') => {
+      clearDropIndicator();
+      if (zone === 'child') { row.style.border = '2px solid #4a9eff'; return; }
+      // before/after: draw the blue insertion line starting at THIS row's indentation, so a
+      // drop under a deeper-indented sibling aligns the line's left start with where the node
+      // will land (rather than spanning the full width and looking ambiguous between levels).
+      const indent = (onode.depth - baseDepth) * 20 + 6;
+      if (getComputedStyle(row).position === 'static') row.style.position = 'relative';
+      const line = document.createElement('div');
+      line.dataset.dropLine = '1';
+      line.style.cssText = `position:absolute;left:${indent}px;right:0;height:2px;background:#4a9eff;pointer-events:none;${zone === 'before' ? 'top:-1px;' : 'bottom:-1px;'}`;
+      row.appendChild(line);
+      dropLine = line;
+    };
     row.addEventListener('dragover', (e) => {
       const pd = ctx.paneDrag;
       if (!pd || dropBlockedBy(onode, pd)) return;
@@ -998,7 +1012,8 @@ export function createOutlinerView(ctx: GraphEditorContext, paneOpts?: OutlinerP
       let childDepth: number;
       if (zone === 'child') {
         await ensureChildren(onode);
-        onode.expanded = true;
+        // Do NOT force-expand the drop target: dropping a node as a child should keep the
+        // target's expand state as-is (collapsed stays collapsed, the child is added inside).
         newParentId = onode.node.id;
         newSibs = onode.children;
         childDepth = onode.depth + 1;
@@ -2255,6 +2270,9 @@ export function createOutlinerView(ctx: GraphEditorContext, paneOpts?: OutlinerP
   };
 
   const getSelectedId = () => paneSelectedId;
+  // Current parent whose children form this pane's rows (null = root/none). Used by the
+  // multi-pane "固定" toggle to snapshot the frozen view.
+  const getPaneParentId = () => (paneParentSet ? paneParentId : null);
   const setPaneFilterKeys = (keys: Set<string>) => { paneFilterKeys = keys; render(); };
   const setPaneSortByProps = (enabled: boolean) => { paneSortByProps = enabled; render(); };
 
@@ -2334,5 +2352,5 @@ export function createOutlinerView(ctx: GraphEditorContext, paneOpts?: OutlinerP
     if (i >= 0) ctx.propChangeHooks.splice(i, 1);
   };
 
-  return { el, filterBtn, load, refresh: render, search, setParent, getAncestorIds, getNodePath, getSelectedId, setPaneFilterKeys, setPaneSortByProps, setSourceRoot, applyPropertySort, openKeyMenu, unregister };
+  return { el, filterBtn, load, refresh: render, search, setParent, getAncestorIds, getNodePath, getSelectedId, getPaneParentId, setPaneFilterKeys, setPaneSortByProps, setSourceRoot, applyPropertySort, openKeyMenu, unregister };
 }
