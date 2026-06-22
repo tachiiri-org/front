@@ -516,17 +516,19 @@ export function createOutlinerView(ctx: GraphEditorContext, paneOpts?: OutlinerP
     const hasChildren = onode.childrenLoaded
       ? onode.children.length > 0
       : (ctx.childrenCache.get(onode.node.id)?.length ?? 1) > 0;
-    // Use first assigned property color, if any
+    // Show assigned property colors: 1 color → solid, 2+ → split the square left/right with
+    // the first two colors (3rd onward omitted), so multi-property nodes are distinguishable.
     const nodeProps = ctx.propStore.get(onode.node.id) ?? {};
-    const propColor = Object.keys(nodeProps)
+    const propColors = Object.keys(nodeProps)
       .map(k => ctx.allPropColors.get(k)?.code)
-      .find(c => c != null);
-    if (propColor) {
-      m.style.background = propColor;
-      m.style.border = 'none';
+      .filter((c): c is string => c != null);
+    m.style.border = 'none';
+    if (propColors.length >= 2) {
+      m.style.background = `linear-gradient(90deg, ${propColors[0]} 0 50%, ${propColors[1]} 50% 100%)`;
+    } else if (propColors.length === 1) {
+      m.style.background = propColors[0];
     } else {
       m.style.background = hasChildren && !onode.expanded ? TEXT_MID : TEXT_DIM;
-      m.style.border = 'none';
     }
     // Triangle expand button (right side)
     const tri = row.querySelector<HTMLElement>('[data-expand-triangle]');
