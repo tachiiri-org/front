@@ -1696,6 +1696,53 @@ export function createOutlinerView(ctx: GraphEditorContext, paneOpts?: OutlinerP
     if (target && byId.has(target.node.id)) focusRow(target);
   };
 
+  // ── Reorder write coalescing (B) ──────────────────────────────────────
+  // Holding Shift+Alt+↑/↓ used to fire one fire-and-forget apiMoveNode PER step. Those
+  // full-order PATCHes have no arrival-order guarantee, so an intermediate order could win
+  // on the backend ("moved 10, reload shows 9"), and the many concurrent chain rebuilds
+  // were slow and could corrupt the chain. We coalesce per parent: keep only a debounce
+  // timer and send ONE PATCH with the final order once moves settle.
+  const REORDER_DEBOUNCE_MS = 300;
+  const reorderTimers = new Map<string, ReturnType<typeof setTimeout>>();
+
+  // Live sibling id order for a parent, read straight from the tree (so temp ids that have
+  // since resolved are picked up). Falls back to roots for the pane/root level whose parent
+  // node isn't itself a row in this pane.
+  const siblingIdsForParent = (parentId: string): string[] =>
+    (byId.get(parentId)?.children ?? roots).map(s => s.node.id);
+
+  const sendReorder = (parentId: string, keepalive = false): Promise<void> => {
+    const order = siblingIdsForParent(parentId);
+    if (order.length === 0) return Promise.resolve();
+    return apiMoveNode(ctx.gId, order[0], parentId, 'down', order, keepalive);
+  };
+
+  const flushReorder = async (parentId: string) => {
+    // Never send a temp id — wait for any pending creates in this sibling set to resolve.
+    const ids = siblingIdsForParent(parentId);
+    await Promise.all(ids.map(id => { const o = byId.get(id); return o ? awaitRealId(o) : Promise.resolve(); }));
+    await sendReorder(parentId);
+  };
+
+  const queueReorder = (parentId: string | null) => {
+    if (parentId === null) return; // bookmark/root-null level uses apiMoveBookmark per step
+    const t = reorderTimers.get(parentId);
+    if (t) clearTimeout(t);
+    reorderTimers.set(parentId, setTimeout(() => { reorderTimers.delete(parentId); void flushReorder(parentId); }, REORDER_DEBOUNCE_MS));
+  };
+
+  // Flush every pending reorder immediately (best-effort). keepalive lets it survive a
+  // page navigation/reload that happens before the debounce fires.
+  const flushPendingReorders = (keepalive = false) => {
+    if (reorderTimers.size === 0) return;
+    const parents = [...reorderTimers.keys()];
+    for (const t of reorderTimers.values()) clearTimeout(t);
+    reorderTimers.clear();
+    for (const pid of parents) void sendReorder(pid, keepalive);
+  };
+  const onPageHide = () => flushPendingReorders(true);
+  window.addEventListener('pagehide', onPageHide);
+
   const doMoveMulti = async (direction: 'up' | 'down') => {
     const sel = getSelectedONodes();
     if (sel.length <= 1) return;
@@ -1716,7 +1763,7 @@ export function createOutlinerView(ctx: GraphEditorContext, paneOpts?: OutlinerP
       const cc = ctx.childrenCache.get(parentId);
       if (cc) { const order = new Map(sibs.map((n, i) => [n.node.id, i])); cc.sort((a, b) => (order.get(a.id) ?? 0) - (order.get(b.id) ?? 0)); }
       updateSelectionHighlight();
-      if (parentId !== null) void apiMoveNode(ctx.gId, sel[0].node.id, parentId, direction, sibs.map(n => n.node.id));
+      if (parentId !== null) queueReorder(parentId);
       ctx.saveChildrenCache?.();
       return;
     }
@@ -1730,7 +1777,7 @@ export function createOutlinerView(ctx: GraphEditorContext, paneOpts?: OutlinerP
       const cc = ctx.childrenCache.get(parentId);
       if (cc) { const order = new Map(sibs.map((n, i) => [n.node.id, i])); cc.sort((a, b) => (order.get(a.id) ?? 0) - (order.get(b.id) ?? 0)); }
       updateSelectionHighlight();
-      if (parentId !== null) void apiMoveNode(ctx.gId, sel[0].node.id, parentId, direction, sibs.map(n => n.node.id));
+      if (parentId !== null) queueReorder(parentId);
       ctx.saveChildrenCache?.();
       return;
     }
@@ -1885,7 +1932,7 @@ export function createOutlinerView(ctx: GraphEditorContext, paneOpts?: OutlinerP
       }
       focusRow(onode);
       if (onode.parentId === null) void apiMoveBookmark(ctx.gId, onode.node.id, direction);
-      else void apiMoveNode(ctx.gId, onode.node.id, onode.parentId, direction, sibs.map(n => n.node.id));
+      else queueReorder(onode.parentId);
       ctx.saveChildrenCache?.();
       return;
     }
@@ -2023,6 +2070,7 @@ export function createOutlinerView(ctx: GraphEditorContext, paneOpts?: OutlinerP
   };
 
   const load = async () => {
+    flushPendingReorders(); // send any queued reorder before the tree is rebuilt
     byId.clear();
     zoomStack.splice(0);
     baseDepth = 0;
@@ -2174,6 +2222,8 @@ export function createOutlinerView(ctx: GraphEditorContext, paneOpts?: OutlinerP
   };
   ctx.propChangeHooks.push(propHook);
   const unregister = () => {
+    flushPendingReorders(true);
+    window.removeEventListener('pagehide', onPageHide);
     const i = ctx.propChangeHooks.indexOf(propHook);
     if (i >= 0) ctx.propChangeHooks.splice(i, 1);
   };

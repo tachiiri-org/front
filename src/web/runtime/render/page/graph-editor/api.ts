@@ -179,11 +179,12 @@ export async function apiRemoveProperty(graphId: string, nodeId: string, key: st
 
 export async function apiMoveNode(
   graphId: string, nodeId: string, parentId: string, direction: 'up' | 'down',
-  afterSwapSiblingIds: string[],
+  afterSwapSiblingIds: string[], keepalive = false,
 ): Promise<void> {
   await apiFetch(`/api/v1/graph/${graphId}/node/${nodeId}/move`, {
     method: 'PATCH',
     headers: { 'Content-Type': 'application/json' },
     body: JSON.stringify({ direction, parentId, afterSwapSiblingIds }),
+    keepalive,
   });
 }
