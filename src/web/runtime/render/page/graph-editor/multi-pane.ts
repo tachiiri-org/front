@@ -59,6 +59,22 @@ export function createMultiPaneView(ctx: GraphEditorContext): {
 
   const panes: PaneInstance[] = [];
   let fullscreenPaneId: string | null = null;
+  let draggingPaneId: string | null = null;
+
+  // Reorder panes via header drag-and-drop. `before` = drop on the left half of the target.
+  const reorderPane = (draggedId: string, targetId: string, before: boolean) => {
+    if (draggedId === targetId) return;
+    const from = panes.findIndex(p => p.config.id === draggedId);
+    if (from === -1) return;
+    const [moved] = panes.splice(from, 1);
+    let to = panes.findIndex(p => p.config.id === targetId);
+    if (to === -1) { panes.splice(from, 0, moved); return; }
+    if (!before) to += 1;
+    panes.splice(to, 0, moved);
+    for (const p of panes) el.insertBefore(p.containerEl, addPaneBtn);
+    saveAll();
+    updateAllSrcBtns();
+  };
 
   const applyFullscreenLayout = () => {
     const isFs = fullscreenPaneId !== null;
@@ -113,6 +129,34 @@ export function createMultiPaneView(ctx: GraphEditorContext): {
       padding:3px 6px;border-bottom:1px solid ${BORDER};
       font-size:11px;color:${TEXT_MID};
     `;
+
+    // Drag handle — drag onto another pane's header to reorder panes
+    const grip = document.createElement('span');
+    grip.textContent = '⠿';
+    grip.title = 'ドラッグでパネルを並び替え';
+    grip.draggable = true;
+    grip.style.cssText = `flex-shrink:0;cursor:grab;color:${TEXT_DIM};font-size:13px;user-select:none;padding:0 2px;`;
+    grip.addEventListener('dragstart', (e) => {
+      draggingPaneId = config.id;
+      e.dataTransfer?.setData('text/plain', config.id);
+      if (e.dataTransfer) e.dataTransfer.effectAllowed = 'move';
+    });
+    grip.addEventListener('dragend', () => { draggingPaneId = null; });
+    header.appendChild(grip);
+
+    // Header is the drop zone (body has its own node drag-and-drop; guard on draggingPaneId)
+    header.addEventListener('dragover', (e) => {
+      if (!draggingPaneId || draggingPaneId === config.id) return;
+      e.preventDefault();
+      if (e.dataTransfer) e.dataTransfer.dropEffect = 'move';
+    });
+    header.addEventListener('drop', (e) => {
+      if (!draggingPaneId || draggingPaneId === config.id) return;
+      e.preventDefault();
+      const rect = containerEl.getBoundingClientRect();
+      reorderPane(draggingPaneId, config.id, (e.clientX - rect.left) < rect.width / 2);
+      draggingPaneId = null;
+    });
 
     // Label (editable) — user-select:text overrides any parent user-select:none
     const labelEl = document.createElement('span');
@@ -178,20 +222,19 @@ export function createMultiPaneView(ctx: GraphEditorContext): {
     });
     header.appendChild(fltArea);
 
-    // Sort toggle button — press to sort by property keyOrder ascending, press again to cancel
+    // Sort action button — press to reorder the stored sibling order by property keyOrder
+    // (persists to the backend; this is an action, not a view toggle)
     const sortBtn = document.createElement('button');
     const updateSortBtn = () => {
       sortBtn.textContent = '並び替え';
-      sortBtn.style.cssText = `background:transparent;border:1px solid ${config.sortByProps ? TEXT_MID : BORDER};color:${config.sortByProps ? TEXT_HIGH : TEXT_DIM};cursor:pointer;font-size:10px;padding:1px 5px;border-radius:3px;flex-shrink:0;`;
+      sortBtn.style.cssText = `background:transparent;border:1px solid ${BORDER};color:${TEXT_DIM};cursor:pointer;font-size:10px;padding:1px 5px;border-radius:3px;flex-shrink:0;`;
     };
     updateSortBtn();
+    sortBtn.title = 'プロパティ順でDB上の並び順を並び替える';
     sortBtn.addEventListener('click', (e) => {
       e.stopPropagation();
-      config.sortByProps = !config.sortByProps;
-      saveAll();
-      const inst = panes.find(p => p.config.id === config.id);
-      inst?.view.setPaneSortByProps(config.sortByProps);
-      updateSortBtn();
+      sortBtn.disabled = true;
+      void view.applyPropertySort().finally(() => { sortBtn.disabled = false; });
     });
     header.appendChild(sortBtn);
 
@@ -242,7 +285,7 @@ export function createMultiPaneView(ctx: GraphEditorContext): {
       paneParentId,
       panePath,
       paneFilterKeys: new Set(config.filterKeys),
-      paneSortByProps: config.sortByProps,
+      paneSortByProps: false, // 並び替えは即時DB反映アクション化したのでビューソートは無効
       onNodeSelect: (nodeId) => onPaneSelect(config.id, nodeId),
       onContentWidthChange: (w) => {
         // Measure only non-flex-1 header children to avoid feedback loop
@@ -320,9 +363,9 @@ export function createMultiPaneView(ctx: GraphEditorContext): {
         if (inst) inst.updateSrcBtn();
         // Trigger load from new source
         if (value === null) {
-          // Reset pane to root (no external parent)
+          // Reset pane to root (clears any stale pane-parent so root children show)
           inst?.view.setPaneFilterKeys(new Set(config.filterKeys));
-          void inst?.view.load();
+          void inst?.view.setSourceRoot();
         } else {
           const srcInst = panes.find(p => p.config.id === value);
           const selId = srcInst ? (srcInst.view.getSelectedId() ?? null) : null;

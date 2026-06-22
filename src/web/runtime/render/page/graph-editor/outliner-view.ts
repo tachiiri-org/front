@@ -63,6 +63,8 @@ export function createOutlinerView(ctx: GraphEditorContext, paneOpts?: OutlinerP
   getSelectedId: () => string | null;
   setPaneFilterKeys: (keys: Set<string>) => void;
   setPaneSortByProps: (enabled: boolean) => void;
+  setSourceRoot: () => Promise<void>;
+  applyPropertySort: () => Promise<void>;
   openKeyMenu: (opts: {
     anchor: HTMLElement;
     mode: 'pane-filter';
@@ -330,6 +332,30 @@ export function createOutlinerView(ctx: GraphEditorContext, paneOpts?: OutlinerP
   };
 
   // Full rebuild — for load / zoom / delete / indent
+  // True when the node passes the active per-pane filter (no filter → always true).
+  const passesPaneFilter = (onode: ONode): boolean => {
+    if (paneFilterKeys.size === 0) return true;
+    const props = ctx.propStore.get(onode.node.id) ?? {};
+    return [...paneFilterKeys].some(k => k in props);
+  };
+
+  // Stable multi-key comparator by property keyOrder: nodes with earlier keys come first,
+  // within the same key compare values asc, nodes without any property go last.
+  const compareByProps = (a: ONode, b: ONode): number => {
+    const masterKeys = [...new Set([...keyOrder, ...ctx.allPropKeys])];
+    const pa = ctx.propStore.get(a.node.id) ?? {};
+    const pb = ctx.propStore.get(b.node.id) ?? {};
+    for (const k of masterKeys) {
+      const hasA = k in pa, hasB = k in pb;
+      if (hasA !== hasB) return hasA ? -1 : 1;
+      if (hasA) {
+        const cmp = (pa[k] || '').localeCompare(pb[k] || '', undefined, { numeric: true, sensitivity: 'base' });
+        if (cmp !== 0) return cmp;
+      }
+    }
+    return 0;
+  };
+
   const render = () => {
     rowMap.clear();
     listEl.innerHTML = '';
@@ -344,32 +370,10 @@ export function createOutlinerView(ctx: GraphEditorContext, paneOpts?: OutlinerP
     } else {
       base = flatVisible();
     }
-    // Apply per-pane filter (ALL keys must be present)
-    const toRender = paneFilterKeys.size > 0
-      ? base.filter(o => {
-          const props = ctx.propStore.get(o.node.id) ?? {};
-          return [...paneFilterKeys].some(k => k in props);
-        })
-      : base;
+    // Apply per-pane filter
+    const toRender = paneFilterKeys.size > 0 ? base.filter(passesPaneFilter) : base;
     let finalRender = toRender;
-    if (paneSortByProps) {
-      // Stable multi-key sort by keyOrder: nodes with earlier keys come first,
-      // within the same key compare values asc, nodes without any property go last
-      const masterKeys = [...new Set([...keyOrder, ...ctx.allPropKeys])];
-      finalRender = [...toRender].sort((a, b) => {
-        const pa = ctx.propStore.get(a.node.id) ?? {};
-        const pb = ctx.propStore.get(b.node.id) ?? {};
-        for (const k of masterKeys) {
-          const hasA = k in pa, hasB = k in pb;
-          if (hasA !== hasB) return hasA ? -1 : 1;
-          if (hasA) {
-            const cmp = (pa[k] || '').localeCompare(pb[k] || '', undefined, { numeric: true, sensitivity: 'base' });
-            if (cmp !== 0) return cmp;
-          }
-        }
-        return 0;
-      });
-    }
+    if (paneSortByProps) finalRender = [...toRender].sort(compareByProps);
     for (const o of finalRender) listEl.appendChild(buildRow(o));
     // Show draft row only when list is empty AND a valid parent is known
     const draftParentId = paneParentSet ? paneParentId : (ctx.rootNodeId ?? null);
@@ -541,9 +545,13 @@ export function createOutlinerView(ctx: GraphEditorContext, paneOpts?: OutlinerP
     let anchorEl: HTMLElement = anchor;
     const insertSubtree = (list: ONode[]) => {
       for (const child of list) {
-        const row = buildRow(child);
-        anchorEl.insertAdjacentElement('afterend', row);
-        anchorEl = row;
+        // Honour the active pane filter for expanded children too (matches render());
+        // a filtered-out parent is skipped but its passing descendants still surface.
+        if (passesPaneFilter(child)) {
+          const row = buildRow(child);
+          anchorEl.insertAdjacentElement('afterend', row);
+          anchorEl = row;
+        }
         if (child.expanded) insertSubtree(child.children);
       }
     };
@@ -1701,8 +1709,14 @@ export function createOutlinerView(ctx: GraphEditorContext, paneOpts?: OutlinerP
         if (!q) return;
         const lang = ctx.state.showFallback ? undefined : ctx.state.lang;
         const { nodes } = await fetchAllNodes(ctx.gId, [], 0, lang, undefined, q, 20);
-        const visIds = new Set(flatVisible().map(n => n.node.id));
-        resultNodes = nodes.filter(n => !visIds.has(n.id));
+        // Exclude only the row being linked, its parent, and nodes already linked as
+        // siblings (re-linking an existing sibling would toggle its edge off). Other
+        // matches — including the exact-word node itself — should appear even when the
+        // same node is visible elsewhere in the pane.
+        const excl = new Set<string>([onode.node.id]);
+        if (onode.parentId) excl.add(onode.parentId);
+        for (const s of getSiblings(onode)) excl.add(s.node.id);
+        resultNodes = nodes.filter(n => !excl.has(n.id));
         for (let i = 0; i < resultNodes.length; i++) {
           const n = resultNodes[i];
           const lbl = (primaryLabel(n, ctx.state.lang) ?? fallbackLabel(n, ctx.state.lang)) || n.id.slice(0, 8);
@@ -2239,6 +2253,39 @@ export function createOutlinerView(ctx: GraphEditorContext, paneOpts?: OutlinerP
   const setPaneFilterKeys = (keys: Set<string>) => { paneFilterKeys = keys; render(); };
   const setPaneSortByProps = (enabled: boolean) => { paneSortByProps = enabled; render(); };
 
+  // Reset this pane back to the graph root (source = ルート). Clears any pane-parent state
+  // so load() takes the root branch — otherwise a stale paneParentId would keep showing the
+  // previously-sourced node's children.
+  const setSourceRoot = async () => {
+    paneParentSet = false;
+    paneParentId = null;
+    externalPath = [];
+    paneSelectedId = null;
+    byId.clear();
+    zoomStack.splice(0);
+    baseDepth = 0;
+    await load();
+  };
+
+  // One-shot action: physically reorder each loaded sibling group (top level + every
+  // expanded parent's children) into property-sort order and persist it to the backend,
+  // so the stored order — not just the view — reflects the sort.
+  const applyPropertySort = async () => {
+    const parents: (string | null)[] = [paneParentSet ? paneParentId : (ctx.rootNodeId ?? null)];
+    roots.sort(compareByProps);
+    byId.forEach(o => {
+      if (o.childrenLoaded && o.children.length > 1) {
+        o.children.sort(compareByProps);
+        parents.push(o.node.id);
+      }
+    });
+    render();
+    for (const pid of parents) {
+      if (pid !== null) await sendReorder(pid);
+    }
+    showToast('並び順を保存しました');
+  };
+
   const search = async (query: string) => {
     if (!query) { await load(); return; }
     byId.clear(); zoomStack.splice(0); baseDepth = 0;
@@ -2282,5 +2329,5 @@ export function createOutlinerView(ctx: GraphEditorContext, paneOpts?: OutlinerP
     if (i >= 0) ctx.propChangeHooks.splice(i, 1);
   };
 
-  return { el, filterBtn, load, refresh: render, search, setParent, getAncestorIds, getNodePath, getSelectedId, setPaneFilterKeys, setPaneSortByProps, openKeyMenu, unregister };
+  return { el, filterBtn, load, refresh: render, search, setParent, getAncestorIds, getNodePath, getSelectedId, setPaneFilterKeys, setPaneSortByProps, setSourceRoot, applyPropertySort, openKeyMenu, unregister };
 }
