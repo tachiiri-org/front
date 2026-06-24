@@ -26,7 +26,7 @@ export async function authorizeFetch(
     headers?: HeadersInit;
     audience?: string;
     tenantContext?: { tenantId?: string; subjectId?: string };
-    actorType?: 'human' | 'service' | 'ops' | 'ai';
+    actorType?: 'human' | 'service' | 'program' | 'ops' | 'ai';
     roles?: string[];
     scopes?: string[];
   },

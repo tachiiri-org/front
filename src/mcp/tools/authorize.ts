@@ -314,7 +314,7 @@ export async function callTool(
             tenantContext: { tenantId: env.actor.tenant, subjectId: env.actor.userId },
             scopes: env.actor.scopes,
           }
-        : { actorType: 'ops' as const }
+        : { actorType: 'program' as const, roles: ['ops'] }
       : {};
     const response = await authorizeFetch(env, { path, method, body, headers, ...backendOpts });
     const text = await response.text();

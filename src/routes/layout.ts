@@ -370,7 +370,8 @@ export const handleApiRequest = async (request: Request, env: Env): Promise<Resp
       body,
       headers: githubToken ? { 'x-github-access-token': githubToken } : undefined,
       tenantContext,
-      actorType: 'ops',
+      actorType: 'program',
+      roles: ['ops'],
     });
   }
 
@@ -381,7 +382,8 @@ export const handleApiRequest = async (request: Request, env: Env): Promise<Resp
       method: 'POST',
       body,
       tenantContext,
-      actorType: 'ops',
+      actorType: 'program',
+      roles: ['ops'],
     });
   }
 
@@ -392,7 +394,8 @@ export const handleApiRequest = async (request: Request, env: Env): Promise<Resp
       method: 'POST',
       body,
       tenantContext,
-      actorType: 'ops',
+      actorType: 'program',
+      roles: ['ops'],
     });
   }
 
@@ -403,7 +406,8 @@ export const handleApiRequest = async (request: Request, env: Env): Promise<Resp
       method: 'POST',
       body,
       tenantContext,
-      actorType: 'ops',
+      actorType: 'program',
+      roles: ['ops'],
     });
   }
 
@@ -414,7 +418,8 @@ export const handleApiRequest = async (request: Request, env: Env): Promise<Resp
       method: 'POST',
       body,
       tenantContext,
-      actorType: 'ops',
+      actorType: 'program',
+      roles: ['ops'],
     });
   }
 
@@ -425,7 +430,8 @@ export const handleApiRequest = async (request: Request, env: Env): Promise<Resp
       method: 'POST',
       body,
       tenantContext,
-      actorType: 'ops',
+      actorType: 'program',
+      roles: ['ops'],
     });
   }
 
@@ -436,7 +442,8 @@ export const handleApiRequest = async (request: Request, env: Env): Promise<Resp
       method: 'POST',
       body,
       tenantContext,
-      actorType: 'ops',
+      actorType: 'program',
+      roles: ['ops'],
     });
   }
 

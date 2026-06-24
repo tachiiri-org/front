@@ -433,7 +433,7 @@ export async function handleMcpToken(request: Request, env: AuthorizeEnv): Promi
     const agentRes = await authorizeFetch(env, {
       path: "/api/v1/agent/by-client-id?client_id=" + encodeURIComponent(row.client_id),
       method: "GET",
-      actorType: "service",
+      actorType: "program",
       tenantContext: { tenantId: row.group_id },
     });
     if (agentRes.ok) {

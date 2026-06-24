@@ -5,7 +5,7 @@ type SecretValue = string | { get(): Promise<string> };
 type InternalTokenClaims = {
   claims_set_version: number;
   actor_id: string;
-  actor_type: "human" | "service" | "ops" | "ai";
+  actor_type: "human" | "service" | "program" | "ops" | "ai";
   iss: string;
   aud: string;
   exp: number;
@@ -132,7 +132,7 @@ export async function issueInternalToken(
   const payload: InternalTokenClaims = {
     claims_set_version: 1,
     actor_id: "front-local",
-    actor_type: input.actorType ?? "service",
+    actor_type: input.actorType ?? "program",
     ...(input.roles ? { roles: input.roles } : {}),
     ...(input.scopes ? { scopes: input.scopes } : {}),
     iss: env.INTERNAL_AUTH_TOKEN_ISSUER ?? "front",
