@@ -63,6 +63,7 @@ const getNavCookies = (request: Request): { userId: string | null; orgId: string
 
 const isPublicPath = (pathname: string): boolean =>
   pathname === '/login' ||
+  pathname === '/public' ||
   /^\/login\/[0-9a-f-]{36}$/i.test(pathname) ||
   /^\/login\/[a-z0-9][a-z0-9-]*[a-z0-9]$/i.test(pathname) ||
   pathname === '/org-group-select' ||
@@ -83,6 +84,47 @@ const isNavigationRequest = (request: Request): boolean => {
 
   const accept = request.headers.get('Accept') ?? '';
   return accept.includes('text/html');
+};
+
+// Public test surface: reachable without login (outside the auth gate). Renders
+// the visitor's 立場 (stance) derived purely from identity cookies — a person's
+// org-relative standing, distinct from the subject model:
+//   guest   (ゲスト)   : not logged in
+//   visitor (ビジター) : logged in, no group context (non-member)
+//   member  (メンバー) : logged in and in a group
+// Only "present / absent" of the cookies is shown, never their values (no XSS).
+const renderPublicStancePage = (request: Request): Response => {
+  const { userId, orgId } = getNavCookies(request);
+  const [stanceJa, stanceEn, desc] = !userId
+    ? ['ゲスト', 'guest', '未ログイン。認証なしでこの公開ページに到達できています（認証ゲートの外側）。']
+    : !orgId
+      ? ['ビジター', 'visitor', 'ログイン済みですが、グループ未選択＝このグループの非メンバーです。']
+      : ['メンバー', 'member', 'ログイン済み、かつグループのメンバーです。'];
+  const html = `<!doctype html>
+<html lang="ja"><head><meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Public — Tempri</title>
+<style>
+  body{margin:0;background:#0e1626;color:#e6edf6;font-family:system-ui,-apple-system,"Segoe UI",sans-serif;display:flex;min-height:100vh;align-items:center;justify-content:center}
+  .card{background:#16213a;border:1px solid #243049;border-radius:14px;padding:32px 40px;max-width:520px;width:90%}
+  .badge{display:inline-block;font-size:12px;color:#8aa0c0;border:1px solid #2c3a57;border-radius:999px;padding:2px 10px;margin-bottom:14px}
+  h1{margin:0 0 4px;font-size:18px}
+  .sub{color:#8aa0c0;font-size:13px;margin-bottom:22px}
+  .stance{font-size:32px;font-weight:700;margin:8px 0}
+  .stance span{font-size:16px;color:#8aa0c0;font-weight:400}
+  .desc{color:#c2cfe2;line-height:1.7;font-size:14px}
+  .meta{margin-top:20px;font-size:12px;color:#6f86a8}
+  a{color:#6ea8ff}
+</style></head>
+<body><div class="card">
+  <span class="badge">public surface · no login required</span>
+  <h1>あなたの立場</h1>
+  <div class="sub">認証ゲートの外側にある公開テストページです</div>
+  <div class="stance">${stanceJa} <span>/ ${stanceEn}</span></div>
+  <div class="desc">${desc}</div>
+  <div class="meta">identity_user_id: ${userId ? 'あり' : 'なし'} ／ identity_group_id: ${orgId ? 'あり' : 'なし'}<br><a href="/login">ログイン</a></div>
+</div></body></html>`;
+  return new Response(html, { status: 200, headers: { 'Content-Type': 'text/html; charset=UTF-8' } });
 };
 
 async function handleAdminOidcApi(request: Request, env: Env): Promise<Response> {
@@ -386,6 +428,11 @@ async function fetchInner(request: Request, env: Env): Promise<Response> {
         const msg = e instanceof Error ? e.message : String(e);
         return new Response(msg, { status: 500 });
       }
+    }
+
+    // Public stance test page — served before the auth gate (no login required).
+    if (pathname === '/public' && request.method === 'GET') {
+      return renderPublicStancePage(request);
     }
 
     // Auth gate: check session before serving any HTML
