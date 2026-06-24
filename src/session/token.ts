@@ -5,7 +5,7 @@ type SecretValue = string | { get(): Promise<string> };
 type InternalTokenClaims = {
   claims_set_version: number;
   actor_id: string;
-  actor_type: "human" | "service" | "program" | "ops" | "ai";
+  actor_type: "human" | "program" | "ai";
   iss: string;
   aud: string;
   exp: number;
