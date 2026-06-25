@@ -224,11 +224,12 @@ export function createMultiPaneView(ctx: GraphEditorContext): {
     const pinBtn = document.createElement('button');
     const updatePinBtn = () => {
       const on = !!config.pinned;
-      pinBtn.textContent = '📌';
+      // ❄ (freeze) with VS15 to force monochrome text rendering (avoid emoji presentation).
+      pinBtn.textContent = '❄︎';
       pinBtn.title = on ? '固定中（ソースの選択に追従しない）。クリックで解除' : '表示を固定（ソースの選択に追従しない）';
       pinBtn.style.cssText = on
-        ? `background:${SELECT_STRONG};border:none;color:#fff;cursor:pointer;font-size:12px;padding:1px 3px;border-radius:3px;line-height:1;flex-shrink:0;`
-        : `background:transparent;border:none;color:${TEXT_DIM};cursor:pointer;font-size:12px;padding:1px 3px;border-radius:3px;line-height:1;flex-shrink:0;opacity:0.6;`;
+        ? `background:${SELECT_STRONG};border:none;color:#fff;cursor:pointer;font-size:13px;padding:1px 3px;border-radius:3px;line-height:1;flex-shrink:0;`
+        : `background:transparent;border:none;color:${TEXT_DIM};cursor:pointer;font-size:13px;padding:0 2px;line-height:1;flex-shrink:0;`;
     };
     updatePinBtn();
     pinBtn.addEventListener('click', (e) => {

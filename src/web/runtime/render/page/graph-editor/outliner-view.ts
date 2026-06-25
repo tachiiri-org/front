@@ -649,7 +649,7 @@ export function createOutlinerView(ctx: GraphEditorContext, paneOpts?: OutlinerP
 
     // Copy-path button — copies the current breadcrumb path as a "/"-joined string.
     const copyBtn = document.createElement('button');
-    copyBtn.textContent = '⧉';
+    copyBtn.textContent = '❐';
     copyBtn.title = 'パスをコピー';
     copyBtn.style.cssText = `margin-left:auto;background:transparent;border:none;color:${TEXT_DIM};cursor:pointer;font-size:12px;padding:0 4px;line-height:1;flex-shrink:0;`;
     copyBtn.addEventListener('click', (e) => {
