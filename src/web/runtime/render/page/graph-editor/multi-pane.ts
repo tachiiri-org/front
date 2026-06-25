@@ -132,7 +132,14 @@ export function createMultiPaneView(ctx: GraphEditorContext): {
     if (targetIdx < 0 || targetIdx >= panes.length) return false;
     const source = panes[idx];
     const target = panes[targetIdx];
-    if (!target.view.canAcceptMove()) return false;
+    const targetParent = target.view.getEffectiveParentId();
+    if (targetParent === null) return false;                 // target can't host a node
+    const sourceParent = source.view.getNodeParentId(nodeId);
+    if (sourceParent === undefined) return false;            // node not in source pane
+    // Same parent (e.g. both panes show the graph root) → no reparent to do. Returning
+    // false leaves the keypress to its default caret-by-word behaviour rather than
+    // silently corrupting the sibling chain with a duplicate.
+    if (sourceParent === targetParent) return false;
     if (!source.view.beginKeyMove(nodeId)) return false;
     void target.view.acceptKeyMove().finally(() => { ctx.paneDrag = null; });
     return true;

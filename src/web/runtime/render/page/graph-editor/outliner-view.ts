@@ -71,7 +71,8 @@ export function createOutlinerView(ctx: GraphEditorContext, paneOpts?: OutlinerP
   applyPropertySort: () => Promise<void>;
   beginKeyMove: (nodeId: string) => boolean;
   acceptKeyMove: () => Promise<void>;
-  canAcceptMove: () => boolean;
+  getEffectiveParentId: () => string | null;
+  getNodeParentId: (nodeId: string) => string | null | undefined;
   openKeyMenu: (opts: {
     anchor: HTMLElement;
     mode: 'pane-filter';
@@ -1136,6 +1137,15 @@ export function createOutlinerView(ctx: GraphEditorContext, paneOpts?: OutlinerP
     const movers = pd.movers;
     if (movers.length === 0) return;
 
+    // Guard against duplicate ids: if a mover is already a sibling at the destination
+    // (e.g. both panes show the same parent), remove the existing entry first so the node
+    // appears exactly once. Otherwise the order sent to apiMoveNode would contain a
+    // duplicate id and corrupt the sibling chain.
+    for (const m of movers) {
+      const ex = newSibs.findIndex(s => s.node.id === m.node.id);
+      if (ex >= 0) { newSibs.splice(ex, 1); if (ex < insertAt) insertAt--; }
+    }
+
     const inserted: ONode[] = [];
     for (const m of movers) {
       byId.delete(m.node.id); // drop any stale ONode for the same id, then rebuild
@@ -1185,17 +1195,23 @@ export function createOutlinerView(ctx: GraphEditorContext, paneOpts?: OutlinerP
     return true;
   };
 
-  // A pane can accept a moved node only when it has a concrete parent to attach it under
-  // (a pane-sourced pane with a selection, or the root pane). A bookmarks-only root or an
-  // empty pane-sourced pane is rejected to avoid orphaning the node.
-  const canAcceptMove = (): boolean =>
-    paneParentSet ? paneParentId !== null : ctx.rootNodeId !== null;
+  // The parent whose children this pane currently displays (null = no concrete parent,
+  // e.g. a bookmarks-only root or an empty pane-sourced pane → cannot accept a move).
+  const getEffectiveParentId = (): string | null =>
+    paneParentSet ? paneParentId : ctx.rootNodeId;
+
+  // The current parent of a node living in this pane's tree (undefined if not present).
+  const getNodeParentId = (nodeId: string): string | null | undefined =>
+    byId.get(nodeId)?.parentId;
 
   const acceptKeyMove = async (): Promise<void> => {
     const pd = ctx.paneDrag;
     if (!pd || pd.sourceToken === paneToken) return;
-    const targetParentId = paneParentSet ? paneParentId : ctx.rootNodeId;
+    const targetParentId = getEffectiveParentId();
     if (targetParentId === null) return;
+    // Same parent → nothing to reparent; skip to avoid a duplicate insertion that would
+    // corrupt the sibling chain (callers also guard, this is defence-in-depth).
+    if ((pd.movers[0]?.oldParentId ?? null) === targetParentId) return;
     const movedId = pd.nodeIds[0];
     await moveAcrossPanes(pd, targetParentId, roots, roots.length, baseDepth);
     const o = byId.get(movedId);
@@ -2422,5 +2438,5 @@ export function createOutlinerView(ctx: GraphEditorContext, paneOpts?: OutlinerP
     if (i >= 0) ctx.propChangeHooks.splice(i, 1);
   };
 
-  return { el, filterBtn, load, refresh: render, search, setParent, getAncestorIds, getNodePath, getSelectedId, getPaneParentId, setPaneFilterKeys, setPaneSortByProps, setSourceRoot, applyPropertySort, beginKeyMove, acceptKeyMove, canAcceptMove, openKeyMenu, unregister };
+  return { el, filterBtn, load, refresh: render, search, setParent, getAncestorIds, getNodePath, getSelectedId, getPaneParentId, setPaneFilterKeys, setPaneSortByProps, setSourceRoot, applyPropertySort, beginKeyMove, acceptKeyMove, getEffectiveParentId, getNodeParentId, openKeyMenu, unregister };
 }
