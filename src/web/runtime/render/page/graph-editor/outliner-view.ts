@@ -626,9 +626,12 @@ export function createOutlinerView(ctx: GraphEditorContext, paneOpts?: OutlinerP
         if (i > 0) appendSep();
         appendLabel(e.label, zoomStack.length === 0 && i === externalPath.length - 1);
       });
+    } else if (zoomStack.length === 0) {
+      // Root-sourced with no zoom: static "ルート" label (no fall-through return so the
+      // copy-path button below is still appended).
+      appendLabel('ルート', true);
     } else {
-      // Root-sourced (or panel-sourced before a selection): clickable "ルート" home.
-      if (zoomStack.length === 0) { appendLabel('ルート', true); return; }
+      // Root-sourced, zoomed in: clickable "ルート" home.
       const homeBtn = document.createElement('button');
       homeBtn.textContent = 'ルート';
       homeBtn.style.cssText = btnStyle(false);
@@ -651,7 +654,7 @@ export function createOutlinerView(ctx: GraphEditorContext, paneOpts?: OutlinerP
     const copyBtn = document.createElement('button');
     copyBtn.textContent = '❐';
     copyBtn.title = 'パスをコピー';
-    copyBtn.style.cssText = `margin-left:auto;background:transparent;border:none;color:${TEXT_DIM};cursor:pointer;font-size:12px;padding:0 4px;line-height:1;flex-shrink:0;`;
+    copyBtn.style.cssText = `margin-left:auto;background:transparent;border:none;color:${TEXT_MID};cursor:pointer;font-size:12px;padding:0 4px;line-height:1;flex-shrink:0;`;
     copyBtn.addEventListener('click', (e) => {
       e.stopPropagation();
       const pathStr = selfPathPrefix().map(p => p.label).join('/');
