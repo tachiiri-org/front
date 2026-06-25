@@ -121,6 +121,23 @@ export function createMultiPaneView(ctx: GraphEditorContext): {
     }
   };
 
+  // Move a node from `paneId` to the adjacent pane (Ctrl/Cmd+→/←). Reuses the cross-pane
+  // DnD primitives: source publishes the node, the neighbour consumes it. Returns true when
+  // a neighbour exists and can accept the node (so the outliner suppresses caret movement).
+  const moveToAdjacentPane = (paneId: string, nodeId: string, direction: 'left' | 'right'): boolean => {
+    if (fullscreenPaneId !== null) return false; // neighbours are hidden in fullscreen
+    const idx = panes.findIndex(p => p.config.id === paneId);
+    if (idx === -1) return false;
+    const targetIdx = idx + (direction === 'right' ? 1 : -1);
+    if (targetIdx < 0 || targetIdx >= panes.length) return false;
+    const source = panes[idx];
+    const target = panes[targetIdx];
+    if (!target.view.canAcceptMove()) return false;
+    if (!source.view.beginKeyMove(nodeId)) return false;
+    void target.view.acceptKeyMove().finally(() => { ctx.paneDrag = null; });
+    return true;
+  };
+
   // ── Pane creation ──────────────────────────────────────────────────
   const createPane = (config: PaneConfig): PaneInstance => {
     const containerEl = document.createElement('div');
@@ -207,11 +224,11 @@ export function createMultiPaneView(ctx: GraphEditorContext): {
     const pinBtn = document.createElement('button');
     const updatePinBtn = () => {
       const on = !!config.pinned;
-      pinBtn.textContent = '固定';
+      pinBtn.textContent = '📌';
       pinBtn.title = on ? '固定中（ソースの選択に追従しない）。クリックで解除' : '表示を固定（ソースの選択に追従しない）';
       pinBtn.style.cssText = on
-        ? `background:${SELECT_STRONG};border:1px solid ${SELECT_STRONG};color:#fff;cursor:pointer;font-size:10px;padding:1px 5px;border-radius:3px;flex-shrink:0;`
-        : `background:transparent;border:1px solid ${BORDER};color:${TEXT_DIM};cursor:pointer;font-size:10px;padding:1px 5px;border-radius:3px;flex-shrink:0;`;
+        ? `background:${SELECT_STRONG};border:none;color:#fff;cursor:pointer;font-size:12px;padding:1px 3px;border-radius:3px;line-height:1;flex-shrink:0;`
+        : `background:transparent;border:none;color:${TEXT_DIM};cursor:pointer;font-size:12px;padding:1px 3px;border-radius:3px;line-height:1;flex-shrink:0;opacity:0.6;`;
     };
     updatePinBtn();
     pinBtn.addEventListener('click', (e) => {
@@ -238,17 +255,15 @@ export function createMultiPaneView(ctx: GraphEditorContext): {
     // Filter area — the "フィルタ" button is tinted when a filter is active (active keys are
     // toggled via the menu that opens on click, so no per-key pills are shown here)
     const fltArea = document.createElement('div');
-    fltArea.style.cssText = `display:flex;align-items:center;gap:3px;flex-wrap:wrap;cursor:pointer;min-width:0;`;
+    fltArea.style.cssText = `display:flex;align-items:center;cursor:pointer;flex-shrink:0;padding:0 2px;`;
     const updateFltBtn = () => {
       fltArea.innerHTML = '';
       const active = config.filterKeys.length > 0;
-      const col = active ? (ctx.allPropColors.get(config.filterKeys[0])?.code ?? TEXT_MID) : null;
-      const placeholder = document.createElement('span');
-      placeholder.textContent = 'フィルタ';
-      placeholder.style.cssText = active
-        ? `color:#fff;background:${col};font-size:10px;padding:1px 5px;border:1px solid ${col};border-radius:3px;flex-shrink:0;`
-        : `color:${TEXT_DIM};font-size:10px;padding:1px 3px;border:1px solid ${BORDER};border-radius:3px;flex-shrink:0;`;
-      fltArea.appendChild(placeholder);
+      const col = active ? (ctx.allPropColors.get(config.filterKeys[0])?.code ?? TEXT_HIGH) : TEXT_DIM;
+      const icon = document.createElement('span');
+      icon.textContent = '▽';
+      icon.style.cssText = `color:${col};font-size:13px;line-height:1;`;
+      fltArea.appendChild(icon);
       fltArea.title = active ? `フィルタ: ${config.filterKeys.join(', ')}` : 'フィルタを設定';
     };
     updateFltBtn();
@@ -278,8 +293,8 @@ export function createMultiPaneView(ctx: GraphEditorContext): {
     // (persists to the backend; this is an action, not a view toggle)
     const sortBtn = document.createElement('button');
     const updateSortBtn = () => {
-      sortBtn.textContent = '並び替え';
-      sortBtn.style.cssText = `background:transparent;border:1px solid ${BORDER};color:${TEXT_DIM};cursor:pointer;font-size:10px;padding:1px 5px;border-radius:3px;flex-shrink:0;`;
+      sortBtn.textContent = '⇅';
+      sortBtn.style.cssText = `background:transparent;border:none;color:${TEXT_DIM};cursor:pointer;font-size:13px;padding:0 2px;line-height:1;flex-shrink:0;`;
     };
     updateSortBtn();
     sortBtn.title = 'プロパティ順でDB上の並び順を並び替える';
@@ -344,6 +359,7 @@ export function createMultiPaneView(ctx: GraphEditorContext): {
       paneFilterKeys: new Set(config.filterKeys),
       paneSortByProps: false, // 並び替えは即時DB反映アクション化したのでビューソートは無効
       onNodeSelect: (nodeId) => onPaneSelect(config.id, nodeId),
+      onMoveToAdjacentPane: (nodeId, direction) => moveToAdjacentPane(config.id, nodeId, direction),
       onContentWidthChange: (w) => {
         // Measure only non-flex-1 header children to avoid feedback loop
         // (header.scrollWidth includes labelEl which stretches to container width)

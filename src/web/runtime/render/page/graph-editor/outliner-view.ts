@@ -33,6 +33,9 @@ export type OutlinerPaneOpts = {
   onNodeSelect?: (nodeId: string | null) => void;
   /** Called after render with the content's natural width (px); used by multi-pane for auto-sizing */
   onContentWidthChange?: (width: number) => void;
+  /** Ctrl/Cmd+→/← on a focused node: move it to the adjacent pane. Returns true if a move
+   *  was initiated (caller then suppresses the default caret-by-word behaviour). */
+  onMoveToAdjacentPane?: (nodeId: string, direction: 'left' | 'right') => boolean;
 };
 
 function showToast(msg: string) {
@@ -66,6 +69,9 @@ export function createOutlinerView(ctx: GraphEditorContext, paneOpts?: OutlinerP
   setPaneSortByProps: (enabled: boolean) => void;
   setSourceRoot: () => Promise<void>;
   applyPropertySort: () => Promise<void>;
+  beginKeyMove: (nodeId: string) => boolean;
+  acceptKeyMove: () => Promise<void>;
+  canAcceptMove: () => boolean;
   openKeyMenu: (opts: {
     anchor: HTMLElement;
     mode: 'pane-filter';
@@ -640,6 +646,19 @@ export function createOutlinerView(ctx: GraphEditorContext, paneOpts?: OutlinerP
       if (i < zoomStack.length - 1) btn.addEventListener('click', () => void doZoomTo(i + 1));
       bcEl.appendChild(btn);
     });
+
+    // Copy-path button — copies the current breadcrumb path as a "/"-joined string.
+    const copyBtn = document.createElement('button');
+    copyBtn.textContent = '⧉';
+    copyBtn.title = 'パスをコピー';
+    copyBtn.style.cssText = `margin-left:auto;background:transparent;border:none;color:${TEXT_DIM};cursor:pointer;font-size:12px;padding:0 4px;line-height:1;flex-shrink:0;`;
+    copyBtn.addEventListener('click', (e) => {
+      e.stopPropagation();
+      const pathStr = selfPathPrefix().map(p => p.label).join('/');
+      if (!pathStr) return;
+      void navigator.clipboard.writeText(pathStr).then(() => showToast('パスをコピーしました'));
+    });
+    bcEl.appendChild(copyBtn);
   };
 
   // ── Zoom ─────────────────────────────────────────────────────────────
@@ -782,6 +801,14 @@ export function createOutlinerView(ctx: GraphEditorContext, paneOpts?: OutlinerP
       }
       if (e.key === 'ArrowUp' && (e.ctrlKey || e.metaKey) && !e.shiftKey && !e.altKey) {
         e.preventDefault(); void toggleExpand(onode, false); return;
+      }
+
+      // Ctrl/Cmd+→ / ←: move this node to the adjacent pane (right / left).
+      // Only consumes the key when a move actually happens (so caret-by-word still
+      // works at the first/last pane where there is no neighbour to move into).
+      if ((e.key === 'ArrowRight' || e.key === 'ArrowLeft') && (e.ctrlKey || e.metaKey) && !e.shiftKey && !e.altKey) {
+        const moved = paneOpts?.onMoveToAdjacentPane?.(onode.node.id, e.key === 'ArrowRight' ? 'right' : 'left');
+        if (moved) { e.preventDefault(); return; }
       }
 
       // Alt+→: zoom in (focus subtree), Alt+←: zoom out
@@ -1138,6 +1165,40 @@ export function createOutlinerView(ctx: GraphEditorContext, paneOpts?: OutlinerP
     }
   };
 
+  // ── Keyboard-driven cross-pane move (Ctrl/Cmd+→/←) ────────────────────
+  // Mirrors the drag-and-drop cross-pane primitives: the source pane publishes the dragged
+  // node into ctx.paneDrag (beginKeyMove), then the target pane consumes it (acceptKeyMove),
+  // reusing moveAcrossPanes so reparent / detach / persistence behave identically.
+  const beginKeyMove = (nodeId: string): boolean => {
+    const o = byId.get(nodeId);
+    if (!o) return false;
+    ctx.paneDrag = {
+      sourceToken: paneToken,
+      nodeIds: [o.node.id],
+      movers: [{ node: o.node, oldParentId: o.parentId }],
+      detachFromSource: (nodes) => detachNodes(nodes),
+      awaitRealIds: () => awaitRealId(o).then(() => {}),
+    };
+    return true;
+  };
+
+  // A pane can accept a moved node only when it has a concrete parent to attach it under
+  // (a pane-sourced pane with a selection, or the root pane). A bookmarks-only root or an
+  // empty pane-sourced pane is rejected to avoid orphaning the node.
+  const canAcceptMove = (): boolean =>
+    paneParentSet ? paneParentId !== null : ctx.rootNodeId !== null;
+
+  const acceptKeyMove = async (): Promise<void> => {
+    const pd = ctx.paneDrag;
+    if (!pd || pd.sourceToken === paneToken) return;
+    const targetParentId = paneParentSet ? paneParentId : ctx.rootNodeId;
+    if (targetParentId === null) return;
+    const movedId = pd.nodeIds[0];
+    await moveAcrossPanes(pd, targetParentId, roots, roots.length, baseDepth);
+    const o = byId.get(movedId);
+    if (o) focusRow(o);
+  };
+
   // List-level drop surface: a cross-pane drag that lands in the empty area / below the
   // last row (or onto an empty pane) appends the node(s) to this pane's root level.
   const isOverRow = (t: EventTarget | null) => !!(t as HTMLElement | null)?.closest?.('[data-node-id]');
@@ -1358,6 +1419,8 @@ export function createOutlinerView(ctx: GraphEditorContext, paneOpts?: OutlinerP
         if (extOpts) { extOpts.onToggle(key); onRedraw(); return; }
         if (mode === 'node' && nodeId) {
           const onode = byId.get(nodeId);
+          // Count properties BEFORE this change to detect "assigning the first property".
+          const countBefore = Object.keys(ctx.propStore.get(nodeId) ?? {}).length;
           if (active) {
             syncPropChange(nodeId, p => { delete p[key]; });
             void apiRemoveProperty(ctx.gId, nodeId, key);
@@ -1366,7 +1429,11 @@ export function createOutlinerView(ctx: GraphEditorContext, paneOpts?: OutlinerP
             void apiSetProperty(ctx.gId, nodeId, key, '●');
           }
           if (onode) updateExpandMarker(onode);
-          if (!e.shiftKey && onClose) { onClose(); return; }
+          // Auto-close (when Shift is not held) ONLY when this assigns the very first
+          // property to a node that had none. Otherwise keep the menu open so the user
+          // can keep tagging without re-opening it each time.
+          const assignedFirst = !active && countBefore === 0;
+          if (assignedFirst && !e.shiftKey && onClose) { onClose(); return; }
         } else if (mode === 'filter') {
           if (active) filterKeys.delete(key); else filterKeys.add(key);
           updateFilterBtn();
@@ -2352,5 +2419,5 @@ export function createOutlinerView(ctx: GraphEditorContext, paneOpts?: OutlinerP
     if (i >= 0) ctx.propChangeHooks.splice(i, 1);
   };
 
-  return { el, filterBtn, load, refresh: render, search, setParent, getAncestorIds, getNodePath, getSelectedId, getPaneParentId, setPaneFilterKeys, setPaneSortByProps, setSourceRoot, applyPropertySort, openKeyMenu, unregister };
+  return { el, filterBtn, load, refresh: render, search, setParent, getAncestorIds, getNodePath, getSelectedId, getPaneParentId, setPaneFilterKeys, setPaneSortByProps, setSourceRoot, applyPropertySort, beginKeyMove, acceptKeyMove, canAcceptMove, openKeyMenu, unregister };
 }
