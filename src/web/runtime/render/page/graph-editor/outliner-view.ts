@@ -412,8 +412,12 @@ export function createOutlinerView(ctx: GraphEditorContext, paneOpts?: OutlinerP
   // Canvas-based text width measurement — called after render to auto-size the pane width
   const scheduleWidthUpdate = () => {
     requestAnimationFrame(() => {
+      // Minimum column width = 20vw (≥280px). Keep this as the floor in every branch so even
+      // an empty/filtered pane stays wide enough for the header icons.
+      const minW = Math.max(280, Math.round(window.innerWidth * 0.20));
+      const maxCap = Math.round(window.innerWidth * 0.40);
       const rows = listEl.querySelectorAll<HTMLElement>('[data-node-id]');
-      if (rows.length === 0) { paneOpts!.onContentWidthChange!(180); return; }
+      if (rows.length === 0) { paneOpts!.onContentWidthChange!(minW); return; }
       const firstTa = rows[0].querySelector<HTMLTextAreaElement>('textarea');
       const font = firstTa ? getComputedStyle(firstTa).font : '14px sans-serif';
       const canvas = document.createElement('canvas');
@@ -430,8 +434,6 @@ export function createOutlinerView(ctx: GraphEditorContext, paneOpts?: OutlinerP
       });
       // Start wide by default (matches the initial PANE_WIDTH baseline); shrink only when
       // every row's text is shorter than this, grow up to maxCap when text is long.
-      const minW = Math.max(280, Math.round(window.innerWidth * 0.20));
-      const maxCap = Math.round(window.innerWidth * 0.40);
       paneOpts!.onContentWidthChange!(Math.min(Math.max(minW, maxW), maxCap));
       // Column width changed → textarea wrapping changed → re-measure heights
       requestAnimationFrame(() => {
