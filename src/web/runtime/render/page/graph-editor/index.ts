@@ -174,17 +174,21 @@ export function renderGraphEditor(
   };
 
   // ── Language / fallback wiring ─────────────────────────────────────
+  // Language is now per-pane (each pane has its own JA/EN toggle). The top-bar buttons act
+  // as "set all panes" and also update the default applied to newly-created panes.
+  jaBtn.title = '全パネルを日本語に';
+  enBtn.title = '全パネルを英語に';
   jaBtn.addEventListener('click', () => {
     state.lang = 'ja';
     refreshLangBtns();
     fallbackBtn.style.cssText = makeFallbackBtnStyle();
-    multiPane.refresh();
+    multiPane.setAllLang('ja');
   });
   enBtn.addEventListener('click', () => {
     state.lang = 'en';
     refreshLangBtns();
     fallbackBtn.style.cssText = makeFallbackBtnStyle();
-    multiPane.refresh();
+    multiPane.setAllLang('en');
   });
 
   fallbackBtn.addEventListener('click', () => {

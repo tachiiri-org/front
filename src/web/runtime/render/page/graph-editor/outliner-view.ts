@@ -29,6 +29,8 @@ export type OutlinerPaneOpts = {
   paneFilterKeys?: Set<string>;
   /** If true, sort nodes by property keyOrder ascending (stable sort) */
   paneSortByProps?: boolean;
+  /** Per-pane display/edit language (overrides the global default for this pane) */
+  lang?: 'en' | 'ja';
   /** Called when user focuses a node row (for inter-pane wiring) */
   onNodeSelect?: (nodeId: string | null) => void;
   /** Called after render with the content's natural width (px); used by multi-pane for auto-sizing */
@@ -72,6 +74,7 @@ export function createOutlinerView(ctx: GraphEditorContext, paneOpts?: OutlinerP
   getPaneParentId: () => string | null;
   setPaneFilterKeys: (keys: Set<string>) => void;
   setPaneSortByProps: (enabled: boolean) => void;
+  setLang: (l: 'en' | 'ja') => void;
   setSourceRoot: () => Promise<void>;
   applyPropertySort: () => Promise<void>;
   beginKeyMove: (nodeId: string) => boolean;
@@ -226,7 +229,7 @@ export function createOutlinerView(ctx: GraphEditorContext, paneOpts?: OutlinerP
       if (!parentId) return;
       // Optimistic: insert temp node immediately (same pattern as doAddSibling)
       const tempId = `temp-${++ctx.tempNodeCounter}`;
-      const tempNode: ExplorerNode = { id: tempId, [ctx.state.lang]: label };
+      const tempNode: ExplorerNode = { id: tempId, [paneLang]: label };
       const o = make(tempNode, parentId, 0);
       o.childrenLoaded = true;
       roots.unshift(o);
@@ -234,7 +237,7 @@ export function createOutlinerView(ctx: GraphEditorContext, paneOpts?: OutlinerP
       tempReady.set(tempId, new Promise<void>(res => { resolveTemp = res; }));
       render(); // hides draft row, shows temp node at top
       focusRow(o);
-      const nn = await apiCreateNode(ctx.gId, parentId, ctx.state.lang, label);
+      const nn = await apiCreateNode(ctx.gId, parentId, paneLang, label);
       if (!nn) {
         resolveTemp(); tempReady.delete(tempId);
         roots.splice(roots.indexOf(o), 1); byId.delete(tempId);
@@ -251,7 +254,7 @@ export function createOutlinerView(ctx: GraphEditorContext, paneOpts?: OutlinerP
       const cc = ctx.childrenCache.get(parentId);
       if (cc) cc.unshift(nn); else setCachedChildren(parentId, [nn]);
       ctx.saveChildrenCache?.();
-      if (typedText.trim() && typedText.trim() !== label) void apiUpdateNode(ctx.gId, nn.id, ctx.state.lang, typedText.trim());
+      if (typedText.trim() && typedText.trim() !== label) void apiUpdateNode(ctx.gId, nn.id, paneLang, typedText.trim());
       // Move to front in backend (was appended to chain end)
       void apiMoveNode(ctx.gId, nn.id, parentId, 'up', roots.map(r => r.node.id));
     }
@@ -274,6 +277,9 @@ export function createOutlinerView(ctx: GraphEditorContext, paneOpts?: OutlinerP
   // unvalidated key refetches before use — keeping reloads fast without serving stale data.
   const validated = new Set<string | null>();
 
+  // Per-pane language (display + edit). Falls back to the global default when unset.
+  let paneLang: 'en' | 'ja' = paneOpts?.lang ?? ctx.state.lang;
+
   // Pane state
   let paneParentSet = paneOpts?.paneParentId !== undefined;
   let paneParentId: string | null = paneOpts?.paneParentId ?? null;
@@ -284,7 +290,7 @@ export function createOutlinerView(ctx: GraphEditorContext, paneOpts?: OutlinerP
   let externalPath: PathEntry[] = paneOpts?.panePath ?? [];
 
   const labelOf = (node: ExplorerNode): string =>
-    primaryLabel(node, ctx.state.lang) ?? fallbackLabel(node, ctx.state.lang) ?? node.id.slice(0, 8);
+    primaryLabel(node, paneLang) ?? fallbackLabel(node, paneLang) ?? node.id.slice(0, 8);
 
   // Path (root-first, inclusive) to the node whose children form this pane's top-level rows.
   const selfPathPrefix = (): PathEntry[] => {
@@ -776,12 +782,12 @@ export function createOutlinerView(ctx: GraphEditorContext, paneOpts?: OutlinerP
     btnWrap.addEventListener('click', (e) => { e.stopPropagation(); showPropertyMenu(onode, e.clientX, e.clientY); });
     btnWrap.addEventListener('contextmenu', (e) => {
       e.preventDefault(); e.stopPropagation();
-      const lbl = primaryLabel(onode.node, ctx.state.lang) ?? fallbackLabel(onode.node, ctx.state.lang) ?? '';
+      const lbl = primaryLabel(onode.node, paneLang) ?? fallbackLabel(onode.node, paneLang) ?? '';
       void navigator.clipboard.writeText(`[${onode.node.id}]${lbl}`).then(() => showToast('コピーしました'));
     });
     row.appendChild(btnWrap);
 
-    const label = primaryLabel(onode.node, ctx.state.lang) ?? fallbackLabel(onode.node, ctx.state.lang);
+    const label = primaryLabel(onode.node, paneLang) ?? fallbackLabel(onode.node, paneLang);
     const ta = document.createElement('textarea');
     ta.value = label;
     ta.style.cssText = `flex:1;background:transparent;border:none;outline:none;resize:none;font-size:14px;font-family:inherit;line-height:1.5;padding:0 4px 0 0;overflow:hidden;min-height:20px;color:${onode.node.color ?? TEXT_HIGH};`;
@@ -796,14 +802,14 @@ export function createOutlinerView(ctx: GraphEditorContext, paneOpts?: OutlinerP
     ta.addEventListener('focus', () => setPaneSelected(onode.node.id));
 
     ta.addEventListener('blur', () => {
-      const old = primaryLabel(onode.node, ctx.state.lang) ?? fallbackLabel(onode.node, ctx.state.lang);
+      const old = primaryLabel(onode.node, paneLang) ?? fallbackLabel(onode.node, paneLang);
       const newVal = ta.value;
       if (newVal !== old) {
-        if (ctx.state.lang === 'en') onode.node.en = newVal; else onode.node.ja = newVal;
+        if (paneLang === 'en') onode.node.en = newVal; else onode.node.ja = newVal;
         const cc = ctx.childrenCache.get(onode.parentId);
         const cn = cc?.find(n => n.id === onode.node.id);
-        if (cn) { if (ctx.state.lang === 'en') cn.en = newVal; else cn.ja = newVal; }
-        void apiUpdateNode(ctx.gId, onode.node.id, ctx.state.lang, newVal);
+        if (cn) { if (paneLang === 'en') cn.en = newVal; else cn.ja = newVal; }
+        void apiUpdateNode(ctx.gId, onode.node.id, paneLang, newVal);
       }
     });
 
@@ -1812,7 +1818,7 @@ export function createOutlinerView(ctx: GraphEditorContext, paneOpts?: OutlinerP
       rowMap.set(node.id, row);
 
       // Update textarea to show found node's label
-      ta.value = (primaryLabel(node, ctx.state.lang) ?? fallbackLabel(node, ctx.state.lang)) || '';
+      ta.value = (primaryLabel(node, paneLang) ?? fallbackLabel(node, paneLang)) || '';
 
       // Update childrenCache entry
       const cc = ctx.childrenCache.get(onode.parentId);
@@ -1832,7 +1838,7 @@ export function createOutlinerView(ctx: GraphEditorContext, paneOpts?: OutlinerP
         const q = inp.value.trim();
         drop.innerHTML = ''; selIdx = 0; resultNodes = [];
         if (!q) return;
-        const lang = ctx.state.showFallback ? undefined : ctx.state.lang;
+        const lang = ctx.state.showFallback ? undefined : paneLang;
         const { nodes } = await fetchAllNodes(ctx.gId, [], 0, lang, undefined, q, 20);
         // Exclude only the row being linked, its parent, and nodes already linked as
         // siblings (re-linking an existing sibling would toggle its edge off). Other
@@ -1844,7 +1850,7 @@ export function createOutlinerView(ctx: GraphEditorContext, paneOpts?: OutlinerP
         resultNodes = nodes.filter(n => !excl.has(n.id));
         for (let i = 0; i < resultNodes.length; i++) {
           const n = resultNodes[i];
-          const lbl = (primaryLabel(n, ctx.state.lang) ?? fallbackLabel(n, ctx.state.lang)) || n.id.slice(0, 8);
+          const lbl = (primaryLabel(n, paneLang) ?? fallbackLabel(n, paneLang)) || n.id.slice(0, 8);
           const item = document.createElement('div');
           item.textContent = lbl;
           item.style.cssText = `padding:5px 12px;cursor:pointer;font-size:14px;color:${TEXT_MID};white-space:nowrap;overflow:hidden;text-overflow:ellipsis;`;
@@ -2058,7 +2064,7 @@ export function createOutlinerView(ctx: GraphEditorContext, paneOpts?: OutlinerP
 
     // For "before first node" (no prevSib), insertAfterId=undefined → backend appends, then reorder
     const insertAfterId = before ? prevSibNode?.node.id : onode.node.id;
-    const nn = await apiCreateNode(ctx.gId, onode.parentId, ctx.state.lang, '', insertAfterId);
+    const nn = await apiCreateNode(ctx.gId, onode.parentId, paneLang, '', insertAfterId);
     if (!nn) {
       resolveTemp();
       tempReady.delete(tempId);
@@ -2085,7 +2091,7 @@ export function createOutlinerView(ctx: GraphEditorContext, paneOpts?: OutlinerP
     }
 
     ctx.saveChildrenCache?.();
-    if (typedText.trim()) void apiUpdateNode(ctx.gId, nn.id, ctx.state.lang, typedText);
+    if (typedText.trim()) void apiUpdateNode(ctx.gId, nn.id, paneLang, typedText);
   };
 
   const doDelete = (onode: ONode, visIdx: number, vis: ONode[]) => {
@@ -2330,7 +2336,7 @@ export function createOutlinerView(ctx: GraphEditorContext, paneOpts?: OutlinerP
       const ids = await fetchBookmarks(ctx.gId);
       ctx.state.bookmarks = new Set(ids);
     }
-    const lang = ctx.state.showFallback ? undefined : ctx.state.lang;
+    const lang = ctx.state.showFallback ? undefined : paneLang;
     const { nodes } = await fetchBookmarkedNodes(ctx.gId, [...ctx.state.bookmarks], lang);
     seedPropStore(nodes);
     roots = nodes.map(n => make(n, null, 0));
@@ -2381,6 +2387,8 @@ export function createOutlinerView(ctx: GraphEditorContext, paneOpts?: OutlinerP
   const getPaneParentId = () => (paneParentSet ? paneParentId : null);
   const setPaneFilterKeys = (keys: Set<string>) => { paneFilterKeys = keys; render(); };
   const setPaneSortByProps = (enabled: boolean) => { paneSortByProps = enabled; render(); };
+  // Change this pane's language and re-render labels (breadcrumb + rows).
+  const setLang = (l: 'en' | 'ja') => { paneLang = l; updateBreadcrumb(); render(); };
 
   // Reset this pane back to the graph root (source = ルート). Clears any pane-parent state
   // so load() takes the root branch — otherwise a stale paneParentId would keep showing the
@@ -2419,7 +2427,7 @@ export function createOutlinerView(ctx: GraphEditorContext, paneOpts?: OutlinerP
     if (!query) { await load(); return; }
     byId.clear(); zoomStack.splice(0); baseDepth = 0;
     updateBreadcrumb();
-    const lang = ctx.state.showFallback ? undefined : ctx.state.lang;
+    const lang = ctx.state.showFallback ? undefined : paneLang;
     const { nodes } = await fetchAllNodes(ctx.gId, [], 0, lang, undefined, query, 50);
     seedPropStore(nodes);
     roots = nodes.map(n => make(n, null, 0));
@@ -2458,5 +2466,5 @@ export function createOutlinerView(ctx: GraphEditorContext, paneOpts?: OutlinerP
     if (i >= 0) ctx.propChangeHooks.splice(i, 1);
   };
 
-  return { el, filterBtn, load, refresh: render, search, setParent, getAncestorIds, getNodePath, getSelectedId, getPaneParentId, setPaneFilterKeys, setPaneSortByProps, setSourceRoot, applyPropertySort, beginKeyMove, acceptKeyMove, getEffectiveParentId, getNodeParentId, openKeyMenu, unregister };
+  return { el, filterBtn, load, refresh: render, search, setParent, getAncestorIds, getNodePath, getSelectedId, getPaneParentId, setPaneFilterKeys, setPaneSortByProps, setLang, setSourceRoot, applyPropertySort, beginKeyMove, acceptKeyMove, getEffectiveParentId, getNodeParentId, openKeyMenu, unregister };
 }

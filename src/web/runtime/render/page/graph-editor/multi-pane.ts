@@ -9,6 +9,7 @@ type PaneConfig = {
   filterKeys: string[];      // property keys that must be present (ALL)
   sortByProps: boolean;      // true = sort by property keyOrder ascending
   width: number;             // px
+  lang: 'en' | 'ja';         // per-pane display/edit language
   pinned?: boolean;          // true = frozen: ignore source-pane selection changes
   pinnedParentId?: string | null; // parent snapshot to restore the frozen view on reload
 };
@@ -22,6 +23,7 @@ type PaneInstance = {
   updateSortBtn: () => void;
   updateFsBtn: () => void;
   updatePinBtn: () => void;
+  updateLangBtn: () => void;
 };
 
 const STORAGE_KEY = (gId: string) => `graph-editor-panes:${gId}`;
@@ -31,16 +33,17 @@ function savePanes(gId: string, configs: PaneConfig[]) {
   localStorage.setItem(STORAGE_KEY(gId), JSON.stringify(configs));
 }
 
-function loadPanes(gId: string): PaneConfig[] | null {
+function loadPanes(gId: string, defaultLang: 'en' | 'ja'): PaneConfig[] | null {
   try {
     const raw = localStorage.getItem(STORAGE_KEY(gId));
     if (!raw) return null;
     const arr = JSON.parse(raw) as Partial<PaneConfig>[];
-    return arr.map(c => ({ ...c, sortByProps: c.sortByProps ?? false })) as PaneConfig[];
+    // Older saved configs predate per-pane lang → fall back to the global default.
+    return arr.map(c => ({ ...c, sortByProps: c.sortByProps ?? false, lang: c.lang ?? defaultLang })) as PaneConfig[];
   } catch { return null; }
 }
 
-function newPaneConfig(label: string): PaneConfig {
+function newPaneConfig(label: string, lang: 'en' | 'ja'): PaneConfig {
   return {
     id: `pane-${Date.now()}-${Math.random().toString(36).slice(2, 6)}`,
     label,
@@ -48,6 +51,7 @@ function newPaneConfig(label: string): PaneConfig {
     filterKeys: [],
     sortByProps: false,
     width: PANE_WIDTH(),
+    lang,
   };
 }
 
@@ -56,6 +60,7 @@ export function createMultiPaneView(ctx: GraphEditorContext): {
   load: () => Promise<void>;
   refresh: () => void;
   search: (q: string) => Promise<void>;
+  setAllLang: (lang: 'en' | 'ja') => void;
 } {
   const el = document.createElement('div');
   el.style.cssText = `display:flex;flex-direction:row;flex:1;overflow-x:auto;overflow-y:hidden;`;
@@ -241,6 +246,23 @@ export function createMultiPaneView(ctx: GraphEditorContext): {
     labelEl.addEventListener('keydown', (e) => { if (e.key === 'Enter') { e.preventDefault(); labelEl.blur(); } });
     header.appendChild(labelEl);
 
+    // Per-pane language toggle (JA ⇄ EN) — compact single button to save header width
+    const langBtn = document.createElement('button');
+    const updateLangBtn = () => {
+      langBtn.textContent = config.lang.toUpperCase();
+      langBtn.title = config.lang === 'ja' ? 'このパネルの言語: 日本語（クリックでEN）' : 'このパネルの言語: 英語（クリックでJA）';
+      langBtn.style.cssText = `background:transparent;border:1px solid ${BORDER};color:${TEXT_MID};cursor:pointer;font-size:10px;padding:1px 4px;border-radius:3px;flex-shrink:0;line-height:1.4;`;
+    };
+    updateLangBtn();
+    langBtn.addEventListener('click', (e) => {
+      e.stopPropagation();
+      config.lang = config.lang === 'ja' ? 'en' : 'ja';
+      updateLangBtn();
+      view.setLang(config.lang);
+      saveAll();
+    });
+    header.appendChild(langBtn);
+
     // Source button
     const srcBtn = document.createElement('button');
     srcBtn.style.cssText = `background:transparent;border:1px solid ${BORDER};color:${TEXT_MID};cursor:pointer;font-size:10px;padding:1px 5px;border-radius:3px;flex-shrink:0;`;
@@ -391,13 +413,14 @@ export function createMultiPaneView(ctx: GraphEditorContext): {
       panePath,
       paneFilterKeys: new Set(config.filterKeys),
       paneSortByProps: false, // 並び替えは即時DB反映アクション化したのでビューソートは無効
+      lang: config.lang,
       onNodeSelect: (nodeId) => onPaneSelect(config.id, nodeId),
       onMoveNodeToPane: (nodeId, direction) => moveToAdjacentPane(config.id, nodeId, direction),
       onReorderPane: (direction) => movePane(config.id, direction),
       onContentWidthChange: (w) => {
         // Measure only non-flex-1 header children to avoid feedback loop
         // (header.scrollWidth includes labelEl which stretches to container width)
-        const minHeaderW = srcBtn.offsetWidth + pinBtn.offsetWidth + fltArea.scrollWidth + sortBtn.offsetWidth + reloadBtn.offsetWidth + fsBtn.offsetWidth + closeBtn.offsetWidth + 36;
+        const minHeaderW = langBtn.offsetWidth + srcBtn.offsetWidth + pinBtn.offsetWidth + fltArea.scrollWidth + sortBtn.offsetWidth + reloadBtn.offsetWidth + fsBtn.offsetWidth + closeBtn.offsetWidth + 36;
         const actualW = Math.max(w, minHeaderW);
         containerEl.style.width = `${actualW}px`;
         config.width = actualW;
@@ -430,7 +453,7 @@ export function createMultiPaneView(ctx: GraphEditorContext): {
     });
     containerEl.appendChild(resizeHandle);
 
-    const instance: PaneInstance = { config, view, containerEl, updateSrcBtn, updateFltBtn, updateSortBtn, updateFsBtn, updatePinBtn };
+    const instance: PaneInstance = { config, view, containerEl, updateSrcBtn, updateFltBtn, updateSortBtn, updateFsBtn, updatePinBtn, updateLangBtn };
 
     return instance;
   };
@@ -515,7 +538,9 @@ export function createMultiPaneView(ctx: GraphEditorContext): {
     line-height:1.4;
   `;
   addPaneBtn.addEventListener('click', () => {
-    const config = newPaneConfig(`パネル ${panes.length + 1}`);
+    // New pane inherits the language of the rightmost pane (or the global default).
+    const inheritLang = panes.length > 0 ? panes[panes.length - 1].config.lang : ctx.state.lang;
+    const config = newPaneConfig(`パネル ${panes.length + 1}`, inheritLang);
     // Default source = rightmost existing pane (1つ左のカラム)
     if (panes.length > 0) config.sourceId = panes[panes.length - 1].config.id;
     const inst = createPane(config);
@@ -562,10 +587,10 @@ export function createMultiPaneView(ctx: GraphEditorContext): {
     el.innerHTML = '';
     panes.length = 0;
 
-    const saved = loadPanes(ctx.gId);
+    const saved = loadPanes(ctx.gId, ctx.state.lang);
     const configs: PaneConfig[] = saved?.length
       ? saved
-      : [newPaneConfig('パネル 1')];
+      : [newPaneConfig('パネル 1', ctx.state.lang)];
 
     for (const cfg of configs) {
       const inst = createPane(cfg);
@@ -592,5 +617,15 @@ export function createMultiPaneView(ctx: GraphEditorContext): {
     for (const p of panes) await p.view.search(q);
   };
 
-  return { el, load, refresh, search };
+  // Apply a language to every pane at once (the top-bar JA/EN acts as "set all").
+  const setAllLang = (lang: 'en' | 'ja') => {
+    for (const p of panes) {
+      p.config.lang = lang;
+      p.updateLangBtn();
+      p.view.setLang(lang);
+    }
+    saveAll();
+  };
+
+  return { el, load, refresh, search, setAllLang };
 }

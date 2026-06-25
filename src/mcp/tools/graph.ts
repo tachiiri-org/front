@@ -393,6 +393,14 @@ export async function callGraphTool(
         const res = await graphFetch(env, graphId, `node/${encodeURIComponent(id)}/property`, "POST", { key, ...(value !== undefined ? { value } : {}) });
         if (!res.ok) throw new Error(`set_property_failed:${res.status}:${id}`);
       }));
+      // b887d7b3: AI-created nodes get an auto "AI" tag (see graph_add_node). Once the AI
+      // assigns a meaningful, non-"AI" property (e.g. "単語"), the node is no longer just an
+      // AI scratch node, so drop the auto "AI" marker. Best-effort (ignore failures/absence).
+      if (key !== "AI") {
+        await Promise.all(ids.map((id) =>
+          graphFetch(env, graphId, `node/${encodeURIComponent(id)}/property/AI`, "DELETE").catch(() => {})
+        ));
+      }
       const suffix = value !== undefined ? `${key}=${value}` : key;
       return { content: [{ type: "text", text: ids.length === 1 ? `Set [${ids[0]}] ${suffix}` : `Set ${ids.length} nodes: ${suffix}` }] };
     }
