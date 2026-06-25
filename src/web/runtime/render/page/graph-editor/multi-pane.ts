@@ -123,7 +123,7 @@ export function createMultiPaneView(ctx: GraphEditorContext): {
 
   // Move a node from `paneId` to the adjacent pane (Ctrl/Cmd+→/←). Reuses the cross-pane
   // DnD primitives: source publishes the node, the neighbour consumes it. Returns true when
-  // a neighbour exists and can accept the node (so the outliner suppresses caret movement).
+  // a neighbour exists and can host the node (so the outliner suppresses caret movement).
   const moveToAdjacentPane = (paneId: string, nodeId: string, direction: 'left' | 'right'): boolean => {
     if (fullscreenPaneId !== null) return false; // neighbours are hidden in fullscreen
     const idx = panes.findIndex(p => p.config.id === paneId);
@@ -142,6 +142,23 @@ export function createMultiPaneView(ctx: GraphEditorContext): {
     if (sourceParent === targetParent) return false;
     if (!source.view.beginKeyMove(nodeId)) return false;
     void target.view.acceptKeyMove().finally(() => { ctx.paneDrag = null; });
+    return true;
+  };
+
+  // Move a whole pane (column) one slot left/right, swapping with its neighbour (Ctrl/Cmd+Shift+→/←).
+  // Same array+DOM reorder as the header drag, just driven by the keyboard. Returns true when
+  // a swap happened (so the outliner suppresses the default caret-by-word movement).
+  const movePane = (paneId: string, direction: 'left' | 'right'): boolean => {
+    if (fullscreenPaneId !== null) return false; // neighbours are hidden in fullscreen
+    const idx = panes.findIndex(p => p.config.id === paneId);
+    if (idx === -1) return false;
+    const targetIdx = idx + (direction === 'right' ? 1 : -1);
+    if (targetIdx < 0 || targetIdx >= panes.length) return false;
+    // Swap positions in the array, then re-insert every container in the new order.
+    [panes[idx], panes[targetIdx]] = [panes[targetIdx], panes[idx]];
+    for (const p of panes) el.insertBefore(p.containerEl, addPaneBtn);
+    saveAll();
+    updateAllSrcBtns();
     return true;
   };
 
@@ -367,7 +384,8 @@ export function createMultiPaneView(ctx: GraphEditorContext): {
       paneFilterKeys: new Set(config.filterKeys),
       paneSortByProps: false, // 並び替えは即時DB反映アクション化したのでビューソートは無効
       onNodeSelect: (nodeId) => onPaneSelect(config.id, nodeId),
-      onMoveToAdjacentPane: (nodeId, direction) => moveToAdjacentPane(config.id, nodeId, direction),
+      onMoveNodeToPane: (nodeId, direction) => moveToAdjacentPane(config.id, nodeId, direction),
+      onReorderPane: (direction) => movePane(config.id, direction),
       onContentWidthChange: (w) => {
         // Measure only non-flex-1 header children to avoid feedback loop
         // (header.scrollWidth includes labelEl which stretches to container width)

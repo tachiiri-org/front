@@ -33,9 +33,14 @@ export type OutlinerPaneOpts = {
   onNodeSelect?: (nodeId: string | null) => void;
   /** Called after render with the content's natural width (px); used by multi-pane for auto-sizing */
   onContentWidthChange?: (width: number) => void;
-  /** Ctrl/Cmd+→/← on a focused node: move it to the adjacent pane. Returns true if a move
-   *  was initiated (caller then suppresses the default caret-by-word behaviour). */
-  onMoveToAdjacentPane?: (nodeId: string, direction: 'left' | 'right') => boolean;
+  /** Ctrl/Cmd+→/← on a focused node: move it to the adjacent pane (reparent under that
+   *  pane's parent). Returns true if a move was initiated (caller then suppresses the
+   *  default caret-by-word behaviour). */
+  onMoveNodeToPane?: (nodeId: string, direction: 'left' | 'right') => boolean;
+  /** Ctrl/Cmd+Shift+→/← while a node in this pane is focused: move THIS pane (column) one
+   *  slot left/right. Returns true if the pane moved (caller then suppresses the default
+   *  caret-by-word behaviour). */
+  onReorderPane?: (direction: 'left' | 'right') => boolean;
 };
 
 function showToast(msg: string) {
@@ -807,11 +812,15 @@ export function createOutlinerView(ctx: GraphEditorContext, paneOpts?: OutlinerP
         e.preventDefault(); void toggleExpand(onode, false); return;
       }
 
-      // Ctrl/Cmd+→ / ←: move this node to the adjacent pane (right / left).
-      // Only consumes the key when a move actually happens (so caret-by-word still
-      // works at the first/last pane where there is no neighbour to move into).
-      if ((e.key === 'ArrowRight' || e.key === 'ArrowLeft') && (e.ctrlKey || e.metaKey) && !e.shiftKey && !e.altKey) {
-        const moved = paneOpts?.onMoveToAdjacentPane?.(onode.node.id, e.key === 'ArrowRight' ? 'right' : 'left');
+      // Ctrl/Cmd+→/←        : move the focused NODE to the adjacent pane (reparent).
+      // Ctrl/Cmd+Shift+→/←  : move THIS pane (column) one slot, swapping with its neighbour.
+      // Each only consumes the key when something actually moved, so caret-by-word still
+      // works at the boundary (no node to reparent / no neighbouring pane).
+      if ((e.key === 'ArrowRight' || e.key === 'ArrowLeft') && (e.ctrlKey || e.metaKey) && !e.altKey) {
+        const dir = e.key === 'ArrowRight' ? 'right' : 'left';
+        const moved = e.shiftKey
+          ? paneOpts?.onReorderPane?.(dir)
+          : paneOpts?.onMoveNodeToPane?.(onode.node.id, dir);
         if (moved) { e.preventDefault(); return; }
       }
 
@@ -1178,10 +1187,10 @@ export function createOutlinerView(ctx: GraphEditorContext, paneOpts?: OutlinerP
     }
   };
 
-  // ── Keyboard-driven cross-pane move (Ctrl/Cmd+→/←) ────────────────────
-  // Mirrors the drag-and-drop cross-pane primitives: the source pane publishes the dragged
-  // node into ctx.paneDrag (beginKeyMove), then the target pane consumes it (acceptKeyMove),
-  // reusing moveAcrossPanes so reparent / detach / persistence behave identically.
+  // ── Keyboard-driven cross-pane node move (Ctrl/Cmd+→/←) ───────────────
+  // Reuses the drag-and-drop cross-pane primitives: the source pane publishes the node into
+  // ctx.paneDrag (beginKeyMove), then the target pane consumes it (acceptKeyMove via
+  // moveAcrossPanes) so reparent / detach / persistence behave identically to a drag.
   const beginKeyMove = (nodeId: string): boolean => {
     const o = byId.get(nodeId);
     if (!o) return false;
