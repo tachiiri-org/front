@@ -154,11 +154,16 @@ export function createMultiPaneView(ctx: GraphEditorContext): {
     if (idx === -1) return false;
     const targetIdx = idx + (direction === 'right' ? 1 : -1);
     if (targetIdx < 0 || targetIdx >= panes.length) return false;
+    // Moving a container via insertBefore blurs any focused descendant (the textarea), so
+    // capture it and restore focus afterwards — otherwise repeated Ctrl+Shift+←/→ stops
+    // firing because the key events no longer land on a node's textarea.
+    const active = document.activeElement as HTMLElement | null;
     // Swap positions in the array, then re-insert every container in the new order.
     [panes[idx], panes[targetIdx]] = [panes[targetIdx], panes[idx]];
     for (const p of panes) el.insertBefore(p.containerEl, addPaneBtn);
     saveAll();
     updateAllSrcBtns();
+    if (active && typeof active.focus === 'function') active.focus();
     return true;
   };
 
