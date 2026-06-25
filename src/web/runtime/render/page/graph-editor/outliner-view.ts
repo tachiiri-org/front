@@ -301,8 +301,11 @@ export function createOutlinerView(ctx: GraphEditorContext, paneOpts?: OutlinerP
       ? zoomStack[zoomStack.length - 1].node.id
       : (paneParentSet ? paneParentId : ctx.rootNodeId);
     const chain: PathEntry[] = [];
+    const seen = new Set<string>();
     let cur = byId.get(nodeId);
     while (cur) {
+      if (seen.has(cur.node.id)) break; // cycle guard — never spin on a self-loop
+      seen.add(cur.node.id);
       chain.unshift({ id: cur.node.id, label: labelOf(cur.node) });
       if (cur.parentId === rootParentId || cur.parentId == null) break;
       cur = byId.get(cur.parentId);
@@ -331,7 +334,11 @@ export function createOutlinerView(ctx: GraphEditorContext, paneOpts?: OutlinerP
   const ancestorIds = (onode: ONode): Set<string> => {
     const ids = new Set<string>();
     let cur: ONode | undefined = onode;
-    while (cur?.parentId != null) { ids.add(cur.parentId); cur = byId.get(cur.parentId); }
+    while (cur?.parentId != null) {
+      if (ids.has(cur.parentId)) break; // cycle guard (e.g. a self-loop) — never spin
+      ids.add(cur.parentId);
+      cur = byId.get(cur.parentId);
+    }
     return ids;
   };
 
@@ -1143,7 +1150,10 @@ export function createOutlinerView(ctx: GraphEditorContext, paneOpts?: OutlinerP
     insertAt: number,
     targetDepth: number,
   ) => {
-    const movers = pd.movers;
+    // Never parent a node to itself (would create a self-loop edge and an infinite
+    // parent-chain → a frozen tab). Happens when dropping/moving a node into a pane that
+    // is showing that very node's children.
+    const movers = pd.movers.filter(m => m.node.id !== newParentId);
     if (movers.length === 0) return;
 
     // Guard against duplicate ids: if a mover is already a sibling at the destination
@@ -2331,6 +2341,7 @@ export function createOutlinerView(ctx: GraphEditorContext, paneOpts?: OutlinerP
     const result = new Set<string>();
     let current = byId.get(nodeId);
     while (current?.parentId) {
+      if (result.has(current.parentId)) break; // cycle guard — never spin on a self-loop
       result.add(current.parentId);
       current = byId.get(current.parentId);
     }

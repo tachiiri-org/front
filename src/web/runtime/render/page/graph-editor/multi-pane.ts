@@ -136,6 +136,9 @@ export function createMultiPaneView(ctx: GraphEditorContext): {
     if (targetParent === null) return false;                 // target can't host a node
     const sourceParent = source.view.getNodeParentId(nodeId);
     if (sourceParent === undefined) return false;            // node not in source pane
+    // Target pane shows this very node's children (it's sourced from this pane and the node
+    // is the current selection) → moving it there would make it its own parent (cycle/freeze).
+    if (targetParent === nodeId) return false;
     // Same parent (e.g. both panes show the graph root) → no reparent to do. Returning
     // false leaves the keypress to its default caret-by-word behaviour rather than
     // silently corrupting the sibling chain with a duplicate.
