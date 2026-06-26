@@ -1421,7 +1421,7 @@ export function createOutlinerView(ctx: GraphEditorContext, paneOpts?: OutlinerP
     void apiDeletePropertyKey(ctx.gId, key);
     void apiSavePropertyOrder(ctx.gId, keyOrder);
     updateFilterBtn();
-    render();
+    broadcastKeyOrder(); // re-render every pane (the deleted key removes a group everywhere)
     onDone();
   };
 
@@ -1635,6 +1635,7 @@ export function createOutlinerView(ctx: GraphEditorContext, paneOpts?: OutlinerP
             order.splice(ti, 0, dragSrc);
             keyOrder = order;
             void apiSavePropertyOrder(ctx.gId, keyOrder);
+            broadcastKeyOrder(); // re-render every pane so grouping order updates at once
           }
         }
         onRedraw();
@@ -2565,11 +2566,27 @@ export function createOutlinerView(ctx: GraphEditorContext, paneOpts?: OutlinerP
     listEl.scrollTop = scroll; // keep the viewport stable across the regroup
   };
   ctx.propChangeHooks.push(propHook);
+
+  // When property keys are reordered (or deleted) in any pane, adopt the new order and
+  // re-render so the grouping order reflects it immediately — no reload needed.
+  const keyOrderHook = (order: string[]) => {
+    keyOrder = [...order];
+    for (const k of order) ctx.allPropKeys.add(k);
+    const scroll = listEl.scrollTop;
+    render();
+    listEl.scrollTop = scroll;
+  };
+  ctx.keyOrderHooks.push(keyOrderHook);
+  // Broadcast this pane's keyOrder to every pane (including itself) after a key reorder.
+  const broadcastKeyOrder = () => { ctx.keyOrderHooks.forEach(h => h(keyOrder)); };
+
   const unregister = () => {
     flushPendingReorders(true);
     window.removeEventListener('pagehide', onPageHide);
     const i = ctx.propChangeHooks.indexOf(propHook);
     if (i >= 0) ctx.propChangeHooks.splice(i, 1);
+    const j = ctx.keyOrderHooks.indexOf(keyOrderHook);
+    if (j >= 0) ctx.keyOrderHooks.splice(j, 1);
   };
 
   return { el, filterBtn, load, refresh: render, search, setParent, getAncestorIds, getNodePath, getSelectedId, getPaneParentId, setPaneFilterKeys, setPaneSortByProps, setLang, setSourceRoot, applyPropertySort, beginKeyMove, acceptKeyMove, getEffectiveParentId, getNodeParentId, openKeyMenu, unregister };

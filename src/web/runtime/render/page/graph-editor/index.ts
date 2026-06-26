@@ -159,6 +159,7 @@ export function renderGraphEditor(
     propStore, allPropKeys, allPropColors, colorPalette,
     tempNodeCounter: 0,
     propChangeHooks: [] as Array<() => void>,
+    keyOrderHooks: [] as Array<(order: string[]) => void>,
     saveChildrenCache,
     paneDrag: null,
   } as unknown as GraphEditorContext;

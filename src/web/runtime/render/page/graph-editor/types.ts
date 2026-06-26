@@ -51,6 +51,10 @@ export interface GraphEditorContext {
   // Outliner views register a callback here; syncPropChange passes the changed nodeId
   // so each pane can do targeted row removal instead of a full re-render.
   propChangeHooks: Array<(nodeId: string) => void>;
+  // Property-key order broadcast. Outliner views register a callback here; when one pane
+  // reorders (or deletes) property keys, it passes the new order so every pane updates its
+  // local keyOrder and re-renders, keeping the grouping order in sync without a reload.
+  keyOrderHooks: Array<(order: string[]) => void>;
   // ── Cross-pane (multi-pane outliner) DnD shared state ──
   // Set by the source pane on dragstart, read by the target pane on drop; null when idle.
   paneDrag: PaneDragState | null;
