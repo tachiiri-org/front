@@ -396,27 +396,13 @@ export function createOutlinerView(ctx: GraphEditorContext, paneOpts?: OutlinerP
     return own[0];
   };
 
-  // Divider + faint label that introduces a property group in the rendered list.
-  // `isFirst` omits the top border so the list never opens with a stray rule.
-  const buildGroupHeader = (key: string, isFirst: boolean): HTMLElement => {
+  // Thin, unlabelled horizontal rule that separates two property groups. Kept slightly
+  // brighter than the pane border (BORDER = #333) so the group separators read about as
+  // clearly as the column separators between panes.
+  const buildGroupDivider = (): HTMLElement => {
     const h = document.createElement('div');
-    h.dataset.groupHeader = key || '__none__';
-    h.style.cssText = [
-      'display:flex', 'align-items:center', 'gap:6px',
-      'padding:6px 8px 3px 2px', 'font-size:11px', `color:${TEXT_DIM}`,
-      'user-select:none', 'pointer-events:none',
-      isFirst ? '' : `border-top:1px solid ${BORDER}`,
-      isFirst ? '' : 'margin-top:5px',
-    ].filter(Boolean).join(';');
-    const code = key ? ctx.allPropColors.get(key)?.code : undefined;
-    if (code) {
-      const sw = document.createElement('span');
-      sw.style.cssText = `display:inline-block;width:9px;height:9px;border-radius:2px;flex-shrink:0;background:${code};`;
-      h.appendChild(sw);
-    }
-    const label = document.createElement('span');
-    label.textContent = key || '(プロパティなし)';
-    h.appendChild(label);
+    h.dataset.groupDivider = '1';
+    h.style.cssText = `border-top:1px solid #4a4a4a;margin:7px 8px 7px 0;pointer-events:none;`;
     return h;
   };
 
@@ -453,7 +439,8 @@ export function createOutlinerView(ctx: GraphEditorContext, paneOpts?: OutlinerP
       if (showHeaders) {
         const g = groupKeyOf(top);
         if (g !== lastGroup) {
-          listEl.appendChild(buildGroupHeader(g, firstGroup));
+          // Divider only between groups — never before the first one.
+          if (!firstGroup) listEl.appendChild(buildGroupDivider());
           lastGroup = g;
           firstGroup = false;
         }
@@ -2498,27 +2485,16 @@ export function createOutlinerView(ctx: GraphEditorContext, paneOpts?: OutlinerP
 
   updateBreadcrumb(); // show "ルート" on initial render
 
-  // Register targeted hook: when a node's property changes, update or remove its row
+  // When a node's property changes, re-render this pane so its grouping (and any active
+  // filter) reflects the change immediately. A property edit can move a node into another
+  // group, add/remove a group divider, or change filter membership — all of which are
+  // recomputed in render(). Panes that don't contain the node are skipped. render() also
+  // rebuilds the node's property marker via buildRow, so colours stay in sync too.
   const propHook = (changedId: string) => {
-    // Update expand marker if node is in this pane's tree
-    const onode = byId.get(changedId);
-    if (onode) updateExpandMarker(onode);
-
-    const activeFilter = paneFilterKeys.size > 0 ? paneFilterKeys : filterKeys.size > 0 ? filterKeys : null;
-    if (!activeFilter) return; // no filter → all rows stay visible regardless of prop change
-
-    const row = rowMap.get(changedId);
-    const props = ctx.propStore.get(changedId) ?? {};
-    const shouldShow = [...activeFilter].some(k => k in props);
-
-    if (row && !shouldShow) {
-      // Node visible but no longer matches filter → remove from DOM immediately
-      row.remove();
-      rowMap.delete(changedId);
-    } else if (!row && shouldShow && onode) {
-      // Node hidden but now matches filter → full render to re-add it
-      render();
-    }
+    if (!byId.has(changedId)) return;
+    const scroll = listEl.scrollTop;
+    render();
+    listEl.scrollTop = scroll; // keep the viewport stable across the regroup
   };
   ctx.propChangeHooks.push(propHook);
   const unregister = () => {
