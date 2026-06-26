@@ -78,6 +78,7 @@ export function createMultiPaneView(ctx: GraphEditorContext): {
   const panes: PaneInstance[] = [];
   let fullscreenPaneId: string | null = null;
   let draggingPaneId: string | null = null;
+  let ready = false; // gate auto-spawn until the initial load settles (so opening doesn't cascade)
   // Relation vocabulary (for the per-pane relation selector), fetched once and reused.
   let relationsCache: Array<{ id: string; name?: string; color?: string }> | null = null;
   const getRelations = async () => {
@@ -155,22 +156,52 @@ export function createMultiPaneView(ctx: GraphEditorContext): {
   };
 
   // ── Inter-pane wiring ──────────────────────────────────────────────
+  // Spawn a pane to the right of `srcInst`, sourced from it, for the drill-in flow.
+  const autoSpawnPane = (
+    srcInst: PaneInstance,
+    kind: 'relation' | 'relationList',
+    selectedNodeId: string,
+    srcRel: string | undefined,
+    path: PathEntry[],
+  ) => {
+    const config = newPaneConfig(kind === 'relation' ? '紐づくノード' : '関係', srcInst.config.lang);
+    config.sourceId = srcInst.config.id;
+    config.kind = kind;
+    config.relationFilter = kind === 'relation' ? (srcRel ?? 'containment') : 'containment';
+    config.width = paneMinWidth(config);
+    const inst = createPane(config);
+    const srcIdx = panes.findIndex(p => p.config.id === srcInst.config.id);
+    panes.splice(srcIdx + 1, 0, inst);
+    el.insertBefore(inst.containerEl, srcInst.containerEl.nextSibling);
+    saveAll();
+    updateAllSrcBtns();
+    void inst.view.load().then(() => {
+      if (kind === 'relation') {
+        void (inst.view as unknown as { setFocusRelation?: (n: string | null, r: string, p?: PathEntry[]) => Promise<void> })
+          .setFocusRelation?.(selectedNodeId, srcRel ?? 'containment', path);
+      } else {
+        void inst.view.setParent(selectedNodeId, undefined, path);
+      }
+    });
+  };
+
   const onPaneSelect = (paneId: string, selectedNodeId: string | null) => {
     // Get ancestors of the selected node from the source pane to exclude from child panes
     // (graph edges are undirected so ancestors appear as neighbors; filtering prevents backward nav)
     const srcPane = panes.find(p => p.config.id === paneId);
-    const ancestorIds = selectedNodeId && srcPane
-      ? srcPane.view.getAncestorIds(selectedNodeId)
-      : new Set<string>();
-    const path = selectedNodeId && srcPane ? srcPane.view.getNodePath(selectedNodeId) : [];
+    if (!srcPane) return;
+    const ancestorIds = selectedNodeId ? srcPane.view.getAncestorIds(selectedNodeId) : new Set<string>();
+    const path = selectedNodeId ? srcPane.view.getNodePath(selectedNodeId) : [];
     // When the source is a relation-list pane (column B), its currently-selected relation drives
     // dependent relation panes (column C): they show that relation's nodes for the focus node.
-    const srcRel = srcPane?.config.kind === 'relationList'
+    const srcRel = srcPane.config.kind === 'relationList'
       ? (srcPane.view as unknown as { getSelectedRelation?: () => string }).getSelectedRelation?.()
       : undefined;
+    let hasChild = false;
     for (const p of panes) {
       // Pinned panes are frozen — they ignore changes to their source pane's selection.
       if (p.config.sourceId === paneId && !p.config.pinned) {
+        hasChild = true;
         if (srcRel !== undefined && p.config.kind === 'relation') {
           p.config.relationFilter = srcRel;
           void (p.view as unknown as { setFocusRelation?: (n: string | null, r: string, p?: PathEntry[]) => Promise<void> })
@@ -179,6 +210,13 @@ export function createMultiPaneView(ctx: GraphEditorContext): {
           void p.view.setParent(selectedNodeId, ancestorIds, path);
         }
       }
+    }
+    // No pane to the right yet → drill in. Node selection opens a relation-list pane; relation
+    // selection (source is a relation-list) opens its relation pane. Gated by `ready` so the initial
+    // load (which focuses a row) doesn't auto-cascade.
+    if (ready && !hasChild && selectedNodeId !== null) {
+      const kind: 'relation' | 'relationList' = srcPane.config.kind === 'relationList' ? 'relation' : 'relationList';
+      autoSpawnPane(srcPane, kind, selectedNodeId, srcRel, path);
     }
   };
 
@@ -321,26 +359,8 @@ export function createMultiPaneView(ctx: GraphEditorContext): {
     });
     header.appendChild(langBtn);
 
-    // Kind toggle — switch this pane between the outliner (containment tree) and the read-only
-    // relation view (edges grouped by relation). Rebuilds all panes from the saved configs.
-    const kindBtn = document.createElement('button');
-    const curKind = (): NonNullable<PaneConfig['kind']> => config.kind ?? 'outliner';
-    const kindIcon = (k: string) => k === 'relation' ? '⇄' : k === 'relationList' ? '☷' : '☰';
-    const kindTitle = (k: string) => k === 'relation' ? 'リレーション先（クリックでアウトラインへ）'
-      : k === 'relationList' ? '関係リスト（クリックでリレーション先へ）'
-      : 'アウトライン（クリックで関係リストへ）';
-    const nextKind = (k: string): NonNullable<PaneConfig['kind']> => k === 'outliner' ? 'relationList' : k === 'relationList' ? 'relation' : 'outliner';
-    kindBtn.textContent = kindIcon(curKind());
-    kindBtn.title = kindTitle(curKind());
-    kindBtn.style.cssText = `background:transparent;border:1px solid ${BORDER};color:${curKind() === 'outliner' ? TEXT_MID : TEXT_HIGH};cursor:pointer;font-size:11px;padding:1px 4px;border-radius:3px;flex-shrink:0;`;
-    kindBtn.addEventListener('click', (e) => {
-      e.stopPropagation();
-      config.kind = nextKind(curKind());
-      saveAll();
-      init();
-      void load();
-    });
-    header.appendChild(kindBtn);
+    // (kind toggle removed — a pane's kind comes from the drill flow: selecting a node spawns a
+    //  relation-list pane, selecting a relation spawns a relation pane. See onPaneSelect.)
 
     // Relation selector (relation-kind panes only) — picks which single relation this pane shows.
     if (config.kind === 'relation') {
@@ -720,6 +740,7 @@ export function createMultiPaneView(ctx: GraphEditorContext): {
 
   const load = async () => {
     for (const p of panes) await p.view.load();
+    ready = true; // initial load settled; now node/relation selection drills in (auto-spawn)
   };
 
   const refresh = () => {
