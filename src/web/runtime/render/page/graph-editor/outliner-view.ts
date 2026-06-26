@@ -382,25 +382,85 @@ export function createOutlinerView(ctx: GraphEditorContext, paneOpts?: OutlinerP
     return 0;
   };
 
+  // Master ordering of all known property keys (persisted keyOrder first, then any others).
+  const masterKeyOrder = (): string[] => [...new Set([...keyOrder, ...ctx.allPropKeys])];
+
+  // Primary group key for a node: the first property key (in master order) it carries,
+  // falling back to its first own key, or '' when it has no properties at all. Top-level
+  // rows are clustered into property groups by this key.
+  const groupKeyOf = (o: ONode): string => {
+    const props = ctx.propStore.get(o.node.id) ?? {};
+    const own = Object.keys(props);
+    if (own.length === 0) return '';
+    for (const k of masterKeyOrder()) if (k in props) return k;
+    return own[0];
+  };
+
+  // Divider + faint label that introduces a property group in the rendered list.
+  // `isFirst` omits the top border so the list never opens with a stray rule.
+  const buildGroupHeader = (key: string, isFirst: boolean): HTMLElement => {
+    const h = document.createElement('div');
+    h.dataset.groupHeader = key || '__none__';
+    h.style.cssText = [
+      'display:flex', 'align-items:center', 'gap:6px',
+      'padding:6px 8px 3px 2px', 'font-size:11px', `color:${TEXT_DIM}`,
+      'user-select:none', 'pointer-events:none',
+      isFirst ? '' : `border-top:1px solid ${BORDER}`,
+      isFirst ? '' : 'margin-top:5px',
+    ].filter(Boolean).join(';');
+    const code = key ? ctx.allPropColors.get(key)?.code : undefined;
+    if (code) {
+      const sw = document.createElement('span');
+      sw.style.cssText = `display:inline-block;width:9px;height:9px;border-radius:2px;flex-shrink:0;background:${code};`;
+      h.appendChild(sw);
+    }
+    const label = document.createElement('span');
+    label.textContent = key || '(プロパティなし)';
+    h.appendChild(label);
+    return h;
+  };
+
   const render = () => {
     rowMap.clear();
     listEl.innerHTML = '';
-    let base: ONode[];
-    if (filterKeys.size > 0) {
+    const globalFilter = filterKeys.size > 0;
+    // Top-level rows to render. In global-filter mode this is the flat set of matching
+    // nodes; otherwise it's the pane's roots (direct children of the pane parent).
+    let tops: ONode[];
+    if (globalFilter) {
       const matched: ONode[] = [];
       byId.forEach(o => {
         const props = ctx.propStore.get(o.node.id) ?? {};
         if ([...filterKeys].some(k => k in props)) matched.push(o);
       });
-      base = matched;
+      tops = matched;
     } else {
-      base = flatVisible();
+      tops = paneFilterKeys.size > 0 ? roots.filter(passesPaneFilter) : roots;
     }
-    // Apply per-pane filter
-    const toRender = paneFilterKeys.size > 0 ? base.filter(passesPaneFilter) : base;
-    let finalRender = toRender;
-    if (paneSortByProps) finalRender = [...toRender].sort(compareByProps);
-    for (const o of finalRender) listEl.appendChild(buildRow(o));
+    // Cluster top-level rows by primary property key (then value) so each group is
+    // contiguous; only show group dividers when more than one group is present.
+    const orderedTops = [...tops].sort(compareByProps);
+    const showHeaders = new Set(orderedTops.map(groupKeyOf)).size > 1;
+    // Render a top-level node and, when expanded, its visible subtree (honouring the
+    // per-pane filter on descendants, matching expandInDom).
+    const appendSubtree = (o: ONode) => {
+      listEl.appendChild(buildRow(o));
+      if (o.expanded) for (const c of o.children) if (passesPaneFilter(c)) appendSubtree(c);
+    };
+    let lastGroup: string | null = null;
+    let firstGroup = true;
+    for (const top of orderedTops) {
+      if (showHeaders) {
+        const g = groupKeyOf(top);
+        if (g !== lastGroup) {
+          listEl.appendChild(buildGroupHeader(g, firstGroup));
+          lastGroup = g;
+          firstGroup = false;
+        }
+      }
+      if (globalFilter) listEl.appendChild(buildRow(top));
+      else appendSubtree(top);
+    }
     // Show draft row only when list is empty AND a valid parent is known
     const draftParentId = paneParentSet ? paneParentId : (ctx.rootNodeId ?? null);
     draftEl.style.display = (roots.length === 0 && draftParentId !== null) ? 'flex' : 'none';
