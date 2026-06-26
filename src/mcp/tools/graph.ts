@@ -27,6 +27,18 @@ async function graphFetch(
 }
 
 type ApiNode = { id: string; en?: string | null; ja?: string | null; color?: string | null; node_type?: string | null; properties?: Record<string, string> };
+// A line (edge) among the returned nodes. `source` (when set) names the directed source endpoint
+// (the other of a/b is the target); its absence means undirected. relation_id/label may be absent.
+type ApiEdge = { a: string; b: string; relation_id?: string; label?: string; source?: string };
+type ReadResult = { nodes: ApiNode[]; edges?: ApiEdge[]; truncated?: boolean; count?: number };
+type ApiRelation = { id: string; name?: string; color?: string };
+
+async function getRelations(env: AuthorizeEnv, graphId: string): Promise<ApiRelation[]> {
+  const res = await graphFetch(env, graphId, "relation");
+  if (!res.ok) throw new Error(`get_relations_failed:${res.status}`);
+  const data = (await res.json()) as { relations?: ApiRelation[] };
+  return data.relations ?? [];
+}
 
 async function getNeighbors(
   env: AuthorizeEnv,
@@ -34,7 +46,7 @@ async function getNeighbors(
   nodeId: string,
   depth: number,
   opts?: { filter?: Record<string, string | string[]>; limit?: number },
-): Promise<{ nodes: ApiNode[]; truncated?: boolean; count?: number }> {
+): Promise<ReadResult> {
   const params = new URLSearchParams({ depth: String(depth) });
   if (opts?.filter) {
     for (const [key, val] of Object.entries(opts.filter)) {
@@ -45,7 +57,7 @@ async function getNeighbors(
   if (opts?.limit != null) params.set("limit", String(opts.limit));
   const res = await graphFetch(env, graphId, `node/${encodeURIComponent(nodeId)}/neighbors?${params.toString()}`);
   if (!res.ok) throw new Error(`get_neighbors_failed:${res.status}`);
-  return res.json() as Promise<{ nodes: ApiNode[]; truncated?: boolean; count?: number }>;
+  return res.json() as Promise<ReadResult>;
 }
 
 async function getNeighborsByWord(
@@ -54,7 +66,7 @@ async function getNeighborsByWord(
   word: string,
   depth: number,
   opts?: { filter?: Record<string, string | string[]>; limit?: number },
-): Promise<{ nodes: ApiNode[]; truncated?: boolean; count?: number } | null> {
+): Promise<ReadResult | null> {
   const params = new URLSearchParams({ depth: String(depth) });
   if (opts?.filter) {
     for (const [key, val] of Object.entries(opts.filter)) {
@@ -65,7 +77,7 @@ async function getNeighborsByWord(
   const res = await graphFetch(env, graphId, `neighbors?word=${encodeURIComponent(word)}&${params.toString()}`);
   if (res.status === 404) return null;
   if (!res.ok) throw new Error(`get_neighbors_by_word_failed:${res.status}`);
-  return res.json() as Promise<{ nodes: ApiNode[]; truncated?: boolean; count?: number }>;
+  return res.json() as Promise<ReadResult>;
 }
 
 async function searchNodesByProperty(
@@ -73,7 +85,7 @@ async function searchNodesByProperty(
   graphId: string,
   filter: Record<string, string | string[]>,
   limit?: number,
-): Promise<{ nodes: ApiNode[]; truncated?: boolean; count?: number }> {
+): Promise<ReadResult> {
   const params = new URLSearchParams();
   for (const [key, val] of Object.entries(filter)) {
     params.set(`filter[${key}]`, Array.isArray(val) ? val.join(",") : val);
@@ -81,7 +93,7 @@ async function searchNodesByProperty(
   if (limit != null) params.set("limit", String(limit));
   const res = await graphFetch(env, graphId, `nodes/search?${params.toString()}`);
   if (!res.ok) throw new Error(`search_nodes_failed:${res.status}`);
-  return res.json() as Promise<{ nodes: ApiNode[]; truncated?: boolean; count?: number }>;
+  return res.json() as Promise<ReadResult>;
 }
 
 function clampDepth(raw: unknown): number {
@@ -95,6 +107,32 @@ const nodeLine = (n: ApiNode): string => {
   const propStr = Object.entries(props).map(([k, v]) => v ? `${k}=${v}` : k).join(", ");
   return `[${n.id}] ${nodeLabel(n)}${propStr ? ` {${propStr}}` : ""}`;
 };
+
+// Render only the *annotated* lines (those carrying a relation / label / direction); the bare
+// adjacency is already implied by the node tree, so unannotated lines are omitted to avoid noise.
+// Directed lines use →, undirected use —. relName maps a relation id to its display name.
+function edgesBlock(edges: ApiEdge[] | undefined, relName: (id: string) => string): string {
+  const annotated = (edges ?? []).filter((e) => e.relation_id || e.label || e.source);
+  if (annotated.length === 0) return "";
+  const lines = annotated.map((e) => {
+    const directed = e.source === e.a || e.source === e.b;
+    const from = e.source === e.b ? e.b : e.a;
+    const to = e.source === e.b ? e.a : e.b;
+    const rel = e.relation_id ? relName(e.relation_id) : "";
+    const lbl = e.label ? `(${e.label})` : "";
+    return `  [${from}] —${rel}${lbl}${directed ? "→" : "—"} [${to}]`;
+  });
+  return `\nEdges:\n${lines.join("\n")}`;
+}
+
+// Build a relation-id → name resolver for a read result, fetching the palette only when the result
+// actually contains relation-bearing edges (so plain reads cost no extra request).
+async function relNameResolver(env: AuthorizeEnv, graphId: string, edges: ApiEdge[] | undefined): Promise<(id: string) => string> {
+  if (!(edges ?? []).some((e) => e.relation_id)) return (id) => id;
+  const rels = await getRelations(env, graphId);
+  const m = new Map(rels.map((r) => [r.id, r.name ?? r.id]));
+  return (id) => m.get(id) ?? id;
+}
 
 // --- Tool definitions ---
 
@@ -272,6 +310,35 @@ export const GRAPH_TOOLS = [
       required: ["graph_id", "key"],
     },
   },
+  {
+    name: "graph_list_relations",
+    description:
+      "List the relation vocabulary (edge types) for the graph: each relation's id, name (e.g. 含有 / is-a / 実現 / 関連) and color. Relations describe *how* two nodes relate; use a relation id with graph_set_line to classify a line. The set is user-managed (the editor adds/edits/deletes relations).",
+    inputSchema: {
+      type: "object",
+      properties: {
+        graph_id: { type: "string", description: "Word graph ID (e.g. 'word-graph-1')" },
+      },
+      required: ["graph_id"],
+    },
+  },
+  {
+    name: "graph_set_line",
+    description:
+      "Set how an existing line (edge) between two nodes relates them: its relation (kind), an optional label, and direction. The line must already exist — create it first with graph_link. Provide relation_id (from graph_list_relations) to classify it; label for a named association (e.g. 接続先); source to make it directed (source must equal node_id or target_node_id; omit = leave as-is). Pass null for any field to clear it (no relation / no label / undirected).",
+    inputSchema: {
+      type: "object",
+      properties: {
+        graph_id: { type: "string", description: "Word graph ID (e.g. 'word-graph-1')" },
+        node_id: { type: "string", description: "One endpoint of the line" },
+        target_node_id: { type: "string", description: "The other endpoint of the line" },
+        relation_id: { type: "string", description: "Relation id from graph_list_relations (null to clear the relation)" },
+        label: { type: "string", description: "Optional label for this line, e.g. 接続先 (null to clear)" },
+        source: { type: "string", description: "Directed source endpoint — must equal node_id or target_node_id (null = undirected)" },
+      },
+      required: ["graph_id", "node_id", "target_node_id"],
+    },
+  },
 ];
 
 // --- Tool handler ---
@@ -295,6 +362,7 @@ export async function callGraphTool(
       }
       const nodes = result.nodes ?? [];
       let text = nodes.map(nodeLine).join("\n") || "(no nodes)";
+      text += edgesBlock(result.edges, await relNameResolver(env, graphId, result.edges));
       if (result.truncated) text += `\n[truncated: ${result.count} nodes returned, more exist — reduce depth or add filter]`;
       return { content: [{ type: "text", text }] };
     }
@@ -305,6 +373,7 @@ export async function callGraphTool(
       const result = await searchNodesByProperty(env, graphId, filter, rawLimit);
       const nodes = result.nodes ?? [];
       let text = nodes.map(nodeLine).join("\n") || "(no nodes)";
+      text += edgesBlock(result.edges, await relNameResolver(env, graphId, result.edges));
       if (result.truncated) text += `\n[truncated: ${result.count} nodes returned, more exist — add more specific filter or reduce limit]`;
       return { content: [{ type: "text", text }] };
     }
@@ -320,6 +389,7 @@ export async function callGraphTool(
       });
       const nodes = result.nodes ?? [];
       let text = nodes.map(nodeLine).join("\n") || "(no nodes)";
+      text += edgesBlock(result.edges, await relNameResolver(env, graphId, result.edges));
       if (result.truncated) text += `\n[truncated: ${result.count} nodes returned, more exist — reduce depth or add filter]`;
       return { content: [{ type: "text", text }] };
     }
@@ -413,6 +483,28 @@ export async function callGraphTool(
         if (!res.ok) throw new Error(`remove_property_failed:${res.status}:${id}`);
       }));
       return { content: [{ type: "text", text: ids.length === 1 ? `Removed [${ids[0]}] ${key}` : `Removed ${key} from ${ids.length} nodes` }] };
+    }
+
+    if (name === "graph_list_relations") {
+      const rels = await getRelations(env, graphId);
+      const text = rels.map((r) => `[${r.id}] ${r.name ?? ""}${r.color ? ` (${r.color})` : ""}`.trimEnd()).join("\n") || "(no relations)";
+      return { content: [{ type: "text", text }] };
+    }
+
+    if (name === "graph_set_line") {
+      const nodeId = String(args.node_id);
+      const targetId = String(args.target_node_id);
+      const body: Record<string, unknown> = {};
+      for (const k of ["relation_id", "label", "source"] as const) {
+        if (k in args) body[k] = args[k] == null ? null : String(args[k]);
+      }
+      const res = await graphFetch(env, graphId, `node/${encodeURIComponent(nodeId)}/line/${encodeURIComponent(targetId)}`, "PATCH", body);
+      if (!res.ok) throw new Error(`set_line_failed:${res.status}`);
+      const parts: string[] = [];
+      if ("relation_id" in body) parts.push(body.relation_id === null ? "relation cleared" : `relation=${String(body.relation_id)}`);
+      if ("label" in body) parts.push(body.label === null ? "label cleared" : `label=${String(body.label)}`);
+      if ("source" in body) parts.push(body.source === null ? "undirected" : `source=${String(body.source)}`);
+      return { content: [{ type: "text", text: `Set line [${nodeId}] ↔ [${targetId}]${parts.length ? `: ${parts.join(", ")}` : ""}` }] };
     }
 
     return { content: [{ type: "text", text: `Unknown graph tool: ${name}` }], isError: true };
