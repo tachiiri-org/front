@@ -2,6 +2,7 @@ import type { GraphEditorContext } from './types';
 import { BORDER, TEXT_HIGH, TEXT_MID, TEXT_DIM, SELECT_STRONG } from './constants';
 import { createOutlinerView, type OutlinerPaneOpts } from './outliner-view';
 import { createRelationView } from './relation-pane';
+import { createRelationListView } from './relation-list-pane';
 import { fetchRelations } from './api';
 
 type PaneConfig = {
@@ -14,7 +15,8 @@ type PaneConfig = {
   lang: 'en' | 'ja';         // per-pane display/edit language
   pinned?: boolean;          // true = frozen: ignore source-pane selection changes
   pinnedParentId?: string | null; // parent snapshot to restore the frozen view on reload
-  kind?: 'outliner' | 'relation'; // 'relation' = read-only edges-by-relation view (default outliner)
+  // 'relationList' = column B (pick a relation); 'relation' = column C (that relation's nodes); default outliner
+  kind?: 'outliner' | 'relation' | 'relationList';
   relationFilter?: string;        // relation-kind only: which single relation this pane shows ('containment' = children)
 };
 
@@ -159,10 +161,21 @@ export function createMultiPaneView(ctx: GraphEditorContext): {
       ? srcPane.view.getAncestorIds(selectedNodeId)
       : new Set<string>();
     const path = selectedNodeId && srcPane ? srcPane.view.getNodePath(selectedNodeId) : [];
+    // When the source is a relation-list pane (column B), its currently-selected relation drives
+    // dependent relation panes (column C): they show that relation's nodes for the focus node.
+    const srcRel = srcPane?.config.kind === 'relationList'
+      ? (srcPane.view as unknown as { getSelectedRelation?: () => string }).getSelectedRelation?.()
+      : undefined;
     for (const p of panes) {
       // Pinned panes are frozen — they ignore changes to their source pane's selection.
       if (p.config.sourceId === paneId && !p.config.pinned) {
-        void p.view.setParent(selectedNodeId, ancestorIds, path);
+        if (srcRel !== undefined && p.config.kind === 'relation') {
+          p.config.relationFilter = srcRel;
+          void (p.view as unknown as { setFocusRelation?: (n: string | null, r: string) => Promise<void> })
+            .setFocusRelation?.(selectedNodeId, srcRel);
+        } else {
+          void p.view.setParent(selectedNodeId, ancestorIds, path);
+        }
       }
     }
   };
@@ -309,13 +322,18 @@ export function createMultiPaneView(ctx: GraphEditorContext): {
     // Kind toggle — switch this pane between the outliner (containment tree) and the read-only
     // relation view (edges grouped by relation). Rebuilds all panes from the saved configs.
     const kindBtn = document.createElement('button');
-    const isRel = () => config.kind === 'relation';
-    kindBtn.textContent = isRel() ? '⇄' : '☰';
-    kindBtn.title = isRel() ? 'リレーション表示（クリックでアウトライン）' : 'アウトライン表示（クリックでリレーション）';
-    kindBtn.style.cssText = `background:transparent;border:1px solid ${BORDER};color:${isRel() ? TEXT_HIGH : TEXT_MID};cursor:pointer;font-size:11px;padding:1px 4px;border-radius:3px;flex-shrink:0;`;
+    const curKind = (): NonNullable<PaneConfig['kind']> => config.kind ?? 'outliner';
+    const kindIcon = (k: string) => k === 'relation' ? '⇄' : k === 'relationList' ? '☷' : '☰';
+    const kindTitle = (k: string) => k === 'relation' ? 'リレーション先（クリックでアウトラインへ）'
+      : k === 'relationList' ? '関係リスト（クリックでリレーション先へ）'
+      : 'アウトライン（クリックで関係リストへ）';
+    const nextKind = (k: string): NonNullable<PaneConfig['kind']> => k === 'outliner' ? 'relationList' : k === 'relationList' ? 'relation' : 'outliner';
+    kindBtn.textContent = kindIcon(curKind());
+    kindBtn.title = kindTitle(curKind());
+    kindBtn.style.cssText = `background:transparent;border:1px solid ${BORDER};color:${curKind() === 'outliner' ? TEXT_MID : TEXT_HIGH};cursor:pointer;font-size:11px;padding:1px 4px;border-radius:3px;flex-shrink:0;`;
     kindBtn.addEventListener('click', (e) => {
       e.stopPropagation();
-      config.kind = isRel() ? 'outliner' : 'relation';
+      config.kind = nextKind(curKind());
       saveAll();
       init();
       void load();
@@ -513,6 +531,8 @@ export function createMultiPaneView(ctx: GraphEditorContext): {
     if (config.kind === 'relation') {
       relView = createRelationView(ctx, viewOpts);
       view = relView as unknown as ReturnType<typeof createOutlinerView>;
+    } else if (config.kind === 'relationList') {
+      view = createRelationListView(ctx, viewOpts) as unknown as ReturnType<typeof createOutlinerView>;
     } else {
       view = createOutlinerView(ctx, viewOpts);
     }

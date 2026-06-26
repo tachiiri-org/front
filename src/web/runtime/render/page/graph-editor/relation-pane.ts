@@ -173,6 +173,8 @@ export function createRelationView(ctx: GraphEditorContext, opts: OutlinerPaneOp
     search: async () => { /* no in-pane search */ },
     setParent: (nodeId: string | null) => setFocus(nodeId),
     setRelation,
+    // Set focus + relation together in one load (used when driven by a relation-list pane).
+    setFocusRelation: async (id: string | null, rel: string) => { focusId = id; relationFilter = rel; await loadData(); },
     getRelation: () => relationFilter,
     getAncestorIds: () => new Set<string>(),
     getNodePath: () => [] as PathEntry[],
