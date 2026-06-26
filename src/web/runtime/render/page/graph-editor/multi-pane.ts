@@ -1,6 +1,6 @@
 import type { GraphEditorContext } from './types';
 import { BORDER, TEXT_HIGH, TEXT_MID, TEXT_DIM, SELECT_STRONG } from './constants';
-import { createOutlinerView, type OutlinerPaneOpts } from './outliner-view';
+import { createOutlinerView, type OutlinerPaneOpts, type PathEntry } from './outliner-view';
 import { createRelationView } from './relation-pane';
 import { createRelationListView } from './relation-list-pane';
 import { fetchRelations } from './api';
@@ -171,8 +171,8 @@ export function createMultiPaneView(ctx: GraphEditorContext): {
       if (p.config.sourceId === paneId && !p.config.pinned) {
         if (srcRel !== undefined && p.config.kind === 'relation') {
           p.config.relationFilter = srcRel;
-          void (p.view as unknown as { setFocusRelation?: (n: string | null, r: string) => Promise<void> })
-            .setFocusRelation?.(selectedNodeId, srcRel);
+          void (p.view as unknown as { setFocusRelation?: (n: string | null, r: string, p?: PathEntry[]) => Promise<void> })
+            .setFocusRelation?.(selectedNodeId, srcRel, path);
         } else {
           void p.view.setParent(selectedNodeId, ancestorIds, path);
         }
@@ -404,7 +404,7 @@ export function createMultiPaneView(ctx: GraphEditorContext): {
       saveAll();
       updatePinBtn();
     });
-    header.appendChild(pinBtn);
+    if (config.kind === 'outliner') header.appendChild(pinBtn);
 
     // Filter area — the "フィルタ" button is tinted when a filter is active (active keys are
     // toggled via the menu that opens on click, so no per-key pills are shown here)
@@ -441,7 +441,7 @@ export function createMultiPaneView(ctx: GraphEditorContext): {
         },
       });
     });
-    header.appendChild(fltArea);
+    if (config.kind === 'outliner') header.appendChild(fltArea);
 
     // Sort action button — press to reorder the stored sibling order by property keyOrder
     // (persists to the backend; this is an action, not a view toggle)
@@ -457,7 +457,7 @@ export function createMultiPaneView(ctx: GraphEditorContext): {
       sortBtn.disabled = true;
       void view.applyPropertySort().finally(() => { sortBtn.disabled = false; });
     });
-    header.appendChild(sortBtn);
+    if (config.kind === 'outliner') header.appendChild(sortBtn);
 
     // Reload button — re-fetch this pane's nodes from the backend
     const reloadBtn = document.createElement('button');
@@ -484,7 +484,7 @@ export function createMultiPaneView(ctx: GraphEditorContext): {
       fullscreenPaneId = fullscreenPaneId === config.id ? null : config.id;
       applyFullscreenLayout();
     });
-    header.appendChild(fsBtn);
+    if (config.kind === 'outliner') header.appendChild(fsBtn);
 
     // Close button
     const closeBtn = document.createElement('button');

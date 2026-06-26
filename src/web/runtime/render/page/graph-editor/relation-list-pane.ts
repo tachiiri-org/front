@@ -1,57 +1,84 @@
 import type { GraphEditorContext } from './types';
 import type { OutlinerPaneOpts, PathEntry } from './outliner-view';
-import { TEXT_HIGH, TEXT_MID, TEXT_DIM, SELECT_STRONG } from './constants';
+import { BORDER, TEXT_HIGH, TEXT_MID, TEXT_DIM, SELECT_STRONG } from './constants';
 import { fetchChildren, fetchNeighbors, fetchRelations } from './api';
 
-// Column B of the "ノード | 関係 | 紐づくノード" layout: lists the relations the focus node
-// participates in (含有 = its children, plus any relation present on its lines), as selectable rows.
-// Selecting a relation propagates (via onNodeSelect of the focus node) so the dependent objects pane
-// (column C, a relation view) shows that relation's nodes — the multi-pane reads getSelectedRelation().
-//
-// Outliner-shaped so the multi-pane hosts it without special casing (caller casts); editing methods
-// are inert. getSelectedRelation() is the one extra, read by the multi-pane wiring.
+// Column B of "ノード | 関係 | 紐づくノード": lists the relations the focus node participates in
+// (含有 = its children, plus relations present on its lines), with counts, as selectable rows.
+// Selecting a relation propagates (onNodeSelect of the focus) so the dependent objects pane (column C)
+// shows that relation's nodes — the multi-pane reads getSelectedRelation(). Chrome (breadcrumb, square
+// marker, label font) matches the outliner. Outliner-shaped so the multi-pane hosts it (caller casts).
 
 type RelItem = { relId: string; name: string; color: string; count: number };
 
 export function createRelationListView(ctx: GraphEditorContext, opts: OutlinerPaneOpts) {
   let focusId: string | null = opts.paneParentId ?? null;
   let selectedRelation = 'containment';
+  let path: PathEntry[] = opts.panePath ?? [];
   let relCache: Array<{ id: string; name?: string; color?: string }> | null = null;
   let items: RelItem[] = [];
 
   const el = document.createElement('div');
-  el.style.cssText = `flex:1;overflow:auto;font-size:13px;`;
+  el.style.cssText = `flex:1;display:flex;flex-direction:column;overflow:hidden;`;
+  const bcEl = document.createElement('div');
+  bcEl.style.cssText = `display:flex;flex-shrink:0;align-items:center;gap:2px;flex-wrap:wrap;padding:4px 8px 4px 10px;border-bottom:1px solid ${BORDER};font-size:12px;`;
+  const bodyEl = document.createElement('div');
+  bodyEl.style.cssText = `flex:1;overflow:auto;`;
+  el.append(bcEl, bodyEl);
+
+  const renderBreadcrumb = () => {
+    bcEl.innerHTML = '';
+    if (path.length === 0) {
+      const s = document.createElement('span');
+      s.textContent = 'ルート';
+      s.style.cssText = `color:${TEXT_HIGH};font-size:12px;padding:0 2px;`;
+      bcEl.appendChild(s);
+      return;
+    }
+    path.forEach((e, i) => {
+      if (i > 0) { const sep = document.createElement('span'); sep.textContent = ' › '; sep.style.color = TEXT_DIM; bcEl.appendChild(sep); }
+      const span = document.createElement('span');
+      span.textContent = e.label;
+      span.title = e.label;
+      span.style.cssText = `color:${i === path.length - 1 ? TEXT_HIGH : TEXT_MID};font-size:12px;padding:0 2px;white-space:nowrap;max-width:120px;overflow:hidden;text-overflow:ellipsis;`;
+      bcEl.appendChild(span);
+    });
+  };
 
   const render = () => {
-    el.innerHTML = '';
+    renderBreadcrumb();
+    bodyEl.innerHTML = '';
     if (focusId === null) {
-      const hint = document.createElement('div');
-      hint.textContent = 'ソースのノードを選択';
-      hint.style.cssText = `padding:10px 12px;color:${TEXT_DIM};`;
-      el.appendChild(hint);
+      const h = document.createElement('div');
+      h.textContent = 'ソースのノードを選択';
+      h.style.cssText = `padding:8px 12px;color:${TEXT_DIM};font-size:13px;`;
+      bodyEl.appendChild(h);
       return;
     }
     for (const it of items) {
       const row = document.createElement('div');
       const active = it.relId === selectedRelation;
-      row.style.cssText = `display:flex;align-items:center;gap:8px;padding:5px 12px;cursor:pointer;color:${active ? TEXT_HIGH : TEXT_MID};background:${active ? SELECT_STRONG : 'transparent'};`;
+      row.style.cssText = `display:flex;align-items:center;padding:0 6px;cursor:pointer;min-height:24px;background:${active ? SELECT_STRONG : 'transparent'};`;
       row.addEventListener('mouseenter', () => { if (!active) row.style.background = 'rgba(255,255,255,.05)'; });
       row.addEventListener('mouseleave', () => { if (!active) row.style.background = 'transparent'; });
-      const tab = document.createElement('span');
-      tab.style.cssText = `width:10px;height:10px;border-radius:3px;background:${it.color};flex:0 0 auto;`;
+      const mw = document.createElement('span');
+      mw.style.cssText = `flex-shrink:0;display:flex;align-items:center;justify-content:center;width:18px;`;
+      const sq = document.createElement('span');
+      sq.style.cssText = `width:7px;height:7px;border-radius:1px;background:${it.color};`;
+      mw.appendChild(sq);
       const nm = document.createElement('span');
       nm.textContent = it.name;
-      nm.style.cssText = `flex:1;min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;font-weight:600;`;
+      nm.style.cssText = `flex:1;min-width:0;font-size:14px;line-height:1.5;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;color:${active ? TEXT_HIGH : TEXT_MID};`;
       const cnt = document.createElement('span');
       cnt.textContent = String(it.count);
-      cnt.style.cssText = `color:${TEXT_DIM};font-size:11px;flex:0 0 auto;`;
-      row.append(tab, nm, cnt);
+      cnt.style.cssText = `color:${TEXT_DIM};font-size:11px;flex:0 0 auto;padding:0 6px 0 4px;`;
+      row.append(mw, nm, cnt);
       row.addEventListener('click', () => {
         selectedRelation = it.relId;
         render();
-        if (focusId !== null) opts.onNodeSelect?.(focusId); // propagate focus; relation read via getSelectedRelation
+        if (focusId !== null) opts.onNodeSelect?.(focusId);
       });
-      el.appendChild(row);
+      bodyEl.appendChild(row);
     }
   };
 
@@ -60,10 +87,7 @@ export function createRelationListView(ctx: GraphEditorContext, opts: OutlinerPa
     const fid = focusId;
     if (!relCache) relCache = await fetchRelations(ctx.gId);
     const relMeta = new Map(relCache.map((r) => [r.id, r]));
-    const [children, nb] = await Promise.all([
-      fetchChildren(ctx.gId, fid, ctx.limit),
-      fetchNeighbors(ctx.gId, fid, 1),
-    ]);
+    const [children, nb] = await Promise.all([fetchChildren(ctx.gId, fid, ctx.limit), fetchNeighbors(ctx.gId, fid, 1)]);
     if (focusId !== fid) return;
     const taggedIds = new Set<string>();
     const relCount = new Map<string, number>();
@@ -86,10 +110,11 @@ export function createRelationListView(ctx: GraphEditorContext, opts: OutlinerPa
     render();
   };
 
-  const setFocus = async (id: string | null) => {
+  const setFocus = async (id: string | null, p?: PathEntry[]) => {
     focusId = id;
+    if (p) path = p;
     await loadData();
-    if (focusId !== null) opts.onNodeSelect?.(focusId); // keep the objects pane (C) in sync with A's node
+    if (focusId !== null) opts.onNodeSelect?.(focusId); // keep column C in sync with column A's node
   };
 
   return {
@@ -97,17 +122,17 @@ export function createRelationListView(ctx: GraphEditorContext, opts: OutlinerPa
     load: () => loadData(),
     refresh: () => { void loadData(); },
     search: async () => { /* n/a */ },
-    setParent: (nodeId: string | null) => setFocus(nodeId),
+    setParent: (nodeId: string | null, _excl?: Set<string>, p?: PathEntry[]) => setFocus(nodeId, p),
     getSelectedRelation: () => selectedRelation,
     getAncestorIds: () => new Set<string>(),
-    getNodePath: () => [] as PathEntry[],
+    getNodePath: () => path,
     getSelectedId: () => focusId,
     getPaneParentId: () => focusId,
     getEffectiveParentId: () => null,
     getNodeParentId: () => undefined,
     setPaneFilterKeys: () => { /* n/a */ },
     setPaneSortByProps: () => { /* n/a */ },
-    setLang: () => { /* relation names are language-neutral here */ },
+    setLang: () => { render(); },
     setSourceRoot: async () => { await setFocus(null); },
     applyPropertySort: async () => { /* n/a */ },
     beginKeyMove: () => false,
