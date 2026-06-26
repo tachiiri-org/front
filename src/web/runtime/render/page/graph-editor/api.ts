@@ -1,4 +1,4 @@
-import type { ExplorerNode } from './types';
+import type { ExplorerNode, ApiEdge } from './types';
 
 export async function apiFetch(input: string, init?: RequestInit): Promise<Response> {
   const r = await fetch(input, init);
@@ -54,6 +54,27 @@ export async function fetchChildren(graphId: string, nodeId: string, limit: numb
   return (data.nodes ?? [])
     .filter((n) => (seen.has(n.id) ? false : (seen.add(n.id), true)))
     .filter((n) => n.properties?.node_type !== 'root');
+}
+
+// Neighbors (depth hops) of a node, with the lines among them. Used by the read-only relation
+// view to group a node's edges by relation. depth=1 = immediate neighbors.
+export async function fetchNeighbors(
+  graphId: string, nodeId: string, depth = 1,
+): Promise<{ nodes: ExplorerNode[]; edges: ApiEdge[] }> {
+  const r = await apiFetch(`/api/v1/graph/${graphId}/node/${nodeId}/neighbors?depth=${depth}`);
+  if (!r.ok) return { nodes: [], edges: [] };
+  const data = await r.json() as { nodes?: ExplorerNode[]; edges?: ApiEdge[] };
+  return { nodes: data.nodes ?? [], edges: data.edges ?? [] };
+}
+
+// The relation vocabulary (edge types): id, display name, hex color. For the relation view's groups.
+export async function fetchRelations(
+  graphId: string,
+): Promise<Array<{ id: string; name?: string; color?: string }>> {
+  const r = await apiFetch(`/api/v1/graph/${graphId}/relation`);
+  if (!r.ok) return [];
+  const data = await r.json() as { relations?: Array<{ id: string; name?: string; color?: string }> };
+  return data.relations ?? [];
 }
 
 export async function apiCreateNode(

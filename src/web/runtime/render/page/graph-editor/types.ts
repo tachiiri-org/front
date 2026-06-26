@@ -1,5 +1,9 @@
 export type ExplorerNode = { id: string; en?: string; ja?: string; color?: string; properties?: Record<string, string> };
 
+// A line (edge) among returned nodes, as the read API now reports it. `source` (when set) names
+// the directed source endpoint (the other of a/b is the target); absence = undirected.
+export type ApiEdge = { a: string; b: string; relation_id?: string; label?: string; source?: string };
+
 // Cross-pane drag state for the multi-pane (パネル) view. Each pane is an independent
 // outliner instance with its own closure scope, so the source pane records the dragged
 // node(s) here on dragstart and the target pane reads them on drop — letting a node be

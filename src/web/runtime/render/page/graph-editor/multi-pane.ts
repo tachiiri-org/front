@@ -1,6 +1,7 @@
 import type { GraphEditorContext } from './types';
 import { BORDER, TEXT_HIGH, TEXT_MID, TEXT_DIM, SELECT_STRONG } from './constants';
-import { createOutlinerView } from './outliner-view';
+import { createOutlinerView, type OutlinerPaneOpts } from './outliner-view';
+import { createRelationView } from './relation-pane';
 
 type PaneConfig = {
   id: string;
@@ -12,6 +13,7 @@ type PaneConfig = {
   lang: 'en' | 'ja';         // per-pane display/edit language
   pinned?: boolean;          // true = frozen: ignore source-pane selection changes
   pinnedParentId?: string | null; // parent snapshot to restore the frozen view on reload
+  kind?: 'outliner' | 'relation'; // 'relation' = read-only edges-by-relation view (default outliner)
 };
 
 type PaneInstance = {
@@ -39,7 +41,7 @@ function loadPanes(gId: string, defaultLang: 'en' | 'ja'): PaneConfig[] | null {
     if (!raw) return null;
     const arr = JSON.parse(raw) as Partial<PaneConfig>[];
     // Older saved configs predate per-pane lang → fall back to the global default.
-    return arr.map(c => ({ ...c, sortByProps: c.sortByProps ?? false, lang: c.lang ?? defaultLang })) as PaneConfig[];
+    return arr.map(c => ({ ...c, sortByProps: c.sortByProps ?? false, lang: c.lang ?? defaultLang, kind: c.kind ?? 'outliner' })) as PaneConfig[];
   } catch { return null; }
 }
 
@@ -52,6 +54,7 @@ function newPaneConfig(label: string, lang: 'en' | 'ja'): PaneConfig {
     sortByProps: false,
     width: PANE_WIDTH(),
     lang,
+    kind: 'outliner',
   };
 }
 
@@ -263,6 +266,22 @@ export function createMultiPaneView(ctx: GraphEditorContext): {
     });
     header.appendChild(langBtn);
 
+    // Kind toggle — switch this pane between the outliner (containment tree) and the read-only
+    // relation view (edges grouped by relation). Rebuilds all panes from the saved configs.
+    const kindBtn = document.createElement('button');
+    const isRel = () => config.kind === 'relation';
+    kindBtn.textContent = isRel() ? '⇄' : '☰';
+    kindBtn.title = isRel() ? 'リレーション表示（クリックでアウトライン）' : 'アウトライン表示（クリックでリレーション）';
+    kindBtn.style.cssText = `background:transparent;border:1px solid ${BORDER};color:${isRel() ? TEXT_HIGH : TEXT_MID};cursor:pointer;font-size:11px;padding:1px 4px;border-radius:3px;flex-shrink:0;`;
+    kindBtn.addEventListener('click', (e) => {
+      e.stopPropagation();
+      config.kind = isRel() ? 'outliner' : 'relation';
+      saveAll();
+      init();
+      void load();
+    });
+    header.appendChild(kindBtn);
+
     // Source button
     const srcBtn = document.createElement('button');
     srcBtn.style.cssText = `background:transparent;border:1px solid ${BORDER};color:${TEXT_MID};cursor:pointer;font-size:10px;padding:1px 5px;border-radius:3px;flex-shrink:0;`;
@@ -408,7 +427,7 @@ export function createMultiPaneView(ctx: GraphEditorContext): {
     const panePath = (config.sourceId !== null && initParent && sourcePane)
       ? sourcePane.view.getNodePath(initParent) : [];
 
-    const view = createOutlinerView(ctx, {
+    const viewOpts: OutlinerPaneOpts = {
       paneParentId,
       panePath,
       paneFilterKeys: new Set(config.filterKeys),
@@ -425,7 +444,11 @@ export function createMultiPaneView(ctx: GraphEditorContext): {
         containerEl.style.width = `${actualW}px`;
         config.width = actualW;
       },
-    });
+    };
+    // Relation panes are hosted via the same PaneInstance surface (outliner-shaped no-op adapter).
+    const view = config.kind === 'relation'
+      ? (createRelationView(ctx, viewOpts) as unknown as ReturnType<typeof createOutlinerView>)
+      : createOutlinerView(ctx, viewOpts);
     view.el.style.flex = '1';
     containerEl.appendChild(view.el);
 
