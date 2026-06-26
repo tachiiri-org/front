@@ -52,8 +52,7 @@ export async function fetchChildren(graphId: string, nodeId: string, limit: numb
   // which would render duplicate rows that all share one id (deleting one deletes all).
   const seen = new Set<string>();
   return (data.nodes ?? [])
-    .filter((n) => (seen.has(n.id) ? false : (seen.add(n.id), true)))
-    .filter((n) => n.properties?.node_type !== 'root');
+    .filter((n) => (seen.has(n.id) ? false : (seen.add(n.id), true)));
 }
 
 export async function apiCreateNode(

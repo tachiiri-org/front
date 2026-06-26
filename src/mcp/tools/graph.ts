@@ -26,7 +26,7 @@ async function graphFetch(
   });
 }
 
-type ApiNode = { id: string; en?: string | null; ja?: string | null; color?: string | null; node_type?: string | null; properties?: Record<string, string> };
+type ApiNode = { id: string; en?: string | null; ja?: string | null; color?: string | null; properties?: Record<string, string> };
 
 async function getNeighbors(
   env: AuthorizeEnv,
@@ -111,7 +111,7 @@ export const GRAPH_TOOLS = [
         depth: { type: "number", description: "Hops to traverse (default 2, max 5)" },
         filter: {
           type: "object",
-          description: "Narrow returned nodes by property (AND with text match). Keys are property names (e.g. 'node_type'); values are string or array (OR match).",
+          description: "Narrow returned nodes by property (AND with text match). Keys are property names (e.g. 'status', 'ready'); values are string or array (OR match).",
           additionalProperties: { oneOf: [{ type: "string" }, { type: "array", items: { type: "string" } }] },
         },
         limit: { type: "number", description: "Max nodes to return (default 100, max 500)." },
@@ -129,7 +129,7 @@ export const GRAPH_TOOLS = [
         graph_id: { type: "string", description: "Word graph ID (e.g. 'word-graph-1')" },
         filter: {
           type: "object",
-          description: "Property filters (AND across keys, OR across values per key). E.g. {node_type: 'issue'} or {node_type: ['rule', 'fact']}.",
+          description: "Property filters (AND across keys, OR across values per key). E.g. {status: 'active'} or {status: ['active', 'done']}.",
           additionalProperties: { oneOf: [{ type: "string" }, { type: "array", items: { type: "string" } }] },
         },
         limit: { type: "number", description: "Max nodes to return (default 100, max 500)." },
@@ -140,7 +140,7 @@ export const GRAPH_TOOLS = [
   {
     name: "graph_read_nodes_from",
     description:
-      "Traverse the graph from any node ID, returning all nodes reachable within `depth` hops (default 2, max 5). Each node's result includes ALL metadata properties (e.g. node_type, ready, status) in {key=value, ...} format. Supports optional `filter` to narrow results by any property at the DB level (e.g. filter: {ready: 'true'} or filter: {node_type: 'issue'}). Returns `truncated: true` with `count` when the result exceeds the limit (default 100, max 500) — use filter or reduce depth to get complete results.",
+      "Traverse the graph from any node ID, returning all nodes reachable within `depth` hops (default 2, max 5). Each node's result includes ALL metadata properties (e.g. ready, status) in {key=value, ...} format. Supports optional `filter` to narrow results by any property at the DB level (e.g. filter: {ready: 'true'} or filter: {status: 'active'}). Returns `truncated: true` with `count` when the result exceeds the limit (default 100, max 500) — use filter or reduce depth to get complete results.",
     inputSchema: {
       type: "object",
       properties: {
@@ -149,7 +149,7 @@ export const GRAPH_TOOLS = [
         depth: { type: "number", description: "Hops to traverse (default 2, max 5)" },
         filter: {
           type: "object",
-          description: "Filter returned nodes by metadata property. Keys are property names (e.g. 'node_type', 'ready', 'status'); values are string or array (OR match). Only matching nodes are returned; traversal still follows all edges.",
+          description: "Filter returned nodes by metadata property. Keys are property names (e.g. 'ready', 'status'); values are string or array (OR match). Only matching nodes are returned; traversal still follows all edges.",
           additionalProperties: {
             oneOf: [{ type: "string" }, { type: "array", items: { type: "string" } }],
           },
@@ -245,14 +245,14 @@ export const GRAPH_TOOLS = [
   },
   {
     name: "graph_set_property",
-    description: "Upsert a metadata property on one or more nodes. Value is optional — omitting it sets a key-only tag (e.g. key='修正' with no value). Pass value to set a key-value pair (e.g. key='node_type', value='rule'). Use node_ids (array) to apply to multiple nodes in one call.",
+    description: "Upsert a metadata property on one or more nodes. Value is optional — omitting it sets a key-only tag (e.g. key='修正' with no value). Pass value to set a key-value pair (e.g. key='状態', value='完了'). Use node_ids (array) to apply to multiple nodes in one call.",
     inputSchema: {
       type: "object",
       properties: {
         graph_id: { type: "string", description: "Word graph ID (e.g. 'word-graph-1')" },
         node_id: { type: "string", description: "Target node ID (use node_ids for bulk)" },
         node_ids: { type: "array", items: { type: "string" }, description: "Multiple target node IDs (alternative to node_id)" },
-        key: { type: "string", description: "Property key (e.g. 'node_type', '修正')" },
+        key: { type: "string", description: "Property key (e.g. '状態', '修正')" },
         value: { type: "string", description: "Property value (optional — omit for key-only tag)" },
       },
       required: ["graph_id", "key"],
