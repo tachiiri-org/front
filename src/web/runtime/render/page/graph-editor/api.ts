@@ -77,6 +77,20 @@ export async function fetchRelations(
   return data.relations ?? [];
 }
 
+// Set how an existing line (between nodeId and targetId) relates them: relation / label /
+// direction. A field omitted is left as-is; null clears it. Used by the relation view to relabel.
+export async function apiSetLine(
+  graphId: string, nodeId: string, targetId: string,
+  body: { relation_id?: string | null; label?: string | null; source?: string | null },
+): Promise<boolean> {
+  const r = await apiFetch(`/api/v1/graph/${graphId}/node/${nodeId}/line/${targetId}`, {
+    method: 'PATCH',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify(body),
+  });
+  return r.ok;
+}
+
 export async function apiCreateNode(
   graphId: string, parentId: string | null, lang: 'en' | 'ja', label: string,
   insertAfterId?: string,
