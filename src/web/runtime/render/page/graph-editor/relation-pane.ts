@@ -29,23 +29,13 @@ export function createRelationView(ctx: GraphEditorContext, opts: OutlinerPaneOp
 
   const labelOf = (n: ExplorerNode) => primaryLabel(n, lang) ?? fallbackLabel(n, lang) ?? n.id.slice(0, 8);
 
+  // Keep the header row (for height parity with the outliner) but show no path text.
   const renderBreadcrumb = () => {
     bcEl.innerHTML = '';
-    if (path.length === 0) {
-      const s = document.createElement('span');
-      s.textContent = 'ルート';
-      s.style.cssText = `color:${TEXT_HIGH};font-size:12px;padding:0 2px;`;
-      bcEl.appendChild(s);
-      return;
-    }
-    path.forEach((e, i) => {
-      if (i > 0) { const sep = document.createElement('span'); sep.textContent = ' › '; sep.style.color = TEXT_DIM; bcEl.appendChild(sep); }
-      const span = document.createElement('span');
-      span.textContent = e.label;
-      span.title = e.label;
-      span.style.cssText = `color:${i === path.length - 1 ? TEXT_HIGH : TEXT_MID};font-size:12px;padding:0 2px;white-space:nowrap;max-width:120px;overflow:hidden;text-overflow:ellipsis;`;
-      bcEl.appendChild(span);
-    });
+    const spacer = document.createElement('span');
+    spacer.innerHTML = '&nbsp;';
+    spacer.style.cssText = `font-size:12px;`;
+    bcEl.appendChild(spacer);
   };
 
   const hint = (text: string) => {

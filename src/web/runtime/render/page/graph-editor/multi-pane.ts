@@ -34,6 +34,8 @@ type PaneInstance = {
 
 const STORAGE_KEY = (gId: string) => `graph-editor-panes:${gId}`;
 const PANE_WIDTH = () => Math.max(280, Math.round(window.innerWidth * 0.20));
+// Relation panes may shrink to 10vw; outliner panes keep the wider default minimum.
+const paneMinWidth = (c: { kind?: string }) => (c.kind && c.kind !== 'outliner') ? Math.round(window.innerWidth * 0.10) : PANE_WIDTH();
 
 function savePanes(gId: string, configs: PaneConfig[]) {
   localStorage.setItem(STORAGE_KEY(gId), JSON.stringify(configs));
@@ -370,7 +372,8 @@ export function createMultiPaneView(ctx: GraphEditorContext): {
       srcBtn.textContent = src ? src.config.label : 'ルート';
     };
     srcBtn.addEventListener('click', (e) => { e.stopPropagation(); showSourceMenu(config.id, srcBtn); });
-    header.appendChild(srcBtn);
+    // Relation panes get their source from the drill-in flow; no manual source picker.
+    if (config.kind === 'outliner') header.appendChild(srcBtn);
 
     // Pin (固定) toggle — when on, this pane stops following its source pane's selection,
     // freezing the currently-displayed nodes. Only meaningful when source is another pane.
@@ -550,7 +553,7 @@ export function createMultiPaneView(ctx: GraphEditorContext): {
       const startX = e.clientX;
       const startW = config.width;
       const onMove = (ev: MouseEvent) => {
-        config.width = Math.max(PANE_WIDTH(), startW + ev.clientX - startX);
+        config.width = Math.max(paneMinWidth(config), startW + ev.clientX - startX);
         containerEl.style.width = `${config.width}px`;
       };
       const onUp = () => {
