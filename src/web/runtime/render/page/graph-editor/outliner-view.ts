@@ -1160,6 +1160,14 @@ export function createOutlinerView(ctx: GraphEditorContext, paneOpts?: OutlinerP
         ctx.saveChildrenCache?.();
         render();
 
+        // Top-level rows are grouped by property: a drop next to `onode` lands the mover in
+        // that node's group, so adopt its property key (drop into the no-property group →
+        // clear the property). Only for sibling drops at the pane's top level.
+        if (zone !== 'child' && newParentId === null) {
+          const destKey = groupKeyOf(onode);
+          for (const m of movers) setNodeGroup(m, destKey);
+        }
+
         await Promise.all(movers.map(m => awaitRealId(m)));
         for (const mover of movers) {
           const oldPid = oldParents.get(mover.node.id) ?? null;
@@ -1333,6 +1341,22 @@ export function createOutlinerView(ctx: GraphEditorContext, paneOpts?: OutlinerP
     if (o) o.node.properties = { ...props };
     // Broadcast to all registered outliner views with the changed nodeId
     ctx.propChangeHooks.forEach(h => h(nodeId));
+  };
+
+  // Move a node into the property group identified by `destKey` (a group's primary
+  // property key, or '' for the no-property group) by rewriting its primary property:
+  // drop the key that currently decides its group, then add destKey=●. Returns whether
+  // anything changed. Used by reorder (DnD / keyboard) so that dragging a node across a
+  // group boundary also changes its property to match the destination group. Routed
+  // through syncPropChange + the property API, so the change persists and every pane
+  // regroups immediately.
+  const setNodeGroup = (onode: ONode, destKey: string): boolean => {
+    const cur = groupKeyOf(onode);
+    if (cur === destKey) return false;
+    const id = onode.node.id;
+    if (cur) { syncPropChange(id, p => { delete p[cur]; }); void apiRemoveProperty(ctx.gId, id, cur); }
+    if (destKey) { syncPropChange(id, p => { p[destKey] = '●'; }); void apiSetProperty(ctx.gId, id, destKey, '●'); }
+    return true;
   };
 
   // Shared color picker popover (callback called after color change to refresh caller UI)
@@ -1995,6 +2019,24 @@ export function createOutlinerView(ctx: GraphEditorContext, paneOpts?: OutlinerP
     if (sel.length <= 1) return;
     const parentId = sel[0].parentId;
     if (!sel.every(n => n.parentId === parentId)) return;
+    // Top-level grouped reorder: when the selection block would step into a different group
+    // (or the selection itself spans groups), unify the whole selection into the neighbour's
+    // group via a property change instead of reordering.
+    if (parentId === null) {
+      const ordered = [...roots].sort(compareByProps);
+      const idxs = sel.map(n => ordered.indexOf(n)).sort((a, b) => a - b);
+      const ni = direction === 'up' ? idxs[0] - 1 : idxs[idxs.length - 1] + 1;
+      if (ni < 0 || ni >= ordered.length) return;
+      const neighbor = ordered[ni];
+      const selGroups = new Set(sel.map(groupKeyOf));
+      const uniform = selGroups.size === 1 && selGroups.has(groupKeyOf(neighbor));
+      if (!uniform) {
+        const destKey = groupKeyOf(neighbor);
+        for (const n of sel) setNodeGroup(n, destKey);
+        return;
+      }
+      // same single group → fall through to the within-group reorder below
+    }
     const sibs = getSiblings(sel[0]);
     const minIdx = Math.min(...sel.map(n => sibs.indexOf(n)));
     const maxIdx = Math.max(...sel.map(n => sibs.indexOf(n)));
@@ -2157,6 +2199,30 @@ export function createOutlinerView(ctx: GraphEditorContext, paneOpts?: OutlinerP
   };
 
   const doMove = async (onode: ONode, direction: 'up' | 'down') => {
+    // Top-level rows are grouped by property and rendered in grouped order, so move within
+    // the VISIBLE (grouped) order: a step into an adjacent group adopts that group's
+    // property; a step within a group just reorders.
+    if (onode.parentId === null) {
+      const ordered = [...roots].sort(compareByProps);
+      const vi = ordered.indexOf(onode);
+      const ni = vi + (direction === 'up' ? -1 : 1);
+      if (ni < 0 || ni >= ordered.length) return;
+      const neighbor = ordered[ni];
+      if (groupKeyOf(onode) !== groupKeyOf(neighbor)) {
+        if (setNodeGroup(onode, groupKeyOf(neighbor))) focusRow(onode); // render ran via propHook
+        return;
+      }
+      const ri = roots.indexOf(onode);
+      roots.splice(ri, 1);
+      const nj = roots.indexOf(neighbor);
+      roots.splice(direction === 'down' ? nj + 1 : nj, 0, onode);
+      render();
+      focusRow(onode);
+      void apiMoveBookmark(ctx.gId, onode.node.id, direction);
+      ctx.saveChildrenCache?.();
+      return;
+    }
+
     const sibs = getSiblings(onode);
     const idx = sibs.indexOf(onode);
     const newIdx = idx + (direction === 'up' ? -1 : 1);
