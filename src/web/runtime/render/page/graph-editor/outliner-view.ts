@@ -1162,8 +1162,9 @@ export function createOutlinerView(ctx: GraphEditorContext, paneOpts?: OutlinerP
 
         // Top-level rows are grouped by property: a drop next to `onode` lands the mover in
         // that node's group, so adopt its property key (drop into the no-property group →
-        // clear the property). Only for sibling drops at the pane's top level.
-        if (zone !== 'child' && newParentId === null) {
+        // clear the property). Only for sibling drops at the pane's top level (newSibs ===
+        // roots), since top-level parentId is the pane parent, not null.
+        if (zone !== 'child' && newSibs === roots) {
           const destKey = groupKeyOf(onode);
           for (const m of movers) setNodeGroup(m, destKey);
         }
@@ -2022,7 +2023,7 @@ export function createOutlinerView(ctx: GraphEditorContext, paneOpts?: OutlinerP
     // Top-level grouped reorder: when the selection block would step into a different group
     // (or the selection itself spans groups), unify the whole selection into the neighbour's
     // group via a property change instead of reordering.
-    if (parentId === null) {
+    if (roots.includes(sel[0])) {
       const ordered = [...roots].sort(compareByProps);
       const idxs = sel.map(n => ordered.indexOf(n)).sort((a, b) => a - b);
       const ni = direction === 'up' ? idxs[0] - 1 : idxs[idxs.length - 1] + 1;
@@ -2199,13 +2200,13 @@ export function createOutlinerView(ctx: GraphEditorContext, paneOpts?: OutlinerP
   };
 
   const doMove = async (onode: ONode, direction: 'up' | 'down') => {
-    // Top-level rows are grouped by property and rendered in grouped order, so move within
-    // the VISIBLE (grouped) order: a step into an adjacent group adopts that group's
-    // property; a step within a group just reorders.
-    if (onode.parentId === null) {
+    // Top-level rows are grouped by property and rendered in grouped order, so move in the
+    // VISIBLE (grouped) order: a step into an adjacent group adopts that group's property;
+    // a step within a group just reorders. (roots are the pane's top-level nodes; their
+    // parentId is the pane parent, not null.)
+    if (roots.includes(onode)) {
       const ordered = [...roots].sort(compareByProps);
-      const vi = ordered.indexOf(onode);
-      const ni = vi + (direction === 'up' ? -1 : 1);
+      const ni = ordered.indexOf(onode) + (direction === 'up' ? -1 : 1);
       if (ni < 0 || ni >= ordered.length) return;
       const neighbor = ordered[ni];
       if (groupKeyOf(onode) !== groupKeyOf(neighbor)) {
@@ -2218,7 +2219,8 @@ export function createOutlinerView(ctx: GraphEditorContext, paneOpts?: OutlinerP
       roots.splice(direction === 'down' ? nj + 1 : nj, 0, onode);
       render();
       focusRow(onode);
-      void apiMoveBookmark(ctx.gId, onode.node.id, direction);
+      if (onode.parentId === null) void apiMoveBookmark(ctx.gId, onode.node.id, direction);
+      else queueReorder(onode.parentId);
       ctx.saveChildrenCache?.();
       return;
     }
