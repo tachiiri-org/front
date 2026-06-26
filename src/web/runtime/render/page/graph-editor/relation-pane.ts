@@ -3,23 +3,23 @@ import type { OutlinerPaneOpts, PathEntry } from './outliner-view';
 import { BORDER, TEXT_HIGH, TEXT_MID, TEXT_DIM } from './constants';
 import { fetchChildren, fetchNeighbors, fetchRelations, apiSetLine } from './api';
 
-// Read-only "relation" view: shows a focus node's edges grouped by relation. Deliberately does
-// NOT reuse the outliner's containment cache / editing machinery — relation browsing is read-mostly
-// and a node has many neighbour-sets (one per relation), not a single editable children tree.
+// Read-only/relabel "relation" view: one pane shows ONE relation of a focus node, as a flat list.
+// 含有 (relationFilter='containment') = the node's children (existing /children endpoint; works on
+// untyped legacy edges, no relabel needed). Other relations = the focus node's lines carrying that
+// relation_id, from the neighbors+edges API, with direction (→ outgoing / ← incoming / — undirected).
+// Each row's ▾ reassigns that line's relation. To see several relations at once, use several panes —
+// each is an independent column.
 //
-// 含有 (containment) = the node's children (existing /children endpoint; works on untyped legacy
-// edges, no relabel needed). Other relations = lines from the neighbors+edges API, grouped by
-// relation_id, with direction (→ outgoing / ← incoming / — undirected) from the line's source.
-//
-// Returns an object shaped like the outliner view so the multi-pane can host it without special
-// casing (the caller casts it to the outliner's type); unused outliner methods are inert no-ops.
+// Deliberately NOT built on the outliner (its children-cache is keyed by node id and tied to
+// containment editing); returned shaped like the outliner so the multi-pane hosts it without special
+// casing (caller casts), with unused outliner methods inert.
 
 type Dir = '▼' | '→' | '←' | '—';
-type RelGroup = { relId: string | null; name: string; color: string; rows: Array<{ node: ExplorerNode; dir: Dir }> };
 
 export function createRelationView(ctx: GraphEditorContext, opts: OutlinerPaneOpts) {
   let focusId: string | null = opts.paneParentId ?? null;
   let lang: 'en' | 'ja' = opts.lang ?? ctx.state.lang;
+  let relationFilter: string = opts.relationFilter ?? 'containment';
   let selected: string | null = null;
   let relCache: Array<{ id: string; name?: string; color?: string }> | null = null;
 
@@ -28,8 +28,7 @@ export function createRelationView(ctx: GraphEditorContext, opts: OutlinerPaneOp
 
   const label = (n: ExplorerNode) => ((lang === 'en' ? (n.en || n.ja) : (n.ja || n.en)) || n.id);
 
-  // Per-row relation editor: pick a relation (or 含有 = clear) for the line focus↔target.
-  // Setting a relation makes it directed from the focus (source = focus); clearing returns it to 含有.
+  // Per-row relation editor: pick a relation (directed from the focus) or 含有 to clear it.
   let openMenu: HTMLElement | null = null;
   const closeMenu = () => { openMenu?.remove(); openMenu = null; };
   const openRelMenu = (anchor: HTMLElement, targetId: string, currentRelId: string | null) => {
@@ -67,8 +66,21 @@ export function createRelationView(ctx: GraphEditorContext, opts: OutlinerPaneOp
     setTimeout(() => document.addEventListener('mousedown', onOut), 0);
   };
 
-  const render = (groups: RelGroup[]) => {
+  const render = (rows: Array<{ node: ExplorerNode; dir: Dir }>, relName: string, relColor: string) => {
     el.innerHTML = '';
+    // Which relation a row currently carries (for the ▾ editor): null for the 含有 pane.
+    const curRel = relationFilter === 'containment' ? null : relationFilter;
+    // Small in-body header naming the relation this pane shows.
+    const head = document.createElement('div');
+    head.style.cssText = `display:flex;align-items:center;gap:7px;padding:7px 10px 5px;font-size:11px;color:${TEXT_MID};border-bottom:1px solid rgba(255,255,255,.05);`;
+    const tab = document.createElement('span');
+    tab.style.cssText = `width:9px;height:9px;border-radius:2px;background:${relColor};flex:0 0 auto;`;
+    const nm = document.createElement('span');
+    nm.textContent = relName;
+    nm.style.fontWeight = '600';
+    head.append(tab, nm);
+    el.appendChild(head);
+
     if (focusId === null) {
       const hint = document.createElement('div');
       hint.textContent = 'ソースのノードを選択';
@@ -76,131 +88,106 @@ export function createRelationView(ctx: GraphEditorContext, opts: OutlinerPaneOp
       el.appendChild(hint);
       return;
     }
-    for (const g of groups) {
-      if (g.rows.length === 0) continue;
-      const gh = document.createElement('div');
-      gh.style.cssText = `display:flex;align-items:center;gap:7px;padding:7px 10px 3px;font-size:11px;color:${TEXT_MID};`;
-      const tab = document.createElement('span');
-      tab.style.cssText = `width:9px;height:9px;border-radius:2px;background:${g.color};flex:0 0 auto;`;
-      gh.appendChild(tab);
-      const nm = document.createElement('span');
-      nm.textContent = g.name;
-      nm.style.fontWeight = '600';
-      gh.appendChild(nm);
-      el.appendChild(gh);
-      for (const row of g.rows) {
-        const r = document.createElement('div');
-        r.style.cssText = `display:flex;align-items:center;gap:8px;padding:3px 12px 3px 20px;cursor:pointer;color:${TEXT_HIGH};`;
-        r.addEventListener('mouseenter', () => { r.style.background = 'rgba(255,255,255,.05)'; });
-        r.addEventListener('mouseleave', () => { r.style.background = ''; });
-        const dir = document.createElement('span');
-        dir.textContent = row.dir;
-        dir.style.cssText = `color:${TEXT_DIM};font-size:11px;width:12px;flex:0 0 auto;text-align:center;`;
-        const dot = document.createElement('span');
-        dot.style.cssText = `width:8px;height:8px;border-radius:50%;background:${g.color};flex:0 0 auto;`;
-        const lb = document.createElement('span');
-        lb.textContent = label(row.node);
-        lb.style.cssText = `flex:1;min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;`;
-        const edit = document.createElement('span');
-        edit.textContent = '▾';
-        edit.title = '関係を設定';
-        edit.style.cssText = `color:${TEXT_DIM};cursor:pointer;font-size:12px;padding:0 4px;flex:0 0 auto;`;
-        const targetId = row.node.id;
-        const curRel = g.relId;
-        edit.addEventListener('click', (ev) => { ev.stopPropagation(); openRelMenu(edit, targetId, curRel); });
-        r.append(dir, dot, lb, edit);
-        r.addEventListener('click', () => { selected = row.node.id; opts.onNodeSelect?.(row.node.id); });
-        el.appendChild(r);
-      }
-    }
-    if (!el.childElementCount) {
+    if (rows.length === 0) {
       const none = document.createElement('div');
-      none.textContent = '(関係なし)';
+      none.textContent = '（なし）';
       none.style.cssText = `padding:10px 12px;color:${TEXT_DIM};`;
       el.appendChild(none);
+      return;
+    }
+    for (const row of rows) {
+      const r = document.createElement('div');
+      r.style.cssText = `display:flex;align-items:center;gap:8px;padding:3px 12px;cursor:pointer;color:${TEXT_HIGH};`;
+      r.addEventListener('mouseenter', () => { r.style.background = 'rgba(255,255,255,.05)'; });
+      r.addEventListener('mouseleave', () => { r.style.background = ''; });
+      const dir = document.createElement('span');
+      dir.textContent = row.dir;
+      dir.style.cssText = `color:${TEXT_DIM};font-size:11px;width:12px;flex:0 0 auto;text-align:center;`;
+      const dot = document.createElement('span');
+      dot.style.cssText = `width:8px;height:8px;border-radius:50%;background:${relColor};flex:0 0 auto;`;
+      const lb = document.createElement('span');
+      lb.textContent = label(row.node);
+      lb.style.cssText = `flex:1;min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;`;
+      const edit = document.createElement('span');
+      edit.textContent = '▾';
+      edit.title = '関係を設定';
+      edit.style.cssText = `color:${TEXT_DIM};cursor:pointer;font-size:12px;padding:0 4px;flex:0 0 auto;`;
+      const targetId = row.node.id;
+      edit.addEventListener('click', (ev) => { ev.stopPropagation(); openRelMenu(edit, targetId, curRel); });
+      r.append(dir, dot, lb, edit);
+      r.addEventListener('click', () => { selected = row.node.id; opts.onNodeSelect?.(row.node.id); });
+      el.appendChild(r);
     }
   };
 
   const loadData = async () => {
-    if (focusId === null) { render([]); return; }
-    const fid = focusId;
     if (!relCache) relCache = await fetchRelations(ctx.gId);
-    const relMeta = new Map(relCache.map((r) => [r.id, r]));
-    const [children, nb] = await Promise.all([
-      fetchChildren(ctx.gId, fid, ctx.limit),
-      fetchNeighbors(ctx.gId, fid, 1),
-    ]);
-    if (focusId !== fid) return; // focus changed mid-fetch; a later loadData will render
+    const meta = relCache.find((r) => r.id === relationFilter);
+    const isContain = relationFilter === 'containment';
+    const relName = meta?.name ?? (isContain ? '含有' : relationFilter);
+    const relColor = meta?.color ?? (isContain ? '#2563EB' : '#888888');
+    if (focusId === null) { render([], relName, relColor); return; }
+    const fid = focusId;
+
+    if (isContain) {
+      const [children, nb] = await Promise.all([
+        fetchChildren(ctx.gId, fid, ctx.limit),
+        fetchNeighbors(ctx.gId, fid, 1),
+      ]);
+      if (focusId !== fid) return;
+      // A child reached by a *tagged* (non-containment) line belongs to that relation, not 含有.
+      const taggedIds = new Set<string>();
+      for (const e of nb.edges) {
+        if (e.relation_id && e.relation_id !== 'containment' && (e.a === fid || e.b === fid)) {
+          taggedIds.add(e.a === fid ? e.b : e.a);
+        }
+      }
+      const rows = children.filter((n) => !taggedIds.has(n.id)).map((n) => ({ node: n, dir: '▼' as Dir }));
+      render(rows, relName, relColor);
+      return;
+    }
+
+    const nb = await fetchNeighbors(ctx.gId, fid, 1);
+    if (focusId !== fid) return;
     const nodeById = new Map(nb.nodes.map((n) => [n.id, n]));
-
-    // Neighbours reached by a *tagged* (non-containment) line belong to that relation's group,
-    // not to 含有 — so exclude them from the children list to avoid double-listing.
-    const taggedIds = new Set<string>();
+    const rows: Array<{ node: ExplorerNode; dir: Dir }> = [];
     for (const e of nb.edges) {
-      if (e.relation_id && e.relation_id !== 'containment' && (e.a === fid || e.b === fid)) {
-        taggedIds.add(e.a === fid ? e.b : e.a);
-      }
-    }
-
-    const groups: RelGroup[] = [];
-    // 含有 = children (▼) minus the tagged ones. Always present, independent of edge tagging.
-    const cm = relMeta.get('containment');
-    groups.push({
-      relId: null,
-      name: cm?.name ?? '含有',
-      color: cm?.color ?? '#2563EB',
-      rows: children.filter((n) => !taggedIds.has(n.id)).map((n) => ({ node: n, dir: '▼' as Dir })),
-    });
-
-    // Other relations: lines incident to the focus, grouped by relation_id.
-    const byRel = new Map<string, RelGroup>();
-    for (const e of nb.edges) {
-      if (!e.relation_id || e.relation_id === 'containment') continue;
+      if (e.relation_id !== relationFilter) continue;
       if (e.a !== fid && e.b !== fid) continue;
-      const otherId = e.a === fid ? e.b : e.a;
-      const other = nodeById.get(otherId);
+      const other = nodeById.get(e.a === fid ? e.b : e.a);
       if (!other) continue;
-      const dir: Dir = !e.source ? '—' : (e.source === fid ? '→' : '←');
-      let g = byRel.get(e.relation_id);
-      if (!g) {
-        const m = relMeta.get(e.relation_id);
-        g = { relId: e.relation_id, name: m?.name ?? e.relation_id, color: m?.color ?? '#888', rows: [] };
-        byRel.set(e.relation_id, g);
-      }
-      g.rows.push({ node: other, dir });
+      rows.push({ node: other, dir: !e.source ? '—' : (e.source === fid ? '→' : '←') });
     }
-    // Append in palette order (stable, predictable).
-    for (const r of relCache) {
-      const g = byRel.get(r.id);
-      if (g) groups.push(g);
-    }
-    render(groups);
+    render(rows, relName, relColor);
   };
 
   const setFocus = async (id: string | null) => { focusId = id; await loadData(); };
+  const setRelation = async (relId: string) => { relationFilter = relId; await loadData(); };
 
-  // Outliner-shaped surface so the multi-pane hosts this like any pane. Real behaviour on the
-  // members it uses for relation browsing; the rest (editing / reordering) are inert no-ops.
+  // Outliner-shaped surface so the multi-pane hosts this like any pane; extras (setRelation/
+  // getRelation) are read via the captured relation-view reference in createPane.
   return {
     el,
     load: () => loadData(),
     refresh: () => { void loadData(); },
-    search: async () => { /* relation view has no in-pane search */ },
+    search: async () => { /* no in-pane search */ },
     setParent: (nodeId: string | null) => setFocus(nodeId),
+    setRelation,
+    getRelation: () => relationFilter,
     getAncestorIds: () => new Set<string>(),
     getNodePath: () => [] as PathEntry[],
     getSelectedId: () => selected ?? focusId,
     getPaneParentId: () => focusId,
     getEffectiveParentId: () => null,
     getNodeParentId: () => undefined,
-    setPaneFilterKeys: () => { /* no filtering in relation view */ },
-    setPaneSortByProps: () => { /* no sort in relation view */ },
+    setPaneFilterKeys: () => { /* n/a */ },
+    setPaneSortByProps: () => { /* n/a */ },
     setLang: (l: 'en' | 'ja') => { lang = l; void loadData(); },
     setSourceRoot: async () => { await setFocus(null); },
-    applyPropertySort: async () => { /* not applicable */ },
+    applyPropertySort: async () => { /* n/a */ },
     beginKeyMove: () => false,
-    acceptKeyMove: async () => { /* not applicable */ },
-    openKeyMenu: () => { /* no key menu in relation view */ },
+    acceptKeyMove: async () => { /* n/a */ },
+    openKeyMenu: () => { /* n/a */ },
     unregister: () => { closeMenu(); },
   };
 }

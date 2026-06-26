@@ -2,6 +2,7 @@ import type { GraphEditorContext } from './types';
 import { BORDER, TEXT_HIGH, TEXT_MID, TEXT_DIM, SELECT_STRONG } from './constants';
 import { createOutlinerView, type OutlinerPaneOpts } from './outliner-view';
 import { createRelationView } from './relation-pane';
+import { fetchRelations } from './api';
 
 type PaneConfig = {
   id: string;
@@ -14,6 +15,7 @@ type PaneConfig = {
   pinned?: boolean;          // true = frozen: ignore source-pane selection changes
   pinnedParentId?: string | null; // parent snapshot to restore the frozen view on reload
   kind?: 'outliner' | 'relation'; // 'relation' = read-only edges-by-relation view (default outliner)
+  relationFilter?: string;        // relation-kind only: which single relation this pane shows ('containment' = children)
 };
 
 type PaneInstance = {
@@ -41,7 +43,7 @@ function loadPanes(gId: string, defaultLang: 'en' | 'ja'): PaneConfig[] | null {
     if (!raw) return null;
     const arr = JSON.parse(raw) as Partial<PaneConfig>[];
     // Older saved configs predate per-pane lang → fall back to the global default.
-    return arr.map(c => ({ ...c, sortByProps: c.sortByProps ?? false, lang: c.lang ?? defaultLang, kind: c.kind ?? 'outliner' })) as PaneConfig[];
+    return arr.map(c => ({ ...c, sortByProps: c.sortByProps ?? false, lang: c.lang ?? defaultLang, kind: c.kind ?? 'outliner', relationFilter: c.relationFilter ?? 'containment' })) as PaneConfig[];
   } catch { return null; }
 }
 
@@ -55,6 +57,7 @@ function newPaneConfig(label: string, lang: 'en' | 'ja'): PaneConfig {
     width: PANE_WIDTH(),
     lang,
     kind: 'outliner',
+    relationFilter: 'containment',
   };
 }
 
@@ -71,6 +74,41 @@ export function createMultiPaneView(ctx: GraphEditorContext): {
   const panes: PaneInstance[] = [];
   let fullscreenPaneId: string | null = null;
   let draggingPaneId: string | null = null;
+  // Relation vocabulary (for the per-pane relation selector), fetched once and reused.
+  let relationsCache: Array<{ id: string; name?: string; color?: string }> | null = null;
+  const getRelations = async () => {
+    if (!relationsCache) relationsCache = await fetchRelations(ctx.gId);
+    return relationsCache;
+  };
+  const relationLabel = (id: string | undefined) => {
+    const rid = id ?? 'containment';
+    if (rid === 'containment') return '含有';
+    return relationsCache?.find(r => r.id === rid)?.name ?? rid;
+  };
+  // Relation picker popover for a relation-kind pane's header button.
+  const showRelMenu = async (anchor: HTMLElement, current: string, onPick: (id: string) => void) => {
+    document.querySelector('[data-pane-rel-menu]')?.remove();
+    const rels = await getRelations();
+    const menu = document.createElement('div');
+    menu.dataset.paneRelMenu = '1';
+    const ar = anchor.getBoundingClientRect();
+    menu.style.cssText = `position:fixed;left:${ar.left}px;top:${ar.bottom + 2}px;z-index:200;background:hsl(240,14%,9%);border:1px solid ${BORDER};border-radius:6px;padding:4px;font-size:12px;box-shadow:0 4px 12px rgba(0,0,0,.4);min-width:130px;`;
+    const addItem = (label: string, id: string) => {
+      const it = document.createElement('div');
+      const active = current === id;
+      it.textContent = (active ? '✓ ' : '') + label;
+      it.style.cssText = `padding:4px 8px;border-radius:4px;cursor:pointer;color:${active ? TEXT_HIGH : TEXT_MID};`;
+      it.addEventListener('mouseenter', () => { it.style.background = 'rgba(255,255,255,.07)'; });
+      it.addEventListener('mouseleave', () => { it.style.background = ''; });
+      it.addEventListener('click', () => { menu.remove(); onPick(id); });
+      menu.appendChild(it);
+    };
+    addItem('含有', 'containment');
+    for (const r of rels) { if (r.id === 'containment') continue; addItem(r.name ?? r.id, r.id); }
+    document.body.appendChild(menu);
+    const onOut = (e: MouseEvent) => { if (!menu.contains(e.target as Element)) { menu.remove(); document.removeEventListener('mousedown', onOut); } };
+    setTimeout(() => document.addEventListener('mousedown', onOut), 0);
+  };
 
   // Clear the pane-reorder drop indicator (blue vertical line) from every pane.
   const clearPaneDropIndicators = () => {
@@ -180,6 +218,8 @@ export function createMultiPaneView(ctx: GraphEditorContext): {
 
   // ── Pane creation ──────────────────────────────────────────────────
   const createPane = (config: PaneConfig): PaneInstance => {
+    // Captured when this pane is a relation view, so the header's relation selector can drive it.
+    let relView: ReturnType<typeof createRelationView> | null = null;
     const containerEl = document.createElement('div');
     containerEl.dataset.paneId = config.id;
     containerEl.style.cssText = `
@@ -281,6 +321,28 @@ export function createMultiPaneView(ctx: GraphEditorContext): {
       void load();
     });
     header.appendChild(kindBtn);
+
+    // Relation selector (relation-kind panes only) — picks which single relation this pane shows.
+    if (config.kind === 'relation') {
+      const relBtn = document.createElement('button');
+      const updateRelBtn = () => {
+        relBtn.textContent = relationLabel(config.relationFilter);
+        relBtn.title = '表示する関係を選択';
+        relBtn.style.cssText = `background:transparent;border:1px solid ${BORDER};color:${TEXT_MID};cursor:pointer;font-size:10px;padding:1px 5px;border-radius:3px;flex-shrink:0;max-width:90px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;`;
+      };
+      updateRelBtn();
+      void getRelations().then(updateRelBtn); // refresh the label once names are loaded
+      relBtn.addEventListener('click', (e) => {
+        e.stopPropagation();
+        void showRelMenu(relBtn, config.relationFilter ?? 'containment', (id) => {
+          config.relationFilter = id;
+          saveAll();
+          updateRelBtn();
+          void relView?.setRelation(id);
+        });
+      });
+      header.appendChild(relBtn);
+    }
 
     // Source button
     const srcBtn = document.createElement('button');
@@ -433,6 +495,7 @@ export function createMultiPaneView(ctx: GraphEditorContext): {
       paneFilterKeys: new Set(config.filterKeys),
       paneSortByProps: false, // 並び替えは即時DB反映アクション化したのでビューソートは無効
       lang: config.lang,
+      relationFilter: config.relationFilter,
       onNodeSelect: (nodeId) => onPaneSelect(config.id, nodeId),
       onMoveNodeToPane: (nodeId, direction) => moveToAdjacentPane(config.id, nodeId, direction),
       onReorderPane: (direction) => movePane(config.id, direction),
@@ -446,9 +509,13 @@ export function createMultiPaneView(ctx: GraphEditorContext): {
       },
     };
     // Relation panes are hosted via the same PaneInstance surface (outliner-shaped no-op adapter).
-    const view = config.kind === 'relation'
-      ? (createRelationView(ctx, viewOpts) as unknown as ReturnType<typeof createOutlinerView>)
-      : createOutlinerView(ctx, viewOpts);
+    let view: ReturnType<typeof createOutlinerView>;
+    if (config.kind === 'relation') {
+      relView = createRelationView(ctx, viewOpts);
+      view = relView as unknown as ReturnType<typeof createOutlinerView>;
+    } else {
+      view = createOutlinerView(ctx, viewOpts);
+    }
     view.el.style.flex = '1';
     containerEl.appendChild(view.el);
 

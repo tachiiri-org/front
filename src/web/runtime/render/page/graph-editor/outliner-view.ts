@@ -31,6 +31,8 @@ export type OutlinerPaneOpts = {
   paneSortByProps?: boolean;
   /** Per-pane display/edit language (overrides the global default for this pane) */
   lang?: 'en' | 'ja';
+  /** Relation-view only: which single relation this pane shows ('containment' = children). Ignored by the outliner. */
+  relationFilter?: string;
   /** Called when user focuses a node row (for inter-pane wiring) */
   onNodeSelect?: (nodeId: string | null) => void;
   /** Called after render with the content's natural width (px); used by multi-pane for auto-sizing */
