@@ -1370,13 +1370,26 @@ export function createOutlinerView(ctx: GraphEditorContext, paneOpts?: OutlinerP
   };
 
   // A node created inside a property-filtered pane inherits that pane's filter keys, so it stays
-  // visible (and lands in the right group) immediately instead of vanishing on the next render.
+  // visible immediately. Updates the node's marker IN PLACE (and persists) rather than going
+  // through syncPropChange — a full re-render here would destroy the just-created textarea and
+  // swallow the label the user is typing. The fresh node is local to this pane, so other panes
+  // (which don't hold it yet) need no broadcast.
   const applyPaneFilterProps = (nodeId: string) => {
     if (paneFilterKeys.size === 0) return;
+    const props = ctx.propStore.get(nodeId) ?? {};
+    let changed = false;
     for (const key of paneFilterKeys) {
-      syncPropChange(nodeId, p => { if (!(key in p)) p[key] = '●'; });
+      if (key in props) continue;
+      props[key] = '●';
+      changed = true;
+      addKeyToOrder(key);
       void apiSetProperty(ctx.gId, nodeId, key, '●');
     }
+    if (!changed) return;
+    ctx.propStore.set(nodeId, props);
+    ctx.childrenCache.forEach(nodes => { for (const n of nodes) if (n.id === nodeId) n.properties = { ...props }; });
+    const o = byId.get(nodeId);
+    if (o) { o.node.properties = { ...props }; updateExpandMarker(o); }
   };
 
   // Move a node into the property group identified by `destKey` (a group's primary
