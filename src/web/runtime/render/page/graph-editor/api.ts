@@ -119,61 +119,38 @@ export async function fetchColors(graphId: string): Promise<Array<{ id: string; 
   return data.colors ?? [];
 }
 
-export async function fetchPropertyColors(graphId: string): Promise<Record<string, { colorId: string; code: string }>> {
-  const r = await apiFetch(`/api/v1/graph/${graphId}/property-color`);
-  if (!r.ok) return {};
-  const data = await r.json() as { propertyColors: Record<string, { colorId: string; code: string }> };
-  return data.propertyColors ?? {};
+// ノード色を設定（code=null/省略で解除）。色は p_node_color に保存され、
+// 読み出し時に ExplorerNode.color として返る。
+export async function apiSetNodeColor(graphId: string, nodeId: string, code: string | null): Promise<void> {
+  await apiFetch(`/api/v1/graph/${graphId}/node/${nodeId}`, {
+    method: 'PATCH',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ color: code }),
+  });
 }
 
-export async function apiSetPropertyColor(graphId: string, key: string, colorId: string): Promise<void> {
-  await apiFetch(`/api/v1/graph/${graphId}/property-color`, {
+// 冪等リンク: node→target の辺を貼る（既に在れば何もしない）。返り値は最終状態。
+export async function apiLinkNode(graphId: string, nodeId: string, targetNodeId: string): Promise<boolean> {
+  const r = await apiFetch(`/api/v1/graph/${graphId}/link`, {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify({ key, colorId }),
+    body: JSON.stringify({ node_id: nodeId, target_node_id: targetNodeId }),
   });
+  if (!r.ok) return false;
+  const data = await r.json() as { linked: boolean };
+  return data.linked;
 }
 
-export async function apiRemovePropertyColor(graphId: string, key: string): Promise<void> {
-  await apiFetch(`/api/v1/graph/${graphId}/property-color/${encodeURIComponent(key)}`, { method: 'DELETE' });
-}
-
-export async function fetchPropertyOrder(graphId: string): Promise<string[]> {
-  const r = await apiFetch(`/api/v1/graph/${graphId}/property-order`);
-  if (!r.ok) return [];
-  const data = await r.json() as { keys: string[] };
-  return data.keys ?? [];
-}
-
-export async function fetchAllPropertyKeys(graphId: string): Promise<string[]> {
-  const r = await apiFetch(`/api/v1/graph/${graphId}/property-keys`);
-  if (!r.ok) return [];
-  const data = await r.json() as { keys: string[] };
-  return data.keys ?? [];
-}
-
-export async function apiSavePropertyOrder(graphId: string, keys: string[]): Promise<void> {
-  await apiFetch(`/api/v1/graph/${graphId}/property-order`, {
-    method: 'PUT',
+// 冪等アンリンク: node→target の辺を外す（無ければ何もしない）。返り値は最終状態。
+export async function apiUnlinkNode(graphId: string, nodeId: string, targetNodeId: string): Promise<boolean> {
+  const r = await apiFetch(`/api/v1/graph/${graphId}/link`, {
+    method: 'DELETE',
     headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify({ keys }),
+    body: JSON.stringify({ node_id: nodeId, target_node_id: targetNodeId }),
   });
-}
-
-export async function apiDeletePropertyKey(graphId: string, key: string): Promise<void> {
-  await apiFetch(`/api/v1/graph/${graphId}/property-key/${encodeURIComponent(key)}`, { method: 'DELETE' });
-}
-
-export async function apiSetProperty(graphId: string, nodeId: string, key: string, value: string): Promise<void> {
-  await apiFetch(`/api/v1/graph/${graphId}/node/${nodeId}/property`, {
-    method: 'POST',
-    headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify({ key, value }),
-  });
-}
-
-export async function apiRemoveProperty(graphId: string, nodeId: string, key: string): Promise<void> {
-  await apiFetch(`/api/v1/graph/${graphId}/node/${nodeId}/property/${encodeURIComponent(key)}`, { method: 'DELETE' });
+  if (!r.ok) return false;
+  const data = await r.json() as { linked: boolean };
+  return data.linked;
 }
 
 export async function apiMoveNode(

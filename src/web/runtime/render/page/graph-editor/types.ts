@@ -40,21 +40,9 @@ export interface GraphEditorContext {
   // ── Shared mutable state ──
   state: ExplorerState;
   childrenCache: Map<string | null, ExplorerNode[]>;
-  propStore: Map<string, Record<string, string>>;
-  allPropKeys: Set<string>;
-  // key → { colorId, code } for property key colors
-  allPropColors: Map<string, { colorId: string; code: string }>;
   // m_color palette: id → code
   colorPalette: Map<string, string>;
   tempNodeCounter: number;
-  // ── Property change broadcast ──
-  // Outliner views register a callback here; syncPropChange passes the changed nodeId
-  // so each pane can do targeted row removal instead of a full re-render.
-  propChangeHooks: Array<(nodeId: string) => void>;
-  // Property-key order broadcast. Outliner views register a callback here; when one pane
-  // reorders (or deletes) property keys, it passes the new order so every pane updates its
-  // local keyOrder and re-renders, keeping the grouping order in sync without a reload.
-  keyOrderHooks: Array<(order: string[]) => void>;
   // ── Cross-pane (multi-pane outliner) DnD shared state ──
   // Set by the source pane on dragstart, read by the target pane on drop; null when idle.
   paneDrag: PaneDragState | null;

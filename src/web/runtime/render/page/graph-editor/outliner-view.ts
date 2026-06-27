@@ -3,9 +3,7 @@ import { BORDER, TEXT_HIGH, TEXT_MID, TEXT_DIM, primaryLabel, fallbackLabel } fr
 import {
   fetchChildren, fetchBookmarks, fetchBookmarkedNodes, fetchAllNodes,
   apiCreateNode, apiUpdateNode, apiDeleteNode, apiMoveNode, apiMoveBookmark, apiToggleLink,
-  apiSetProperty, apiRemoveProperty, apiDeletePropertyKey,
-  fetchColors, fetchPropertyColors, apiSetPropertyColor, apiRemovePropertyColor,
-  fetchPropertyOrder, apiSavePropertyOrder, fetchAllPropertyKeys,
+  apiSetNodeColor, apiLinkNode, apiUnlinkNode, fetchColors,
 } from './api';
 
 // ── Occurrence model ───────────────────────────────────────────────────
@@ -46,10 +44,6 @@ export type OutlinerPaneOpts = {
   paneParentId?: string | null;
   /** Breadcrumb path (root-first) to paneParentId, for panel-sourced panes */
   panePath?: PathEntry[];
-  /** Only show nodes that have ALL of these property keys */
-  paneFilterKeys?: Set<string>;
-  /** If true, sort nodes by property keyOrder ascending (stable sort) */
-  paneSortByProps?: boolean;
   /** Per-pane display/edit language (overrides the global default for this pane) */
   lang?: 'en' | 'ja';
   /** Called when user focuses a node row (for inter-pane wiring) */
@@ -84,7 +78,6 @@ function showToast(msg: string) {
 
 export function createOutlinerView(ctx: GraphEditorContext, paneOpts?: OutlinerPaneOpts): {
   el: HTMLElement;
-  filterBtn: HTMLElement;
   load: () => Promise<void>;
   refresh: () => void;
   search: (query: string) => Promise<void>;
@@ -93,21 +86,12 @@ export function createOutlinerView(ctx: GraphEditorContext, paneOpts?: OutlinerP
   getNodePath: (nodeId: string) => PathEntry[];
   getSelectedId: () => string | null;
   getPaneParentId: () => string | null;
-  setPaneFilterKeys: (keys: Set<string>) => void;
-  setPaneSortByProps: (enabled: boolean) => void;
   setLang: (l: 'en' | 'ja') => void;
   setSourceRoot: () => Promise<void>;
-  applyPropertySort: () => Promise<void>;
   beginKeyMove: (nodeId: string) => boolean;
   acceptKeyMove: () => Promise<void>;
   getEffectiveParentId: () => string | null;
   getNodeParentId: (nodeId: string) => string | null | undefined;
-  openKeyMenu: (opts: {
-    anchor: HTMLElement;
-    mode: 'pane-filter';
-    isActive: (key: string) => boolean;
-    onToggle: (key: string) => void;
-  }) => void;
   unregister: () => void;
 } {
   // Outer wrapper (returned as el)
@@ -118,110 +102,6 @@ export function createOutlinerView(ctx: GraphEditorContext, paneOpts?: OutlinerP
   const bcEl = document.createElement('div');
   bcEl.style.cssText = `display:flex;flex-shrink:0;align-items:center;gap:2px;flex-wrap:wrap;padding:4px 8px 4px 10px;border-bottom:1px solid ${BORDER};font-size:12px;`;
   el.appendChild(bcEl);
-
-  // Active property key filters
-  const filterKeys = new Set<string>();
-
-  // Ordered list of all known property keys (persisted to backend)
-  let keyOrder: string[] = [];
-
-  const addKeyToOrder = (key: string, persist = false) => {
-    if (!keyOrder.includes(key)) {
-      keyOrder.push(key);
-      if (persist) void apiSavePropertyOrder(ctx.gId, keyOrder);
-    }
-    ctx.allPropKeys.add(key);
-  };
-
-  // filterBtn is placed in topBar by index.ts (returned as part of createOutlinerView result)
-  const filterBtn = document.createElement('button');
-  filterBtn.textContent = 'フィルタ';
-
-  const updateFilterBtn = () => {
-    const n = filterKeys.size;
-    filterBtn.textContent = n > 0 ? `フィルタ (${n})` : 'フィルタ';
-  };
-
-  filterBtn.addEventListener('click', (e) => {
-    const r = filterBtn.getBoundingClientRect();
-    showFilterMenu(r.left, r.bottom + 4);
-    e.stopPropagation();
-  });
-
-  const showFilterMenu = (x: number, y: number) => {
-    document.querySelector('[data-filter-menu]')?.remove();
-    document.querySelector('[data-key-ctx-menu]')?.remove();
-    document.querySelector('[data-color-picker]')?.remove();
-    const menu = document.createElement('div');
-    menu.dataset.filterMenu = '1';
-    menu.style.cssText = `position:fixed;left:${x}px;top:${y}px;z-index:100;width:260px;background:hsl(240,14%,9%);border:1px solid ${BORDER};border-radius:6px;padding:8px;font-size:13px;box-shadow:0 4px 16px rgba(0,0,0,.4);`;
-
-    const rebuildFilterMenu = () => {
-      menu.innerHTML = '';
-
-      // Active filter tags
-      const tagsEl = document.createElement('div');
-      tagsEl.style.cssText = `display:flex;flex-wrap:wrap;gap:4px;margin-bottom:6px;min-height:4px;`;
-      for (const key of keyOrder) {
-        if (!filterKeys.has(key)) continue;
-        const col = ctx.allPropColors.get(key)?.code ?? TEXT_DIM;
-        const tag = document.createElement('span');
-        tag.style.cssText = `display:inline-flex;align-items:center;gap:3px;padding:2px 8px;border-radius:4px;background:${col};color:#fff;font-size:12px;font-weight:500;`;
-        const namePart = document.createElement('span'); namePart.textContent = key;
-        const xBtn = document.createElement('button');
-        xBtn.textContent = '×';
-        xBtn.style.cssText = `background:transparent;border:none;color:#fff;opacity:.7;cursor:pointer;padding:0 0 0 3px;font-size:11px;line-height:1;`;
-        xBtn.addEventListener('click', (e) => {
-          e.stopPropagation();
-          filterKeys.delete(key);
-          updateFilterBtn();
-          render();
-          rebuildFilterMenu();
-        });
-        tag.append(namePart, xBtn);
-        tagsEl.appendChild(tag);
-      }
-      menu.appendChild(tagsEl);
-
-      const searchIn = document.createElement('input');
-      searchIn.placeholder = '';
-      searchIn.style.cssText = `width:100%;box-sizing:border-box;background:transparent;border:1px solid ${BORDER};border-radius:3px;padding:4px 6px;color:${TEXT_HIGH};font-size:12px;outline:none;font-family:inherit;margin-bottom:4px;`;
-      menu.appendChild(searchIn);
-
-      const divider = document.createElement('div');
-      divider.style.cssText = `border-top:1px solid ${BORDER};margin:2px 0 4px;`;
-      menu.appendChild(divider);
-
-      const listContainer = document.createElement('div');
-      listContainer.style.cssText = `max-height:220px;overflow-y:auto;`;
-      searchIn.addEventListener('input', () => buildKeyList(listContainer, 'filter', null, searchIn, rebuildFilterMenu));
-      searchIn.addEventListener('keydown', (e) => {
-        if (e.key !== 'Enter') return;
-        const val = searchIn.value.trim();
-        if (!val) return;
-        addKeyToOrder(val, true);
-        if (!filterKeys.has(val)) { filterKeys.add(val); updateFilterBtn(); render(); }
-        searchIn.value = '';
-        rebuildFilterMenu();
-      });
-      buildKeyList(listContainer, 'filter', null, searchIn, rebuildFilterMenu);
-      menu.appendChild(listContainer);
-    };
-
-    rebuildFilterMenu();
-    document.body.appendChild(menu);
-    requestAnimationFrame(() => {
-      const r = menu.getBoundingClientRect();
-      if (r.right > window.innerWidth) menu.style.left = `${window.innerWidth - r.width - 8}px`;
-      if (r.bottom > window.innerHeight) menu.style.top = `${y - r.height}px`;
-    });
-    const close = (e: MouseEvent) => {
-      const t = e.target as Element;
-      if (!menu.contains(t) && !t?.closest('[data-key-ctx-menu]') && !t?.closest('[data-color-picker]'))
-        { menu.remove(); document.removeEventListener('click', close, true); }
-    };
-    setTimeout(() => document.addEventListener('click', close, true), 0);
-  };
 
   // Draft row — shown only when list is empty; structurally matches a node row at depth 0
   const draftEl = document.createElement('div');
@@ -278,7 +158,6 @@ export function createOutlinerView(ctx: GraphEditorContext, paneOpts?: OutlinerP
       swapNodeId(o, tempId, nn.id, rootKey(null, nn.id));
       Object.assign(tempNode, nn); // copy labels/color (id already set to real by swapNodeId)
       resolveTemp(); tempReady.delete(tempId);
-      applyInheritedProps(nn.id, inheritedPropsFor());
       const cc = ctx.childrenCache.get(parentId);
       if (cc) cc.unshift(nn); else setCachedChildren(parentId, [nn]);
       ctx.saveChildrenCache?.();
@@ -298,9 +177,9 @@ export function createOutlinerView(ctx: GraphEditorContext, paneOpts?: OutlinerP
 
   let roots: ONode[] = [];
   // Canonical top-level node list (one entry per node id), the source from which `roots` is
-  // (re)built. In property-grouping mode `roots` is one ONode per node; in LINK_PANELS mode
-  // a node that links to N targets becomes N root occurrences (multi-membership). Kept
-  // separate so we can rebuild occurrences after async link-target loading without refetching.
+  // (re)built. A node that links to several panel targets becomes one root occurrence per
+  // panel (multi-membership). Kept separate so we can rebuild occurrences after async
+  // link-target loading without refetching.
   let rootNodeList: ExplorerNode[] = [];
   // Underlying parent NODE id for the current top-level rows (pane parent / zoom node / null).
   let rootParentNodeId: string | null = null;
@@ -387,8 +266,6 @@ export function createOutlinerView(ctx: GraphEditorContext, paneOpts?: OutlinerP
   let paneParentSet = paneOpts?.paneParentId !== undefined;
   let paneParentId: string | null = paneOpts?.paneParentId ?? null;
   let paneSelectedId: string | null = null;
-  let paneFilterKeys: Set<string> = paneOpts?.paneFilterKeys ?? new Set();
-  let paneSortByProps: boolean = paneOpts?.paneSortByProps ?? false;
   // Breadcrumb path (root-first, inclusive of paneParentId) for panel-sourced panes
   let externalPath: PathEntry[] = paneOpts?.panePath ?? [];
 
@@ -471,63 +348,10 @@ export function createOutlinerView(ctx: GraphEditorContext, paneOpts?: OutlinerP
     return out;
   };
 
-  // Full rebuild — for load / zoom / delete / indent
-  // True when the node passes the active per-pane filter (no filter → always true).
-  const passesPaneFilter = (onode: ONode): boolean => {
-    if (paneFilterKeys.size === 0) return true;
-    const props = ctx.propStore.get(onode.node.id) ?? {};
-    return [...paneFilterKeys].some(k => k in props);
-  };
-
-  // Group comparator: order top-level rows into property PANELS by their primary group key
-  // (groupKeyOf), following masterKeyOrder; the no-property group ('') sorts last. Nodes in
-  // the SAME panel compare equal (return 0) so their manual order — the persisted
-  // h_node_line / roots order, kept intact by the stable sort — decides the within-panel
-  // sequence. The group key's VALUE is deliberately NOT used for ordering: e.g. 集約=● and
-  // 集約="" belong to one 集約 panel and can be freely reordered against each other (a
-  // value-based sub-sort here would fight the manual reorder and make a node oscillate
-  // up/down on every move). Crossing into another KEY's panel re-assigns the property via
-  // setNodeGroup; that boundary is still detected with groupKeyOf, which this matches.
-  const compareByProps = (a: ONode, b: ONode): number => {
-    const ga = groupKeyOf(a), gb = groupKeyOf(b);
-    if (ga === gb) return 0;
-    if (ga === '') return 1;
-    if (gb === '') return -1;
-    const order = masterKeyOrder();
-    const rank = (k: string): number => { const i = order.indexOf(k); return i < 0 ? order.length : i; };
-    return rank(ga) - rank(gb);
-  };
-
-  // Master ordering of all known property keys (persisted keyOrder first, then any others).
-  const masterKeyOrder = (): string[] => [...new Set([...keyOrder, ...ctx.allPropKeys])];
-
-  // Primary group key for a node: the first property key (in master order) it carries,
-  // falling back to its first own key, or '' when it has no properties at all. Top-level
-  // rows are clustered into property groups by this key.
-  const groupKeyOf = (o: ONode): string => {
-    const props = ctx.propStore.get(o.node.id) ?? {};
-    const own = Object.keys(props);
-    if (own.length === 0) return '';
-    for (const k of masterKeyOrder()) if (k in props) return k;
-    return own[0];
-  };
-
-  // Thin, unlabelled horizontal rule that separates two property groups. Kept slightly
-  // brighter than the pane border (BORDER = #333) so the group separators read about as
-  // clearly as the column separators between panes.
-  const buildGroupDivider = (): HTMLElement => {
-    const h = document.createElement('div');
-    h.dataset.groupDivider = '1';
-    h.style.cssText = `border-top:1px solid #4a4a4a;margin:7px 8px 7px 0;pointer-events:none;`;
-    return h;
-  };
-
-  // ── Link panels (Step 2) ────────────────────────────────────────────
-  // When true, top-level rows are clustered into PANELS by the nodes they LINK TO (their
-  // neighbours via fetchChildren, minus the pane parent) instead of by property key. The
-  // same root can appear in several panels (multi-membership), once per linked target.
-  // The legacy property-grouping path below is kept intact and reachable when this is false.
-  const LINK_PANELS = true;
+  // ── Link panels ─────────────────────────────────────────────────────
+  // Top-level rows are clustered into PANELS by the nodes they LINK TO (their neighbours via
+  // fetchChildren, minus the pane parent). The same root can appear in several panels
+  // (multi-membership), once per linked target.
   // Cap on how many top-level roots we prefetch link-targets for per pane (the panel-grouping
   // N+1: one fetchChildren per root). A large hub pane (100+ members) would otherwise fire
   // 100+ requests on open. Roots beyond the cap stay unclassified until grouped.
@@ -569,6 +393,18 @@ export function createOutlinerView(ctx: GraphEditorContext, paneOpts?: OutlinerP
     return targetId.slice(0, 8);
   };
 
+  // Resolve a node's color CODE (the linked concept's own color) from anything we know —
+  // any live occurrence or the children cache. Returns undefined when unknown / uncolored.
+  const resolveColor = (nodeId: string): string | undefined => {
+    const o = anyOccOf(nodeId);
+    if (o?.node.color) return o.node.color;
+    for (const nodes of ctx.childrenCache.values()) {
+      const n = nodes.find(x => x.id === nodeId);
+      if (n?.color) return n.color;
+    }
+    return undefined;
+  };
+
   // Panel header label: '未分類' for the no-link panel, otherwise all target labels joined.
   const panelLabel = (key: string): string => {
     if (key === UNCLASSIFIED) return '未分類';
@@ -583,7 +419,6 @@ export function createOutlinerView(ctx: GraphEditorContext, paneOpts?: OutlinerP
     const parentNodeId = rootParentNodeId;
     let cached = ctx.childrenCache.get(rootNodeId);
     if (!cached) { cached = await fetchChildrenFiltered(rootNodeId); setCachedChildren(rootNodeId, cached); validated.add(rootNodeId); }
-    seedPropStore(cached);
     const targets: string[] = [];
     for (const n of cached) {
       if (n.id === parentNodeId || n.id === rootNodeId) continue;
@@ -641,10 +476,9 @@ export function createOutlinerView(ctx: GraphEditorContext, paneOpts?: OutlinerP
   };
 
   // (Re)build the `roots` ONode array from `rootNodeList`, preserving the expand/loaded
-  // state of any occurrence whose key still exists. In LINK_PANELS mode every node is
-  // emitted once per panel it belongs to (multi-membership); otherwise once with a '@'
-  // (no-panel) key — matching the single-group property layout. Re-indexes byKey/occByNode
-  // for the top level only (descendant occurrences are recreated lazily by ensureChildren).
+  // state of any occurrence whose key still exists. Every node is emitted once per panel it
+  // belongs to (multi-membership). Re-indexes byKey/occByNode for the top level only
+  // (descendant occurrences are recreated lazily by ensureChildren).
   const buildRoots = () => {
     // Remember which root occurrence keys were expanded so a rebuild keeps them open.
     const prevExpanded = new Set<string>();
@@ -654,48 +488,39 @@ export function createOutlinerView(ctx: GraphEditorContext, paneOpts?: OutlinerP
     for (const r of roots) dropSubtree(r);
 
     const next: ONode[] = [];
-    if (!LINK_PANELS) {
-      for (const node of rootNodeList) {
-        const key = rootKey(null, node.id);
+    // Emit grouped by panel, in the SAME panel order render() uses, so the `roots` array
+    // order matches DOM order (multi-select range / flatVisible rely on this). Within a
+    // panel, preserve rootNodeList order.
+    const byPanel = new Map<string, ExplorerNode[]>();
+    for (const node of rootNodeList) {
+      for (const panel of panelsForNode(node.id)) {
+        let arr = byPanel.get(panel); if (!arr) { arr = []; byPanel.set(panel, arr); }
+        arr.push(node);
+      }
+    }
+    for (const panel of sortPanelIds([...byPanel.keys()])) {
+      const panelId = panel === UNCLASSIFIED ? null : panel;
+      for (const node of byPanel.get(panel)!) {
+        const key = rootKey(panelId, node.id);
         const o = make(node, rootParentNodeId, baseDepth, key, null);
         if (prevExpanded.has(key)) o.expanded = true;
         next.push(o);
-      }
-    } else {
-      // Emit grouped by panel, in the SAME panel order render() uses, so the `roots` array
-      // order matches DOM order (multi-select range / flatVisible rely on this). Within a
-      // panel, preserve rootNodeList order.
-      const byPanel = new Map<string, ExplorerNode[]>();
-      for (const node of rootNodeList) {
-        for (const panel of panelsForNode(node.id)) {
-          let arr = byPanel.get(panel); if (!arr) { arr = []; byPanel.set(panel, arr); }
-          arr.push(node);
-        }
-      }
-      for (const panel of sortPanelIds([...byPanel.keys()])) {
-        const panelId = panel === UNCLASSIFIED ? null : panel;
-        for (const node of byPanel.get(panel)!) {
-          const key = rootKey(panelId, node.id);
-          const o = make(node, rootParentNodeId, baseDepth, key, null);
-          if (prevExpanded.has(key)) o.expanded = true;
-          next.push(o);
-        }
       }
     }
     roots = next;
   };
 
-  // Set the pane's top-level node list, rebuild root occurrences, and render. In LINK_PANELS
-  // mode this also kicks off async loading of each root's link targets (N+1; see ensureLinkTargets)
-  // and re-renders once they resolve so panels appear. `parentNodeId` is the underlying parent
-  // node id for the top level. `excl` filters out nodes that must not appear as roots.
+  // Set the pane's top-level node list, rebuild root occurrences, and render. Also kicks off
+  // async loading of each root's link targets (N+1; see ensureLinkTargets) and re-renders once
+  // they resolve so panels appear. `parentNodeId` is the underlying parent node id for the top
+  // level. `excl` filters out nodes that must not appear as roots.
   const applyRoots = (nodes: ExplorerNode[], parentNodeId: string | null, excl?: Set<string>) => {
     rootParentNodeId = parentNodeId;
     baseDepth = 0;
     rootNodeList = excl ? nodes.filter(n => !excl.has(n.id)) : nodes.slice();
     buildRoots();
     render();
-    if (LINK_PANELS) void loadLinkPanels();
+    void loadLinkPanels();
   };
 
   // Async: load every root's link targets, then rebuild + re-render so panels surface. Guarded
@@ -722,63 +547,26 @@ export function createOutlinerView(ctx: GraphEditorContext, paneOpts?: OutlinerP
   const render = () => {
     rowMap.clear();
     listEl.innerHTML = '';
-    const globalFilter = filterKeys.size > 0;
-    // Top-level rows to render. In global-filter mode this is the flat set of matching
-    // nodes; otherwise it's the pane's roots (direct children of the pane parent).
-    let tops: ONode[];
-    if (globalFilter) {
-      const matched: ONode[] = [];
-      byKey.forEach(o => {
-        const props = ctx.propStore.get(o.node.id) ?? {};
-        if ([...filterKeys].some(k => k in props)) matched.push(o);
-      });
-      tops = matched;
-    } else {
-      tops = paneFilterKeys.size > 0 ? roots.filter(passesPaneFilter) : roots;
-    }
-    // Render a top-level node and, when expanded, its visible subtree (honouring the
-    // per-pane filter on descendants, matching expandInDom).
+    // Render a top-level node and, when expanded, its visible subtree.
     const appendSubtree = (o: ONode) => {
       listEl.appendChild(buildRow(o));
-      if (o.expanded) for (const c of o.children) if (passesPaneFilter(c)) appendSubtree(c);
+      if (o.expanded) for (const c of o.children) appendSubtree(c);
     };
 
-    if (LINK_PANELS && !globalFilter) {
-      // ── Link panels (Step 2): cluster roots by the node they link to. Each root is
-      // already a per-panel occurrence (its key encodes the panel target); group by that,
-      // order panels by header label (UNCLASSIFIED last), show a header when >1 panel. ──
-      const byPanel = new Map<string, ONode[]>();
-      for (const top of tops) {
-        const p = panelOfRoot(top);
-        let arr = byPanel.get(p); if (!arr) { arr = []; byPanel.set(p, arr); }
-        arr.push(top);
-      }
-      const panelIds = sortPanelIds([...byPanel.keys()]);
-      const showHeaders = panelIds.length > 1;
-      for (const pid of panelIds) {
-        if (showHeaders) listEl.appendChild(buildPanelHeader(pid));
-        for (const top of byPanel.get(pid)!) appendSubtree(top);
-      }
-    } else {
-      // ── Property grouping (legacy path): cluster top-level rows by primary property key
-      // so each group is contiguous; show dividers only when more than one group present. ──
-      const orderedTops = [...tops].sort(compareByProps);
-      const showHeaders = new Set(orderedTops.map(groupKeyOf)).size > 1;
-      let lastGroup: string | null = null;
-      let firstGroup = true;
-      for (const top of orderedTops) {
-        if (showHeaders) {
-          const g = groupKeyOf(top);
-          if (g !== lastGroup) {
-            // Divider only between groups — never before the first one.
-            if (!firstGroup) listEl.appendChild(buildGroupDivider());
-            lastGroup = g;
-            firstGroup = false;
-          }
-        }
-        if (globalFilter) listEl.appendChild(buildRow(top));
-        else appendSubtree(top);
-      }
+    // ── Link panels: cluster roots by the node they link to. Each root is already a
+    // per-panel occurrence (its key encodes the panel target); group by that, order panels
+    // by header label (UNCLASSIFIED last), show a header when >1 panel. ──
+    const byPanel = new Map<string, ONode[]>();
+    for (const top of roots) {
+      const p = panelOfRoot(top);
+      let arr = byPanel.get(p); if (!arr) { arr = []; byPanel.set(p, arr); }
+      arr.push(top);
+    }
+    const panelIds = sortPanelIds([...byPanel.keys()]);
+    const showHeaders = panelIds.length > 1;
+    for (const pid of panelIds) {
+      if (showHeaders) listEl.appendChild(buildPanelHeader(pid));
+      for (const top of byPanel.get(pid)!) appendSubtree(top);
     }
     // Show draft row only when list is empty AND a valid parent is known
     const draftParentId = paneParentSet ? paneParentId : (ctx.rootNodeId ?? null);
@@ -893,7 +681,6 @@ export function createOutlinerView(ctx: GraphEditorContext, paneOpts?: OutlinerP
       setCachedChildren(id, cached);
       validated.add(id);
     }
-    seedPropStore(cached);
     const excl = ancestorIds(onode); excl.add(onode.node.id);
     // Child occurrence keys embed THIS occurrence's key, so the same child node reached via
     // two parent occurrences gets two distinct keys (multi-membership / diamond-safe).
@@ -928,17 +715,17 @@ export function createOutlinerView(ctx: GraphEditorContext, paneOpts?: OutlinerP
     const hasChildren = onode.childrenLoaded
       ? onode.children.length > 0
       : (ctx.childrenCache.get(onode.node.id)?.length ?? 1) > 0;
-    // Show assigned property colors: 1 color → solid, 2+ → split the square left/right with
-    // the first two colors (3rd onward omitted), so multi-property nodes are distinguishable.
-    const nodeProps = ctx.propStore.get(onode.node.id) ?? {};
-    const propColors = Object.keys(nodeProps)
-      .map(k => ctx.allPropColors.get(k)?.code)
+    // Color the square from the node's LINKED concept nodes' own colors: 1 color → solid,
+    // 2+ → split the square left/right with the first two colors (3rd onward omitted), so a
+    // node linked to several colored concepts is distinguishable.
+    const linkColors = (linkTargets.get(onode.node.id) ?? [])
+      .map(tid => resolveColor(tid))
       .filter((c): c is string => c != null);
     m.style.border = 'none';
-    if (propColors.length >= 2) {
-      m.style.background = `linear-gradient(90deg, ${propColors[0]} 0 50%, ${propColors[1]} 50% 100%)`;
-    } else if (propColors.length === 1) {
-      m.style.background = propColors[0];
+    if (linkColors.length >= 2) {
+      m.style.background = `linear-gradient(90deg, ${linkColors[0]} 0 50%, ${linkColors[1]} 50% 100%)`;
+    } else if (linkColors.length === 1) {
+      m.style.background = linkColors[0];
     } else {
       m.style.background = hasChildren && !onode.expanded ? TEXT_MID : TEXT_DIM;
     }
@@ -959,13 +746,9 @@ export function createOutlinerView(ctx: GraphEditorContext, paneOpts?: OutlinerP
     let anchorEl: HTMLElement = anchor;
     const insertSubtree = (list: ONode[]) => {
       for (const child of list) {
-        // Honour the active pane filter for expanded children too (matches render());
-        // a filtered-out parent is skipped but its passing descendants still surface.
-        if (passesPaneFilter(child)) {
-          const row = buildRow(child);
-          anchorEl.insertAdjacentElement('afterend', row);
-          anchorEl = row;
-        }
+        const row = buildRow(child);
+        anchorEl.insertAdjacentElement('afterend', row);
+        anchorEl = row;
         if (child.expanded) insertSubtree(child.children);
       }
     };
@@ -1530,10 +1313,10 @@ export function createOutlinerView(ctx: GraphEditorContext, paneOpts?: OutlinerP
 
         const topLevelDrop = zone !== 'child' && newSibs === roots;
 
-        // ── Case 1: LINK_PANELS top-level→top-level = panel relink + reorder. The node stays
-        // top-level (same pane parent), only its panel membership changes. Rebuild from
-        // rootNodeList + linkTargets so multi-membership stays consistent. ──
-        if (topLevelDrop && LINK_PANELS && movers.every(m => m.parentKey === null)) {
+        // ── Case 1: top-level→top-level = panel relink + reorder. The node stays top-level
+        // (same pane parent), only its panel membership changes. Rebuild from rootNodeList +
+        // linkTargets so multi-membership stays consistent. ──
+        if (topLevelDrop && movers.every(m => m.parentKey === null)) {
           const destPanel = panelOfRoot(onode); // combined key (or UNCLASSIFIED)
           // Drop onto a panel = make each mover's link set equal that panel's target set.
           for (const m of movers) {
@@ -1594,12 +1377,6 @@ export function createOutlinerView(ctx: GraphEditorContext, paneOpts?: OutlinerP
         for (const pid of affectedParents) { if (pid !== null) ctx.childrenCache.delete(pid); }
         ctx.saveChildrenCache?.();
         render();
-
-        // Property path only: a top-level drop next to `onode` adopts that node's group key.
-        if (topLevelDrop && !LINK_PANELS) {
-          const destKey = groupKeyOf(onode);
-          for (const m of movers) setNodeGroup(m, destKey);
-        }
 
         await Promise.all(movers.map(m => awaitRealId(m)));
         for (const mover of movers) {
@@ -1680,7 +1457,6 @@ export function createOutlinerView(ctx: GraphEditorContext, paneOpts?: OutlinerP
       const key = intoRoots ? rootKey(null, m.node.id) : childKey(parentKey ?? '', m.node.id);
       inserted.push(make(m.node, newParentId, targetDepth, key, parentKey));
     }
-    seedPropStore(movers.map(m => m.node));
     for (let i = 0; i < inserted.length; i++) {
       newSibs.splice(insertAt + i, 0, inserted[i]);
       if (intoRoots) { rootNodeList.splice(Math.min(insertAt + i, rootNodeList.length), 0, inserted[i].node); linkTargets.delete(inserted[i].node.id); }
@@ -1776,76 +1552,25 @@ export function createOutlinerView(ctx: GraphEditorContext, paneOpts?: OutlinerP
 
   // ── Property menu (right-click on expand marker) ─────────────────────
 
-  // Update propStore/allPropKeys and sync to all ExplorerNode instances in childrenCache
-  const syncPropChange = (nodeId: string, updater: (props: Record<string, string>) => void) => {
-    const props = ctx.propStore.get(nodeId) ?? {};
-    updater(props);
-    if (Object.keys(props).length > 0) ctx.propStore.set(nodeId, props);
-    else ctx.propStore.delete(nodeId);
-    for (const k of Object.keys(props)) addKeyToOrder(k);
-    // Also sync to ExplorerNode instances already in memory
-    ctx.childrenCache.forEach(nodes => {
-      for (const n of nodes) { if (n.id === nodeId) n.properties = { ...props }; }
-    });
-    // Property change is node-level → apply to every occurrence's node object.
-    for (const o of occsOf(nodeId)) o.node.properties = { ...props };
-    // Broadcast to all registered outliner views with the changed nodeId
-    ctx.propChangeHooks.forEach(h => h(nodeId));
-  };
+  // ── Node link + color menu (click on expand marker) ──────────────────
 
-  // Property keys (with values) a node created next to `anchor` should inherit, so it lands in
-  // the same property context: the anchor's primary GROUP key (value-matched, so it joins the
-  // very same group in a grouped pane) plus any active pane FILTER keys (so it stays visible in
-  // a filtered pane). Returns {} when there is nothing to inherit. Draft (top-level) creation
-  // passes no anchor, so only filter keys apply.
-  const inheritedPropsFor = (anchor?: ONode): Record<string, string> => {
-    const kv: Record<string, string> = {};
-    const ap = anchor ? (ctx.propStore.get(anchor.node.id) ?? {}) : {};
-    if (anchor) { const gk = groupKeyOf(anchor); if (gk) kv[gk] = ap[gk] ?? '●'; }
-    for (const k of paneFilterKeys) if (!(k in kv)) kv[k] = ap[k] ?? '●';
-    return kv;
-  };
-
-  // Apply inherited properties to a freshly-created node. Updates the node's marker IN PLACE
-  // (and persists) rather than going through syncPropChange — a full re-render here would
-  // destroy the just-created textarea and swallow the label the user is typing. The fresh node
-  // is local to this pane, so other panes (which don't hold it yet) need no broadcast.
-  const applyInheritedProps = (nodeId: string, kv: Record<string, string>) => {
-    const keys = Object.keys(kv);
-    if (keys.length === 0) return;
-    const props = ctx.propStore.get(nodeId) ?? {};
-    let changed = false;
-    for (const key of keys) {
-      if (key in props) continue;
-      props[key] = kv[key];
-      changed = true;
-      addKeyToOrder(key);
-      void apiSetProperty(ctx.gId, nodeId, key, kv[key]);
+  // Set a concept node's color CODE locally (childrenCache + every live occurrence) and
+  // refresh the markers/text of every row, so a color change to a linked concept shows up
+  // everywhere it is referenced. Persisted separately by the caller via apiSetNodeColor.
+  const setConceptColor = (nodeId: string, code: string | null) => {
+    for (const o of occsOf(nodeId)) o.node.color = code ?? undefined;
+    ctx.childrenCache.forEach(nodes => { for (const n of nodes) if (n.id === nodeId) n.color = code ?? undefined; });
+    ctx.saveChildrenCache?.();
+    // The color of a linked concept feeds every referrer's marker → refresh all markers.
+    rowMap.forEach((_, k) => { const o = byKey.get(k); if (o) updateExpandMarker(o); });
+    // The concept node's own rows show the color as their text color too.
+    for (const o of occsOf(nodeId)) {
+      const ta = rowMap.get(o.key)?.querySelector<HTMLTextAreaElement>('textarea');
+      if (ta) ta.style.color = code ?? TEXT_HIGH;
     }
-    if (!changed) return;
-    ctx.propStore.set(nodeId, props);
-    ctx.childrenCache.forEach(nodes => { for (const n of nodes) if (n.id === nodeId) n.properties = { ...props }; });
-    // Node-level → update every occurrence's marker.
-    for (const o of occsOf(nodeId)) { o.node.properties = { ...props }; updateExpandMarker(o); }
   };
 
-  // Move a node into the property group identified by `destKey` (a group's primary
-  // property key, or '' for the no-property group) by rewriting its primary property:
-  // drop the key that currently decides its group, then add destKey=●. Returns whether
-  // anything changed. Used by reorder (DnD / keyboard) so that dragging a node across a
-  // group boundary also changes its property to match the destination group. Routed
-  // through syncPropChange + the property API, so the change persists and every pane
-  // regroups immediately.
-  const setNodeGroup = (onode: ONode, destKey: string): boolean => {
-    const cur = groupKeyOf(onode);
-    if (cur === destKey) return false;
-    const id = onode.node.id;
-    if (cur) { syncPropChange(id, p => { delete p[cur]; }); void apiRemoveProperty(ctx.gId, id, cur); }
-    if (destKey) { syncPropChange(id, p => { p[destKey] = '●'; }); void apiSetProperty(ctx.gId, id, destKey, '●'); }
-    return true;
-  };
-
-  // Link-panel analogue of setNodeGroup (Step 3): drop onto a panel = make the node's link set
+  // Link-panel relink: drop onto a panel = make the node's link set
   // EQUAL that panel's target set. fromKey/toKey are combined panel keys (or UNCLASSIFIED).
   // We diff the sets: drop links only in `from`, add links only in `to`. apiToggleLink toggles,
   // and the drag invariant (node IS linked to its from-set, NOT to the added to-targets) makes
@@ -1860,8 +1585,10 @@ export function createOutlinerView(ctx: GraphEditorContext, paneOpts?: OutlinerP
     for (const t of toAdd) await apiToggleLink(ctx.gId, nodeId, t);    // link
   };
 
-  // Shared color picker popover (callback called after color change to refresh caller UI)
-  const showColorPickerFor = (key: string, anchorEl: HTMLElement, onChanged: () => void) => {
+  // Color picker popover for a CONCEPT NODE (the linked node). Applies the chosen palette
+  // code to the node and persists via apiSetNodeColor (null clears). `onChanged` refreshes
+  // the caller UI (the link menu) after the change.
+  const showColorPickerFor = (nodeId: string, anchorEl: HTMLElement, onChanged: () => void) => {
     document.querySelector('[data-color-picker]')?.remove();
     const picker = document.createElement('div');
     picker.dataset.colorPicker = '1';
@@ -1870,29 +1597,23 @@ export function createOutlinerView(ctx: GraphEditorContext, paneOpts?: OutlinerP
     picker.style.left = `${ar.left}px`;
     picker.style.top = `${ar.bottom + 4}px`;
 
-    const current = ctx.allPropColors.get(key)?.colorId;
+    const current = resolveColor(nodeId); // current color CODE
+    const apply = (code: string | null) => {
+      setConceptColor(nodeId, code);
+      void apiSetNodeColor(ctx.gId, nodeId, code);
+      picker.remove();
+      onChanged();
+    };
     const noneBtn = document.createElement('button');
     noneBtn.title = '色なし'; noneBtn.textContent = '×';
     noneBtn.style.cssText = `width:20px;height:20px;border-radius:4px;border:1.5px solid ${BORDER};background:transparent;cursor:pointer;grid-column:span 2;font-size:10px;color:${TEXT_DIM};`;
-    noneBtn.addEventListener('click', () => {
-      ctx.allPropColors.delete(key);
-      void apiRemovePropertyColor(ctx.gId, key);
-      picker.remove();
-      onChanged();
-      rowMap.forEach((_, key) => { const o = byKey.get(key); if (o) updateExpandMarker(o); });
-    });
+    noneBtn.addEventListener('click', () => apply(null));
     picker.appendChild(noneBtn);
     for (const [id, code] of ctx.colorPalette) {
       const btn = document.createElement('button');
       btn.title = id;
-      btn.style.cssText = `width:20px;height:20px;border-radius:4px;border:${current === id ? `2px solid ${TEXT_HIGH}` : 'none'};background:${code};cursor:pointer;`;
-      btn.addEventListener('click', () => {
-        ctx.allPropColors.set(key, { colorId: id, code });
-        void apiSetPropertyColor(ctx.gId, key, id);
-        picker.remove();
-        onChanged();
-        rowMap.forEach((_, key) => { const o = byKey.get(key); if (o) updateExpandMarker(o); });
-      });
+      btn.style.cssText = `width:20px;height:20px;border-radius:4px;border:${current === code ? `2px solid ${TEXT_HIGH}` : 'none'};background:${code};cursor:pointer;`;
+      btn.addEventListener('click', () => apply(code));
       picker.appendChild(btn);
     }
     document.body.appendChild(picker);
@@ -1902,327 +1623,77 @@ export function createOutlinerView(ctx: GraphEditorContext, paneOpts?: OutlinerP
     setTimeout(() => document.addEventListener('click', closePicker, true), 0);
   };
 
-  // Delete a property key globally from all nodes + memory
-  const deleteKey = (key: string, onDone: () => void) => {
-    keyOrder = keyOrder.filter(k => k !== key);
-    ctx.allPropKeys.delete(key);
-    ctx.allPropColors.delete(key);
-    filterKeys.delete(key);
-    ctx.propStore.forEach((props, nid) => {
-      if (key in props) {
-        delete props[key];
-        for (const o of occsOf(nid)) { o.node.properties = { ...props }; updateExpandMarker(o); }
-      }
-    });
-    ctx.childrenCache.forEach(nodes => {
-      for (const n of nodes) { if (n.properties && key in n.properties) delete n.properties[key]; }
-    });
-    void apiDeletePropertyKey(ctx.gId, key);
-    void apiSavePropertyOrder(ctx.gId, keyOrder);
-    updateFilterBtn();
-    broadcastKeyOrder(); // re-render every pane (the deleted key removes a group everywhere)
-    onDone();
-  };
-
-  // ⋯ context menu per key: inline color palette + delete
-  const showKeyContextMenu = (key: string, anchor: HTMLElement, onDone: () => void) => {
-    document.querySelector('[data-key-ctx-menu]')?.remove();
-    const m = document.createElement('div');
-    m.dataset.keyCtxMenu = '1';
-    m.style.cssText = `position:fixed;z-index:102;background:hsl(240,14%,9%);border:1px solid ${BORDER};border-radius:6px;padding:8px;font-size:12px;box-shadow:0 4px 12px rgba(0,0,0,.4);min-width:160px;`;
-    const ar = anchor.getBoundingClientRect();
-    m.style.left = `${ar.left}px`;
-    m.style.top = `${ar.bottom + 4}px`;
-
-    // Color palette header
-    const colorLabel = document.createElement('div');
-    colorLabel.textContent = '色';
-    colorLabel.style.cssText = `color:${TEXT_DIM};font-size:11px;margin-bottom:6px;`;
-    m.appendChild(colorLabel);
-
-    // Color grid
-    const grid = document.createElement('div');
-    grid.style.cssText = `display:grid;grid-template-columns:repeat(6,1fr);gap:4px;margin-bottom:8px;`;
-
-    const current = ctx.allPropColors.get(key)?.colorId;
-    // No-color button
-    const noneBtn = document.createElement('button');
-    noneBtn.title = '色なし'; noneBtn.textContent = '×';
-    noneBtn.style.cssText = `width:22px;height:22px;border-radius:4px;border:1.5px solid ${BORDER};background:transparent;cursor:pointer;font-size:11px;color:${TEXT_DIM};grid-column:span 2;`;
-    noneBtn.addEventListener('click', () => {
-      ctx.allPropColors.delete(key);
-      void apiRemovePropertyColor(ctx.gId, key);
-      m.remove();
-      onDone();
-      rowMap.forEach((_, key) => { const o = byKey.get(key); if (o) updateExpandMarker(o); });
-    });
-    grid.appendChild(noneBtn);
-
-    for (const [id, code] of ctx.colorPalette) {
-      const btn = document.createElement('button');
-      btn.title = id;
-      btn.style.cssText = `width:22px;height:22px;border-radius:4px;border:${current === id ? `2px solid ${TEXT_HIGH}` : 'none'};background:${code};cursor:pointer;`;
-      btn.addEventListener('click', () => {
-        ctx.allPropColors.set(key, { colorId: id, code });
-        void apiSetPropertyColor(ctx.gId, key, id);
-        m.remove();
-        onDone();
-        rowMap.forEach((_, key) => { const o = byKey.get(key); if (o) updateExpandMarker(o); });
-      });
-      grid.appendChild(btn);
-    }
-    m.appendChild(grid);
-
-    // Divider + delete
-    const div = document.createElement('div');
-    div.style.cssText = `border-top:1px solid ${BORDER};margin:0 0 6px;`;
-    m.appendChild(div);
-
-    const deleteBtn = document.createElement('div');
-    deleteBtn.textContent = '削除';
-    deleteBtn.style.cssText = `padding:4px 6px;cursor:pointer;border-radius:4px;color:#e57373;`;
-    deleteBtn.addEventListener('mouseenter', () => { deleteBtn.style.background = 'rgba(255,255,255,.08)'; });
-    deleteBtn.addEventListener('mouseleave', () => { deleteBtn.style.background = ''; });
-    deleteBtn.addEventListener('click', () => { m.remove(); deleteKey(key, onDone); });
-    m.appendChild(deleteBtn);
-
-    document.body.appendChild(m);
-    requestAnimationFrame(() => {
-      const r = m.getBoundingClientRect();
-      if (r.right > window.innerWidth) m.style.left = `${window.innerWidth - r.width - 8}px`;
-      if (r.bottom > window.innerHeight) m.style.top = `${ar.top - r.height - 2}px`;
-    });
-    const close = (e: MouseEvent) => {
-      if (!m.contains(e.target as Node)) { m.remove(); document.removeEventListener('click', close, true); }
-    };
-    setTimeout(() => document.addEventListener('click', close, true), 0);
-  };
-
-  // Build a Notion-style key list (shared by property menu and filter menu)
-  // mode 'node': click pill toggles assignment on nodeId; mode 'filter': click pill toggles filterKeys
-  // extOpts: when provided, overrides active/toggle behaviour for external callers (pane-filter / pane-sort)
-  const buildKeyList = (
-    container: HTMLElement,
-    mode: 'node' | 'filter',
-    nodeId: string | null,
-    searchIn: HTMLInputElement,
-    onRedraw: () => void,
-    onClose?: () => void,
-    extOpts?: {
-      isActive: (key: string) => boolean;
-      onToggle: (key: string) => void;
-      getSuffix?: (key: string) => string;
-    },
-  ) => {
-    container.innerHTML = '';
-    let dragSrc: string | null = null;
-    const nodeProps = nodeId ? (ctx.propStore.get(nodeId) ?? {}) : {};
-    const filter = searchIn.value.trim().toLowerCase();
-    // Use ctx.allPropKeys as master (shared across all panes); keyOrder provides sort order
-    const masterKeys = [...new Set([...keyOrder, ...ctx.allPropKeys])];
-    const keys = filter ? masterKeys.filter(k => k.toLowerCase().includes(filter)) : masterKeys;
-
-    for (const key of keys) {
-      const active = extOpts ? extOpts.isActive(key) : (mode === 'node' ? key in nodeProps : filterKeys.has(key));
-      const propColor = ctx.allPropColors.get(key);
-      const col = propColor?.code ?? TEXT_DIM;
-
-      const row = document.createElement('div');
-      row.style.cssText = `display:flex;align-items:center;gap:4px;padding:0 4px;border-radius:3px;cursor:pointer;border:2px solid transparent;`;
-      row.addEventListener('mouseenter', () => { row.style.background = 'rgba(255,255,255,.05)'; });
-      row.addEventListener('mouseleave', () => { row.style.background = ''; });
-      // Click on the row (empty area) → toggle property
-      row.addEventListener('click', (e) => {
-        if (extOpts) { extOpts.onToggle(key); onRedraw(); return; }
-        if (mode === 'node' && nodeId) {
-          // Count properties BEFORE this change to detect "assigning the first property".
-          const countBefore = Object.keys(ctx.propStore.get(nodeId) ?? {}).length;
-          if (active) {
-            syncPropChange(nodeId, p => { delete p[key]; });
-            void apiRemoveProperty(ctx.gId, nodeId, key);
-          } else {
-            syncPropChange(nodeId, p => { p[key] = '●'; });
-            void apiSetProperty(ctx.gId, nodeId, key, '●');
-          }
-          for (const onode of occsOf(nodeId)) updateExpandMarker(onode);
-          // Auto-close (when Shift is not held) ONLY when this assigns the very first
-          // property to a node that had none. Otherwise keep the menu open so the user
-          // can keep tagging without re-opening it each time.
-          const assignedFirst = !active && countBefore === 0;
-          if (assignedFirst && !e.shiftKey && onClose) { onClose(); return; }
-        } else if (mode === 'filter') {
-          if (active) filterKeys.delete(key); else filterKeys.add(key);
-          updateFilterBtn();
-          render();
-        }
-        onRedraw();
-      });
-
-      // Square marker (filled=active, border-only=inactive) — replaces ⋯ + ⠿
-      const sqBtn = document.createElement('span');
-      sqBtn.style.cssText = `
-        width:8px;height:8px;border-radius:1px;box-sizing:border-box;flex-shrink:0;cursor:pointer;
-        ${active ? `background:${col};border:none;` : `background:transparent;border:1.5px solid ${TEXT_DIM};`}
-      `;
-
-      // Drag on square → reorder key; mouse: immediate drag, touch: long press (350ms, 5px threshold)
-      let sqPressTimer: ReturnType<typeof setTimeout> | null = null;
-      let sqDragStarted = false;
-      let sqPressX = 0, sqPressY = 0;
-      sqBtn.addEventListener('pointerdown', (e) => {
-        sqDragStarted = false;
-        sqPressX = e.clientX; sqPressY = e.clientY;
-        if (e.pointerType === 'mouse') {
-          row.draggable = true;
-        } else {
-          sqPressTimer = setTimeout(() => {
-            row.draggable = true;
-            row.style.opacity = '0.4';
-          }, 350);
-        }
-      });
-      const cancelSqPress = () => { if (sqPressTimer) { clearTimeout(sqPressTimer); sqPressTimer = null; } };
-      sqBtn.addEventListener('pointerup', () => {
-        cancelSqPress();
-        if (!sqDragStarted) row.draggable = false;
-      });
-      sqBtn.addEventListener('pointermove', (e) => {
-        if (!sqPressTimer) return;
-        if (Math.abs(e.clientX - sqPressX) > 5 || Math.abs(e.clientY - sqPressY) > 5) cancelSqPress();
-      });
-      // Click on square → context menu only (stop propagation to prevent row toggle)
-      sqBtn.addEventListener('click', (e) => {
-        e.stopPropagation();
-        if (sqDragStarted) return;
-        showKeyContextMenu(key, sqBtn, onRedraw);
-      });
-
-      // Colored pill
-      const pill = document.createElement('span');
-      pill.textContent = key;
-      pill.style.cssText = `display:inline-flex;align-items:center;padding:1px 6px;border-radius:3px;background:${col};color:#fff;font-size:11px;cursor:pointer;font-weight:500;white-space:nowrap;`;
-      // pill click delegates to row's click handler (stop propagation to prevent double-fire)
-      pill.addEventListener('click', (e) => { e.stopPropagation(); row.click(); });
-
-      // DnD for key reordering
-      row.addEventListener('dragstart', (e) => {
-        sqDragStarted = true;
-        dragSrc = key;
-        e.dataTransfer!.effectAllowed = 'move';
-      });
-      row.addEventListener('dragend', () => {
-        sqDragStarted = false;
-        row.style.opacity = '';
-        row.draggable = false;
-        dragSrc = null;
-      });
-      row.addEventListener('dragover', (e) => {
-        e.preventDefault();
-        row.style.borderTop = `2px solid ${TEXT_MID}`;
-        row.style.borderBottom = 'none';
-      });
-      row.addEventListener('dragleave', () => { row.style.borderTop = ''; });
-      row.addEventListener('drop', (e) => {
-        e.preventDefault(); row.style.borderTop = '';
-        if (dragSrc && dragSrc !== key) {
-          // Rebuild from the full displayed order (so keys not yet in keyOrder are handled)
-          // and insert dragSrc immediately before the drop target — matching the top border.
-          const order = [...new Set([...keyOrder, ...ctx.allPropKeys])].filter(k => k !== dragSrc);
-          const ti = order.indexOf(key);
-          if (ti >= 0) {
-            order.splice(ti, 0, dragSrc);
-            keyOrder = order;
-            void apiSavePropertyOrder(ctx.gId, keyOrder);
-            broadcastKeyOrder(); // re-render every pane so grouping order updates at once
-          }
-        }
-        onRedraw();
-      });
-
-      row.append(sqBtn, pill);
-      if (extOpts?.getSuffix) {
-        const sf = extOpts.getSuffix(key);
-        if (sf) {
-          const sfEl = document.createElement('span');
-          sfEl.textContent = sf;
-          sfEl.style.cssText = `margin-left:auto;color:${TEXT_HIGH};font-size:11px;font-weight:600;padding-right:2px;`;
-          row.appendChild(sfEl);
-        }
-      }
-      container.appendChild(row);
-    }
-
-    // Create option if search text doesn't match existing key (not shown for external callers)
-    const val = searchIn.value.trim();
-    if (val && !keyOrder.includes(val) && !extOpts) {
-      const createRow = document.createElement('div');
-      createRow.style.cssText = `display:flex;align-items:center;gap:6px;padding:3px 4px;border-radius:4px;cursor:pointer;`;
-      createRow.addEventListener('mouseenter', () => { createRow.style.background = 'rgba(255,255,255,.05)'; });
-      createRow.addEventListener('mouseleave', () => { createRow.style.background = ''; });
-      const handle2 = document.createElement('span');
-      handle2.style.cssText = `width:13px;flex-shrink:0;`;
-      const createPill = document.createElement('span');
-      createPill.style.cssText = `flex:1;padding:3px 10px;border-radius:4px;background:${TEXT_DIM};color:#fff;font-size:12px;font-weight:500;`;
-      createPill.textContent = `「${val}」を作成`;
-      createRow.append(handle2, createPill);
-      createRow.addEventListener('click', () => {
-        addKeyToOrder(val, true);
-        if (mode === 'node' && nodeId) {
-          syncPropChange(nodeId, p => { p[val] = '●'; });
-          void apiSetProperty(ctx.gId, nodeId, val, '●');
-          for (const onode of occsOf(nodeId)) updateExpandMarker(onode);
-        } else if (mode === 'filter') {
-          filterKeys.add(val);
-          updateFilterBtn();
-          render();
-        }
-        searchIn.value = '';
-        onRedraw();
-      });
-      container.appendChild(createRow);
-    }
-  };
-
+  // Click on a row's left square opens this menu: shows the node's LINKED concept nodes as
+  // chips (× unlinks, clicking the label assigns a color to that concept), plus a node SEARCH
+  // that links the chosen (or a newly-created) node to this one.
   const showPropertyMenu = (onode: ONode, x: number, y: number) => {
     document.querySelector('[data-prop-menu]')?.remove();
-    document.querySelector('[data-key-ctx-menu]')?.remove();
     document.querySelector('[data-color-picker]')?.remove();
 
     const menu = document.createElement('div');
     menu.dataset.propMenu = '1';
     menu.style.cssText = `position:fixed;left:${x}px;top:${y}px;z-index:100;width:260px;background:hsl(240,14%,9%);border:1px solid ${BORDER};border-radius:6px;padding:8px;font-size:13px;box-shadow:0 4px 16px rgba(0,0,0,.4);`;
 
+    const sid = onode.node.id;
+
+    // Refresh this node's marker + panels after a link change.
+    const refreshAfterLink = () => {
+      for (const o of occsOf(sid)) updateExpandMarker(o);
+      buildRoots();
+      render();
+    };
+
+    // Link an existing node to this one (idempotent). Optimistically updates linkTargets +
+    // childrenCache so chips/markers/panels reflect it at once.
+    const linkExisting = async (target: ExplorerNode) => {
+      if (target.id === sid) return;
+      const cur = linkTargets.get(sid) ?? [];
+      if (!cur.includes(target.id)) { cur.push(target.id); linkTargets.set(sid, cur); }
+      if (!panelLabelCache.has(target.id)) panelLabelCache.set(target.id, labelOf(target));
+      const cc = ctx.childrenCache.get(sid);
+      if (cc && !cc.find(n => n.id === target.id)) { cc.push(target); ctx.saveChildrenCache?.(); }
+      refreshAfterLink();
+      await apiLinkNode(ctx.gId, sid, target.id);
+    };
+
+    // Create a brand-new node (no parent) and link it.
+    const createAndLink = async (label: string) => {
+      const nn = await apiCreateNode(ctx.gId, null, paneLang, label);
+      if (nn) await linkExisting(nn);
+    };
+
     const rebuild = () => {
       menu.innerHTML = '';
-      const nodeProps = ctx.propStore.get(onode.node.id) ?? {};
 
-      // Selected tags row (shows assigned properties; × unlinks from this node only)
+      // ── Linked concept chips: the node's link targets (pane parent already excluded by
+      // ensureLinkTargets). × unlinks; clicking the label assigns a color to that concept. ──
       const tagsEl = document.createElement('div');
       tagsEl.style.cssText = `display:flex;flex-wrap:wrap;gap:4px;margin-bottom:6px;min-height:4px;`;
-      const masterTagKeys = [...new Set([...keyOrder, ...ctx.allPropKeys])];
-      for (const key of masterTagKeys) {
-        if (!(key in nodeProps)) continue;
-        const col = ctx.allPropColors.get(key)?.code ?? TEXT_DIM;
+      for (const tid of (linkTargets.get(sid) ?? [])) {
+        const col = resolveColor(tid) ?? TEXT_DIM;
         const tag = document.createElement('span');
         tag.style.cssText = `display:inline-flex;align-items:center;gap:3px;padding:2px 8px;border-radius:4px;background:${col};color:#fff;font-size:12px;font-weight:500;`;
-        const namePart = document.createElement('span'); namePart.textContent = key;
+        const namePart = document.createElement('span');
+        namePart.textContent = targetLabel(tid);
+        namePart.style.cursor = 'pointer';
+        namePart.addEventListener('click', (e) => { e.stopPropagation(); showColorPickerFor(tid, tag, rebuild); });
         const xBtn = document.createElement('button');
         xBtn.textContent = '×';
         xBtn.style.cssText = `background:transparent;border:none;color:#fff;opacity:.7;cursor:pointer;padding:0 0 0 3px;font-size:11px;line-height:1;`;
-        xBtn.addEventListener('click', (e) => {
+        xBtn.addEventListener('click', async (e) => {
           e.stopPropagation();
-          // Unlink from this node only (NOT global delete)
-          syncPropChange(onode.node.id, p => { delete p[key]; });
-          void apiRemoveProperty(ctx.gId, onode.node.id, key);
-          updateExpandMarker(onode);
+          // Unlink the edge between this node and the target.
+          linkTargets.set(sid, (linkTargets.get(sid) ?? []).filter(t => t !== tid));
+          refreshAfterLink();
           rebuild();
+          await apiUnlinkNode(ctx.gId, sid, tid);
         });
         tag.append(namePart, xBtn);
         tagsEl.appendChild(tag);
       }
       menu.appendChild(tagsEl);
 
-      // Search / create input
+      // ── Node search input: links the chosen node; Enter with no exact match creates one. ──
       const searchIn = document.createElement('input');
       searchIn.placeholder = '';
       searchIn.style.cssText = `width:100%;box-sizing:border-box;background:transparent;border:1px solid ${BORDER};border-radius:3px;padding:4px 6px;color:${TEXT_HIGH};font-size:12px;outline:none;font-family:inherit;margin-bottom:4px;`;
@@ -2232,30 +1703,50 @@ export function createOutlinerView(ctx: GraphEditorContext, paneOpts?: OutlinerP
       divider.style.cssText = `border-top:1px solid ${BORDER};margin:2px 0 4px;`;
       menu.appendChild(divider);
 
-      // Key list
       const listContainer = document.createElement('div');
       listContainer.style.cssText = `max-height:220px;overflow-y:auto;`;
-      const closeMenu = () => { menu.remove(); };
-      searchIn.addEventListener('input', () => buildKeyList(listContainer, 'node', onode.node.id, searchIn, rebuild, closeMenu));
+      menu.appendChild(listContainer);
+
+      let resultNodes: ExplorerNode[] = [];
+      let timer: ReturnType<typeof setTimeout> | null = null;
+      const runSearch = async () => {
+        const q = searchIn.value.trim();
+        listContainer.innerHTML = '';
+        resultNodes = [];
+        if (!q) return;
+        const lang = ctx.state.showFallback ? undefined : paneLang;
+        const { nodes } = await fetchAllNodes(ctx.gId, [], 0, lang, undefined, q, 20);
+        const linked = new Set(linkTargets.get(sid) ?? []);
+        resultNodes = nodes.filter(n => n.id !== sid && !linked.has(n.id));
+        for (const n of resultNodes) {
+          const lbl = (primaryLabel(n, paneLang) ?? fallbackLabel(n, paneLang)) || n.id.slice(0, 8);
+          const item = document.createElement('div');
+          item.textContent = lbl;
+          item.style.cssText = `padding:4px 6px;cursor:pointer;font-size:13px;color:${TEXT_MID};white-space:nowrap;overflow:hidden;text-overflow:ellipsis;border-radius:3px;`;
+          item.addEventListener('mouseenter', () => { item.style.background = 'rgba(255,255,255,.05)'; });
+          item.addEventListener('mouseleave', () => { item.style.background = ''; });
+          item.addEventListener('click', () => { void linkExisting(n); searchIn.value = ''; rebuild(); });
+          listContainer.appendChild(item);
+        }
+      };
+      searchIn.addEventListener('input', () => { if (timer) clearTimeout(timer); timer = setTimeout(() => void runSearch(), 200); });
       searchIn.addEventListener('keydown', (e) => {
         if (e.key !== 'Enter') return;
+        e.preventDefault();
         const val = searchIn.value.trim();
         if (!val) return;
-        addKeyToOrder(val, true);
-        const nodeProps = ctx.propStore.get(onode.node.id) ?? {};
-        if (!(val in nodeProps)) {
-          syncPropChange(onode.node.id, p => { p[val] = '●'; });
-          void apiSetProperty(ctx.gId, onode.node.id, val, '●');
-          updateExpandMarker(onode);
-        }
+        // Exact label match among current results → link it; otherwise create a new node.
+        const exact = resultNodes.find(n => (primaryLabel(n, paneLang) ?? fallbackLabel(n, paneLang)) === val);
+        if (exact) { void linkExisting(exact); } else { void createAndLink(val); }
         searchIn.value = '';
         rebuild();
       });
-      buildKeyList(listContainer, 'node', onode.node.id, searchIn, rebuild, closeMenu);
-      menu.appendChild(listContainer);
+      searchIn.focus();
     };
 
     rebuild();
+    // Chips need this node's link targets; load them (lazy for non-root rows) then refill.
+    void ensureLinkTargets(sid).then(() => { if (document.body.contains(menu)) rebuild(); });
     document.body.appendChild(menu);
     requestAnimationFrame(() => {
       const r = menu.getBoundingClientRect();
@@ -2264,64 +1755,16 @@ export function createOutlinerView(ctx: GraphEditorContext, paneOpts?: OutlinerP
     });
     const onOutside = (e: MouseEvent) => {
       const t = e.target as Element;
-      if (!menu.contains(t) && !t?.closest('[data-key-ctx-menu]') && !t?.closest('[data-color-picker]'))
+      if (!menu.contains(t) && !t?.closest('[data-color-picker]'))
         { menu.remove(); document.removeEventListener('mousedown', onOutside); }
     };
     const onKey = (e: KeyboardEvent) => {
       if (e.key === 'Escape') {
-        document.querySelector('[data-key-ctx-menu]')?.remove();
         document.querySelector('[data-color-picker]')?.remove();
         menu.remove(); document.removeEventListener('keydown', onKey);
       }
     };
     setTimeout(() => { document.addEventListener('mousedown', onOutside); document.addEventListener('keydown', onKey); }, 0);
-  };
-
-  // ── Key management menu for pane filter (called from multi-pane) ────
-  const openKeyMenu = (opts: {
-    anchor: HTMLElement;
-    mode: 'pane-filter';
-    isActive: (key: string) => boolean;
-    onToggle: (key: string) => void;
-  }) => {
-    document.querySelector('[data-key-mgmt-menu]')?.remove();
-    document.querySelector('[data-key-ctx-menu]')?.remove();
-    document.querySelector('[data-color-picker]')?.remove();
-
-    const menu = document.createElement('div');
-    menu.dataset.keyMgmtMenu = '1';
-    const ar = opts.anchor.getBoundingClientRect();
-    menu.style.cssText = `position:fixed;left:${ar.left}px;top:${ar.bottom + 2}px;z-index:200;width:220px;background:hsl(240,14%,9%);border:1px solid ${BORDER};border-radius:6px;padding:8px;font-size:13px;box-shadow:0 4px 16px rgba(0,0,0,.4);`;
-
-    const rebuild = () => {
-      menu.innerHTML = '';
-      const searchIn = document.createElement('input');
-      searchIn.placeholder = '';
-      searchIn.style.cssText = `width:100%;box-sizing:border-box;background:transparent;border:1px solid ${BORDER};border-radius:3px;padding:4px 6px;color:${TEXT_HIGH};font-size:12px;outline:none;font-family:inherit;margin-bottom:4px;`;
-      const divider = document.createElement('div');
-      divider.style.cssText = `border-top:1px solid ${BORDER};margin:2px 0 4px;`;
-      const listContainer = document.createElement('div');
-      listContainer.style.cssText = `max-height:220px;overflow-y:auto;`;
-      const ext = { isActive: opts.isActive, onToggle: opts.onToggle };
-      searchIn.addEventListener('input', () => buildKeyList(listContainer, 'node', null, searchIn, rebuild, undefined, ext));
-      buildKeyList(listContainer, 'node', null, searchIn, rebuild, undefined, ext);
-      menu.append(searchIn, divider, listContainer);
-      searchIn.focus();
-    };
-
-    rebuild();
-    document.body.appendChild(menu);
-    requestAnimationFrame(() => {
-      const r = menu.getBoundingClientRect();
-      if (r.right > window.innerWidth) menu.style.left = `${window.innerWidth - r.width - 8}px`;
-      if (r.bottom > window.innerHeight) menu.style.top = `${ar.top - r.height - 2}px`;
-    });
-    const onOutside = (e: MouseEvent) => {
-      const t = e.target as Element;
-      if (!menu.contains(t) && !t?.closest('[data-key-ctx-menu]') && !t?.closest('[data-color-picker]'))
-        { menu.remove(); document.removeEventListener('mousedown', onOutside); }
-    };
-    setTimeout(() => document.addEventListener('mousedown', onOutside), 0);
   };
 
   // ── Link-search (/) ──────────────────────────────────────────────────
@@ -2498,8 +1941,8 @@ export function createOutlinerView(ctx: GraphEditorContext, paneOpts?: OutlinerP
 
   // Live sibling id order for a parent, read straight from the tree (so temp ids that have
   // since resolved are picked up). For the pane top level we send rootNodeList (the canonical
-  // one-per-node order) rather than `roots`, which in LINK_PANELS mode holds duplicate node
-  // ids across panels. For a child parent, use any occurrence's children (unique node ids
+  // one-per-node order) rather than `roots`, which holds duplicate node ids across panels.
+  // For a child parent, use any occurrence's children (unique node ids
   // within that subtree).
   const siblingIdsForParent = (parentId: string): string[] => {
     if (parentId === rootParentNodeId) return rootNodeList.map(n => n.id);
@@ -2544,28 +1987,10 @@ export function createOutlinerView(ctx: GraphEditorContext, paneOpts?: OutlinerP
     if (sel.length <= 1) return;
     const parentId = sel[0].parentId;
     if (!sel.every(n => n.parentId === parentId)) return;
-    // Top-level grouped reorder: when the selection block would step into a different group
-    // (or the selection itself spans groups), unify the whole selection into the neighbour's
-    // group via a property change instead of reordering.
-    if (!LINK_PANELS && roots.includes(sel[0])) {
-      const ordered = [...roots].sort(compareByProps);
-      const idxs = sel.map(n => ordered.indexOf(n)).sort((a, b) => a - b);
-      const ni = direction === 'up' ? idxs[0] - 1 : idxs[idxs.length - 1] + 1;
-      if (ni < 0 || ni >= ordered.length) return;
-      const neighbor = ordered[ni];
-      const selGroups = new Set(sel.map(groupKeyOf));
-      const uniform = selGroups.size === 1 && selGroups.has(groupKeyOf(neighbor));
-      if (!uniform) {
-        const destKey = groupKeyOf(neighbor);
-        for (const n of sel) setNodeGroup(n, destKey);
-        return;
-      }
-      // same single group → fall through to the within-group reorder below
-    }
-    // LINK_PANELS top-level reorder: operate on the canonical rootNodeList order (panels are
-    // a display grouping, not a sibling chain), then re-render. Cross-panel keyboard moves are
-    // out of scope here — dragging is the relink path.
-    if (LINK_PANELS && roots.includes(sel[0])) {
+    // Top-level reorder: operate on the canonical rootNodeList order (panels are a display
+    // grouping, not a sibling chain), then re-render. Cross-panel keyboard moves are out of
+    // scope here — dragging is the relink path.
+    if (roots.includes(sel[0])) {
       const selNodes = sel.map(n => n.node);
       const idxs = selNodes.map(n => rootNodeList.indexOf(n)).sort((a, b) => a - b);
       const lo = idxs[0], hi = idxs[idxs.length - 1];
@@ -2739,7 +2164,6 @@ export function createOutlinerView(ctx: GraphEditorContext, paneOpts?: OutlinerP
     Object.assign(tempNode, nn); // copy labels/color (id already real via swapNodeId)
     resolveTemp();
     tempReady.delete(tempId);
-    applyInheritedProps(nn.id, inheritedPropsFor(onode));
 
     const cc = ctx.childrenCache.get(onode.parentId);
     if (cc) { const ci = cc.findIndex(n => n.id === onode.node.id); if (ci >= 0) cc.splice(before ? ci : ci + 1, 0, nn); }
@@ -2784,33 +2208,9 @@ export function createOutlinerView(ctx: GraphEditorContext, paneOpts?: OutlinerP
   };
 
   const doMove = async (onode: ONode, direction: 'up' | 'down') => {
-    // Top-level rows are grouped by property and rendered in grouped order, so move in the
-    // VISIBLE (grouped) order: a step into an adjacent group adopts that group's property;
-    // a step within a group just reorders. (roots are the pane's top-level nodes; their
-    // parentId is the pane parent, not null.)
-    if (!LINK_PANELS && roots.includes(onode)) {
-      const ordered = [...roots].sort(compareByProps);
-      const ni = ordered.indexOf(onode) + (direction === 'up' ? -1 : 1);
-      if (ni < 0 || ni >= ordered.length) return;
-      const neighbor = ordered[ni];
-      if (groupKeyOf(onode) !== groupKeyOf(neighbor)) {
-        if (setNodeGroup(onode, groupKeyOf(neighbor))) focusRow(onode); // render ran via propHook
-        return;
-      }
-      const ri = roots.indexOf(onode);
-      roots.splice(ri, 1);
-      const nj = roots.indexOf(neighbor);
-      roots.splice(direction === 'down' ? nj + 1 : nj, 0, onode);
-      render();
-      focusRow(onode);
-      if (onode.parentId === null) void apiMoveBookmark(ctx.gId, onode.node.id, direction);
-      else queueReorder(onode.parentId);
-      ctx.saveChildrenCache?.();
-      return;
-    }
-    // LINK_PANELS top-level reorder: reorder the canonical rootNodeList, then re-render. (Panels
-    // are a display grouping; cross-panel keyboard moves are out of scope — dragging relinks.)
-    if (LINK_PANELS && roots.includes(onode)) {
+    // Top-level reorder: reorder the canonical rootNodeList, then re-render. (Panels are a
+    // display grouping; cross-panel keyboard moves are out of scope — dragging relinks.)
+    if (roots.includes(onode)) {
       const ri = rootNodeList.indexOf(onode.node);
       const ni = ri + (direction === 'up' ? -1 : 1);
       if (ri < 0 || ni < 0 || ni >= rootNodeList.length) return;
@@ -2948,29 +2348,13 @@ export function createOutlinerView(ctx: GraphEditorContext, paneOpts?: OutlinerP
     if (onode.parentId !== null) void apiToggleLink(ctx.gId, onode.node.id, onode.parentId);
   };
 
-  // Merge node properties into propStore and register all keys into allPropKeys
-  const seedPropStore = (nodes: ExplorerNode[]) => {
-    for (const n of nodes) {
-      if (n.properties && Object.keys(n.properties).length > 0) {
-        ctx.propStore.set(n.id, { ...ctx.propStore.get(n.id), ...n.properties });
-        for (const k of Object.keys(n.properties)) addKeyToOrder(k);
-      }
-    }
-  };
-
   // Shallow structural comparison of two child lists — detects whether a revalidation
-  // fetch returned anything that affects rendering (order, labels, color, properties).
+  // fetch returned anything that affects rendering (order, labels, color).
   const childrenDiffer = (a: ExplorerNode[], b: ExplorerNode[]): boolean => {
     if (a.length !== b.length) return true;
     for (let i = 0; i < a.length; i++) {
       const x = a[i], y = b[i];
       if (x.id !== y.id || (x.en ?? '') !== (y.en ?? '') || (x.ja ?? '') !== (y.ja ?? '') || (x.color ?? '') !== (y.color ?? '')) return true;
-      const xk = Object.keys(x.properties ?? {}).sort();
-      const yk = Object.keys(y.properties ?? {}).sort();
-      if (xk.length !== yk.length) return true;
-      for (let j = 0; j < xk.length; j++) {
-        if (xk[j] !== yk[j] || (x.properties as Record<string, string>)[xk[j]] !== (y.properties as Record<string, string>)[yk[j]]) return true;
-      }
     }
     return false;
   };
@@ -2991,7 +2375,6 @@ export function createOutlinerView(ctx: GraphEditorContext, paneOpts?: OutlinerP
     if (fresh.length === 0 && painted && painted.length > 0) return; // suspected transient error
     setCachedChildren(cacheKey, fresh);
     validated.add(cacheKey);
-    seedPropStore(fresh);
     if (painted && !childrenDiffer(painted, fresh)) return; // nothing changed since the paint
     if (listEl.contains(document.activeElement)) return;     // don't clobber an active edit
     clearIndex();
@@ -3005,25 +2388,11 @@ export function createOutlinerView(ctx: GraphEditorContext, paneOpts?: OutlinerP
     baseDepth = 0;
     updateBreadcrumb();
 
-    // Load color palette, property key colors, and key order (parallel, best-effort)
+    // Load the color palette (id → code), used by the link menu's color picker.
     if (ctx.colorPalette.size === 0) {
-      const [palette, propColors, savedOrder, allKeys] = await Promise.all([
-        fetchColors(ctx.gId),
-        fetchPropertyColors(ctx.gId),
-        fetchPropertyOrder(ctx.gId),
-        fetchAllPropertyKeys(ctx.gId),
-      ]);
+      const palette = await fetchColors(ctx.gId);
       ctx.colorPalette.clear();
       for (const { id, code } of palette) ctx.colorPalette.set(id, code);
-      ctx.allPropColors.clear();
-      for (const [key, val] of Object.entries(propColors)) ctx.allPropColors.set(key, val);
-      keyOrder = savedOrder.filter(k => k.length > 0);
-      // Seed allPropKeys from both saved order and all keys actually present on nodes
-      for (const k of keyOrder) ctx.allPropKeys.add(k);
-      for (const k of allKeys) {
-        if (!keyOrder.includes(k)) keyOrder.push(k);
-        ctx.allPropKeys.add(k);
-      }
     }
 
     // Pane-specific parent override
@@ -3034,7 +2403,7 @@ export function createOutlinerView(ctx: GraphEditorContext, paneOpts?: OutlinerP
         const excl = new Set([pid]);
         const apply = (nodes: ExplorerNode[]) => applyRoots(nodes, pid, excl);
         const cached = ctx.childrenCache.get(pid);
-        if (cached) { seedPropStore(cached); apply(cached); }
+        if (cached) apply(cached);
         await revalidate(pid, pid, cached, apply);
       } else {
         applyRoots([], null);
@@ -3047,7 +2416,7 @@ export function createOutlinerView(ctx: GraphEditorContext, paneOpts?: OutlinerP
       const apply = (nodes: ExplorerNode[]) => applyRoots(nodes, rootId);
       // Use same cache key (null) as column view so both views share the same root node list
       const cached = ctx.childrenCache.get(null);
-      if (cached) { seedPropStore(cached); apply(cached); }
+      if (cached) apply(cached);
       // Stale-while-revalidate against the backend so edits persisted since the cache was
       // written are reflected on reload (rather than reverting to the cached snapshot).
       await revalidate(null, rootId, cached, apply);
@@ -3061,7 +2430,6 @@ export function createOutlinerView(ctx: GraphEditorContext, paneOpts?: OutlinerP
     }
     const lang = ctx.state.showFallback ? undefined : paneLang;
     const { nodes } = await fetchBookmarkedNodes(ctx.gId, [...ctx.state.bookmarks], lang);
-    seedPropStore(nodes);
     applyRoots(nodes, null);
   };
 
@@ -3095,7 +2463,7 @@ export function createOutlinerView(ctx: GraphEditorContext, paneOpts?: OutlinerP
       const excl = new Set([nid, ...(excludeIds ?? [])]);
       const apply = (nodes: ExplorerNode[]) => applyRoots(nodes, nid, excl);
       const cached = ctx.childrenCache.get(nid);
-      if (cached) { seedPropStore(cached); apply(cached); }
+      if (cached) apply(cached);
       await revalidate(nid, nid, cached, apply);
     } else {
       applyRoots([], null);
@@ -3106,8 +2474,6 @@ export function createOutlinerView(ctx: GraphEditorContext, paneOpts?: OutlinerP
   // Current parent whose children form this pane's rows (null = root/none). Used by the
   // multi-pane "固定" toggle to snapshot the frozen view.
   const getPaneParentId = () => (paneParentSet ? paneParentId : null);
-  const setPaneFilterKeys = (keys: Set<string>) => { paneFilterKeys = keys; render(); };
-  const setPaneSortByProps = (enabled: boolean) => { paneSortByProps = enabled; render(); };
   // Change this pane's language and re-render labels (breadcrumb + rows).
   const setLang = (l: 'en' | 'ja') => { paneLang = l; updateBreadcrumb(); render(); };
 
@@ -3125,76 +2491,21 @@ export function createOutlinerView(ctx: GraphEditorContext, paneOpts?: OutlinerP
     await load();
   };
 
-  // One-shot action: physically reorder each loaded sibling group (top level + every
-  // expanded parent's children) into property-sort order and persist it to the backend,
-  // so the stored order — not just the view — reflects the sort.
-  const applyPropertySort = async () => {
-    const parents: (string | null)[] = [paneParentSet ? paneParentId : (ctx.rootNodeId ?? null)];
-    // Sort the canonical top-level order by property comparator (occurrence-keyless), then
-    // rebuild. compareByProps reads props off ONode.node; wrap each top-level node in a probe.
-    const cmpNode = (a: ExplorerNode, b: ExplorerNode) =>
-      compareByProps({ node: a } as ONode, { node: b } as ONode);
-    rootNodeList.sort(cmpNode);
-    buildRoots();
-    byKey.forEach(o => {
-      if (o.childrenLoaded && o.children.length > 1) {
-        o.children.sort(compareByProps);
-        parents.push(o.node.id);
-      }
-    });
-    render();
-    for (const pid of parents) {
-      if (pid !== null) await sendReorder(pid);
-    }
-    showToast('並び順を保存しました');
-  };
-
   const search = async (query: string) => {
     if (!query) { await load(); return; }
     clearIndex(); zoomStack.splice(0); baseDepth = 0;
     updateBreadcrumb();
     const lang = ctx.state.showFallback ? undefined : paneLang;
     const { nodes } = await fetchAllNodes(ctx.gId, [], 0, lang, undefined, query, 50);
-    seedPropStore(nodes);
     applyRoots(nodes, null);
   };
 
   updateBreadcrumb(); // show "ルート" on initial render
 
-  // When a node's property changes, re-render this pane so its grouping (and any active
-  // filter) reflects the change immediately. A property edit can move a node into another
-  // group, add/remove a group divider, or change filter membership — all of which are
-  // recomputed in render(). Panes that don't contain the node are skipped. render() also
-  // rebuilds the node's property marker via buildRow, so colours stay in sync too.
-  const propHook = (changedId: string) => {
-    if (!occByNode.has(changedId)) return;
-    const scroll = listEl.scrollTop;
-    render();
-    listEl.scrollTop = scroll; // keep the viewport stable across the regroup
-  };
-  ctx.propChangeHooks.push(propHook);
-
-  // When property keys are reordered (or deleted) in any pane, adopt the new order and
-  // re-render so the grouping order reflects it immediately — no reload needed.
-  const keyOrderHook = (order: string[]) => {
-    keyOrder = [...order];
-    for (const k of order) ctx.allPropKeys.add(k);
-    const scroll = listEl.scrollTop;
-    render();
-    listEl.scrollTop = scroll;
-  };
-  ctx.keyOrderHooks.push(keyOrderHook);
-  // Broadcast this pane's keyOrder to every pane (including itself) after a key reorder.
-  const broadcastKeyOrder = () => { ctx.keyOrderHooks.forEach(h => h(keyOrder)); };
-
   const unregister = () => {
     flushPendingReorders(true);
     window.removeEventListener('pagehide', onPageHide);
-    const i = ctx.propChangeHooks.indexOf(propHook);
-    if (i >= 0) ctx.propChangeHooks.splice(i, 1);
-    const j = ctx.keyOrderHooks.indexOf(keyOrderHook);
-    if (j >= 0) ctx.keyOrderHooks.splice(j, 1);
   };
 
-  return { el, filterBtn, load, refresh: render, search, setParent, getAncestorIds, getNodePath, getSelectedId, getPaneParentId, setPaneFilterKeys, setPaneSortByProps, setLang, setSourceRoot, applyPropertySort, beginKeyMove, acceptKeyMove, getEffectiveParentId, getNodeParentId, openKeyMenu, unregister };
+  return { el, load, refresh: render, search, setParent, getAncestorIds, getNodePath, getSelectedId, getPaneParentId, setLang, setSourceRoot, beginKeyMove, acceptKeyMove, getEffectiveParentId, getNodeParentId, unregister };
 }

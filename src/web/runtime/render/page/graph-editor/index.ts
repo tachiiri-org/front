@@ -150,16 +150,11 @@ export function renderGraphEditor(
 
   // ── Context assembly ──────────────────────────────────────────────
   const rootNodeId = comp.rootNodeId ?? null;
-  const propStore = new Map<string, Record<string, string>>();
-  const allPropKeys = new Set<string>();
-  const allPropColors = new Map<string, { colorId: string; code: string }>();
   const colorPalette = new Map<string, string>();
   const ctx = {
     gId, limit, rootNodeId, outer, state, childrenCache,
-    propStore, allPropKeys, allPropColors, colorPalette,
+    colorPalette,
     tempNodeCounter: 0,
-    propChangeHooks: [] as Array<() => void>,
-    keyOrderHooks: [] as Array<(order: string[]) => void>,
     saveChildrenCache,
     paneDrag: null,
   } as unknown as GraphEditorContext;

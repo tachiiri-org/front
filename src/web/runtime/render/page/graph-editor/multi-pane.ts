@@ -6,8 +6,6 @@ type PaneConfig = {
   id: string;
   label: string;
   sourceId: string | null;   // null = root; or another pane id
-  filterKeys: string[];      // property keys that must be present (ALL)
-  sortByProps: boolean;      // true = sort by property keyOrder ascending
   width: number;             // px
   lang: 'en' | 'ja';         // per-pane display/edit language
   pinned?: boolean;          // true = frozen: ignore source-pane selection changes
@@ -19,8 +17,6 @@ type PaneInstance = {
   view: ReturnType<typeof createOutlinerView>;
   containerEl: HTMLElement;   // the outer div (header + body)
   updateSrcBtn: () => void;
-  updateFltBtn: () => void;
-  updateSortBtn: () => void;
   updateFsBtn: () => void;
   updatePinBtn: () => void;
   updateLangBtn: () => void;
@@ -39,7 +35,7 @@ function loadPanes(gId: string, defaultLang: 'en' | 'ja'): PaneConfig[] | null {
     if (!raw) return null;
     const arr = JSON.parse(raw) as Partial<PaneConfig>[];
     // Older saved configs predate per-pane lang → fall back to the global default.
-    return arr.map(c => ({ ...c, sortByProps: c.sortByProps ?? false, lang: c.lang ?? defaultLang })) as PaneConfig[];
+    return arr.map(c => ({ ...c, lang: c.lang ?? defaultLang })) as PaneConfig[];
   } catch { return null; }
 }
 
@@ -48,8 +44,6 @@ function newPaneConfig(label: string, lang: 'en' | 'ja'): PaneConfig {
     id: `pane-${Date.now()}-${Math.random().toString(36).slice(2, 6)}`,
     label,
     sourceId: null,
-    filterKeys: [],
-    sortByProps: false,
     width: PANE_WIDTH(),
     lang,
   };
@@ -329,59 +323,6 @@ export function createMultiPaneView(ctx: GraphEditorContext): {
     });
     header.appendChild(pinBtn);
 
-    // Filter area — the "フィルタ" button is tinted when a filter is active (active keys are
-    // toggled via the menu that opens on click, so no per-key pills are shown here)
-    const fltArea = document.createElement('div');
-    fltArea.style.cssText = `display:flex;align-items:center;cursor:pointer;flex-shrink:0;padding:0 2px;`;
-    const updateFltBtn = () => {
-      fltArea.innerHTML = '';
-      const active = config.filterKeys.length > 0;
-      const col = active ? (ctx.allPropColors.get(config.filterKeys[0])?.code ?? TEXT_HIGH) : TEXT_DIM;
-      const icon = document.createElement('span');
-      icon.textContent = '▽';
-      icon.style.cssText = `color:${col};font-size:13px;line-height:1;`;
-      fltArea.appendChild(icon);
-      fltArea.title = active ? `フィルタ: ${config.filterKeys.join(', ')}` : 'フィルタを設定';
-    };
-    updateFltBtn();
-    fltArea.addEventListener('click', (e) => {
-      e.stopPropagation();
-      const inst = panes.find(p => p.config.id === config.id);
-      if (!inst) return;
-      inst.view.openKeyMenu({
-        anchor: fltArea,
-        mode: 'pane-filter',
-        isActive: (key) => config.filterKeys.includes(key),
-        onToggle: (key) => {
-          if (config.filterKeys.includes(key)) {
-            config.filterKeys = config.filterKeys.filter(k => k !== key);
-          } else {
-            config.filterKeys.push(key);
-          }
-          saveAll();
-          inst.view.setPaneFilterKeys(new Set(config.filterKeys));
-          updateFltBtn();
-        },
-      });
-    });
-    header.appendChild(fltArea);
-
-    // Sort action button — press to reorder the stored sibling order by property keyOrder
-    // (persists to the backend; this is an action, not a view toggle)
-    const sortBtn = document.createElement('button');
-    const updateSortBtn = () => {
-      sortBtn.textContent = '⇅';
-      sortBtn.style.cssText = `background:transparent;border:none;color:${TEXT_DIM};cursor:pointer;font-size:13px;padding:0 2px;line-height:1;flex-shrink:0;`;
-    };
-    updateSortBtn();
-    sortBtn.title = 'プロパティ順でDB上の並び順を並び替える';
-    sortBtn.addEventListener('click', (e) => {
-      e.stopPropagation();
-      sortBtn.disabled = true;
-      void view.applyPropertySort().finally(() => { sortBtn.disabled = false; });
-    });
-    header.appendChild(sortBtn);
-
     // Reload button — re-fetch this pane's nodes from the backend
     const reloadBtn = document.createElement('button');
     reloadBtn.textContent = '⟳';
@@ -433,8 +374,6 @@ export function createMultiPaneView(ctx: GraphEditorContext): {
     const view = createOutlinerView(ctx, {
       paneParentId,
       panePath,
-      paneFilterKeys: new Set(config.filterKeys),
-      paneSortByProps: false, // 並び替えは即時DB反映アクション化したのでビューソートは無効
       lang: config.lang,
       onNodeSelect: (nodeId) => onPaneSelect(config.id, nodeId),
       onMoveNodeToPane: (nodeId, direction) => moveToAdjacentPane(config.id, nodeId, direction),
@@ -442,7 +381,7 @@ export function createMultiPaneView(ctx: GraphEditorContext): {
       onContentWidthChange: (w) => {
         // Measure only non-flex-1 header children to avoid feedback loop
         // (header.scrollWidth includes labelEl which stretches to container width)
-        const minHeaderW = langBtn.offsetWidth + srcBtn.offsetWidth + pinBtn.offsetWidth + fltArea.scrollWidth + sortBtn.offsetWidth + reloadBtn.offsetWidth + fsBtn.offsetWidth + closeBtn.offsetWidth + 36;
+        const minHeaderW = langBtn.offsetWidth + srcBtn.offsetWidth + pinBtn.offsetWidth + reloadBtn.offsetWidth + fsBtn.offsetWidth + closeBtn.offsetWidth + 36;
         const actualW = Math.max(w, minHeaderW);
         containerEl.style.width = `${actualW}px`;
         config.width = actualW;
@@ -475,7 +414,7 @@ export function createMultiPaneView(ctx: GraphEditorContext): {
     });
     containerEl.appendChild(resizeHandle);
 
-    const instance: PaneInstance = { config, view, containerEl, updateSrcBtn, updateFltBtn, updateSortBtn, updateFsBtn, updatePinBtn, updateLangBtn };
+    const instance: PaneInstance = { config, view, containerEl, updateSrcBtn, updateFsBtn, updatePinBtn, updateLangBtn };
 
     return instance;
   };
@@ -519,7 +458,6 @@ export function createMultiPaneView(ctx: GraphEditorContext): {
         // Trigger load from new source
         if (value === null) {
           // Reset pane to root (clears any stale pane-parent so root children show)
-          inst?.view.setPaneFilterKeys(new Set(config.filterKeys));
           void inst?.view.setSourceRoot();
         } else {
           const srcInst = panes.find(p => p.config.id === value);
