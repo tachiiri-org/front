@@ -366,21 +366,23 @@ export function createOutlinerView(ctx: GraphEditorContext, paneOpts?: OutlinerP
     return [...paneFilterKeys].some(k => k in props);
   };
 
-  // Stable multi-key comparator by property keyOrder: nodes with earlier keys come first,
-  // within the same key compare values asc, nodes without any property go last.
+  // Group comparator: order top-level rows into property PANELS by their primary group key
+  // (groupKeyOf), following masterKeyOrder; the no-property group ('') sorts last. Nodes in
+  // the SAME panel compare equal (return 0) so their manual order — the persisted
+  // h_node_line / roots order, kept intact by the stable sort — decides the within-panel
+  // sequence. The group key's VALUE is deliberately NOT used for ordering: e.g. 集約=● and
+  // 集約="" belong to one 集約 panel and can be freely reordered against each other (a
+  // value-based sub-sort here would fight the manual reorder and make a node oscillate
+  // up/down on every move). Crossing into another KEY's panel re-assigns the property via
+  // setNodeGroup; that boundary is still detected with groupKeyOf, which this matches.
   const compareByProps = (a: ONode, b: ONode): number => {
-    const masterKeys = [...new Set([...keyOrder, ...ctx.allPropKeys])];
-    const pa = ctx.propStore.get(a.node.id) ?? {};
-    const pb = ctx.propStore.get(b.node.id) ?? {};
-    for (const k of masterKeys) {
-      const hasA = k in pa, hasB = k in pb;
-      if (hasA !== hasB) return hasA ? -1 : 1;
-      if (hasA) {
-        const cmp = (pa[k] || '').localeCompare(pb[k] || '', undefined, { numeric: true, sensitivity: 'base' });
-        if (cmp !== 0) return cmp;
-      }
-    }
-    return 0;
+    const ga = groupKeyOf(a), gb = groupKeyOf(b);
+    if (ga === gb) return 0;
+    if (ga === '') return 1;
+    if (gb === '') return -1;
+    const order = masterKeyOrder();
+    const rank = (k: string): number => { const i = order.indexOf(k); return i < 0 ? order.length : i; };
+    return rank(ga) - rank(gb);
   };
 
   // Master ordering of all known property keys (persisted keyOrder first, then any others).
