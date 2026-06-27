@@ -538,10 +538,18 @@ export function createOutlinerView(ctx: GraphEditorContext, paneOpts?: OutlinerP
   // Labels for panel headers, keyed by target node id (filled from childrenCache / roots).
   const panelLabelCache = new Map<string, string>();
 
-  // Resolve a panel header label from any node we know about (the linked neighbour itself
-  // or the cache). Falls back to the id prefix.
-  const panelLabel = (targetId: string): string => {
-    if (targetId === UNCLASSIFIED) return '未分類';
+  // A panel is keyed by the WHOLE SET of a node's link targets (sorted, joined), not one
+  // target. So a node with several links appears in exactly ONE combined panel (no
+  // multi-membership) whose header lists all its targets. UUIDs contain no '+'/'#'/'/', so
+  // the combined key stays safe as a rootKey prefix.
+  const COMBO_SEP = '+';
+  const comboKey = (targetIds: string[]): string => [...targetIds].sort().join(COMBO_SEP);
+  const parseCombo = (key: string): string[] =>
+    (key === UNCLASSIFIED || key === '' || key === '@') ? [] : key.split(COMBO_SEP);
+
+  // Resolve a single target node's label from anything we know (the node itself or the
+  // cache). Falls back to the id prefix.
+  const targetLabel = (targetId: string): string => {
     const o = anyOccOf(targetId);
     if (o) return labelOf(o.node);
     const cached = panelLabelCache.get(targetId);
@@ -551,6 +559,12 @@ export function createOutlinerView(ctx: GraphEditorContext, paneOpts?: OutlinerP
       if (n) { const l = labelOf(n); panelLabelCache.set(targetId, l); return l; }
     }
     return targetId.slice(0, 8);
+  };
+
+  // Panel header label: '未分類' for the no-link panel, otherwise all target labels joined.
+  const panelLabel = (key: string): string => {
+    if (key === UNCLASSIFIED) return '未分類';
+    return parseCombo(key).map(targetLabel).join(' , ');
   };
 
   // The panel target ids a root belongs to: the OTHER nodes it links to, excluding the pane
@@ -575,12 +589,13 @@ export function createOutlinerView(ctx: GraphEditorContext, paneOpts?: OutlinerP
     linkTargets.set(rootNodeId, targets);
   };
 
-  // The panel ids a node currently belongs to (read from the linkTargets cache; unloaded →
-  // UNCLASSIFIED until ensureLinkTargets fills it and a re-render runs).
+  // The single panel a node belongs to: ONE combined key built from its full link-target set
+  // (so a multi-link node lands in one combined panel, not several). No links → UNCLASSIFIED.
+  // Returns an array (length 1) to keep buildRoots' per-panel loop unchanged.
   const panelsForNode = (nodeId: string): string[] => {
     const t = linkTargets.get(nodeId);
     if (!t || t.length === 0) return [UNCLASSIFIED];
-    return t;
+    return [comboKey(t)];
   };
 
   // Stable, deterministic panel ordering: by header label, UNCLASSIFIED always last.
@@ -1509,12 +1524,11 @@ export function createOutlinerView(ctx: GraphEditorContext, paneOpts?: OutlinerP
         // top-level (same pane parent), only its panel membership changes. Rebuild from
         // rootNodeList + linkTargets so multi-membership stays consistent. ──
         if (topLevelDrop && LINK_PANELS && movers.every(m => m.parentKey === null)) {
-          const destPanel = panelOfRoot(onode);
-          // Reorder rootNodeList so the (first) mover lands next to the target node.
+          const destPanel = panelOfRoot(onode); // combined key (or UNCLASSIFIED)
+          // Drop onto a panel = make each mover's link set equal that panel's target set.
           for (const m of movers) {
-            const fromTarget = (() => { const p = panelOfRoot(m); return p === UNCLASSIFIED ? null : p; })();
-            const toTarget = destPanel === UNCLASSIFIED ? null : destPanel;
-            if (fromTarget !== toTarget) void relinkPanel(m.node.id, fromTarget, toTarget);
+            const fromPanel = panelOfRoot(m);
+            if (fromPanel !== destPanel) void relinkPanel(m.node.id, fromPanel, destPanel);
           }
           // Move mover nodes adjacent to the target in rootNodeList (panel is a display group;
           // ordering is the canonical list).
@@ -1821,19 +1835,19 @@ export function createOutlinerView(ctx: GraphEditorContext, paneOpts?: OutlinerP
     return true;
   };
 
-  // Link-panel analogue of setNodeGroup (Step 3): move a node's membership from one panel to
-  // another by RELINKING. fromTarget/toTarget are panel target NODE ids (null = UNCLASSIFIED,
-  // i.e. no link on that side). apiToggleLink toggles, and the drag invariant is that the node
-  // IS linked to fromTarget and is NOT linked to toTarget, so plain toggles reach the right
-  // final state. Also updates this pane's local linkTargets cache so other occurrences regroup.
-  const relinkPanel = async (nodeId: string, fromTarget: string | null, toTarget: string | null) => {
-    const targets = linkTargets.get(nodeId);
-    if (targets) {
-      if (fromTarget) { const i = targets.indexOf(fromTarget); if (i >= 0) targets.splice(i, 1); }
-      if (toTarget && !targets.includes(toTarget)) targets.push(toTarget);
-    }
-    if (fromTarget) await apiToggleLink(ctx.gId, nodeId, fromTarget); // unlink
-    if (toTarget) await apiToggleLink(ctx.gId, nodeId, toTarget);     // link
+  // Link-panel analogue of setNodeGroup (Step 3): drop onto a panel = make the node's link set
+  // EQUAL that panel's target set. fromKey/toKey are combined panel keys (or UNCLASSIFIED).
+  // We diff the sets: drop links only in `from`, add links only in `to`. apiToggleLink toggles,
+  // and the drag invariant (node IS linked to its from-set, NOT to the added to-targets) makes
+  // plain toggles reach the right final state. Updates the local linkTargets cache too.
+  const relinkPanel = async (nodeId: string, fromKey: string, toKey: string) => {
+    const fromSet = new Set(parseCombo(fromKey));
+    const toSet = new Set(parseCombo(toKey));
+    const toRemove = [...fromSet].filter(t => !toSet.has(t));
+    const toAdd = [...toSet].filter(t => !fromSet.has(t));
+    linkTargets.set(nodeId, [...toSet]);
+    for (const t of toRemove) await apiToggleLink(ctx.gId, nodeId, t); // unlink
+    for (const t of toAdd) await apiToggleLink(ctx.gId, nodeId, t);    // link
   };
 
   // Shared color picker popover (callback called after color change to refresh caller UI)
