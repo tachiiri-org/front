@@ -533,6 +533,9 @@ export function createOutlinerView(ctx: GraphEditorContext, paneOpts?: OutlinerP
   // 100+ requests on open. Roots beyond the cap stay unclassified until grouped.
   // TODO: load more on scroll / a bulk depth-2 read.
   const LINK_PANEL_PREFETCH_LIMIT = 50;
+  // Max characters shown in a (combined) panel header before truncating with an ellipsis.
+  // Combined keys can list many targets, so cap the displayed text length.
+  const PANEL_HEADER_MAX_CHARS = 24;
 
   // The synthetic panel id for roots that link to no other node ("未分類", sorts last).
   const UNCLASSIFIED = ' 未分類';
@@ -619,7 +622,8 @@ export function createOutlinerView(ctx: GraphEditorContext, paneOpts?: OutlinerP
     const h = document.createElement('div');
     h.dataset.panelHeader = '1';
     h.dataset.panelTarget = targetId;
-    h.textContent = panelLabel(targetId);
+    const full = panelLabel(targetId);
+    h.textContent = full.length > PANEL_HEADER_MAX_CHARS ? full.slice(0, PANEL_HEADER_MAX_CHARS) + '…' : full;
     h.style.cssText = `margin:8px 8px 3px 0;padding:0 0 3px 0;border-bottom:1px solid #4a4a4a;color:${TEXT_MID};font-size:11px;font-weight:600;pointer-events:none;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;`;
     return h;
   };
