@@ -251,6 +251,7 @@ export function createOutlinerView(ctx: GraphEditorContext, paneOpts?: OutlinerP
       rowMap.delete(tempId); if (tempRowEl) { rowMap.set(nn.id, tempRowEl); tempRowEl.dataset.nodeId = nn.id; }
       Object.assign(tempNode, nn);
       resolveTemp(); tempReady.delete(tempId);
+      applyPaneFilterProps(nn.id);
       const cc = ctx.childrenCache.get(parentId);
       if (cc) cc.unshift(nn); else setCachedChildren(parentId, [nn]);
       ctx.saveChildrenCache?.();
@@ -850,6 +851,30 @@ export function createOutlinerView(ctx: GraphEditorContext, paneOpts?: OutlinerP
     });
     ta.addEventListener('focus', () => setPaneSelected(onode.node.id));
 
+    // Multi-line paste → one node per line: the first line merges into this row at the caret,
+    // each remaining line becomes a sibling node below (in order). Single-line paste is left
+    // to the browser's default handling.
+    ta.addEventListener('paste', (e) => {
+      const text = e.clipboardData?.getData('text/plain') ?? '';
+      const lines = text.split(/\r?\n/).map(l => l.trim()).filter(l => l.length > 0);
+      if (lines.length <= 1) return; // single line → default paste
+      e.preventDefault();
+      const start = ta.selectionStart ?? ta.value.length;
+      const end = ta.selectionEnd ?? ta.value.length;
+      ta.value = ta.value.slice(0, start) + lines[0] + ta.value.slice(end);
+      const caret = start + lines[0].length;
+      ta.setSelectionRange(caret, caret);
+      ta.dispatchEvent(new Event('input')); // resize + width
+      void (async () => {
+        let anchor = onode;
+        for (let k = 1; k < lines.length; k++) {
+          const created = await doAddSibling(anchor, false, { text: lines[k] });
+          if (!created) break;
+          anchor = created;
+        }
+      })();
+    });
+
     ta.addEventListener('blur', () => {
       const old = primaryLabel(onode.node, paneLang) ?? fallbackLabel(onode.node, paneLang);
       const newVal = ta.value;
@@ -1342,6 +1367,16 @@ export function createOutlinerView(ctx: GraphEditorContext, paneOpts?: OutlinerP
     if (o) o.node.properties = { ...props };
     // Broadcast to all registered outliner views with the changed nodeId
     ctx.propChangeHooks.forEach(h => h(nodeId));
+  };
+
+  // A node created inside a property-filtered pane inherits that pane's filter keys, so it stays
+  // visible (and lands in the right group) immediately instead of vanishing on the next render.
+  const applyPaneFilterProps = (nodeId: string) => {
+    if (paneFilterKeys.size === 0) return;
+    for (const key of paneFilterKeys) {
+      syncPropChange(nodeId, p => { if (!(key in p)) p[key] = '●'; });
+      void apiSetProperty(ctx.gId, nodeId, key, '●');
+    }
   };
 
   // Move a node into the property group identified by `destKey` (a group's primary
@@ -1950,8 +1985,15 @@ export function createOutlinerView(ctx: GraphEditorContext, paneOpts?: OutlinerP
   const doDeleteMulti = () => {
     const sel = getSelectedONodes();
     if (sel.length === 0) return;
-    const vis = flatVisible();
-    const firstIdx = vis.indexOf(sel[0]);
+    const selSet = new Set(sel.map(n => n.node.id));
+    // Focus target in VISIBLE (DOM) order: first non-selected row above the block, else below it.
+    const rows = [...listEl.querySelectorAll<HTMLElement>('[data-node-id]')];
+    const selRowIdxs = rows.map((r, idx) => (selSet.has(r.dataset.nodeId ?? '') ? idx : -1)).filter(idx => idx >= 0);
+    const firstRowIdx = selRowIdxs.length ? Math.min(...selRowIdxs) : -1;
+    const lastRowIdx = selRowIdxs.length ? Math.max(...selRowIdxs) : -1;
+    let targetId: string | null = null;
+    for (let k = firstRowIdx - 1; k >= 0; k--) { const id = rows[k]?.dataset.nodeId; if (id && !selSet.has(id)) { targetId = id; break; } }
+    if (!targetId) for (let k = lastRowIdx + 1; k < rows.length; k++) { const id = rows[k]?.dataset.nodeId; if (id && !selSet.has(id)) { targetId = id; break; } }
     clearSelection();
     for (const n of sel) {
       if (n.expanded) collapseInDom(n);
@@ -1963,9 +2005,7 @@ export function createOutlinerView(ctx: GraphEditorContext, paneOpts?: OutlinerP
       if (cc) { const ci = cc.findIndex(x => x.id === n.node.id); if (ci >= 0) cc.splice(ci, 1); }
       void apiDeleteNode(ctx.gId, n.node.id);
     }
-    const selSet = new Set(sel.map(n => n.node.id));
-    const remaining = vis.filter(n => !selSet.has(n.node.id));
-    const target = remaining[Math.max(0, firstIdx - 1)] ?? remaining[0];
+    const target = targetId ? byId.get(targetId) : undefined;
     if (target && byId.has(target.node.id)) focusRow(target);
   };
 
@@ -2126,9 +2166,10 @@ export function createOutlinerView(ctx: GraphEditorContext, paneOpts?: OutlinerP
 
   // ── Node operations ───────────────────────────────────────────────────
 
-  const doAddSibling = async (onode: ONode, before = false) => {
+  const doAddSibling = async (onode: ONode, before = false, opts?: { text?: string }): Promise<ONode | null> => {
     const tempId = `temp-${++ctx.tempNodeCounter}`;
-    const tempNode: ExplorerNode = { id: tempId };
+    const initialText = opts?.text ?? '';
+    const tempNode: ExplorerNode = initialText ? { id: tempId, [paneLang]: initialText } : { id: tempId };
     const sibs = getSiblings(onode);
     const idx = sibs.indexOf(onode);
     // Capture previous sibling before splice (needed when inserting before the first node)
@@ -2140,12 +2181,12 @@ export function createOutlinerView(ctx: GraphEditorContext, paneOpts?: OutlinerP
     let newRow: HTMLElement;
     if (before) {
       const ownRow = rowMap.get(onode.node.id);
-      if (!ownRow) { sibs.splice(sibs.indexOf(no), 1); byId.delete(tempId); return; }
+      if (!ownRow) { sibs.splice(sibs.indexOf(no), 1); byId.delete(tempId); return null; }
       newRow = buildRow(no);
       ownRow.insertAdjacentElement('beforebegin', newRow);
     } else {
       const anchor = lastDescRow(onode);
-      if (!anchor) { sibs.splice(sibs.indexOf(no), 1); byId.delete(tempId); return; }
+      if (!anchor) { sibs.splice(sibs.indexOf(no), 1); byId.delete(tempId); return null; }
       newRow = buildRow(no);
       anchor.insertAdjacentElement('afterend', newRow);
     }
@@ -2157,14 +2198,14 @@ export function createOutlinerView(ctx: GraphEditorContext, paneOpts?: OutlinerP
 
     // For "before first node" (no prevSib), insertAfterId=undefined → backend appends, then reorder
     const insertAfterId = before ? prevSibNode?.node.id : onode.node.id;
-    const nn = await apiCreateNode(ctx.gId, onode.parentId, paneLang, '', insertAfterId);
+    const nn = await apiCreateNode(ctx.gId, onode.parentId, paneLang, initialText, insertAfterId);
     if (!nn) {
       resolveTemp();
       tempReady.delete(tempId);
       newRow.remove(); rowMap.delete(tempId);
       sibs.splice(sibs.indexOf(no), 1); byId.delete(tempId);
       focusRow(onode);
-      return;
+      return null;
     }
 
     const typedText = newRow.querySelector<HTMLTextAreaElement>('textarea')?.value ?? '';
@@ -2174,6 +2215,7 @@ export function createOutlinerView(ctx: GraphEditorContext, paneOpts?: OutlinerP
     Object.assign(tempNode, nn);
     resolveTemp();
     tempReady.delete(tempId);
+    applyPaneFilterProps(nn.id);
 
     const cc = ctx.childrenCache.get(onode.parentId);
     if (cc) { const ci = cc.findIndex(n => n.id === onode.node.id); if (ci >= 0) cc.splice(before ? ci : ci + 1, 0, nn); }
@@ -2184,18 +2226,30 @@ export function createOutlinerView(ctx: GraphEditorContext, paneOpts?: OutlinerP
     }
 
     ctx.saveChildrenCache?.();
-    if (typedText.trim()) void apiUpdateNode(ctx.gId, nn.id, paneLang, typedText);
+    // Persist later edits, but skip when the label already matches what we created with (paste path).
+    if (typedText.trim() && typedText.trim() !== initialText.trim()) void apiUpdateNode(ctx.gId, nn.id, paneLang, typedText);
+    return no;
   };
 
-  const doDelete = (onode: ONode, visIdx: number, vis: ONode[]) => {
+  const doDelete = (onode: ONode, _visIdx: number, _vis: ONode[]) => {
     if (onode.expanded) collapseInDom(onode);
+    // Pick the focus target from the VISIBLE (DOM) order, not flatVisible: top-level rows are
+    // reordered by property grouping, so flatVisible's index can point at the wrong row. Capture
+    // the DOM neighbour (row above, else below) while the row is still in the list.
+    const rowEl = rowMap.get(onode.node.id);
+    let targetId: string | null = null;
+    if (rowEl) {
+      const rows = [...listEl.querySelectorAll<HTMLElement>('[data-node-id]')];
+      const di = rows.indexOf(rowEl);
+      targetId = (rows[di - 1] ?? rows[di + 1])?.dataset.nodeId ?? null;
+    }
     rowMap.get(onode.node.id)?.remove(); rowMap.delete(onode.node.id);
     const sibs = getSiblings(onode);
     sibs.splice(sibs.indexOf(onode), 1);
     byId.delete(onode.node.id);
     const cc = ctx.childrenCache.get(onode.parentId);
     if (cc) { const ci = cc.findIndex(n => n.id === onode.node.id); if (ci >= 0) cc.splice(ci, 1); }
-    const target = vis[visIdx - 1] ?? vis[visIdx + 1];
+    const target = targetId ? byId.get(targetId) : undefined;
     if (target && byId.has(target.node.id)) focusRow(target);
     void apiDeleteNode(ctx.gId, onode.node.id);
   };

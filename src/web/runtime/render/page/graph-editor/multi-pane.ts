@@ -111,6 +111,27 @@ export function createMultiPaneView(ctx: GraphEditorContext): {
 
   // ── Inter-pane wiring ──────────────────────────────────────────────
   const onPaneSelect = (paneId: string, selectedNodeId: string | null) => {
+    // Miller-columns drill-down: selecting a node keeps exactly one pane immediately to the
+    // right of the active pane. If none exists, open one (sourced from the active pane) to show
+    // the selection's children; if panes exist beyond that immediate child ("右の右以降"), close
+    // them. Pinned panes are deliberately frozen, so never auto-create/remove around them.
+    const srcIdx = panes.findIndex(p => p.config.id === paneId);
+    if (selectedNodeId !== null && srcIdx !== -1 && fullscreenPaneId === null && !panes[srcIdx].config.pinned) {
+      // Remove panes deeper than the immediate child, stopping at any pinned pane.
+      while (panes.length > srcIdx + 2 && !panes[panes.length - 1].config.pinned) {
+        removePane(panes[panes.length - 1].config.id);
+      }
+      // No pane to the right → open a child pane sourced from this one.
+      if (panes.length === srcIdx + 1) {
+        const cfg = newPaneConfig(`パネル ${panes.length + 1}`, panes[srcIdx].config.lang);
+        cfg.sourceId = paneId;
+        const inst = createPane(cfg);
+        panes.push(inst);
+        el.insertBefore(inst.containerEl, addPaneBtn);
+        saveAll();
+        updateAllSrcBtns();
+      }
+    }
     // Get ancestors of the selected node from the source pane to exclude from child panes
     // (graph edges are undirected so ancestors appear as neighbors; filtering prevents backward nav)
     const srcPane = panes.find(p => p.config.id === paneId);
