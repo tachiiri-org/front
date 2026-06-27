@@ -528,6 +528,11 @@ export function createOutlinerView(ctx: GraphEditorContext, paneOpts?: OutlinerP
   // same root can appear in several panels (multi-membership), once per linked target.
   // The legacy property-grouping path below is kept intact and reachable when this is false.
   const LINK_PANELS = true;
+  // Cap on how many top-level roots we prefetch link-targets for per pane (the panel-grouping
+  // N+1: one fetchChildren per root). A large hub pane (100+ members) would otherwise fire
+  // 100+ requests on open. Roots beyond the cap stay unclassified until grouped.
+  // TODO: load more on scroll / a bulk depth-2 read.
+  const LINK_PANEL_PREFETCH_LIMIT = 50;
 
   // The synthetic panel id for roots that link to no other node ("未分類", sorts last).
   const UNCLASSIFIED = ' 未分類';
@@ -694,7 +699,8 @@ export function createOutlinerView(ctx: GraphEditorContext, paneOpts?: OutlinerP
   let linkPanelsToken = 0;
   const loadLinkPanels = async () => {
     const myToken = ++linkPanelsToken;
-    const snapshot = rootNodeList.slice();
+    // Cap the prefetch so a large hub pane doesn't fire one fetchChildren per root (N+1).
+    const snapshot = rootNodeList.slice(0, LINK_PANEL_PREFETCH_LIMIT);
     let changed = false;
     for (const node of snapshot) {
       if (linkTargets.has(node.id)) continue;
