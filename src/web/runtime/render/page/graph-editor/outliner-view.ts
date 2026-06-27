@@ -565,6 +565,10 @@ export function createOutlinerView(ctx: GraphEditorContext, paneOpts?: OutlinerP
     const targets: string[] = [];
     for (const n of cached) {
       if (n.id === parentNodeId || n.id === rootNodeId) continue;
+      // Skip blank-label targets: an unlabelled node is not a meaningful panel, so don't
+      // form a panel for it (the root then folds into 未分類 instead of producing an empty
+      // header). Covers both '' and null labels in either language.
+      if (!(n.ja?.trim() || n.en?.trim())) continue;
       targets.push(n.id);
       if (!panelLabelCache.has(n.id)) panelLabelCache.set(n.id, labelOf(n));
     }
