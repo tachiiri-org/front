@@ -26,23 +26,17 @@ async function graphFetch(
   });
 }
 
-type ApiNode = { id: string; en?: string | null; ja?: string | null; color?: string | null; properties?: Record<string, string> };
+type ApiNode = { id: string; en?: string | null; ja?: string | null; color?: string | null };
 
 async function getNeighbors(
   env: AuthorizeEnv,
   graphId: string,
   nodeId: string,
   depth: number,
-  opts?: { filter?: Record<string, string | string[]>; limit?: number },
+  limit?: number,
 ): Promise<{ nodes: ApiNode[]; truncated?: boolean; count?: number }> {
   const params = new URLSearchParams({ depth: String(depth) });
-  if (opts?.filter) {
-    for (const [key, val] of Object.entries(opts.filter)) {
-      const values = Array.isArray(val) ? val : [val];
-      params.set(`filter[${key}]`, values.join(","));
-    }
-  }
-  if (opts?.limit != null) params.set("limit", String(opts.limit));
+  if (limit != null) params.set("limit", String(limit));
   const res = await graphFetch(env, graphId, `node/${encodeURIComponent(nodeId)}/neighbors?${params.toString()}`);
   if (!res.ok) throw new Error(`get_neighbors_failed:${res.status}`);
   return res.json() as Promise<{ nodes: ApiNode[]; truncated?: boolean; count?: number }>;
@@ -53,34 +47,13 @@ async function getNeighborsByWord(
   graphId: string,
   word: string,
   depth: number,
-  opts?: { filter?: Record<string, string | string[]>; limit?: number },
+  limit?: number,
 ): Promise<{ nodes: ApiNode[]; truncated?: boolean; count?: number } | null> {
   const params = new URLSearchParams({ depth: String(depth) });
-  if (opts?.filter) {
-    for (const [key, val] of Object.entries(opts.filter)) {
-      params.set(`filter[${key}]`, Array.isArray(val) ? val.join(",") : val);
-    }
-  }
-  if (opts?.limit != null) params.set("limit", String(opts.limit));
+  if (limit != null) params.set("limit", String(limit));
   const res = await graphFetch(env, graphId, `neighbors?word=${encodeURIComponent(word)}&${params.toString()}`);
   if (res.status === 404) return null;
   if (!res.ok) throw new Error(`get_neighbors_by_word_failed:${res.status}`);
-  return res.json() as Promise<{ nodes: ApiNode[]; truncated?: boolean; count?: number }>;
-}
-
-async function searchNodesByProperty(
-  env: AuthorizeEnv,
-  graphId: string,
-  filter: Record<string, string | string[]>,
-  limit?: number,
-): Promise<{ nodes: ApiNode[]; truncated?: boolean; count?: number }> {
-  const params = new URLSearchParams();
-  for (const [key, val] of Object.entries(filter)) {
-    params.set(`filter[${key}]`, Array.isArray(val) ? val.join(",") : val);
-  }
-  if (limit != null) params.set("limit", String(limit));
-  const res = await graphFetch(env, graphId, `nodes/search?${params.toString()}`);
-  if (!res.ok) throw new Error(`search_nodes_failed:${res.status}`);
   return res.json() as Promise<{ nodes: ApiNode[]; truncated?: boolean; count?: number }>;
 }
 
@@ -90,11 +63,7 @@ function clampDepth(raw: unknown): number {
 }
 
 const nodeLabel = (n: ApiNode): string => [n.en, n.ja].filter(Boolean).join(" / ");
-const nodeLine = (n: ApiNode): string => {
-  const props = n.properties ?? {};
-  const propStr = Object.entries(props).map(([k, v]) => v ? `${k}=${v}` : k).join(", ");
-  return `[${n.id}] ${nodeLabel(n)}${propStr ? ` {${propStr}}` : ""}`;
-};
+const nodeLine = (n: ApiNode): string => `[${n.id}] ${nodeLabel(n)}`;
 
 // --- Tool definitions ---
 
@@ -102,59 +71,29 @@ export const GRAPH_TOOLS = [
   {
     name: "graph_read_texts_by_word",
     description:
-      "Traverse the graph from any node whose label exactly matches `word` (en or ja), returning all nodes reachable within `depth` hops (default 2, max 5). Supports optional `filter` to narrow results by property (AND condition). Loop-safe.",
+      "Traverse the graph from any node whose label exactly matches `word` (en or ja), returning all nodes reachable within `depth` hops (default 2, max 5). Loop-safe.",
     inputSchema: {
       type: "object",
       properties: {
         graph_id: { type: "string", description: "Word graph ID (e.g. 'word-graph-1')" },
         word: { type: "string", description: "Exact en or ja label of any node to start from" },
         depth: { type: "number", description: "Hops to traverse (default 2, max 5)" },
-        filter: {
-          type: "object",
-          description: "Narrow returned nodes by property (AND with text match). Keys are property names (e.g. 'status', 'ready'); values are string or array (OR match).",
-          additionalProperties: { oneOf: [{ type: "string" }, { type: "array", items: { type: "string" } }] },
-        },
         limit: { type: "number", description: "Max nodes to return (default 100, max 500)." },
       },
       required: ["graph_id", "word"],
     },
   },
   {
-    name: "graph_search_nodes",
-    description:
-      "Search all nodes in the graph by property filter alone (no starting node or label required). Returns up to `limit` nodes matching all specified filters. Use when you want to find nodes by type or other metadata without a known label or ID.",
-    inputSchema: {
-      type: "object",
-      properties: {
-        graph_id: { type: "string", description: "Word graph ID (e.g. 'word-graph-1')" },
-        filter: {
-          type: "object",
-          description: "Property filters (AND across keys, OR across values per key). E.g. {status: 'active'} or {status: ['active', 'done']}.",
-          additionalProperties: { oneOf: [{ type: "string" }, { type: "array", items: { type: "string" } }] },
-        },
-        limit: { type: "number", description: "Max nodes to return (default 100, max 500)." },
-      },
-      required: ["graph_id", "filter"],
-    },
-  },
-  {
     name: "graph_read_nodes_from",
     description:
-      "Traverse the graph from any node ID, returning all nodes reachable within `depth` hops (default 2, max 5). Each node's result includes ALL metadata properties (e.g. ready, status) in {key=value, ...} format. Supports optional `filter` to narrow results by any property at the DB level (e.g. filter: {ready: 'true'} or filter: {status: 'active'}). Returns `truncated: true` with `count` when the result exceeds the limit (default 100, max 500) — use filter or reduce depth to get complete results.",
+      "Traverse the graph from any node ID, returning all nodes reachable within `depth` hops (default 2, max 5). Returns `truncated: true` with `count` when the result exceeds the limit (default 100, max 500) — reduce depth to get complete results.",
     inputSchema: {
       type: "object",
       properties: {
         graph_id: { type: "string", description: "Word graph ID (e.g. 'word-graph-1')" },
         node_id: { type: "string", description: "Starting node ID" },
         depth: { type: "number", description: "Hops to traverse (default 2, max 5)" },
-        filter: {
-          type: "object",
-          description: "Filter returned nodes by metadata property. Keys are property names (e.g. 'ready', 'status'); values are string or array (OR match). Only matching nodes are returned; traversal still follows all edges.",
-          additionalProperties: {
-            oneOf: [{ type: "string" }, { type: "array", items: { type: "string" } }],
-          },
-        },
-        limit: { type: "number", description: "Max nodes to return (default 100, max 500). If truncated, reduce depth or add filter." },
+        limit: { type: "number", description: "Max nodes to return (default 100, max 500). If truncated, reduce depth." },
       },
       required: ["graph_id", "node_id"],
     },
@@ -243,35 +182,6 @@ export const GRAPH_TOOLS = [
       required: ["graph_id", "node_id", "target_node_id"],
     },
   },
-  {
-    name: "graph_set_property",
-    description: "Upsert a metadata property on one or more nodes. Value is optional — omitting it sets a key-only tag (e.g. key='修正' with no value). Pass value to set a key-value pair (e.g. key='状態', value='完了'). Use node_ids (array) to apply to multiple nodes in one call.",
-    inputSchema: {
-      type: "object",
-      properties: {
-        graph_id: { type: "string", description: "Word graph ID (e.g. 'word-graph-1')" },
-        node_id: { type: "string", description: "Target node ID (use node_ids for bulk)" },
-        node_ids: { type: "array", items: { type: "string" }, description: "Multiple target node IDs (alternative to node_id)" },
-        key: { type: "string", description: "Property key (e.g. '状態', '修正')" },
-        value: { type: "string", description: "Property value (optional — omit for key-only tag)" },
-      },
-      required: ["graph_id", "key"],
-    },
-  },
-  {
-    name: "graph_remove_property",
-    description: "Remove a metadata property from one or more nodes by key. Use node_ids (array) to remove from multiple nodes in one call.",
-    inputSchema: {
-      type: "object",
-      properties: {
-        graph_id: { type: "string", description: "Word graph ID (e.g. 'word-graph-1')" },
-        node_id: { type: "string", description: "Target node ID (use node_ids for bulk)" },
-        node_ids: { type: "array", items: { type: "string" }, description: "Multiple target node IDs (alternative to node_id)" },
-        key: { type: "string", description: "Property key to remove" },
-      },
-      required: ["graph_id", "key"],
-    },
-  },
 ];
 
 // --- Tool handler ---
@@ -287,40 +197,25 @@ export async function callGraphTool(
     if (name === "graph_read_texts_by_word") {
       const word = String(args.word);
       const depth = clampDepth(args.depth);
-      const filter = args.filter as Record<string, string | string[]> | undefined;
       const rawLimit = typeof args.limit === "number" ? args.limit : undefined;
-      const result = await getNeighborsByWord(env, graphId, word, depth, { filter, limit: rawLimit });
+      const result = await getNeighborsByWord(env, graphId, word, depth, rawLimit);
       if (result === null) {
         return { content: [{ type: "text", text: `No node found matching: ${word}` }], isError: true };
       }
       const nodes = result.nodes ?? [];
       let text = nodes.map(nodeLine).join("\n") || "(no nodes)";
-      if (result.truncated) text += `\n[truncated: ${result.count} nodes returned, more exist — reduce depth or add filter]`;
-      return { content: [{ type: "text", text }] };
-    }
-
-    if (name === "graph_search_nodes") {
-      const filter = args.filter as Record<string, string | string[]>;
-      const rawLimit = typeof args.limit === "number" ? args.limit : undefined;
-      const result = await searchNodesByProperty(env, graphId, filter, rawLimit);
-      const nodes = result.nodes ?? [];
-      let text = nodes.map(nodeLine).join("\n") || "(no nodes)";
-      if (result.truncated) text += `\n[truncated: ${result.count} nodes returned, more exist — add more specific filter or reduce limit]`;
+      if (result.truncated) text += `\n[truncated: ${result.count} nodes returned, more exist — reduce depth]`;
       return { content: [{ type: "text", text }] };
     }
 
     if (name === "graph_read_nodes_from") {
       const nodeId = String(args.node_id);
       const depth = clampDepth(args.depth);
-      const filter = args.filter as Record<string, string | string[]> | undefined;
       const rawLimit = typeof args.limit === "number" ? args.limit : undefined;
-      const result = await getNeighbors(env, graphId, nodeId, depth, {
-        filter,
-        limit: rawLimit,
-      });
+      const result = await getNeighbors(env, graphId, nodeId, depth, rawLimit);
       const nodes = result.nodes ?? [];
       let text = nodes.map(nodeLine).join("\n") || "(no nodes)";
-      if (result.truncated) text += `\n[truncated: ${result.count} nodes returned, more exist — reduce depth or add filter]`;
+      if (result.truncated) text += `\n[truncated: ${result.count} nodes returned, more exist — reduce depth]`;
       return { content: [{ type: "text", text }] };
     }
 
@@ -334,8 +229,6 @@ export async function callGraphTool(
       const res = await graphFetch(env, graphId, "node", "POST", body);
       if (!res.ok) throw new Error(`add_node_failed:${res.status}`);
       const data = (await res.json()) as { id: string; en?: string; ja?: string };
-      // Auto-tag all AI-created nodes
-      await graphFetch(env, graphId, `node/${encodeURIComponent(data.id)}/property`, "POST", { key: "AI" });
       return { content: [{ type: "text", text: `Created [${data.id}] ${[data.en, data.ja].filter(Boolean).join(" / ")}` }] };
     }
 
@@ -383,36 +276,6 @@ export async function callGraphTool(
       const res = await graphFetch(env, graphId, "link", "DELETE", { node_id: nodeId, target_node_id: targetId });
       if (!res.ok) throw new Error(`graph_unlink_failed:${res.status}`);
       return { content: [{ type: "text", text: `Unlinked [${nodeId}] ↔ [${targetId}]` }] };
-    }
-
-    if (name === "graph_set_property") {
-      const ids = Array.isArray(args.node_ids) ? (args.node_ids as string[]) : [String(args.node_id)];
-      const key = String(args.key);
-      const value = args.value !== undefined && args.value !== "" ? String(args.value) : undefined;
-      await Promise.all(ids.map(async (id) => {
-        const res = await graphFetch(env, graphId, `node/${encodeURIComponent(id)}/property`, "POST", { key, ...(value !== undefined ? { value } : {}) });
-        if (!res.ok) throw new Error(`set_property_failed:${res.status}:${id}`);
-      }));
-      // b887d7b3: AI-created nodes get an auto "AI" tag (see graph_add_node). Once the AI
-      // assigns a meaningful, non-"AI" property (e.g. "単語"), the node is no longer just an
-      // AI scratch node, so drop the auto "AI" marker. Best-effort (ignore failures/absence).
-      if (key !== "AI") {
-        await Promise.all(ids.map((id) =>
-          graphFetch(env, graphId, `node/${encodeURIComponent(id)}/property/AI`, "DELETE").catch(() => {})
-        ));
-      }
-      const suffix = value !== undefined ? `${key}=${value}` : key;
-      return { content: [{ type: "text", text: ids.length === 1 ? `Set [${ids[0]}] ${suffix}` : `Set ${ids.length} nodes: ${suffix}` }] };
-    }
-
-    if (name === "graph_remove_property") {
-      const ids = Array.isArray(args.node_ids) ? (args.node_ids as string[]) : [String(args.node_id)];
-      const key = String(args.key);
-      await Promise.all(ids.map(async (id) => {
-        const res = await graphFetch(env, graphId, `node/${encodeURIComponent(id)}/property/${encodeURIComponent(key)}`, "DELETE");
-        if (!res.ok) throw new Error(`remove_property_failed:${res.status}:${id}`);
-      }));
-      return { content: [{ type: "text", text: ids.length === 1 ? `Removed [${ids[0]}] ${key}` : `Removed ${key} from ${ids.length} nodes` }] };
     }
 
     return { content: [{ type: "text", text: `Unknown graph tool: ${name}` }], isError: true };
