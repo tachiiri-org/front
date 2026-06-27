@@ -114,9 +114,10 @@ export function createMultiPaneView(ctx: GraphEditorContext): {
     // Miller-columns drill-down: selecting a node keeps exactly one pane immediately to the
     // right of the active pane. If none exists, open one (sourced from the active pane) to show
     // the selection's children; if panes exist beyond that immediate child ("右の右以降"), close
-    // them. Pinned panes are deliberately frozen, so never auto-create/remove around them.
+    // them. A pinned pane is frozen against its *source*, but can still drive its own children,
+    // so selecting in one still drills down; only pinned panes themselves are never auto-removed.
     const srcIdx = panes.findIndex(p => p.config.id === paneId);
-    if (selectedNodeId !== null && srcIdx !== -1 && fullscreenPaneId === null && !panes[srcIdx].config.pinned) {
+    if (selectedNodeId !== null && srcIdx !== -1 && fullscreenPaneId === null) {
       // Remove panes deeper than the immediate child, stopping at any pinned pane.
       while (panes.length > srcIdx + 2 && !panes[panes.length - 1].config.pinned) {
         removePane(panes[panes.length - 1].config.id);
