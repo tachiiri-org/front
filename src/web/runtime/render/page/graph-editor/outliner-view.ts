@@ -408,6 +408,13 @@ export function createOutlinerView(ctx: GraphEditorContext, paneOpts?: OutlinerP
   // Panel header label: '未分類' for the no-link panel, otherwise all target labels joined.
   const panelLabel = (key: string): string => {
     if (key === UNCLASSIFIED) return '未分類';
+    // v1 (group-by-parent): the parent panel is labelled by the ancestor PATH to the pane
+    // parent (root-first), e.g. "ルート" / "ルート / ドメイン" — we group by parent, not by a
+    // node's own link targets.
+    if (rootParentNodeId !== null && key === rootParentNodeId) {
+      const p = selfPathPrefix();
+      if (p.length) return p.map(e => e.label).join(' / ');
+    }
     return parseCombo(key).map(targetLabel).join(' , ');
   };
 
@@ -435,10 +442,12 @@ export function createOutlinerView(ctx: GraphEditorContext, paneOpts?: OutlinerP
   // The single panel a node belongs to: ONE combined key built from its full link-target set
   // (so a multi-link node lands in one combined panel, not several). No links → UNCLASSIFIED.
   // Returns an array (length 1) to keep buildRoots' per-panel loop unchanged.
-  const panelsForNode = (nodeId: string): string[] => {
-    const t = linkTargets.get(nodeId);
-    if (!t || t.length === 0) return [UNCLASSIFIED];
-    return [comboKey(t)];
+  const panelsForNode = (_nodeId: string): string[] => {
+    // v1 (group-by-parent): cluster every top-level node under the SINGLE pane parent instead
+    // of by the node's own link targets (its children). The per-node child-link headers are
+    // gone; all rows share one parent panel. Multi-parent fan-out (a node appearing under each
+    // of its parents) is a later step that needs a flattened subtree view.
+    return [rootParentNodeId ?? UNCLASSIFIED];
   };
 
   // Stable, deterministic panel ordering: by header label, UNCLASSIFIED always last.
@@ -527,21 +536,11 @@ export function createOutlinerView(ctx: GraphEditorContext, paneOpts?: OutlinerP
   // against clobbering an in-progress edit. TODO: bulk depth-2 read to avoid N+1.
   let linkPanelsToken = 0;
   const loadLinkPanels = async () => {
-    const myToken = ++linkPanelsToken;
-    // Cap the prefetch so a large hub pane doesn't fire one fetchChildren per root (N+1).
-    const snapshot = rootNodeList.slice(0, LINK_PANEL_PREFETCH_LIMIT);
-    let changed = false;
-    for (const node of snapshot) {
-      if (linkTargets.has(node.id)) continue;
-      await ensureLinkTargets(node.id);
-      changed = true;
-      if (myToken !== linkPanelsToken) return; // a newer load superseded this one
-    }
-    if (!changed) return;
-    if (myToken !== linkPanelsToken) return;
-    if (listEl.contains(document.activeElement)) return; // don't clobber an active edit
-    buildRoots();
-    render();
+    // v1 (group-by-parent): panels are keyed by the pane parent, not by per-node link targets,
+    // so we no longer prefetch each root's children to build headers. This skips the old N+1
+    // fetch + deferred rebuild; panels are correct on the first synchronous render.
+    linkPanelsToken++;
+    return;
   };
 
   const render = () => {
@@ -563,7 +562,10 @@ export function createOutlinerView(ctx: GraphEditorContext, paneOpts?: OutlinerP
       arr.push(top);
     }
     const panelIds = sortPanelIds([...byPanel.keys()]);
-    const showHeaders = panelIds.length > 1;
+    // v1 (group-by-parent): show the parent-path header whenever a real parent panel exists
+    // (the only non-UNCLASSIFIED panel here), so the parent grouping is visible even though
+    // there is a single group. Bookmark/search panes (null parent → UNCLASSIFIED) stay headerless.
+    const showHeaders = panelIds.some(p => p !== UNCLASSIFIED);
     for (const pid of panelIds) {
       if (showHeaders) listEl.appendChild(buildPanelHeader(pid));
       for (const top of byPanel.get(pid)!) appendSubtree(top);
