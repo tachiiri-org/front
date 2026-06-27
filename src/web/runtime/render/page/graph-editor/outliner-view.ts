@@ -588,13 +588,15 @@ export function createOutlinerView(ctx: GraphEditorContext, paneOpts?: OutlinerP
       return la < lb ? -1 : la > lb ? 1 : (a < b ? -1 : a > b ? 1 : 0);
     });
 
-  // Panel header row (target node's label). Shown only when >1 panel is present.
+  // Panel header row (target node's label) + a divider rule under it, so each panel reads as
+  // a titled section. Shown only when >1 panel is present. The rule (#4a4a4a) matches
+  // buildGroupDivider; top margin separates it from the previous panel's rows.
   const buildPanelHeader = (targetId: string): HTMLElement => {
     const h = document.createElement('div');
     h.dataset.panelHeader = '1';
     h.dataset.panelTarget = targetId;
     h.textContent = panelLabel(targetId);
-    h.style.cssText = `padding:6px 8px 2px 0;color:${TEXT_MID};font-size:11px;font-weight:600;pointer-events:none;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;`;
+    h.style.cssText = `margin:8px 8px 3px 0;padding:0 0 3px 0;border-bottom:1px solid #4a4a4a;color:${TEXT_MID};font-size:11px;font-weight:600;pointer-events:none;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;`;
     return h;
   };
 
