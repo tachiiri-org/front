@@ -251,7 +251,7 @@ export function createOutlinerView(ctx: GraphEditorContext, paneOpts?: OutlinerP
       rowMap.delete(tempId); if (tempRowEl) { rowMap.set(nn.id, tempRowEl); tempRowEl.dataset.nodeId = nn.id; }
       Object.assign(tempNode, nn);
       resolveTemp(); tempReady.delete(tempId);
-      applyPaneFilterProps(nn.id);
+      applyInheritedProps(nn.id, inheritedPropsFor());
       const cc = ctx.childrenCache.get(parentId);
       if (cc) cc.unshift(nn); else setCachedChildren(parentId, [nn]);
       ctx.saveChildrenCache?.();
@@ -1369,21 +1369,34 @@ export function createOutlinerView(ctx: GraphEditorContext, paneOpts?: OutlinerP
     ctx.propChangeHooks.forEach(h => h(nodeId));
   };
 
-  // A node created inside a property-filtered pane inherits that pane's filter keys, so it stays
-  // visible immediately. Updates the node's marker IN PLACE (and persists) rather than going
-  // through syncPropChange — a full re-render here would destroy the just-created textarea and
-  // swallow the label the user is typing. The fresh node is local to this pane, so other panes
-  // (which don't hold it yet) need no broadcast.
-  const applyPaneFilterProps = (nodeId: string) => {
-    if (paneFilterKeys.size === 0) return;
+  // Property keys (with values) a node created next to `anchor` should inherit, so it lands in
+  // the same property context: the anchor's primary GROUP key (value-matched, so it joins the
+  // very same group in a grouped pane) plus any active pane FILTER keys (so it stays visible in
+  // a filtered pane). Returns {} when there is nothing to inherit. Draft (top-level) creation
+  // passes no anchor, so only filter keys apply.
+  const inheritedPropsFor = (anchor?: ONode): Record<string, string> => {
+    const kv: Record<string, string> = {};
+    const ap = anchor ? (ctx.propStore.get(anchor.node.id) ?? {}) : {};
+    if (anchor) { const gk = groupKeyOf(anchor); if (gk) kv[gk] = ap[gk] ?? '●'; }
+    for (const k of paneFilterKeys) if (!(k in kv)) kv[k] = ap[k] ?? '●';
+    return kv;
+  };
+
+  // Apply inherited properties to a freshly-created node. Updates the node's marker IN PLACE
+  // (and persists) rather than going through syncPropChange — a full re-render here would
+  // destroy the just-created textarea and swallow the label the user is typing. The fresh node
+  // is local to this pane, so other panes (which don't hold it yet) need no broadcast.
+  const applyInheritedProps = (nodeId: string, kv: Record<string, string>) => {
+    const keys = Object.keys(kv);
+    if (keys.length === 0) return;
     const props = ctx.propStore.get(nodeId) ?? {};
     let changed = false;
-    for (const key of paneFilterKeys) {
+    for (const key of keys) {
       if (key in props) continue;
-      props[key] = '●';
+      props[key] = kv[key];
       changed = true;
       addKeyToOrder(key);
-      void apiSetProperty(ctx.gId, nodeId, key, '●');
+      void apiSetProperty(ctx.gId, nodeId, key, kv[key]);
     }
     if (!changed) return;
     ctx.propStore.set(nodeId, props);
@@ -2228,7 +2241,7 @@ export function createOutlinerView(ctx: GraphEditorContext, paneOpts?: OutlinerP
     Object.assign(tempNode, nn);
     resolveTemp();
     tempReady.delete(tempId);
-    applyPaneFilterProps(nn.id);
+    applyInheritedProps(nn.id, inheritedPropsFor(onode));
 
     const cc = ctx.childrenCache.get(onode.parentId);
     if (cc) { const ci = cc.findIndex(n => n.id === onode.node.id); if (ci >= 0) cc.splice(before ? ci : ci + 1, 0, nn); }
