@@ -737,29 +737,12 @@ export function createOutlinerView(ctx: GraphEditorContext, paneOpts?: OutlinerP
   // When the pane root N is a SHARED node (reached via several sibling contexts that N links to —
   // e.g. マスタテーブル under both 認証DB and グループDB, both children of システム), compute those
   // context-parents and which context(s) each child of N belongs to. Drives the per-path groups.
+  // (B2 mirror per-path grouping retired alongside B: with edge orientation a shared node's
+  // children are uniform, so splitting a drilled node into per-context groups is redundant. The
+  // pane is always rendered as a single root group; rootCtxParents stays null.)
   const computeRootContext = async (): Promise<void> => {
     rootCtxParents = null;
     rootCtxChildMembership = null;
-    if (!paneParentSet || paneParentId === null) return;
-    const N = paneParentId;
-    const path = selfPathPrefix(); // [..., GP, P0, N]
-    if (path.length < 3) return;
-    const GP = path[path.length - 3]?.id;
-    if (!GP) return;
-    const [gpChildren, nNeighbors] = await Promise.all([neighborIdsOf(GP), neighborIdsOf(N)]);
-    const ctxParents = [...nNeighbors].filter(x => x !== N && gpChildren.has(x));
-    if (ctxParents.length <= 1) return; // single context → ordinary pane
-    const ctxSets = await Promise.all(ctxParents.map(p => neighborIdsOf(p)));
-    const ctxSet = new Set(ctxParents);
-    const ancestors = new Set(path.map(e => e.id).filter((x): x is string => !!x));
-    const membership = new Map<string, string[]>();
-    for (const c of (ctx.childrenCache.get(N) ?? [])) {
-      if (ctxSet.has(c.id) || c.id === N || ancestors.has(c.id)) continue; // skip context/ancestor nodes
-      const belongs = ctxParents.filter((_, i) => ctxSets[i].has(c.id));
-      membership.set(c.id, belongs.length ? belongs : [...ctxParents]); // context-free child → all groups
-    }
-    rootCtxParents = ctxParents;
-    rootCtxChildMembership = membership;
   };
   // Async: compute the pane root's context (if shared), then render flat. No auto-expand: only the
   // root group(s) show initially; deeper groups appear when the user expands a node.
@@ -1012,10 +995,9 @@ export function createOutlinerView(ctx: GraphEditorContext, paneOpts?: OutlinerP
       validated.add(id);
     }
     const excl = ancestorIds(onode); excl.add(onode.node.id);
-    let kids = cached.filter(c => !excl.has(c.id));
-    // v2: drop children that belong to a sibling path-context (e.g. show 認証DB's tables under
-    // 認証DB › マスタテーブル, not グループDB's). No-op for normal (single-context) trees.
-    if (V2_FLAT) kids = await contextFilterNodes(onode, kids);
+    const kids = cached.filter(c => !excl.has(c.id));
+    // (B context-filter retired: hierarchy direction is now expressed by edge orientation
+    // (h_orientation) on the backend, so a node's children are uniform — same wherever it appears.)
     // Child occurrence keys embed THIS occurrence's key, so the same child node reached via
     // two parent occurrences gets two distinct keys (multi-membership / diamond-safe).
     onode.children = kids
