@@ -571,9 +571,9 @@ export function createOutlinerView(ctx: GraphEditorContext, paneOpts?: OutlinerP
   const buildFlatGroupHeader = (parentOcc: ONode | null): HTMLElement => {
     const h = document.createElement('div');
     h.dataset.panelHeader = '1';
-    // Frame the group header like the pane title / old breadcrumb bars: a bottom-bordered band
-    // (BG fill so it reads as a contained strip, BORDER divider) with matching padding.
-    h.style.cssText = `display:flex;align-items:center;gap:2px;flex-wrap:wrap;margin:8px 0 0 0;padding:3px 8px 4px 10px;background:${BG};border-bottom:1px solid ${BORDER};font-size:12px;color:${TEXT_MID};`;
+    // Frame the group header like the stacked pane title / breadcrumb bars: a full band with
+    // top+bottom BORDER lines, BG fill, and NO outer margin (flush, no extra vertical gap).
+    h.style.cssText = `display:flex;align-items:center;gap:2px;flex-wrap:wrap;margin:0;padding:3px 8px 4px 10px;background:${BG};border-top:1px solid ${BORDER};border-bottom:1px solid ${BORDER};font-size:12px;color:${TEXT_MID};`;
 
     const path = flatGroupPath(parentOcc);
     path.forEach((e, i) => {
