@@ -529,7 +529,7 @@ export function createOutlinerView(ctx: GraphEditorContext, paneOpts?: OutlinerP
     rootNodeList = excl ? nodes.filter(n => !excl.has(n.id)) : nodes.slice();
     buildRoots();
     render();
-    void loadLinkPanels();
+    if (V2_FLAT) void flatten(); else void loadLinkPanels();
   };
 
   // Async: load every root's link targets, then rebuild + re-render so panels surface. Guarded
@@ -543,7 +543,85 @@ export function createOutlinerView(ctx: GraphEditorContext, paneOpts?: OutlinerP
     return;
   };
 
-  const render = () => {
+  // ── v2: flattened, parent-grouped view ─────────────────────────────────
+  // Flatten the pane parent's subtree to FLAT_DEPTH levels and group every occurrence into a
+  // panel keyed by its PARENT occurrence (root-relative, all-paths), so a multi-parent node
+  // shows once under each parent. Each panel's header is the ancestor PATH to that parent
+  // (e.g. "ルート / A / B"). This replaces the v1 single-parent header at render time.
+  const V2_FLAT = true;
+  const FLAT_DEPTH = 2;   // levels of children below the pane parent to flatten in
+  const FLAT_MAX = 400;   // hard cap on rendered rows / expanded children (prototype guard)
+
+  // Occurrences from the top-level root down to `occ` (inclusive), root-first.
+  const occChainOcc = (occ: ONode): ONode[] => {
+    const chain: ONode[] = []; const seen = new Set<string>(); let cur: ONode | undefined = occ;
+    while (cur) { if (seen.has(cur.key)) break; seen.add(cur.key); chain.unshift(cur); if (cur.parentKey == null) break; cur = byKey.get(cur.parentKey); }
+    return chain;
+  };
+  // Header label for a parent group: ancestor path (pane prefix + occurrence chain) to the parent.
+  const flatHeaderLabel = (parentOcc: ONode | null): string => {
+    const prefix = selfPathPrefix().map(e => e.label);
+    const chain = parentOcc ? occChainOcc(parentOcc).map(o => labelOf(o.node)) : [];
+    const parts = [...prefix, ...chain];
+    return parts.length ? parts.join(' / ') : 'ルート';
+  };
+  const buildFlatHeader = (text: string): HTMLElement => {
+    const h = document.createElement('div');
+    h.dataset.panelHeader = '1';
+    h.textContent = text;
+    h.style.cssText = `margin:8px 8px 3px 0;padding:0 0 3px 0;border-bottom:1px solid #4a4a4a;color:${TEXT_MID};font-size:11px;font-weight:600;pointer-events:none;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;`;
+    return h;
+  };
+  // Auto-expand occurrences down to `limitDepth`, loading children as needed. Bounded by FLAT_MAX
+  // expanded children so a wide/deep graph can't fan out without limit.
+  let flatExpandCount = 0;
+  const expandToDepth = async (list: ONode[], limitDepth: number): Promise<void> => {
+    for (const o of list) {
+      if (o.depth >= limitDepth || flatExpandCount >= FLAT_MAX) continue;
+      await ensureChildren(o);
+      o.expanded = true;
+      flatExpandCount += o.children.length;
+      await expandToDepth(o.children, limitDepth);
+    }
+  };
+  // Async: expand the subtree, then render it flat. Token-guarded against overlapping loads.
+  let flattenToken = 0;
+  const flatten = async (): Promise<void> => {
+    const myToken = ++flattenToken;
+    flatExpandCount = 0;
+    await expandToDepth(roots, baseDepth + FLAT_DEPTH);
+    if (myToken !== flattenToken) return;
+    if (listEl.contains(document.activeElement)) return; // don't clobber an active edit
+    renderFlat();
+  };
+  // Flat render: pre-order over the occurrence tree, emitting one panel section per parent
+  // (header = its ancestor path) listing that parent's child occurrences. Multi-parent nodes
+  // recur once per parent. Indentation is flattened so every row in a group sits at one level.
+  const renderFlat = () => {
+    rowMap.clear();
+    listEl.innerHTML = '';
+    let count = 0; let truncated = false;
+    const emitGroup = (parentOcc: ONode | null, children: ONode[]) => {
+      if (!children.length || truncated) return;
+      listEl.appendChild(buildFlatHeader(flatHeaderLabel(parentOcc)));
+      const saved = baseDepth;
+      baseDepth = children[0].depth;
+      for (const c of children) { if (count >= FLAT_MAX) { truncated = true; break; } listEl.appendChild(buildRow(c)); count++; }
+      baseDepth = saved;
+    };
+    emitGroup(null, roots);
+    const dfs = (o: ONode) => { if (truncated) return; if (o.children.length) { emitGroup(o, o.children); o.children.forEach(dfs); } };
+    roots.forEach(dfs);
+    const draftParentId = paneParentSet ? paneParentId : (ctx.rootNodeId ?? null);
+    draftEl.style.display = (roots.length === 0 && draftParentId !== null) ? 'flex' : 'none';
+    updateSelectionHighlight();
+    schedulePrefetch();
+    if (paneOpts?.onContentWidthChange) scheduleWidthUpdate();
+  };
+
+  const render = () => { if (V2_FLAT) renderFlat(); else renderNested(); };
+
+  const renderNested = () => {
     rowMap.clear();
     listEl.innerHTML = '';
     // Render a top-level node and, when expanded, its visible subtree.
