@@ -572,6 +572,12 @@ export function createOutlinerView(ctx: GraphEditorContext, paneOpts?: OutlinerP
   // API (queueReorder). Cross-hierarchy drops are rejected: the tree shape must hold.
   const groupKeyOf = (parentOcc: ONode | null): string => parentOcc ? parentOcc.key : '__root__';
   let draggingGroupKey: string | null = null;
+  // A drop is valid only onto a different SIBLING group (same parent occurrence) — used to gate
+  // both the drop indicator and the drop itself, so invalid targets give no misleading feedback.
+  const canDropGroup = (dragKey: string, dropKey: string): boolean => {
+    const xo = byKey.get(dragKey), yo = byKey.get(dropKey);
+    return !!(xo && yo && xo !== yo && xo.parentKey === yo.parentKey);
+  };
   const reorderGroup = (fromKey: string, toKey: string, before: boolean) => {
     const xo = byKey.get(fromKey), yo = byKey.get(toKey);
     if (!xo || !yo || xo === yo) return;
@@ -597,7 +603,7 @@ export function createOutlinerView(ctx: GraphEditorContext, paneOpts?: OutlinerP
     // Group header band: a single bottom BORDER divider only (no top border — the band above it
     // already supplies its own bottom line, so a top border here would double it), BG fill, flush.
     // Padding matches the pane chrome header (3px 6px) so the drag grip aligns with the pane's.
-    h.style.cssText = `display:flex;align-items:center;gap:4px;flex-wrap:wrap;margin:0;padding:3px 6px 3px 0;background:${BG};border-bottom:1px solid ${BORDER};font-size:12px;color:${TEXT_MID};`;
+    h.style.cssText = `display:flex;align-items:center;gap:4px;flex-wrap:wrap;margin:0;padding:3px 6px;background:${BG};border-bottom:1px solid ${BORDER};font-size:12px;color:${TEXT_MID};`;
 
     // Drag grip — drag a group's header to reorder group sections (like the pane reorder grip).
     const groupKey = groupKeyOf(parentOcc);
@@ -616,7 +622,7 @@ export function createOutlinerView(ctx: GraphEditorContext, paneOpts?: OutlinerP
     h.appendChild(grip);
     // The header is the drop target; show a blue insertion line on the half nearest the cursor.
     h.addEventListener('dragover', (e) => {
-      if (!draggingGroupKey || draggingGroupKey === groupKey) return;
+      if (!draggingGroupKey || !canDropGroup(draggingGroupKey, groupKey)) return;
       e.preventDefault();
       if (e.dataTransfer) e.dataTransfer.dropEffect = 'move';
       const rect = h.getBoundingClientRect();
@@ -625,7 +631,7 @@ export function createOutlinerView(ctx: GraphEditorContext, paneOpts?: OutlinerP
     });
     h.addEventListener('dragleave', () => { h.style.boxShadow = ''; });
     h.addEventListener('drop', (e) => {
-      if (!draggingGroupKey || draggingGroupKey === groupKey) return;
+      if (!draggingGroupKey || !canDropGroup(draggingGroupKey, groupKey)) return;
       e.preventDefault();
       const rect = h.getBoundingClientRect();
       const before = (e.clientY - rect.top) < rect.height / 2;
