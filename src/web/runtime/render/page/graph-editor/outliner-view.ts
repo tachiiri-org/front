@@ -439,14 +439,20 @@ export function createOutlinerView(ctx: GraphEditorContext, paneOpts?: OutlinerP
     linkTargets.set(rootNodeId, targets);
   };
 
-  // The single panel a node belongs to: ONE combined key built from its full link-target set
-  // (so a multi-link node lands in one combined panel, not several). No links → UNCLASSIFIED.
-  // Returns an array (length 1) to keep buildRoots' per-panel loop unchanged.
-  const panelsForNode = (_nodeId: string): string[] => {
-    // v1 (group-by-parent): cluster every top-level node under the SINGLE pane parent instead
-    // of by the node's own link targets (its children). The per-node child-link headers are
-    // gone; all rows share one parent panel. Multi-parent fan-out (a node appearing under each
-    // of its parents) is a later step that needs a flattened subtree view.
+  // Multi-context root (mirror/drill pane rooted at a SHARED node): each context-parent becomes
+  // a panel, and a child belongs to the context(s) it links to (or all of them, if context-free).
+  // Populated by computeRootContext; null for ordinary panes.
+  let rootCtxParents: string[] | null = null;
+  let rootCtxChildMembership: Map<string, string[]> | null = null;
+
+  // The panel(s) a top-level node belongs to. Ordinary panes: the single pane parent (one group).
+  // Multi-context panes: the context-parent(s) the node links to, so a shared node's children
+  // split into per-path groups (e.g. m_user under 認証DB, m_node under グループDB).
+  const panelsForNode = (nodeId: string): string[] => {
+    if (rootCtxChildMembership) {
+      const m = rootCtxChildMembership.get(nodeId);
+      if (m && m.length) return m;
+    }
     return [rootParentNodeId ?? UNCLASSIFIED];
   };
 
@@ -597,7 +603,7 @@ export function createOutlinerView(ctx: GraphEditorContext, paneOpts?: OutlinerP
   // A group header styled like the pane breadcrumb bar (bcEl/updateBreadcrumb): the ancestor
   // path as ' › '-separated crumbs, plus per-group controls — copy-path, language toggle, and
   // refresh — relocated here from the pane chrome so each parent group reads as its own panel.
-  const buildFlatGroupHeader = (parentOcc: ONode | null): HTMLElement => {
+  const buildFlatGroupHeader = (parentOcc: ONode | null, ctxPath?: PathEntry[]): HTMLElement => {
     const h = document.createElement('div');
     h.dataset.panelHeader = '1';
     // Group header band: a single bottom BORDER divider only (no top border — the band above it
@@ -606,41 +612,44 @@ export function createOutlinerView(ctx: GraphEditorContext, paneOpts?: OutlinerP
     h.style.cssText = `display:flex;align-items:center;gap:4px;flex-wrap:wrap;margin:0;padding:3px 6px;background:${BG};border-bottom:1px solid ${BORDER};font-size:12px;color:${TEXT_MID};`;
 
     // Drag grip — drag a group's header to reorder group sections (like the pane reorder grip).
-    const groupKey = groupKeyOf(parentOcc);
-    const grip = document.createElement('span');
-    grip.textContent = '⠿';
-    grip.title = 'ドラッグでグループを並び替え';
-    grip.draggable = true;
-    grip.style.cssText = `flex-shrink:0;cursor:grab;color:${TEXT_DIM};font-size:13px;user-select:none;padding:0 2px;`;
-    grip.addEventListener('dragstart', (e) => {
-      e.stopPropagation();
-      draggingGroupKey = groupKey;
-      e.dataTransfer?.setData('text/x-flat-group', groupKey);
-      if (e.dataTransfer) e.dataTransfer.effectAllowed = 'move';
-    });
-    grip.addEventListener('dragend', () => { draggingGroupKey = null; h.style.boxShadow = ''; });
-    h.appendChild(grip);
-    // The header is the drop target; show a blue insertion line on the half nearest the cursor.
-    h.addEventListener('dragover', (e) => {
-      if (!draggingGroupKey || !canDropGroup(draggingGroupKey, groupKey)) return;
-      e.preventDefault();
-      if (e.dataTransfer) e.dataTransfer.dropEffect = 'move';
-      const rect = h.getBoundingClientRect();
-      const before = (e.clientY - rect.top) < rect.height / 2;
-      h.style.boxShadow = before ? 'inset 0 2px 0 0 #4a9eff' : 'inset 0 -2px 0 0 #4a9eff';
-    });
-    h.addEventListener('dragleave', () => { h.style.boxShadow = ''; });
-    h.addEventListener('drop', (e) => {
-      if (!draggingGroupKey || !canDropGroup(draggingGroupKey, groupKey)) return;
-      e.preventDefault();
-      const rect = h.getBoundingClientRect();
-      const before = (e.clientY - rect.top) < rect.height / 2;
-      const from = draggingGroupKey;
-      draggingGroupKey = null; h.style.boxShadow = '';
-      reorderGroup(from, groupKey, before);
-    });
+    // Skipped for context groups (ctxPath): those are the node's parent-paths, not reorderable.
+    if (!ctxPath) {
+      const groupKey = groupKeyOf(parentOcc);
+      const grip = document.createElement('span');
+      grip.textContent = '⠿';
+      grip.title = 'ドラッグでグループを並び替え';
+      grip.draggable = true;
+      grip.style.cssText = `flex-shrink:0;cursor:grab;color:${TEXT_DIM};font-size:13px;user-select:none;padding:0 2px;`;
+      grip.addEventListener('dragstart', (e) => {
+        e.stopPropagation();
+        draggingGroupKey = groupKey;
+        e.dataTransfer?.setData('text/x-flat-group', groupKey);
+        if (e.dataTransfer) e.dataTransfer.effectAllowed = 'move';
+      });
+      grip.addEventListener('dragend', () => { draggingGroupKey = null; h.style.boxShadow = ''; });
+      h.appendChild(grip);
+      // The header is the drop target; show a blue insertion line on the half nearest the cursor.
+      h.addEventListener('dragover', (e) => {
+        if (!draggingGroupKey || !canDropGroup(draggingGroupKey, groupKey)) return;
+        e.preventDefault();
+        if (e.dataTransfer) e.dataTransfer.dropEffect = 'move';
+        const rect = h.getBoundingClientRect();
+        const before = (e.clientY - rect.top) < rect.height / 2;
+        h.style.boxShadow = before ? 'inset 0 2px 0 0 #4a9eff' : 'inset 0 -2px 0 0 #4a9eff';
+      });
+      h.addEventListener('dragleave', () => { h.style.boxShadow = ''; });
+      h.addEventListener('drop', (e) => {
+        if (!draggingGroupKey || !canDropGroup(draggingGroupKey, groupKey)) return;
+        e.preventDefault();
+        const rect = h.getBoundingClientRect();
+        const before = (e.clientY - rect.top) < rect.height / 2;
+        const from = draggingGroupKey;
+        draggingGroupKey = null; h.style.boxShadow = '';
+        reorderGroup(from, groupKey, before);
+      });
+    }
 
-    const path = flatGroupPath(parentOcc);
+    const path = ctxPath ?? flatGroupPath(parentOcc);
     path.forEach((e, i) => {
       if (i > 0) {
         const sep = document.createElement('span');
@@ -696,11 +705,57 @@ export function createOutlinerView(ctx: GraphEditorContext, paneOpts?: OutlinerP
       await expandToDepth(o.children, limitDepth);
     }
   };
-  // Async: expand the subtree, then render it flat. Token-guarded against overlapping loads.
-  let flattenToken = 0;
+  // Display label for a context-parent node id (resolve from any occurrence / children cache).
+  const ctxLabel = (id: string): string => {
+    const o = anyOccOf(id);
+    if (o) return labelOf(o.node);
+    for (const nodes of ctx.childrenCache.values()) { const n = nodes.find(x => x.id === id); if (n) return labelOf(n); }
+    return id.slice(0, 8);
+  };
+  // The breadcrumb path to a context-parent group: the pane path to N with the arrival parent
+  // (second-to-last) swapped for this context, e.g. [root, システム, グループDB, マスタテーブル].
+  const ctxGroupPath = (ctxId: string): PathEntry[] => {
+    const base = selfPathPrefix().map(e => ({ ...e }));
+    if (base.length >= 2) base[base.length - 2] = { id: ctxId, label: ctxLabel(ctxId) };
+    return base;
+  };
+  // When the pane root N is a SHARED node (reached via several sibling contexts that N links to —
+  // e.g. マスタテーブル under both 認証DB and グループDB, both children of システム), compute those
+  // context-parents and which context(s) each child of N belongs to. Drives the per-path groups.
+  const computeRootContext = async (): Promise<void> => {
+    rootCtxParents = null;
+    rootCtxChildMembership = null;
+    if (!paneParentSet || paneParentId === null) return;
+    const N = paneParentId;
+    const path = selfPathPrefix(); // [..., GP, P0, N]
+    if (path.length < 3) return;
+    const GP = path[path.length - 3]?.id;
+    if (!GP) return;
+    const [gpChildren, nNeighbors] = await Promise.all([neighborIdsOf(GP), neighborIdsOf(N)]);
+    const ctxParents = [...nNeighbors].filter(x => x !== N && gpChildren.has(x));
+    if (ctxParents.length <= 1) return; // single context → ordinary pane
+    const ctxSets = await Promise.all(ctxParents.map(p => neighborIdsOf(p)));
+    const ctxSet = new Set(ctxParents);
+    const ancestors = new Set(path.map(e => e.id).filter((x): x is string => !!x));
+    const membership = new Map<string, string[]>();
+    for (const c of (ctx.childrenCache.get(N) ?? [])) {
+      if (ctxSet.has(c.id) || c.id === N || ancestors.has(c.id)) continue; // skip context/ancestor nodes
+      const belongs = ctxParents.filter((_, i) => ctxSets[i].has(c.id));
+      membership.set(c.id, belongs.length ? belongs : [...ctxParents]); // context-free child → all groups
+    }
+    rootCtxParents = ctxParents;
+    rootCtxChildMembership = membership;
+  };
+  // Async: compute the pane root's context (if shared), then render flat. No auto-expand: only the
+  // root group(s) show initially; deeper groups appear when the user expands a node.
   const flatten = async (): Promise<void> => {
-    // No auto-expand: only the root group shows initially; deeper groups appear when the user
-    // expands a node (toggleExpand → renderFlat). This keeps the first level to just the root.
+    await computeRootContext();
+    if (rootCtxParents) {
+      // Context-parent nodes become group HEADERS, not rows — drop them from the row list.
+      const ctxSet = new Set(rootCtxParents);
+      rootNodeList = rootNodeList.filter(n => !ctxSet.has(n.id));
+      buildRoots();
+    }
     if (listEl.contains(document.activeElement)) return; // don't clobber an active edit
     renderFlat();
   };
@@ -711,26 +766,42 @@ export function createOutlinerView(ctx: GraphEditorContext, paneOpts?: OutlinerP
     rowMap.clear();
     listEl.innerHTML = '';
     let count = 0; let truncated = false;
-    const emitGroup = (parentOcc: ONode | null, children: ONode[]) => {
-      if (!children.length || truncated) return;
-      listEl.appendChild(buildFlatGroupHeader(parentOcc));
+    // Emit a group's rows + closing divider (no header), flattening indentation to one level.
+    const emitRows = (children: ONode[]) => {
       const saved = baseDepth;
-      baseDepth = children[0].depth;
+      if (children.length) baseDepth = children[0].depth;
       for (const c of children) { if (count >= FLAT_MAX) { truncated = true; break; } listEl.appendChild(buildRow(c)); count++; }
       baseDepth = saved;
-      // Close the node block with a single full-width divider, so each group's rows read as a
-      // bordered band (and the next group header sits below a single line, never a double one).
       const div = document.createElement('div');
       div.style.cssText = `border-bottom:1px solid ${BORDER};`;
       listEl.appendChild(div);
     };
-    // Emit groups in natural DFS pre-order (parent before its descendants). Sibling order
-    // reflects the underlying node order, which group-drag reordering mutates + persists.
-    emitGroup(null, roots);
+    const emitGroup = (parentOcc: ONode | null, children: ONode[]) => {
+      if (!children.length || truncated) return;
+      listEl.appendChild(buildFlatGroupHeader(parentOcc));
+      emitRows(children);
+    };
     // Reveal a child group only when its parent occurrence is expanded (expansion-driven flatten):
-    // initially just the root group; expanding a row inserts that node's group section inline.
+    // initially just the root group(s); expanding a row inserts that node's group section inline.
     const dfs = (o: ONode) => { if (truncated || !o.expanded) return; if (o.children.length) { emitGroup(o, o.children); o.children.forEach(dfs); } };
-    roots.forEach(dfs);
+    if (rootCtxParents) {
+      // Multi-context pane root: one group per context-parent (the node's paths), each headed by
+      // that path and listing the children that belong to it. Roots are keyed by their context.
+      const byCtx = new Map<string, ONode[]>();
+      for (const top of roots) { const p = panelOfRoot(top); let a = byCtx.get(p); if (!a) { a = []; byCtx.set(p, a); } a.push(top); }
+      for (const ctxId of rootCtxParents) {
+        if (truncated) break;
+        const tops = byCtx.get(ctxId) ?? [];
+        listEl.appendChild(buildFlatGroupHeader(null, ctxGroupPath(ctxId)));
+        emitRows(tops);
+        tops.forEach(dfs);
+      }
+    } else {
+      // Emit groups in natural DFS pre-order (parent before its descendants). Sibling order
+      // reflects the underlying node order, which group-drag reordering mutates + persists.
+      emitGroup(null, roots);
+      roots.forEach(dfs);
+    }
     const draftParentId = paneParentSet ? paneParentId : (ctx.rootNodeId ?? null);
     draftEl.style.display = (roots.length === 0 && draftParentId !== null) ? 'flex' : 'none';
     updateSelectionHighlight();
