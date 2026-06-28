@@ -182,6 +182,35 @@ export const GRAPH_TOOLS = [
       required: ["graph_id", "node_id", "target_node_id"],
     },
   },
+  {
+    name: "graph_orient",
+    description:
+      "Set (or clear) the PARENT endpoint of the edge between two nodes — the direction used to render a hierarchy from the otherwise-undirected links. parent_node_id becomes the parent (the other node is its child); with clear=true the edge returns to undirected. A node never shows as a child under an edge whose parent is the other endpoint, so this is how you stop a category/hub node from appearing under its members.",
+    inputSchema: {
+      type: "object",
+      properties: {
+        graph_id: { type: "string", description: "Word graph ID (e.g. 'word-graph-1')" },
+        node_id: { type: "string", description: "One endpoint of the edge" },
+        parent_node_id: { type: "string", description: "The endpoint to mark as PARENT (must be the other endpoint of this edge)" },
+        clear: { type: "boolean", description: "If true, remove the orientation (edge becomes undirected). parent_node_id is still required, to locate the edge." },
+      },
+      required: ["graph_id", "node_id", "parent_node_id"],
+    },
+  },
+  {
+    name: "graph_orient_children",
+    description:
+      "Bulk-orient every edge of a node so the node is the PARENT (each neighbour becomes its child), EXCEPT neighbours in `except`, whose edge is oriented the other way (that neighbour is the node's parent). Mark a category/hub in one call: e.g. graph_orient_children on '単語' with except=['<カテゴリ id>'] makes 単語 the parent of all its member words while keeping カテゴリ as 単語's parent — so 単語 shows only under カテゴリ, not under every member.",
+    inputSchema: {
+      type: "object",
+      properties: {
+        graph_id: { type: "string", description: "Word graph ID (e.g. 'word-graph-1')" },
+        node_id: { type: "string", description: "The category/hub node to make the parent of its edges" },
+        except: { type: "array", items: { type: "string" }, description: "Neighbour node ids that are instead this node's PARENT (their edge points toward them)" },
+      },
+      required: ["graph_id", "node_id"],
+    },
+  },
 ];
 
 // --- Tool handler ---
@@ -276,6 +305,25 @@ export async function callGraphTool(
       const res = await graphFetch(env, graphId, "link", "DELETE", { node_id: nodeId, target_node_id: targetId });
       if (!res.ok) throw new Error(`graph_unlink_failed:${res.status}`);
       return { content: [{ type: "text", text: `Unlinked [${nodeId}] ↔ [${targetId}]` }] };
+    }
+
+    if (name === "graph_orient") {
+      const nodeId = String(args.node_id);
+      const parentId = String(args.parent_node_id);
+      const clear = args.clear === true;
+      const res = await graphFetch(env, graphId, "orient", "POST", { nodeId, parentId, clear });
+      if (!res.ok) throw new Error(`graph_orient_failed:${res.status}`);
+      const data = (await res.json()) as { oriented: boolean };
+      return { content: [{ type: "text", text: data.oriented ? `Oriented: parent [${parentId}] → child [${nodeId}]` : `Cleared orientation between [${nodeId}] and [${parentId}]` }] };
+    }
+
+    if (name === "graph_orient_children") {
+      const nodeId = String(args.node_id);
+      const except = Array.isArray(args.except) ? (args.except as string[]) : [];
+      const res = await graphFetch(env, graphId, `node/${encodeURIComponent(nodeId)}/orient-children`, "POST", { except });
+      if (!res.ok) throw new Error(`graph_orient_children_failed:${res.status}`);
+      const data = (await res.json()) as { oriented: number };
+      return { content: [{ type: "text", text: `Oriented ${data.oriented} edges of [${nodeId}] as parent${except.length ? ` (except parents: ${except.join(", ")})` : ""}` }] };
     }
 
     return { content: [{ type: "text", text: `Unknown graph tool: ${name}` }], isError: true };
