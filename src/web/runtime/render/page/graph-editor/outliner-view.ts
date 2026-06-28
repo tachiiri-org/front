@@ -172,7 +172,7 @@ export function createOutlinerView(ctx: GraphEditorContext, paneOpts?: OutlinerP
   // Scrollable list
   const listEl = document.createElement('div');
   listEl.dataset.outlinerList = '1';
-  listEl.style.cssText = `flex:1;overflow-y:auto;overflow-x:hidden;padding:4px 0 4px 10px;`;
+  listEl.style.cssText = `flex:1;overflow-y:auto;overflow-x:hidden;padding:4px 0;`;
   el.appendChild(listEl);
 
   let roots: ONode[] = [];
@@ -527,7 +527,6 @@ export function createOutlinerView(ctx: GraphEditorContext, paneOpts?: OutlinerP
     rootParentNodeId = parentNodeId;
     baseDepth = 0;
     rootNodeList = excl ? nodes.filter(n => !excl.has(n.id)) : nodes.slice();
-    flatGroupOrder = null; // occurrence keys change on rebuild → drop any display reorder
     buildRoots();
     render();
     if (V2_FLAT) void flatten(); else void loadLinkPanels();
@@ -566,23 +565,27 @@ export function createOutlinerView(ctx: GraphEditorContext, paneOpts?: OutlinerP
     const all = [...base, ...chain];
     return all.length ? all : [{ id: null, label: 'ルート' }];
   };
-  // ── Flat group reordering (display-only prototype) ─────────────────────
-  // A group's stable key for the current render (occurrence key; the root group uses a sentinel).
-  // Keys change when the tree is rebuilt, so flatGroupOrder is reset on applyRoots.
+  // ── Flat group reordering (sibling groups → persisted node order) ───────
+  // A group is identified by its PARENT occurrence key (the root group uses a sentinel and is not
+  // reorderable). Dragging group X onto a SIBLING group Y (same parent occurrence) reorders the
+  // two group-parents among their shared parent's children — which persists via the node-order
+  // API (queueReorder). Cross-hierarchy drops are rejected: the tree shape must hold.
   const groupKeyOf = (parentOcc: ONode | null): string => parentOcc ? parentOcc.key : '__root__';
   let draggingGroupKey: string | null = null;
-  let flatGroupOrder: string[] | null = null; // display order of group sections (null = natural DFS)
-  let lastGroupOrder: string[] = [];           // group keys in the order last rendered
-  // Move group `from` before/after group `to` in the display order, then re-render. Display-only:
-  // the order is not persisted and resets on reload (refresh / load).
-  const reorderGroup = (from: string, to: string, before: boolean) => {
-    const order = flatGroupOrder ? [...flatGroupOrder] : [...lastGroupOrder];
-    const fi = order.indexOf(from); if (fi < 0) return;
-    order.splice(fi, 1);
-    const ti = order.indexOf(to); if (ti < 0) return;
-    order.splice(before ? ti : ti + 1, 0, from);
-    flatGroupOrder = order;
+  const reorderGroup = (fromKey: string, toKey: string, before: boolean) => {
+    const xo = byKey.get(fromKey), yo = byKey.get(toKey);
+    if (!xo || !yo || xo === yo) return;
+    if (xo.parentKey !== yo.parentKey) { showToast('同じ階層（兄弟）のグループ同士でのみ並び替えできます'); return; }
+    const parentOcc = xo.parentKey ? byKey.get(xo.parentKey) : null;
+    const sibs = parentOcc ? parentOcc.children : roots; // sibling occurrences to reorder
+    const fi = sibs.indexOf(xo); if (fi < 0) return;
+    sibs.splice(fi, 1);
+    const ti = sibs.indexOf(yo); if (ti < 0) { sibs.splice(fi, 0, xo); return; }
+    sibs.splice(before ? ti : ti + 1, 0, xo);
+    const parentNodeId = parentOcc ? parentOcc.node.id : rootParentNodeId;
+    if (!parentOcc) rootNodeList = roots.map((o) => o.node); // keep the canonical root order in sync
     renderFlat();
+    if (parentNodeId) queueReorder(parentNodeId); // persist the new sibling order (debounced)
   };
 
   // A group header styled like the pane breadcrumb bar (bcEl/updateBreadcrumb): the ancestor
@@ -594,7 +597,7 @@ export function createOutlinerView(ctx: GraphEditorContext, paneOpts?: OutlinerP
     // Group header band: a single bottom BORDER divider only (no top border — the band above it
     // already supplies its own bottom line, so a top border here would double it), BG fill, flush.
     // Padding matches the pane chrome header (3px 6px) so the drag grip aligns with the pane's.
-    h.style.cssText = `display:flex;align-items:center;gap:4px;flex-wrap:wrap;margin:0;padding:3px 6px;background:${BG};border-bottom:1px solid ${BORDER};font-size:12px;color:${TEXT_MID};`;
+    h.style.cssText = `display:flex;align-items:center;gap:4px;flex-wrap:wrap;margin:0;padding:3px 6px 3px 0;background:${BG};border-bottom:1px solid ${BORDER};font-size:12px;color:${TEXT_MID};`;
 
     // Drag grip — drag a group's header to reorder group sections (like the pane reorder grip).
     const groupKey = groupKeyOf(parentOcc);
@@ -717,25 +720,11 @@ export function createOutlinerView(ctx: GraphEditorContext, paneOpts?: OutlinerP
       div.style.cssText = `border-bottom:1px solid ${BORDER};`;
       listEl.appendChild(div);
     };
-    // Collect groups in natural DFS pre-order (parent before its descendants).
-    const groups: { key: string; parentOcc: ONode | null; children: ONode[] }[] = [];
-    const push = (parentOcc: ONode | null, children: ONode[]) => {
-      if (children.length) groups.push({ key: groupKeyOf(parentOcc), parentOcc, children });
-    };
-    push(null, roots);
-    const dfs = (o: ONode) => { if (o.children.length) { push(o, o.children); o.children.forEach(dfs); } };
+    // Emit groups in natural DFS pre-order (parent before its descendants). Sibling order
+    // reflects the underlying node order, which group-drag reordering mutates + persists.
+    emitGroup(null, roots);
+    const dfs = (o: ONode) => { if (truncated) return; if (o.children.length) { emitGroup(o, o.children); o.children.forEach(dfs); } };
     roots.forEach(dfs);
-    // Apply the display reorder if any; groups absent from flatGroupOrder keep their DFS position.
-    let ordered = groups;
-    if (flatGroupOrder) {
-      const idx = new Map(flatGroupOrder.map((k, i) => [k, i] as const));
-      ordered = groups
-        .map((g, i) => ({ g, rank: idx.has(g.key) ? idx.get(g.key)! : 1e6 + i }))
-        .sort((a, b) => a.rank - b.rank)
-        .map((x) => x.g);
-    }
-    lastGroupOrder = ordered.map((g) => g.key);
-    for (const g of ordered) { if (truncated) break; emitGroup(g.parentOcc, g.children); }
     const draftParentId = paneParentSet ? paneParentId : (ctx.rootNodeId ?? null);
     draftEl.style.display = (roots.length === 0 && draftParentId !== null) ? 'flex' : 'none';
     updateSelectionHighlight();
