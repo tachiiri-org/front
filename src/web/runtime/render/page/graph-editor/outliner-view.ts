@@ -558,18 +558,59 @@ export function createOutlinerView(ctx: GraphEditorContext, paneOpts?: OutlinerP
     while (cur) { if (seen.has(cur.key)) break; seen.add(cur.key); chain.unshift(cur); if (cur.parentKey == null) break; cur = byKey.get(cur.parentKey); }
     return chain;
   };
-  // Header label for a parent group: ancestor path (pane prefix + occurrence chain) to the parent.
-  const flatHeaderLabel = (parentOcc: ONode | null): string => {
-    const prefix = selfPathPrefix().map(e => e.label);
-    const chain = parentOcc ? occChainOcc(parentOcc).map(o => labelOf(o.node)) : [];
-    const parts = [...prefix, ...chain];
-    return parts.length ? parts.join(' / ') : 'ルート';
+  // Root-first path entries (id+label) to a group's parent: pane prefix + occurrence chain.
+  const flatGroupPath = (parentOcc: ONode | null): PathEntry[] => {
+    const base = selfPathPrefix();
+    const chain = parentOcc ? occChainOcc(parentOcc).map(o => ({ id: o.node.id, label: labelOf(o.node) })) : [];
+    const all = [...base, ...chain];
+    return all.length ? all : [{ id: null, label: 'ルート' }];
   };
-  const buildFlatHeader = (text: string): HTMLElement => {
+  // A group header styled like the pane breadcrumb bar (bcEl/updateBreadcrumb): the ancestor
+  // path as ' › '-separated crumbs, plus per-group controls — copy-path, language toggle, and
+  // refresh — relocated here from the pane chrome so each parent group reads as its own panel.
+  const buildFlatGroupHeader = (parentOcc: ONode | null): HTMLElement => {
     const h = document.createElement('div');
     h.dataset.panelHeader = '1';
-    h.textContent = text;
-    h.style.cssText = `margin:8px 8px 3px 0;padding:0 0 3px 0;border-bottom:1px solid #4a4a4a;color:${TEXT_MID};font-size:11px;font-weight:600;pointer-events:none;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;`;
+    h.style.cssText = `display:flex;align-items:center;gap:2px;flex-wrap:wrap;margin:8px 0 3px 0;padding:4px 8px 4px 10px;border-bottom:1px solid ${BORDER};font-size:12px;`;
+
+    const path = flatGroupPath(parentOcc);
+    path.forEach((e, i) => {
+      if (i > 0) {
+        const sep = document.createElement('span');
+        sep.textContent = ' › ';
+        sep.style.color = TEXT_DIM;
+        h.appendChild(sep);
+      }
+      const span = document.createElement('span');
+      span.textContent = e.label;
+      span.title = e.label;
+      const active = i === path.length - 1;
+      span.style.cssText = `color:${active ? TEXT_HIGH : TEXT_MID};font-size:12px;padding:0 2px;white-space:nowrap;max-width:160px;overflow:hidden;text-overflow:ellipsis;`;
+      h.appendChild(span);
+    });
+
+    const ctrls = document.createElement('span');
+    ctrls.style.cssText = `margin-left:auto;display:flex;align-items:center;gap:2px;flex-shrink:0;`;
+    const mkBtn = (text: string, title: string, onClick: () => void): HTMLButtonElement => {
+      const b = document.createElement('button');
+      b.textContent = text;
+      b.title = title;
+      b.style.cssText = `background:transparent;border:none;color:${TEXT_MID};cursor:pointer;font-size:12px;padding:0 4px;line-height:1;flex-shrink:0;`;
+      b.addEventListener('click', (e) => { e.stopPropagation(); onClick(); });
+      return b;
+    };
+    const pathStr = path.map(p => p.label).join('/');
+    ctrls.appendChild(mkBtn('❐', 'パスをコピー', () => {
+      if (pathStr) void navigator.clipboard.writeText(pathStr).then(() => showToast('パスをコピーしました'));
+    }));
+    const langBtn = mkBtn(paneLang.toUpperCase(), 'このパネルの言語を切替（JA⇄EN）', () => setLang(paneLang === 'ja' ? 'en' : 'ja'));
+    langBtn.style.border = `1px solid ${BORDER}`;
+    langBtn.style.borderRadius = '3px';
+    langBtn.style.fontSize = '10px';
+    langBtn.style.padding = '1px 4px';
+    ctrls.appendChild(langBtn);
+    ctrls.appendChild(mkBtn('⟳', 'このパネルを再読み込み', () => { void load(); }));
+    h.appendChild(ctrls);
     return h;
   };
   // Auto-expand occurrences down to `limitDepth`, loading children as needed. Bounded by FLAT_MAX
@@ -603,7 +644,7 @@ export function createOutlinerView(ctx: GraphEditorContext, paneOpts?: OutlinerP
     let count = 0; let truncated = false;
     const emitGroup = (parentOcc: ONode | null, children: ONode[]) => {
       if (!children.length || truncated) return;
-      listEl.appendChild(buildFlatHeader(flatHeaderLabel(parentOcc)));
+      listEl.appendChild(buildFlatGroupHeader(parentOcc));
       const saved = baseDepth;
       baseDepth = children[0].depth;
       for (const c of children) { if (count >= FLAT_MAX) { truncated = true; break; } listEl.appendChild(buildRow(c)); count++; }
