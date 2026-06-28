@@ -571,7 +571,7 @@ export function createOutlinerView(ctx: GraphEditorContext, paneOpts?: OutlinerP
   const buildFlatGroupHeader = (parentOcc: ONode | null): HTMLElement => {
     const h = document.createElement('div');
     h.dataset.panelHeader = '1';
-    h.style.cssText = `display:flex;align-items:center;gap:2px;flex-wrap:wrap;margin:8px 0 3px 0;padding:4px 8px 4px 10px;border-bottom:1px solid ${BORDER};font-size:12px;`;
+    h.style.cssText = `display:flex;align-items:center;gap:2px;flex-wrap:wrap;margin:8px 0 3px 0;padding:4px 8px 4px 10px;font-size:12px;`;
 
     const path = flatGroupPath(parentOcc);
     path.forEach((e, i) => {
@@ -599,16 +599,20 @@ export function createOutlinerView(ctx: GraphEditorContext, paneOpts?: OutlinerP
       b.addEventListener('click', (e) => { e.stopPropagation(); onClick(); });
       return b;
     };
+    // Bordered "chip" style shared by the copy and language buttons so they read as a set.
+    const chip = (b: HTMLButtonElement): HTMLButtonElement => {
+      b.style.border = `1px solid ${BORDER}`;
+      b.style.borderRadius = '3px';
+      b.style.fontSize = '10px';
+      b.style.padding = '1px 4px';
+      b.style.lineHeight = '1.4';
+      return b;
+    };
     const pathStr = path.map(p => p.label).join('/');
-    ctrls.appendChild(mkBtn('コピー', 'パスをコピー', () => {
+    ctrls.appendChild(chip(mkBtn('コピー', 'パスをコピー', () => {
       if (pathStr) void navigator.clipboard.writeText(pathStr).then(() => showToast('パスをコピーしました'));
-    }));
-    const langBtn = mkBtn(paneLang.toUpperCase(), 'このパネルの言語を切替（JA⇄EN）', () => setLang(paneLang === 'ja' ? 'en' : 'ja'));
-    langBtn.style.border = `1px solid ${BORDER}`;
-    langBtn.style.borderRadius = '3px';
-    langBtn.style.fontSize = '10px';
-    langBtn.style.padding = '1px 4px';
-    ctrls.appendChild(langBtn);
+    })));
+    ctrls.appendChild(chip(mkBtn(paneLang.toUpperCase(), 'このパネルの言語を切替（JA⇄EN）', () => setLang(paneLang === 'ja' ? 'en' : 'ja'))));
     ctrls.appendChild(mkBtn('⟳', 'このパネルを再読み込み', () => { void load(); }));
     h.appendChild(ctrls);
     return h;
@@ -909,6 +913,10 @@ export function createOutlinerView(ctx: GraphEditorContext, paneOpts?: OutlinerP
 
   // ── Breadcrumb ───────────────────────────────────────────────────────
   const updateBreadcrumb = () => {
+    // Flat (v2) mode: every group renders its own breadcrumb, so the pane-level breadcrumb bar
+    // is redundant — hide it.
+    if (V2_FLAT) { bcEl.style.display = 'none'; return; }
+    bcEl.style.display = '';
     bcEl.innerHTML = '';
 
     const btnStyle = (active: boolean) =>
