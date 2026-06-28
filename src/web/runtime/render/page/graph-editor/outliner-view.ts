@@ -600,7 +600,7 @@ export function createOutlinerView(ctx: GraphEditorContext, paneOpts?: OutlinerP
       return b;
     };
     const pathStr = path.map(p => p.label).join('/');
-    ctrls.appendChild(mkBtn('❐', 'パスをコピー', () => {
+    ctrls.appendChild(mkBtn('コピー', 'パスをコピー', () => {
       if (pathStr) void navigator.clipboard.writeText(pathStr).then(() => showToast('パスをコピーしました'));
     }));
     const langBtn = mkBtn(paneLang.toUpperCase(), 'このパネルの言語を切替（JA⇄EN）', () => setLang(paneLang === 'ja' ? 'en' : 'ja'));
