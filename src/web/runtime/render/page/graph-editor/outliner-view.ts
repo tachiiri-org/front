@@ -699,10 +699,8 @@ export function createOutlinerView(ctx: GraphEditorContext, paneOpts?: OutlinerP
   // Async: expand the subtree, then render it flat. Token-guarded against overlapping loads.
   let flattenToken = 0;
   const flatten = async (): Promise<void> => {
-    const myToken = ++flattenToken;
-    flatExpandCount = 0;
-    await expandToDepth(roots, baseDepth + FLAT_DEPTH);
-    if (myToken !== flattenToken) return;
+    // No auto-expand: only the root group shows initially; deeper groups appear when the user
+    // expands a node (toggleExpand → renderFlat). This keeps the first level to just the root.
     if (listEl.contains(document.activeElement)) return; // don't clobber an active edit
     renderFlat();
   };
@@ -729,7 +727,9 @@ export function createOutlinerView(ctx: GraphEditorContext, paneOpts?: OutlinerP
     // Emit groups in natural DFS pre-order (parent before its descendants). Sibling order
     // reflects the underlying node order, which group-drag reordering mutates + persists.
     emitGroup(null, roots);
-    const dfs = (o: ONode) => { if (truncated) return; if (o.children.length) { emitGroup(o, o.children); o.children.forEach(dfs); } };
+    // Reveal a child group only when its parent occurrence is expanded (expansion-driven flatten):
+    // initially just the root group; expanding a row inserts that node's group section inline.
+    const dfs = (o: ONode) => { if (truncated || !o.expanded) return; if (o.children.length) { emitGroup(o, o.children); o.children.forEach(dfs); } };
     roots.forEach(dfs);
     const draftParentId = paneParentSet ? paneParentId : (ctx.rootNodeId ?? null);
     draftEl.style.display = (roots.length === 0 && draftParentId !== null) ? 'flex' : 'none';
@@ -978,6 +978,15 @@ export function createOutlinerView(ctx: GraphEditorContext, paneOpts?: OutlinerP
       expandingSet.delete(onode.key);
     }
     if (next && onode.children.length === 0) { updateExpandMarker(onode); focusRow(onode); return; }
+    if (V2_FLAT) {
+      // Flat mode: expansion reveals/hides the node's group SECTION, so re-render the flat view
+      // rather than nesting rows in place.
+      onode.expanded = next;
+      renderFlat();
+      if (paneOpts?.onContentWidthChange) scheduleWidthUpdate();
+      focusRow(onode);
+      return;
+    }
     if (next) expandInDom(onode); else collapseInDom(onode);
     // expand/collapse mutate the DOM directly (no full render), so re-measure the pane
     // width here — otherwise collapsing long rows leaves the column stuck at its wide size.
