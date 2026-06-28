@@ -439,20 +439,8 @@ export function createOutlinerView(ctx: GraphEditorContext, paneOpts?: OutlinerP
     linkTargets.set(rootNodeId, targets);
   };
 
-  // Multi-context root (mirror/drill pane rooted at a SHARED node): each context-parent becomes
-  // a panel, and a child belongs to the context(s) it links to (or all of them, if context-free).
-  // Populated by computeRootContext; null for ordinary panes.
-  let rootCtxParents: string[] | null = null;
-  let rootCtxChildMembership: Map<string, string[]> | null = null;
-
-  // The panel(s) a top-level node belongs to. Ordinary panes: the single pane parent (one group).
-  // Multi-context panes: the context-parent(s) the node links to, so a shared node's children
-  // split into per-path groups (e.g. m_user under 認証DB, m_node under グループDB).
-  const panelsForNode = (nodeId: string): string[] => {
-    if (rootCtxChildMembership) {
-      const m = rootCtxChildMembership.get(nodeId);
-      if (m && m.length) return m;
-    }
+  // The panel a top-level node belongs to: the single pane parent (one group per pane).
+  const panelsForNode = (_nodeId: string): string[] => {
     return [rootParentNodeId ?? UNCLASSIFIED];
   };
 
@@ -550,13 +538,11 @@ export function createOutlinerView(ctx: GraphEditorContext, paneOpts?: OutlinerP
   };
 
   // ── v2: flattened, parent-grouped view ─────────────────────────────────
-  // Flatten the pane parent's subtree to FLAT_DEPTH levels and group every occurrence into a
-  // panel keyed by its PARENT occurrence (root-relative, all-paths), so a multi-parent node
-  // shows once under each parent. Each panel's header is the ancestor PATH to that parent
-  // (e.g. "ルート / A / B"). This replaces the v1 single-parent header at render time.
+  // Expansion-driven flatten: each occurrence is grouped under its PARENT occurrence (its ancestor
+  // PATH is the group header), so a multi-parent node appears once under each parent. Groups are
+  // revealed as the user expands; initially only the root group shows.
   const V2_FLAT = true;
-  const FLAT_DEPTH = 2;   // levels of children below the pane parent to flatten in
-  const FLAT_MAX = 400;   // hard cap on rendered rows / expanded children (prototype guard)
+  const FLAT_MAX = 400;   // hard cap on rendered rows (guard against a runaway flatten)
 
   // Occurrences from the top-level root down to `occ` (inclusive), root-first.
   const occChainOcc = (occ: ONode): ONode[] => {
@@ -603,7 +589,7 @@ export function createOutlinerView(ctx: GraphEditorContext, paneOpts?: OutlinerP
   // A group header styled like the pane breadcrumb bar (bcEl/updateBreadcrumb): the ancestor
   // path as ' › '-separated crumbs, plus per-group controls — copy-path, language toggle, and
   // refresh — relocated here from the pane chrome so each parent group reads as its own panel.
-  const buildFlatGroupHeader = (parentOcc: ONode | null, ctxPath?: PathEntry[]): HTMLElement => {
+  const buildFlatGroupHeader = (parentOcc: ONode | null): HTMLElement => {
     const h = document.createElement('div');
     h.dataset.panelHeader = '1';
     // Group header band: a single bottom BORDER divider only (no top border — the band above it
@@ -612,8 +598,7 @@ export function createOutlinerView(ctx: GraphEditorContext, paneOpts?: OutlinerP
     h.style.cssText = `display:flex;align-items:center;gap:4px;flex-wrap:nowrap;overflow:hidden;margin:0;padding:3px 6px;background:${BG};border-bottom:1px solid ${BORDER};font-size:12px;color:${TEXT_MID};`;
 
     // Drag grip — drag a group's header to reorder group sections (like the pane reorder grip).
-    // Skipped for context groups (ctxPath): those are the node's parent-paths, not reorderable.
-    if (!ctxPath) {
+    {
       const groupKey = groupKeyOf(parentOcc);
       const grip = document.createElement('span');
       grip.textContent = '⠿';
@@ -649,7 +634,7 @@ export function createOutlinerView(ctx: GraphEditorContext, paneOpts?: OutlinerP
       });
     }
 
-    const path = ctxPath ?? flatGroupPath(parentOcc);
+    const path = flatGroupPath(parentOcc);
     // Crumbs go in a shrinkable container so the controls stay visible; long paths collapse the
     // middle to "…" to keep a single line: root › … › <parent> › <node> (the tail keeps the
     // distinguishing context, e.g. 認証DB vs グループDB).
@@ -708,52 +693,9 @@ export function createOutlinerView(ctx: GraphEditorContext, paneOpts?: OutlinerP
     h.appendChild(ctrls);
     return h;
   };
-  // Auto-expand occurrences down to `limitDepth`, loading children as needed. Bounded by FLAT_MAX
-  // expanded children so a wide/deep graph can't fan out without limit.
-  let flatExpandCount = 0;
-  const expandToDepth = async (list: ONode[], limitDepth: number): Promise<void> => {
-    for (const o of list) {
-      if (o.depth >= limitDepth || flatExpandCount >= FLAT_MAX) continue;
-      await ensureChildren(o);
-      o.expanded = true;
-      flatExpandCount += o.children.length;
-      await expandToDepth(o.children, limitDepth);
-    }
-  };
-  // Display label for a context-parent node id (resolve from any occurrence / children cache).
-  const ctxLabel = (id: string): string => {
-    const o = anyOccOf(id);
-    if (o) return labelOf(o.node);
-    for (const nodes of ctx.childrenCache.values()) { const n = nodes.find(x => x.id === id); if (n) return labelOf(n); }
-    return id.slice(0, 8);
-  };
-  // The breadcrumb path to a context-parent group: the pane path to N with the arrival parent
-  // (second-to-last) swapped for this context, e.g. [root, システム, グループDB, マスタテーブル].
-  const ctxGroupPath = (ctxId: string): PathEntry[] => {
-    const base = selfPathPrefix().map(e => ({ ...e }));
-    if (base.length >= 2) base[base.length - 2] = { id: ctxId, label: ctxLabel(ctxId) };
-    return base;
-  };
-  // When the pane root N is a SHARED node (reached via several sibling contexts that N links to —
-  // e.g. マスタテーブル under both 認証DB and グループDB, both children of システム), compute those
-  // context-parents and which context(s) each child of N belongs to. Drives the per-path groups.
-  // (B2 mirror per-path grouping retired alongside B: with edge orientation a shared node's
-  // children are uniform, so splitting a drilled node into per-context groups is redundant. The
-  // pane is always rendered as a single root group; rootCtxParents stays null.)
-  const computeRootContext = async (): Promise<void> => {
-    rootCtxParents = null;
-    rootCtxChildMembership = null;
-  };
-  // Async: compute the pane root's context (if shared), then render flat. No auto-expand: only the
-  // root group(s) show initially; deeper groups appear when the user expands a node.
+  // Render the flat view. No auto-expand: only the root group shows initially; deeper groups
+  // appear when the user expands a node.
   const flatten = async (): Promise<void> => {
-    await computeRootContext();
-    if (rootCtxParents) {
-      // Context-parent nodes become group HEADERS, not rows — drop them from the row list.
-      const ctxSet = new Set(rootCtxParents);
-      rootNodeList = rootNodeList.filter(n => !ctxSet.has(n.id));
-      buildRoots();
-    }
     if (listEl.contains(document.activeElement)) return; // don't clobber an active edit
     renderFlat();
   };
@@ -782,24 +724,10 @@ export function createOutlinerView(ctx: GraphEditorContext, paneOpts?: OutlinerP
     // Reveal a child group only when its parent occurrence is expanded (expansion-driven flatten):
     // initially just the root group(s); expanding a row inserts that node's group section inline.
     const dfs = (o: ONode) => { if (truncated || !o.expanded) return; if (o.children.length) { emitGroup(o, o.children); o.children.forEach(dfs); } };
-    if (rootCtxParents) {
-      // Multi-context pane root: one group per context-parent (the node's paths), each headed by
-      // that path and listing the children that belong to it. Roots are keyed by their context.
-      const byCtx = new Map<string, ONode[]>();
-      for (const top of roots) { const p = panelOfRoot(top); let a = byCtx.get(p); if (!a) { a = []; byCtx.set(p, a); } a.push(top); }
-      for (const ctxId of rootCtxParents) {
-        if (truncated) break;
-        const tops = byCtx.get(ctxId) ?? [];
-        listEl.appendChild(buildFlatGroupHeader(null, ctxGroupPath(ctxId)));
-        emitRows(tops);
-        tops.forEach(dfs);
-      }
-    } else {
-      // Emit groups in natural DFS pre-order (parent before its descendants). Sibling order
-      // reflects the underlying node order, which group-drag reordering mutates + persists.
-      emitGroup(null, roots);
-      roots.forEach(dfs);
-    }
+    // Emit groups in natural DFS pre-order (parent before its descendants). Sibling order
+    // reflects the underlying node order, which group-drag reordering mutates + persists.
+    emitGroup(null, roots);
+    roots.forEach(dfs);
     const draftParentId = paneParentSet ? paneParentId : (ctx.rootNodeId ?? null);
     draftEl.style.display = (roots.length === 0 && draftParentId !== null) ? 'flex' : 'none';
     updateSelectionHighlight();
@@ -945,41 +873,6 @@ export function createOutlinerView(ctx: GraphEditorContext, paneOpts?: OutlinerP
   const setCachedChildren = (key: string | null, val: ExplorerNode[]) => {
     ctx.childrenCache.set(key, val);
     ctx.saveChildrenCache?.();
-  };
-
-  // Neighbor node ids of `id` (children = undirected neighbors), fetching + caching if absent.
-  const neighborIdsOf = async (id: string): Promise<Set<string>> => {
-    let c = ctx.childrenCache.get(id);
-    if (!c) { c = await fetchChildrenFiltered(id); setCachedChildren(id, c); }
-    return new Set(c.map(n => n.id));
-  };
-  // v2 path-context filter for a SHARED node's children. When a node N (parent P, grandparent GP)
-  // is reached through one of several "context" parents (siblings of P that N also links to — e.g.
-  // 認証DB vs グループDB, both children of システム and both linked to マスタテーブル), keep only the
-  // children consistent with THIS path:
-  //   - drop the alternative-context nodes themselves (the other parents),
-  //   - keep a child linked to P (this context),
-  //   - drop a child linked to another context but not P,
-  //   - keep a child linked to no context (a shared/common child).
-  // Returns the input unchanged when N has no alternative context (the normal single-parent tree).
-  const contextFilterNodes = async (onode: ONode, kids: ExplorerNode[]): Promise<ExplorerNode[]> => {
-    const P = onode.parentId;
-    if (!P) return kids;
-    const gpOcc = onode.parentKey ? byKey.get(onode.parentKey) : undefined;
-    const GP = gpOcc?.parentId ?? rootParentNodeId;
-    if (!GP || GP === P) return kids;
-    const [gpChildren, nNeighbors] = await Promise.all([neighborIdsOf(GP), neighborIdsOf(onode.node.id)]);
-    const altContexts = [...nNeighbors].filter(x => x !== P && x !== onode.node.id && gpChildren.has(x));
-    if (altContexts.length === 0) return kids;
-    const altSet = new Set(altContexts);
-    const [pNeighbors, ...altNeighborSets] = await Promise.all([
-      neighborIdsOf(P), ...altContexts.map(q => neighborIdsOf(q)),
-    ]);
-    return kids.filter(c => {
-      if (altSet.has(c.id)) return false;                 // an alternative-context node itself
-      if (pNeighbors.has(c.id)) return true;              // belongs to this (P) context
-      return !altNeighborSets.some(s => s.has(c.id));     // linked to another context → drop
-    });
   };
 
   const ensureChildren = async (onode: ONode) => {
