@@ -571,9 +571,9 @@ export function createOutlinerView(ctx: GraphEditorContext, paneOpts?: OutlinerP
   const buildFlatGroupHeader = (parentOcc: ONode | null): HTMLElement => {
     const h = document.createElement('div');
     h.dataset.panelHeader = '1';
-    // Frame the group header like the stacked pane title / breadcrumb bars: a full band with
-    // top+bottom BORDER lines, BG fill, and NO outer margin (flush, no extra vertical gap).
-    h.style.cssText = `display:flex;align-items:center;gap:2px;flex-wrap:wrap;margin:0;padding:3px 8px 4px 10px;background:${BG};border-top:1px solid ${BORDER};border-bottom:1px solid ${BORDER};font-size:12px;color:${TEXT_MID};`;
+    // Group header band: a single bottom BORDER divider only (no top border — the band above it
+    // already supplies its own bottom line, so a top border here would double it), BG fill, flush.
+    h.style.cssText = `display:flex;align-items:center;gap:2px;flex-wrap:wrap;margin:0;padding:3px 8px 4px 10px;background:${BG};border-bottom:1px solid ${BORDER};font-size:12px;color:${TEXT_MID};`;
 
     const path = flatGroupPath(parentOcc);
     path.forEach((e, i) => {
@@ -655,6 +655,11 @@ export function createOutlinerView(ctx: GraphEditorContext, paneOpts?: OutlinerP
       baseDepth = children[0].depth;
       for (const c of children) { if (count >= FLAT_MAX) { truncated = true; break; } listEl.appendChild(buildRow(c)); count++; }
       baseDepth = saved;
+      // Close the node block with a single full-width divider, so each group's rows read as a
+      // bordered band (and the next group header sits below a single line, never a double one).
+      const div = document.createElement('div');
+      div.style.cssText = `border-bottom:1px solid ${BORDER};`;
+      listEl.appendChild(div);
     };
     emitGroup(null, roots);
     const dfs = (o: ONode) => { if (truncated) return; if (o.children.length) { emitGroup(o, o.children); o.children.forEach(dfs); } };
