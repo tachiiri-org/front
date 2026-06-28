@@ -55,6 +55,16 @@ export async function fetchChildren(graphId: string, nodeId: string, limit: numb
     .filter((n) => (seen.has(n.id) ? false : (seen.add(n.id), true)));
 }
 
+// A node's ORIENTED parents (the nodes marked as its parent via h_orientation). Used to render a
+// multi-parent node under each of its paths in a mirror/drill pane.
+export async function fetchParents(graphId: string, nodeId: string): Promise<ExplorerNode[]> {
+  const r = await apiFetch(`/api/v1/graph/${graphId}/node/${nodeId}/parents`);
+  if (!r.ok) return [];
+  const data = await r.json() as { nodes: ExplorerNode[] };
+  const seen = new Set<string>();
+  return (data.nodes ?? []).filter((n) => (seen.has(n.id) ? false : (seen.add(n.id), true)));
+}
+
 export async function apiCreateNode(
   graphId: string, parentId: string | null, lang: 'en' | 'ja', label: string,
   insertAfterId?: string,
