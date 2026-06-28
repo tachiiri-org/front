@@ -868,6 +868,41 @@ export function createOutlinerView(ctx: GraphEditorContext, paneOpts?: OutlinerP
     ctx.saveChildrenCache?.();
   };
 
+  // Neighbor node ids of `id` (children = undirected neighbors), fetching + caching if absent.
+  const neighborIdsOf = async (id: string): Promise<Set<string>> => {
+    let c = ctx.childrenCache.get(id);
+    if (!c) { c = await fetchChildrenFiltered(id); setCachedChildren(id, c); }
+    return new Set(c.map(n => n.id));
+  };
+  // v2 path-context filter for a SHARED node's children. When a node N (parent P, grandparent GP)
+  // is reached through one of several "context" parents (siblings of P that N also links to — e.g.
+  // 認証DB vs グループDB, both children of システム and both linked to マスタテーブル), keep only the
+  // children consistent with THIS path:
+  //   - drop the alternative-context nodes themselves (the other parents),
+  //   - keep a child linked to P (this context),
+  //   - drop a child linked to another context but not P,
+  //   - keep a child linked to no context (a shared/common child).
+  // Returns the input unchanged when N has no alternative context (the normal single-parent tree).
+  const contextFilterNodes = async (onode: ONode, kids: ExplorerNode[]): Promise<ExplorerNode[]> => {
+    const P = onode.parentId;
+    if (!P) return kids;
+    const gpOcc = onode.parentKey ? byKey.get(onode.parentKey) : undefined;
+    const GP = gpOcc?.parentId ?? rootParentNodeId;
+    if (!GP || GP === P) return kids;
+    const [gpChildren, nNeighbors] = await Promise.all([neighborIdsOf(GP), neighborIdsOf(onode.node.id)]);
+    const altContexts = [...nNeighbors].filter(x => x !== P && x !== onode.node.id && gpChildren.has(x));
+    if (altContexts.length === 0) return kids;
+    const altSet = new Set(altContexts);
+    const [pNeighbors, ...altNeighborSets] = await Promise.all([
+      neighborIdsOf(P), ...altContexts.map(q => neighborIdsOf(q)),
+    ]);
+    return kids.filter(c => {
+      if (altSet.has(c.id)) return false;                 // an alternative-context node itself
+      if (pNeighbors.has(c.id)) return true;              // belongs to this (P) context
+      return !altNeighborSets.some(s => s.has(c.id));     // linked to another context → drop
+    });
+  };
+
   const ensureChildren = async (onode: ONode) => {
     if (onode.childrenLoaded) return;
     const id = onode.node.id;
@@ -881,9 +916,13 @@ export function createOutlinerView(ctx: GraphEditorContext, paneOpts?: OutlinerP
       validated.add(id);
     }
     const excl = ancestorIds(onode); excl.add(onode.node.id);
+    let kids = cached.filter(c => !excl.has(c.id));
+    // v2: drop children that belong to a sibling path-context (e.g. show 認証DB's tables under
+    // 認証DB › マスタテーブル, not グループDB's). No-op for normal (single-context) trees.
+    if (V2_FLAT) kids = await contextFilterNodes(onode, kids);
     // Child occurrence keys embed THIS occurrence's key, so the same child node reached via
     // two parent occurrences gets two distinct keys (multi-membership / diamond-safe).
-    onode.children = cached.filter(c => !excl.has(c.id))
+    onode.children = kids
       .map(c => make(c, onode.node.id, onode.depth + 1, childKey(onode.key, c.id), onode.key));
     onode.childrenLoaded = true;
   };
