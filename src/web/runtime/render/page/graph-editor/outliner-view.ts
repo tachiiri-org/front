@@ -609,7 +609,7 @@ export function createOutlinerView(ctx: GraphEditorContext, paneOpts?: OutlinerP
     // Group header band: a single bottom BORDER divider only (no top border — the band above it
     // already supplies its own bottom line, so a top border here would double it), BG fill, flush.
     // Padding matches the pane chrome header (3px 6px) so the drag grip aligns with the pane's.
-    h.style.cssText = `display:flex;align-items:center;gap:4px;flex-wrap:wrap;margin:0;padding:3px 6px;background:${BG};border-bottom:1px solid ${BORDER};font-size:12px;color:${TEXT_MID};`;
+    h.style.cssText = `display:flex;align-items:center;gap:4px;flex-wrap:nowrap;overflow:hidden;margin:0;padding:3px 6px;background:${BG};border-bottom:1px solid ${BORDER};font-size:12px;color:${TEXT_MID};`;
 
     // Drag grip — drag a group's header to reorder group sections (like the pane reorder grip).
     // Skipped for context groups (ctxPath): those are the node's parent-paths, not reorderable.
@@ -650,23 +650,38 @@ export function createOutlinerView(ctx: GraphEditorContext, paneOpts?: OutlinerP
     }
 
     const path = ctxPath ?? flatGroupPath(parentOcc);
-    path.forEach((e, i) => {
+    // Crumbs go in a shrinkable container so the controls stay visible; long paths collapse the
+    // middle to "…" to keep a single line: root › … › <parent> › <node> (the tail keeps the
+    // distinguishing context, e.g. 認証DB vs グループDB).
+    const crumbsWrap = document.createElement('span');
+    crumbsWrap.dataset.crumbs = '1';
+    crumbsWrap.style.cssText = `flex:1;min-width:0;display:flex;align-items:center;gap:2px;overflow:hidden;white-space:nowrap;`;
+    type Crumb = { label: string; dim?: boolean; active?: boolean };
+    const crumbs: Crumb[] = path.length > 3
+      ? [
+          { label: path[0].label },
+          { label: '…', dim: true },
+          { label: path[path.length - 2].label },
+          { label: path[path.length - 1].label, active: true },
+        ]
+      : path.map((e, i) => ({ label: e.label, active: i === path.length - 1 }));
+    crumbs.forEach((cr, i) => {
       if (i > 0) {
         const sep = document.createElement('span');
         sep.textContent = ' › ';
-        sep.style.color = TEXT_DIM;
-        h.appendChild(sep);
+        sep.style.cssText = `color:${TEXT_DIM};flex-shrink:0;`;
+        crumbsWrap.appendChild(sep);
       }
       const span = document.createElement('span');
-      span.textContent = e.label;
-      span.title = e.label;
-      const active = i === path.length - 1;
-      span.style.cssText = `color:${active ? TEXT_HIGH : TEXT_MID};font-size:12px;padding:0 2px;white-space:nowrap;max-width:160px;overflow:hidden;text-overflow:ellipsis;`;
-      h.appendChild(span);
+      span.textContent = cr.label;
+      span.title = cr.label;
+      span.style.cssText = `color:${cr.dim ? TEXT_DIM : cr.active ? TEXT_HIGH : TEXT_MID};font-size:12px;padding:0 2px;white-space:nowrap;max-width:160px;overflow:hidden;text-overflow:ellipsis;flex-shrink:0;`;
+      crumbsWrap.appendChild(span);
     });
+    h.appendChild(crumbsWrap);
 
     const ctrls = document.createElement('span');
-    ctrls.style.cssText = `margin-left:auto;display:flex;align-items:center;gap:2px;flex-shrink:0;`;
+    ctrls.style.cssText = `display:flex;align-items:center;gap:2px;flex-shrink:0;`;
     const mkBtn = (text: string, title: string, onClick: () => void): HTMLButtonElement => {
       const b = document.createElement('button');
       b.textContent = text;
@@ -854,8 +869,7 @@ export function createOutlinerView(ctx: GraphEditorContext, paneOpts?: OutlinerP
       const minW = Math.max(280, Math.round(window.innerWidth * 0.20));
       const maxCap = Math.round(window.innerWidth * 0.40);
       const rows = listEl.querySelectorAll<HTMLElement>('[data-node-id]');
-      if (rows.length === 0) { paneOpts!.onContentWidthChange!(minW); return; }
-      const firstTa = rows[0].querySelector<HTMLTextAreaElement>('textarea');
+      const firstTa = rows[0]?.querySelector<HTMLTextAreaElement>('textarea');
       const font = firstTa ? getComputedStyle(firstTa).font : '14px sans-serif';
       const canvas = document.createElement('canvas');
       const c = canvas.getContext('2d')!;
@@ -869,6 +883,17 @@ export function createOutlinerView(ctx: GraphEditorContext, paneOpts?: OutlinerP
         const textW = Math.ceil(c.measureText(ta.value).width);
         maxW = Math.max(maxW, spacerW + 18 + textW + 48);
       });
+      // Group headers (breadcrumb path + controls) are part of the content too: size to fit the
+      // crumbs' intrinsic width (scrollWidth, since the crumb box clips) plus the fixed controls.
+      listEl.querySelectorAll<HTMLElement>('[data-panel-header]').forEach(h => {
+        const crumbs = h.querySelector<HTMLElement>('[data-crumbs]');
+        let w = 12; // horizontal padding
+        for (const child of Array.from(h.children) as HTMLElement[]) {
+          w += child === crumbs ? child.scrollWidth : child.offsetWidth;
+        }
+        maxW = Math.max(maxW, w);
+      });
+      if (maxW === 0) { paneOpts!.onContentWidthChange!(minW); return; }
       // Start wide by default (matches the initial PANE_WIDTH baseline); shrink only when
       // every row's text is shorter than this, grow up to maxCap when text is long.
       paneOpts!.onContentWidthChange!(Math.min(Math.max(minW, maxW), maxCap));
