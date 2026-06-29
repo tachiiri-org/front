@@ -154,6 +154,7 @@ export function createLineView(
     const labelById = new Map(line.participants.map((p) => [p.id, labelOf(p, lang)] as const));
 
     const row = document.createElement('div');
+    row.dataset.lineId = line.lineId;
     row.style.cssText = `display:flex;align-items:flex-start;padding:2px 0;`;
     const spacer = document.createElement('span');
     spacer.style.cssText = `flex-shrink:0;width:6px;`;
@@ -245,6 +246,13 @@ export function createLineView(
           if (e.key === 'Escape') { closeMenu(); return; }
         }
         if (e.key === 'Escape') { closeMenu(); return; }
+        // 既存リレーションで Enter は改行ではなく「新しいリレーションを追加」（Shift+Enterで改行）。
+        if (e.key === 'Enter' && !e.shiftKey) {
+          e.preventDefault();
+          const nid = currentNodeId;
+          if (nid) void (async () => { const created = await apiCreateRelation(ctx.gId, nid, lang, ''); await render(); if (created) focusLine(created.lineId); })();
+          return;
+        }
         const atStart = ta.selectionStart === 0 && ta.selectionEnd === 0;
         const atEnd = ta.selectionStart === ta.value.length && ta.selectionEnd === ta.value.length;
         // 連続caret: 端で←→を押すと隣のテキスト片へ（チップを跨ぐ）。
@@ -398,6 +406,11 @@ export function createLineView(
     bodyEl.appendChild(makeDraftRow(nodeId));
     for (const line of lines) bodyEl.appendChild(renderRelationRow(line));
     updateActiveHighlight();
+  };
+
+  const focusLine = (lineId: string) => {
+    const row = bodyEl.querySelector(`[data-line-id="${CSS.escape(lineId)}"]`);
+    (row?.querySelector('textarea') as HTMLTextAreaElement | null)?.focus();
   };
 
   void render();
