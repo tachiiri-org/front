@@ -63,38 +63,15 @@ export function createMultiPaneView(ctx: GraphEditorContext): {
   const el = document.createElement('div');
   el.style.cssText = `display:flex;flex-direction:row;flex:1;overflow:hidden;`;
 
+  // Node panels take only their own width on the left (shrinkable + horizontally scrollable when
+  // they overflow); the line dock fills ALL remaining space to the right (右余白全体).
   const nodeArea = document.createElement('div');
-  nodeArea.style.cssText = `display:flex;flex-direction:row;flex:1;overflow-x:auto;overflow-y:hidden;min-width:0;`;
+  nodeArea.style.cssText = `display:flex;flex-direction:row;flex:0 1 auto;overflow-x:auto;overflow-y:hidden;min-width:0;`;
   el.appendChild(nodeArea);
 
-  // ── Line dock (常時表示) ────────────────────────────────────────────────────
-  const DOCK_KEY = `graph-editor-linedock:${ctx.gId}`;
-  const loadDockWidth = (): number => {
-    const raw = parseInt(localStorage.getItem(DOCK_KEY) ?? '', 10);
-    return Number.isFinite(raw) && raw >= 240 ? raw : Math.max(300, Math.round(window.innerWidth * 0.24));
-  };
+  // ── Line dock (常時表示・右余白を全部使う) ──────────────────────────────────
   const lineDock = document.createElement('div');
-  lineDock.style.cssText = `flex-shrink:0;display:flex;flex-direction:column;width:${loadDockWidth()}px;border-left:1px solid ${BORDER};overflow:hidden;position:relative;`;
-  // Left-edge resize handle for the dock.
-  const dockResize = document.createElement('div');
-  dockResize.style.cssText = `position:absolute;left:0;top:0;bottom:0;width:4px;cursor:col-resize;z-index:2;`;
-  dockResize.addEventListener('mousedown', (e) => {
-    e.preventDefault();
-    const startX = e.clientX;
-    const startW = lineDock.offsetWidth;
-    const onMove = (ev: MouseEvent) => {
-      const w = Math.max(240, startW - (ev.clientX - startX));
-      lineDock.style.width = `${w}px`;
-    };
-    const onUp = () => {
-      document.removeEventListener('mousemove', onMove);
-      document.removeEventListener('mouseup', onUp);
-      localStorage.setItem(DOCK_KEY, String(lineDock.offsetWidth));
-    };
-    document.addEventListener('mousemove', onMove);
-    document.addEventListener('mouseup', onUp);
-  });
-  lineDock.appendChild(dockResize);
+  lineDock.style.cssText = `flex:1 1 0;min-width:300px;display:flex;flex-direction:column;border-left:1px solid ${BORDER};overflow:hidden;`;
 
   const lineView: PaneView = createLineView(ctx, { lang: ctx.state.lang, initialNodeId: null });
   lineView.el.style.flex = '1';
@@ -147,29 +124,10 @@ export function createMultiPaneView(ctx: GraphEditorContext): {
 
   // ── Inter-pane wiring ──────────────────────────────────────────────
   const onPaneSelect = (paneId: string, selectedNodeId: string | null) => {
-    // Miller-columns drill-down: selecting a node keeps exactly one pane immediately to the
-    // right of the active pane. If none exists, open one (sourced from the active pane) to show
-    // the selection's children; if panes exist beyond that immediate child ("右の右以降"), close
-    // them. A pinned pane is frozen against its *source*, but can still drive its own children,
-    // so selecting in one still drills down; only pinned panes themselves are never auto-removed.
-    const srcIdx = panes.findIndex(p => p.config.id === paneId);
-    if (selectedNodeId !== null && srcIdx !== -1 && fullscreenPaneId === null) {
-      // Remove panes deeper than the immediate child, stopping at any pinned pane.
-      while (panes.length > srcIdx + 2 && !panes[panes.length - 1].config.pinned) {
-        removePane(panes[panes.length - 1].config.id);
-      }
-      // No pane to the right → open a child pane sourced from this one.
-      if (panes.length === srcIdx + 1) {
-        const cfg = newPaneConfig(`パネル ${panes.length + 1}`, panes[srcIdx].config.lang);
-        cfg.sourceId = paneId;
-        const inst = createPane(cfg);
-        panes.push(inst);
-        nodeArea.insertBefore(inst.containerEl, addPaneBtn);
-        saveAll();
-        updateAllSrcBtns();
-      }
-    }
-    // Get ancestors of the selected node from the source pane to exclude from child panes
+    // Selecting a node no longer auto-opens a child pane — drilling is done inline (▸/▾) within
+    // the panel. Selection only (a) updates any pane the user has explicitly sourced from this one
+    // and (b) feeds the persistent line dock. Extra node panels are added manually (＋).
+    // Get ancestors of the selected node from the source pane to exclude from linked panes
     // (graph edges are undirected so ancestors appear as neighbors; filtering prevents backward nav)
     const srcPane = panes.find(p => p.config.id === paneId);
     const ancestorIds = selectedNodeId && srcPane
@@ -545,8 +503,8 @@ export function createMultiPaneView(ctx: GraphEditorContext): {
     // New pane inherits the language of the rightmost pane (or the global default).
     const inheritLang = panes.length > 0 ? panes[panes.length - 1].config.lang : ctx.state.lang;
     const config = newPaneConfig(`パネル ${panes.length + 1}`, inheritLang);
-    // Default source = rightmost existing pane (1つ左のカラム)
-    if (panes.length > 0) config.sourceId = panes[panes.length - 1].config.id;
+    // Default = independent (source = root/null). Linking to another pane is opt-in via the
+    // source menu.
     const inst = createPane(config);
     panes.push(inst);
     nodeArea.insertBefore(inst.containerEl, addPaneBtn);
