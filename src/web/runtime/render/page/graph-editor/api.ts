@@ -1,4 +1,4 @@
-import type { ExplorerNode } from './types';
+import type { ExplorerNode, ExplorerLine } from './types';
 
 export async function apiFetch(input: string, init?: RequestInit): Promise<Response> {
   const r = await fetch(input, init);
@@ -172,5 +172,67 @@ export async function apiMoveNode(
     headers: { 'Content-Type': 'application/json' },
     body: JSON.stringify({ direction, parentId, afterSwapSiblingIds }),
     keepalive,
+  });
+}
+
+// ── 関係 line (relation line) ────────────────────────────────────────────────
+// A relation line is an n-ary edge that carries free-text prose (body) connecting its participant
+// nodes (ordered; head = subject). See backend p_line_body / h_ray.
+
+// ノードが参加している関係 line 一覧（本文＋順序付き参加者）。ツリー枝は含まれない。
+export async function fetchNodeLines(graphId: string, nodeId: string): Promise<ExplorerLine[]> {
+  const r = await apiFetch(`/api/v1/graph/${graphId}/node/${nodeId}/lines`);
+  if (!r.ok) return [];
+  const data = await r.json() as { lines: ExplorerLine[] };
+  return data.lines ?? [];
+}
+
+// nodeId を主語（先頭参加者）にした関係 line を新規作成。
+export async function apiCreateRelation(
+  graphId: string, nodeId: string, lang: 'en' | 'ja', body?: string,
+): Promise<ExplorerLine | null> {
+  const r = await apiFetch(`/api/v1/graph/${graphId}/node/${nodeId}/relation`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ lang, ...(body ? { body } : {}) }),
+  });
+  if (!r.ok) return null;
+  return r.json() as Promise<ExplorerLine>;
+}
+
+// 関係 line の本文を言語ごとに設定（空文字でも行は残り、関係 line のマークは保持）。
+export async function apiSetLineBody(graphId: string, lineId: string, lang: 'en' | 'ja', body: string): Promise<void> {
+  await apiFetch(`/api/v1/graph/${graphId}/line/${lineId}/body`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ lang, body }),
+  });
+}
+
+// 参加者を追加（afterNodeId 指定でその直後、無指定で末尾）。返り値は更新後の順序付き参加者。
+export async function apiAddRay(
+  graphId: string, lineId: string, nodeId: string, afterNodeId?: string,
+): Promise<ExplorerNode[]> {
+  const r = await apiFetch(`/api/v1/graph/${graphId}/line/${lineId}/ray`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ nodeId, ...(afterNodeId ? { afterNodeId } : {}) }),
+  });
+  if (!r.ok) return [];
+  const data = await r.json() as { participants: ExplorerNode[] };
+  return data.participants ?? [];
+}
+
+// 参加者を削除（残り0なら line ごと削除される）。
+export async function apiRemoveRay(graphId: string, lineId: string, nodeId: string): Promise<void> {
+  await apiFetch(`/api/v1/graph/${graphId}/line/${lineId}/ray/${nodeId}`, { method: 'DELETE' });
+}
+
+// 参加者順を明示配列で再構築（h_ray を貼り直す）。
+export async function apiReorderRay(graphId: string, lineId: string, order: string[]): Promise<void> {
+  await apiFetch(`/api/v1/graph/${graphId}/line/${lineId}/ray/order`, {
+    method: 'PATCH',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ order }),
   });
 }

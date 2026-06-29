@@ -1,6 +1,7 @@
-import type { GraphEditorContext } from './types';
+import type { GraphEditorContext, PaneView } from './types';
 import { BORDER, TEXT_HIGH, TEXT_MID, TEXT_DIM, SELECT_STRONG } from './constants';
 import { createOutlinerView } from './outliner-view';
+import { createLineView } from './line-view';
 
 type PaneConfig = {
   id: string;
@@ -8,18 +9,20 @@ type PaneConfig = {
   sourceId: string | null;   // null = root; or another pane id
   width: number;             // px
   lang: 'en' | 'ja';         // per-pane display/edit language
+  mode?: 'node' | 'line';    // 'node' (default) = hierarchy outliner; 'line' = relation (関係) view
   pinned?: boolean;          // true = frozen: ignore source-pane selection changes
   pinnedParentId?: string | null; // parent snapshot to restore the frozen view on reload
 };
 
 type PaneInstance = {
   config: PaneConfig;
-  view: ReturnType<typeof createOutlinerView>;
+  view: PaneView;
   containerEl: HTMLElement;   // the outer div (header + body)
   updateSrcBtn: () => void;
   updateFsBtn: () => void;
   updatePinBtn: () => void;
   updateLangBtn: () => void;
+  updateModeBtn: () => void;
 };
 
 const STORAGE_KEY = (gId: string) => `graph-editor-panes:${gId}`;
@@ -279,6 +282,24 @@ export function createMultiPaneView(ctx: GraphEditorContext): {
     });
     header.appendChild(langBtn);
 
+    // Mode toggle (ノード ⇄ 関係) — switch the column between the hierarchy outliner and the
+    // relation (line) view of the source pane's selected node. Toggling rebuilds the pane.
+    const modeBtn = document.createElement('button');
+    const updateModeBtn = () => {
+      const isLine = config.mode === 'line';
+      modeBtn.textContent = isLine ? '関係' : 'ノード';
+      modeBtn.title = isLine ? '関係(line)列。クリックでノード列へ' : 'ノード(階層)列。クリックで関係(line)列へ';
+      modeBtn.style.cssText = `background:${isLine ? SELECT_STRONG : 'transparent'};border:1px solid ${BORDER};color:${isLine ? '#fff' : TEXT_MID};cursor:pointer;font-size:10px;padding:1px 4px;border-radius:3px;flex-shrink:0;line-height:1.4;`;
+    };
+    updateModeBtn();
+    modeBtn.addEventListener('click', (e) => {
+      e.stopPropagation();
+      config.mode = config.mode === 'line' ? 'node' : 'line';
+      saveAll();
+      rebuildPane(config.id);
+    });
+    header.appendChild(modeBtn);
+
     // Source button
     const srcBtn = document.createElement('button');
     srcBtn.style.cssText = `background:transparent;border:1px solid ${BORDER};color:${TEXT_MID};cursor:pointer;font-size:10px;padding:1px 5px;border-radius:3px;flex-shrink:0;`;
@@ -371,22 +392,28 @@ export function createMultiPaneView(ctx: GraphEditorContext): {
     const panePath = (config.sourceId !== null && initParent && sourcePane)
       ? sourcePane.view.getNodePath(initParent) : [];
 
-    const view = createOutlinerView(ctx, {
-      paneParentId,
-      panePath,
-      lang: config.lang,
-      onNodeSelect: (nodeId) => onPaneSelect(config.id, nodeId),
-      onMoveNodeToPane: (nodeId, direction) => moveToAdjacentPane(config.id, nodeId, direction),
-      onReorderPane: (direction) => movePane(config.id, direction),
-      onContentWidthChange: (w) => {
-        // Measure only non-flex-1 header children to avoid feedback loop
-        // (header.scrollWidth includes labelEl which stretches to container width)
-        const minHeaderW = langBtn.offsetWidth + srcBtn.offsetWidth + pinBtn.offsetWidth + reloadBtn.offsetWidth + fsBtn.offsetWidth + closeBtn.offsetWidth + 36;
-        const actualW = Math.max(w, minHeaderW);
-        containerEl.style.width = `${actualW}px`;
-        config.width = actualW;
-      },
-    });
+    const view: PaneView = config.mode === 'line'
+      ? createLineView(ctx, {
+          lang: config.lang,
+          // A relation column shows the relations of its source pane's selected node.
+          initialNodeId: config.sourceId !== null ? (initParent ?? null) : null,
+        })
+      : createOutlinerView(ctx, {
+          paneParentId,
+          panePath,
+          lang: config.lang,
+          onNodeSelect: (nodeId) => onPaneSelect(config.id, nodeId),
+          onMoveNodeToPane: (nodeId, direction) => moveToAdjacentPane(config.id, nodeId, direction),
+          onReorderPane: (direction) => movePane(config.id, direction),
+          onContentWidthChange: (w) => {
+            // Measure only non-flex-1 header children to avoid feedback loop
+            // (header.scrollWidth includes labelEl which stretches to container width)
+            const minHeaderW = langBtn.offsetWidth + srcBtn.offsetWidth + pinBtn.offsetWidth + reloadBtn.offsetWidth + fsBtn.offsetWidth + closeBtn.offsetWidth + 36;
+            const actualW = Math.max(w, minHeaderW);
+            containerEl.style.width = `${actualW}px`;
+            config.width = actualW;
+          },
+        });
     view.el.style.flex = '1';
     containerEl.appendChild(view.el);
 
@@ -414,9 +441,25 @@ export function createMultiPaneView(ctx: GraphEditorContext): {
     });
     containerEl.appendChild(resizeHandle);
 
-    const instance: PaneInstance = { config, view, containerEl, updateSrcBtn, updateFsBtn, updatePinBtn, updateLangBtn };
+    const instance: PaneInstance = { config, view, containerEl, updateSrcBtn, updateFsBtn, updatePinBtn, updateLangBtn, updateModeBtn };
 
     return instance;
+  };
+
+  // Rebuild a pane in place (used when toggling its mode). Recreates the instance from its config
+  // — the new view re-derives its parent/node from the source pane's current selection — and swaps
+  // the DOM node at the same position so neighbouring panes and ordering are preserved.
+  const rebuildPane = (paneId: string) => {
+    const idx = panes.findIndex(p => p.config.id === paneId);
+    if (idx === -1) return;
+    const old = panes[idx];
+    old.view.unregister();
+    const inst = createPane(old.config);
+    panes[idx] = inst;
+    el.insertBefore(inst.containerEl, old.containerEl);
+    old.containerEl.remove();
+    updateAllSrcBtns();
+    void inst.view.load();
   };
 
   // ── Source selector popover ──────────────────────────────────────

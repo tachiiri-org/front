@@ -1,5 +1,9 @@
 export type ExplorerNode = { id: string; en?: string; ja?: string; color?: string; properties?: Record<string, string> };
 
+// 関係 line: テキスト本文(body, 言語ごと)と順序付き参加者(participants, 先頭=主語)を持つ n 項エッジ。
+// 構造ツリーの枝(テキスト無しの line)とは別物で、各参加ノードの「関係」一覧として現れる。
+export type ExplorerLine = { lineId: string; body: Record<string, string>; participants: ExplorerNode[] };
+
 // Cross-pane drag state for the multi-pane (パネル) view. Each pane is an independent
 // outliner instance with its own closure scope, so the source pane records the dragged
 // node(s) here on dragstart and the target pane reads them on drop — letting a node be
@@ -18,6 +22,32 @@ export type PaneDragState = {
   // calls never send a temp id to the backend.
   awaitRealIds: () => Promise<void>;
 };
+
+// Path breadcrumb entry (structurally identical to outliner-view's PathEntry).
+export type PaneViewPathEntry = { id: string | null; label: string };
+
+// The interface a multi-pane column exposes. Both the outliner (node) view and the relation
+// (line) view satisfy this, so multi-pane can host either kind of column uniformly. Methods that
+// only make sense for the node view (key-move, ancestors, path) are present so a line view can
+// implement them as inert no-ops.
+export interface PaneView {
+  el: HTMLElement;
+  load: () => Promise<void>;
+  refresh: () => void;
+  search: (query: string) => Promise<void>;
+  setParent: (nodeId: string | null, excludeIds?: Set<string>, path?: PaneViewPathEntry[]) => Promise<void>;
+  getAncestorIds: (nodeId: string) => Set<string>;
+  getNodePath: (nodeId: string) => PaneViewPathEntry[];
+  getSelectedId: () => string | null;
+  getPaneParentId: () => string | null;
+  setLang: (l: 'en' | 'ja') => void;
+  setSourceRoot: () => Promise<void>;
+  beginKeyMove: (nodeId: string) => boolean;
+  acceptKeyMove: () => Promise<void>;
+  getEffectiveParentId: () => string | null;
+  getNodeParentId: (nodeId: string) => string | null | undefined;
+  unregister: () => void;
+}
 
 export type ExplorerState = {
   graphId: string;
