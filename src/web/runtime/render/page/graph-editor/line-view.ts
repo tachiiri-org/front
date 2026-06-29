@@ -1,19 +1,34 @@
 import type { GraphEditorContext, PaneView, ExplorerNode, ExplorerLine, PaneViewPathEntry } from './types';
 import { BORDER, TEXT_HIGH, TEXT_MID, TEXT_DIM, SELECT_STRONG } from './constants';
 import {
-  fetchNodeLines, apiCreateRelation, apiSetLineBody, apiAddRay, fetchAllNodes, apiCreateNode,
+  fetchNodeLines, apiCreateRelation, apiSetLineBody, apiAddRay, apiRemoveRay, fetchAllNodes, apiCreateNode,
 } from './api';
 
-// 関係 (line) パネル。左で選んだノードの関係を素のテキスト行として読み書きする。
-// - 本文はノードラベルと同じく素のテキスト入力（ポップアップ無し）。
-// - 本文中で「@」を押すとノード検索が出て、選ぶとラベルを挿入＋参加者として紐付け(j_ray)。
-// - 関係にフォーカスするとその関係が「アクティブ」になり、ノードパネルの四角が
-//   塗り(参加)/空(非参加) を表す。四角の右クリックで link/unlink（outliner 側）。
+// 関係 (line) パネル。関係 = テキストとノード参照(チップ)が交互に並ぶ1行（セグメント分割編集）。
+// - テキスト片は普通の <textarea>（IMEはその中で素直に効く・部分装飾の問題が起きない）。
+// - 「@」でノード検索→選ぶと、その場でテキストを割ってノード参照チップを差し込み、参加者リンク(j_ray)。
+// - 本文は p_line_body に「…⟦nodeId⟧…」の id 入りで保存。描画時に分割し、チップのラベルは id から解決。
+// - 関係にフォーカスでアクティブ化 → ノードの四角が塗り(参加)/空(非参加)。
 
 function labelOf(n: ExplorerNode, lang: 'en' | 'ja'): string {
   const primary = lang === 'ja' ? n.ja : n.en;
   const fallback = lang === 'ja' ? n.en : n.ja;
   return primary || fallback || n.id;
+}
+
+// 本文を [テキスト, メンション, テキスト, …] に分解。
+function splitTokens(body: string): Array<{ t: 'txt'; v: string } | { t: 'men'; id: string }> {
+  const out: Array<{ t: 'txt'; v: string } | { t: 'men'; id: string }> = [];
+  const re = /⟦([^⟧]+)⟧/g;
+  let last = 0;
+  let m: RegExpExecArray | null;
+  while ((m = re.exec(body))) {
+    out.push({ t: 'txt', v: body.slice(last, m.index) });
+    out.push({ t: 'men', id: m[1] });
+    last = m.index + m[0].length;
+  }
+  out.push({ t: 'txt', v: body.slice(last) });
+  return out;
 }
 
 export function createLineView(
@@ -23,8 +38,9 @@ export function createLineView(
   let lang = opts.lang;
   let currentNodeId: string | null = opts.initialNodeId ?? null;
   let renderToken = 0;
-  // lineId → その行の頭の四角（アクティブ強調の付け替え用）。
   const sqByLine = new Map<string, HTMLElement>();
+  const canvas = document.createElement('canvas');
+  const cctx = canvas.getContext('2d');
 
   const el = document.createElement('div');
   el.style.cssText = `flex:1;display:flex;flex-direction:column;overflow:hidden;`;
@@ -37,17 +53,38 @@ export function createLineView(
   bodyEl.style.cssText = `flex:1;overflow-y:auto;padding:6px 8px;`;
   el.appendChild(bodyEl);
 
-  // ── @メンション用ドロップダウン（1つを使い回す） ──────────────────────────────
+  // ── @メンション ドロップダウン（使い回し） ──────────────────────────────────
   const menu = document.createElement('div');
   menu.style.cssText = `position:fixed;z-index:300;background:hsl(240,14%,9%);border:1px solid ${BORDER};border-radius:6px;max-height:200px;overflow-y:auto;min-width:180px;display:none;box-shadow:0 4px 12px rgba(0,0,0,.4);`;
   document.body.appendChild(menu);
-  let mention: { ta: HTMLTextAreaElement; lineId: string; atStart: number; end: number } | null = null;
+  let mention: { anchor: HTMLTextAreaElement; onPick: (n: ExplorerNode, createLabel?: string) => Promise<void> } | null = null;
+  let mentionSeq = 0;
   const closeMenu = () => { menu.style.display = 'none'; menu.innerHTML = ''; mention = null; };
+  const showMenu = (anchor: HTMLTextAreaElement, query: string, nodes: ExplorerNode[]) => {
+    menu.innerHTML = '';
+    const rows: Array<{ label: string; act: () => void }> = nodes.slice(0, 20).map((n) => ({
+      label: labelOf(n, lang), act: () => void mention?.onPick(n),
+    }));
+    const exact = nodes.find((n) => labelOf(n, lang) === query);
+    if (query && !exact) rows.push({ label: `＋「${query}」を新規ノードで作成して挿入`, act: () => void mention?.onPick({ id: '' }, query) });
+    if (rows.length === 0) { closeMenu(); return; }
+    for (const r of rows) {
+      const item = document.createElement('div');
+      item.textContent = r.label;
+      item.style.cssText = `padding:4px 8px;cursor:pointer;color:${TEXT_MID};font-size:12px;white-space:nowrap;`;
+      item.addEventListener('mouseenter', () => { item.style.background = 'rgba(255,255,255,.07)'; });
+      item.addEventListener('mouseleave', () => { item.style.background = 'transparent'; });
+      item.addEventListener('mousedown', (e) => { e.preventDefault(); r.act(); });
+      menu.appendChild(item);
+    }
+    const rect = anchor.getBoundingClientRect();
+    menu.style.left = `${rect.left}px`;
+    menu.style.top = `${rect.bottom + 2}px`;
+    menu.style.display = 'block';
+  };
 
   const setActive = (line: ExplorerLine) => {
     const cur = ctx.activeRelation;
-    // Re-focusing the already-active relation keeps its live participant set (which may include
-    // additions made by right-clicking node squares since this row was rendered).
     if (!cur || cur.lineId !== line.lineId) {
       ctx.setActiveRelation({ lineId: line.lineId, participants: new Set(line.participants.map((p) => p.id)) });
     }
@@ -61,98 +98,157 @@ export function createLineView(
     }
   };
 
-  // メンション挿入: 「@query」を選んだノードのラベルに置換し、参加者に紐付け＋本文保存。
-  const insertMention = async (n: ExplorerNode, createLabel?: string) => {
-    if (!mention) return;
-    const { ta, lineId, atStart, end } = mention;
-    let nodeId = n.id;
-    if (createLabel) {
-      const created = await apiCreateNode(ctx.gId, null, lang, createLabel);
-      if (!created) { closeMenu(); return; }
-      nodeId = created.id;
-    }
-    const label = createLabel ?? labelOf(n, lang);
-    ta.value = ta.value.slice(0, atStart) + label + ta.value.slice(end);
-    const caret = atStart + label.length;
-    closeMenu();
-    ta.focus();
-    ta.setSelectionRange(caret, caret);
-    ta.style.height = 'auto'; ta.style.height = ta.scrollHeight + 'px';
-    await apiAddRay(ctx.gId, lineId, nodeId);
-    const ar = ctx.activeRelation;
-    if (ar && ar.lineId === lineId) { ar.participants.add(nodeId); ctx.setActiveRelation(ar); }
-    await apiSetLineBody(ctx.gId, lineId, lang, ta.value);
-  };
-
-  const showMenu = (ta: HTMLTextAreaElement, query: string, nodes: ExplorerNode[]) => {
-    menu.innerHTML = '';
-    const rows: Array<{ label: string; act: () => void }> = nodes.slice(0, 20).map((n) => ({
-      label: labelOf(n, lang), act: () => void insertMention(n),
-    }));
-    const exact = nodes.find((n) => labelOf(n, lang) === query);
-    if (query && !exact) rows.push({ label: `＋「${query}」を新規ノードで作成して挿入`, act: () => void insertMention({ id: '' }, query) });
-    if (rows.length === 0) { closeMenu(); return; }
-    for (const r of rows) {
-      const item = document.createElement('div');
-      item.textContent = r.label;
-      item.style.cssText = `padding:4px 8px;cursor:pointer;color:${TEXT_MID};font-size:12px;white-space:nowrap;`;
-      item.addEventListener('mouseenter', () => { item.style.background = 'rgba(255,255,255,.07)'; });
-      item.addEventListener('mouseleave', () => { item.style.background = 'transparent'; });
-      item.addEventListener('mousedown', (e) => { e.preventDefault(); r.act(); });
-      menu.appendChild(item);
-    }
-    const rect = ta.getBoundingClientRect();
-    menu.style.left = `${rect.left}px`;
-    menu.style.top = `${rect.bottom + 2}px`;
-    menu.style.display = 'block';
-  };
-
-  // 本文の input ごとに「@…」を検出してドロップダウンを出す。
-  const handleMention = async (ta: HTMLTextAreaElement, lineId: string) => {
-    const caret = ta.selectionStart;
-    const before = ta.value.slice(0, caret);
-    const m = before.match(/@([^\s@]*)$/);
-    if (!m) { closeMenu(); return; }
-    const q = m[1];
-    mention = { ta, lineId, atStart: caret - m[0].length, end: caret };
-    const seq = ++mentionSeq;
-    const { nodes } = await fetchAllNodes(ctx.gId, [], 0, lang, undefined, q || undefined);
-    if (seq !== mentionSeq || !mention) return;
-    showMenu(ta, q, nodes);
-  };
-  let mentionSeq = 0;
-
-  // ── 関係 1 件 = 素のテキスト行 ───────────────────────────────────────────────
-  // ノード行と同じ桁構成: spacer(6px) + 四角(18px) + テキスト。
+  // ── 関係 1 件 = セグメント分割行 ─────────────────────────────────────────────
   const renderRelationRow = (line: ExplorerLine): HTMLElement => {
+    const labelById = new Map(line.participants.map((p) => [p.id, labelOf(p, lang)] as const));
+
     const row = document.createElement('div');
     row.style.cssText = `display:flex;align-items:flex-start;padding:2px 0;`;
     const spacer = document.createElement('span');
     spacer.style.cssText = `flex-shrink:0;width:6px;`;
-    // 行頭の四角。アクティブ関係なら塗る。クリックで本文にフォーカス＝アクティブ化。
     const bw = document.createElement('span');
     bw.style.cssText = `flex-shrink:0;display:flex;align-items:center;justify-content:center;width:18px;height:21px;cursor:pointer;`;
     const sq = document.createElement('span');
     sq.style.cssText = `width:7px;height:7px;border-radius:1px;box-sizing:border-box;background:transparent;border:1.5px solid ${TEXT_DIM};`;
     bw.appendChild(sq);
     sqByLine.set(line.lineId, sq);
-    const ta = document.createElement('textarea');
-    ta.value = line.body[lang] ?? line.body[lang === 'ja' ? 'en' : 'ja'] ?? '';
-    ta.rows = 1;
-    ta.style.cssText = `flex:1;background:transparent;border:none;outline:none;resize:none;font-size:14px;font-family:inherit;line-height:1.5;padding:0 4px;overflow:hidden;min-width:0;color:${TEXT_HIGH};`;
+    // セグメント/チップを並べるインライン領域。
+    const content = document.createElement('div');
+    content.style.cssText = `flex:1;min-width:0;line-height:1.5;`;
+    row.append(spacer, bw, content);
     bw.addEventListener('mousedown', (e) => e.preventDefault());
-    bw.addEventListener('click', () => ta.focus());
-    const resize = () => { ta.style.height = 'auto'; ta.style.height = ta.scrollHeight + 'px'; };
-    setTimeout(resize, 0);
-    ta.addEventListener('focus', () => setActive(line));
-    ta.addEventListener('input', () => { resize(); void handleMention(ta, line.lineId); });
-    ta.addEventListener('blur', () => { void apiSetLineBody(ctx.gId, line.lineId, lang, ta.value); });
-    ta.addEventListener('keydown', (e) => { if (e.key === 'Escape') closeMenu(); });
-    row.append(spacer, bw, ta);
+    bw.addEventListener('click', () => { content.querySelector('textarea')?.focus(); });
+
+    const rebuild = (): string => Array.from(content.children).map((c) => {
+      const id = (c as HTMLElement).dataset.men;
+      return id ? `⟦${id}⟧` : (c as HTMLTextAreaElement).value;
+    }).join('');
+    let saveTimer: ReturnType<typeof setTimeout> | undefined;
+    const save = (immediate = false) => {
+      if (saveTimer) clearTimeout(saveTimer);
+      const doSave = () => { void apiSetLineBody(ctx.gId, line.lineId, lang, rebuild()); };
+      if (immediate) doSave(); else saveTimer = setTimeout(doSave, 400);
+    };
+
+    const autosize = (ta: HTMLTextAreaElement) => {
+      const text = ta.value || '';
+      let w = 8;
+      if (cctx) { cctx.font = '14px sans-serif'; w = cctx.measureText(text).width + 6; }
+      const max = content.clientWidth || 99999;
+      ta.style.width = w <= max ? `${Math.max(8, w)}px` : '100%';
+      ta.style.height = 'auto';
+      ta.style.height = `${ta.scrollHeight}px`;
+    };
+
+    const mkChip = (id: string, label?: string): HTMLElement => {
+      const chip = document.createElement('span');
+      chip.dataset.men = id;
+      chip.contentEditable = 'false';
+      chip.style.cssText = `display:inline-flex;align-items:center;gap:1px;vertical-align:top;line-height:1.5;font-size:14px;color:${TEXT_HIGH};border-bottom:1px solid ${SELECT_STRONG};margin:0 1px;user-select:none;`;
+      const txt = document.createElement('span');
+      txt.textContent = label ?? labelById.get(id) ?? id;
+      chip.appendChild(txt);
+      const x = document.createElement('span');
+      x.textContent = '×';
+      x.style.cssText = `cursor:pointer;color:${TEXT_DIM};font-size:12px;padding:0 1px;`;
+      x.addEventListener('mousedown', (e) => { e.preventDefault(); removeChip(chip); });
+      chip.appendChild(x);
+      return chip;
+    };
+
+    const mkTextarea = (v: string): HTMLTextAreaElement => {
+      const ta = document.createElement('textarea');
+      ta.value = v;
+      ta.rows = 1;
+      ta.style.cssText = `display:inline-block;vertical-align:top;background:transparent;border:none;outline:none;resize:none;font-size:14px;font-family:inherit;line-height:1.5;padding:0;margin:0;overflow:hidden;color:${TEXT_HIGH};`;
+      ta.addEventListener('focus', () => setActive(line));
+      ta.addEventListener('input', () => { autosize(ta); void handleMention(ta); save(); });
+      ta.addEventListener('blur', () => save(true));
+      ta.addEventListener('keydown', (e) => {
+        if (e.key === 'Escape') { closeMenu(); return; }
+        if (e.key === 'Backspace' && ta.selectionStart === 0 && ta.selectionEnd === 0) {
+          const prev = ta.previousElementSibling as HTMLElement | null;
+          if (prev && prev.dataset.men) { e.preventDefault(); removeChip(prev); }
+        }
+      });
+      setTimeout(() => autosize(ta), 0);
+      return ta;
+    };
+
+    const removeChip = (chip: HTMLElement) => {
+      const id = chip.dataset.men!;
+      const prev = chip.previousElementSibling as HTMLTextAreaElement | null;
+      const next = chip.nextElementSibling as HTMLTextAreaElement | null;
+      // 前後のテキスト片を結合してチップを除去。
+      if (prev && next) {
+        const caret = prev.value.length;
+        prev.value = prev.value + next.value;
+        next.remove();
+        autosize(prev);
+        prev.focus();
+        prev.setSelectionRange(caret, caret);
+      }
+      chip.remove();
+      save(true);
+      // 同じ id のチップが他に無ければ参加も解除。
+      const stillUsed = Array.from(content.children).some((c) => (c as HTMLElement).dataset.men === id);
+      if (!stillUsed) {
+        void apiRemoveRay(ctx.gId, line.lineId, id);
+        const ar = ctx.activeRelation;
+        if (ar && ar.lineId === line.lineId) { ar.participants.delete(id); ctx.setActiveRelation(ar); }
+      }
+    };
+
+    const handleMention = async (ta: HTMLTextAreaElement) => {
+      const caret = ta.selectionStart;
+      const before = ta.value.slice(0, caret);
+      const mm = before.match(/@([^\s@]*)$/);
+      if (!mm) { closeMenu(); return; }
+      const q = mm[1];
+      const atStart = caret - mm[0].length;
+      mention = {
+        anchor: ta,
+        onPick: async (n, createLabel) => {
+          let nodeId = n.id;
+          if (createLabel) {
+            const created = await apiCreateNode(ctx.gId, null, lang, createLabel);
+            if (!created) { closeMenu(); return; }
+            nodeId = created.id;
+          }
+          const label = createLabel ?? labelOf(n, lang);
+          const left = ta.value.slice(0, atStart);
+          const right = ta.value.slice(ta.selectionStart);
+          ta.value = left;
+          autosize(ta);
+          const chip = mkChip(nodeId, label);
+          const newTa = mkTextarea(right);
+          content.insertBefore(chip, ta.nextSibling);
+          content.insertBefore(newTa, chip.nextSibling);
+          closeMenu();
+          newTa.focus();
+          newTa.setSelectionRange(0, 0);
+          save(true);
+          await apiAddRay(ctx.gId, line.lineId, nodeId);
+          const ar = ctx.activeRelation;
+          if (ar && ar.lineId === line.lineId) { ar.participants.add(nodeId); ctx.setActiveRelation(ar); }
+        },
+      };
+      const seq = ++mentionSeq;
+      const { nodes } = await fetchAllNodes(ctx.gId, [], 0, lang, undefined, q || undefined);
+      if (seq !== mentionSeq || !mention) return;
+      showMenu(ta, q, nodes);
+    };
+
+    // 初期トークンを並べる（必ずテキスト片で始まり/終わる）。
+    const body = line.body[lang] ?? line.body[lang === 'ja' ? 'en' : 'ja'] ?? '';
+    for (const tok of splitTokens(body)) {
+      if (tok.t === 'txt') content.appendChild(mkTextarea(tok.v));
+      else content.appendChild(mkChip(tok.id));
+    }
     return row;
   };
 
-  // ノードパネルの draft 行と同じ構成のドラフト行（spacer+四角+入力）。テキストを書いて Enter で作成。
+  // ノードパネルの draft 行と同じ構成（spacer+四角+入力）。テキストを書いて Enter で作成。
   const makeDraftRow = (nodeId: string): HTMLElement => {
     const row = document.createElement('div');
     row.style.cssText = `display:flex;align-items:flex-start;padding:2px 0;`;
@@ -216,7 +312,6 @@ export function createLineView(
     load: () => render(),
     refresh: () => { void render(); },
     search: async () => { /* top-bar 検索は関係列には作用しない */ },
-    // ノードを切り替えても「アクティブ関係」は保持する（両方に選択を持つ設計）。一覧だけ更新。
     setParent: async (nodeId) => { currentNodeId = nodeId; await render(); },
     getAncestorIds: () => new Set<string>(),
     getNodePath: () => noPath,
