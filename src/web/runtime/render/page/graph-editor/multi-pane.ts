@@ -97,14 +97,13 @@ export function createMultiPaneView(ctx: GraphEditorContext): {
     if (to === -1) { panes.splice(from, 0, moved); return; }
     if (!before) to += 1;
     panes.splice(to, 0, moved);
-    for (const p of panes) nodeArea.insertBefore(p.containerEl, addPaneBtn);
+    for (const p of panes) nodeArea.appendChild(p.containerEl);
     saveAll();
     updateAllSrcBtns();
   };
 
   const applyFullscreenLayout = () => {
     const isFs = fullscreenPaneId !== null;
-    addPaneBtn.style.display = isFs ? 'none' : '';
     for (const p of panes) {
       const isThis = p.config.id === fullscreenPaneId;
       if (!isFs) {
@@ -186,7 +185,7 @@ export function createMultiPaneView(ctx: GraphEditorContext): {
     const active = document.activeElement as HTMLElement | null;
     // Swap positions in the array, then re-insert every container in the new order.
     [panes[idx], panes[targetIdx]] = [panes[targetIdx], panes[idx]];
-    for (const p of panes) nodeArea.insertBefore(p.containerEl, addPaneBtn);
+    for (const p of panes) nodeArea.appendChild(p.containerEl);
     saveAll();
     updateAllSrcBtns();
     if (active && typeof active.focus === 'function') active.focus();
@@ -352,6 +351,16 @@ export function createMultiPaneView(ctx: GraphEditorContext): {
     });
     header.appendChild(fsBtn);
 
+    // Add-pane button (＋) — lives in the header, just left of ×, matching its look. Adding panels
+    // is manual now (no standalone + between the panels and the line dock), so node panels and the
+    // line dock sit flush against each other.
+    const addBtn = document.createElement('button');
+    addBtn.textContent = '＋';
+    addBtn.title = '列を追加';
+    addBtn.style.cssText = `background:transparent;border:none;color:${TEXT_DIM};cursor:pointer;font-size:13px;padding:0 2px;line-height:1;flex-shrink:0;`;
+    addBtn.addEventListener('click', (e) => { e.stopPropagation(); addPane(); });
+    header.appendChild(addBtn);
+
     // Close button
     const closeBtn = document.createElement('button');
     closeBtn.textContent = '×';
@@ -383,7 +392,7 @@ export function createMultiPaneView(ctx: GraphEditorContext): {
       onContentWidthChange: (w) => {
         // Measure only non-flex-1 header children to avoid feedback loop
         // (header.scrollWidth includes labelEl which stretches to container width)
-        const minHeaderW = langBtn.offsetWidth + srcBtn.offsetWidth + pinBtn.offsetWidth + reloadBtn.offsetWidth + fsBtn.offsetWidth + closeBtn.offsetWidth + 36;
+        const minHeaderW = langBtn.offsetWidth + srcBtn.offsetWidth + pinBtn.offsetWidth + reloadBtn.offsetWidth + fsBtn.offsetWidth + addBtn.offsetWidth + closeBtn.offsetWidth + 36;
         const actualW = Math.max(w, minHeaderW);
         containerEl.style.width = `${actualW}px`;
         config.width = actualW;
@@ -490,16 +499,8 @@ export function createMultiPaneView(ctx: GraphEditorContext): {
 
 
   // ── Pane add / remove ────────────────────────────────────────────
-  const addPaneBtn = document.createElement('button');
-  addPaneBtn.textContent = '+';
-  addPaneBtn.title = '列を追加';
-  addPaneBtn.style.cssText = `
-    flex-shrink:0;align-self:flex-start;margin:8px 6px;
-    background:transparent;border:1px solid ${BORDER};color:${TEXT_MID};
-    cursor:pointer;font-size:16px;padding:2px 10px;border-radius:4px;
-    line-height:1.4;
-  `;
-  addPaneBtn.addEventListener('click', () => {
+  // Add a new independent node panel to the right. Triggered from each pane header's "+" button.
+  const addPane = () => {
     // New pane inherits the language of the rightmost pane (or the global default).
     const inheritLang = panes.length > 0 ? panes[panes.length - 1].config.lang : ctx.state.lang;
     const config = newPaneConfig(`パネル ${panes.length + 1}`, inheritLang);
@@ -507,11 +508,11 @@ export function createMultiPaneView(ctx: GraphEditorContext): {
     // source menu.
     const inst = createPane(config);
     panes.push(inst);
-    nodeArea.insertBefore(inst.containerEl, addPaneBtn);
+    nodeArea.appendChild(inst.containerEl);
     saveAll();
     updateAllSrcBtns();
     void inst.view.load();
-  });
+  };
 
   const removePane = (paneId: string) => {
     const idx = panes.findIndex(p => p.config.id === paneId);
@@ -559,7 +560,6 @@ export function createMultiPaneView(ctx: GraphEditorContext): {
       panes.push(inst);
       nodeArea.appendChild(inst.containerEl);
     }
-    nodeArea.appendChild(addPaneBtn);
 
     // After all panes are created, update source buttons
     updateAllSrcBtns();

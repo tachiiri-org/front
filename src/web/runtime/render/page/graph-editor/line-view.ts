@@ -162,13 +162,7 @@ export function createLineView(
     head.innerHTML = '';
     bodyEl.innerHTML = '';
 
-    if (!currentNodeId) {
-      const hint = document.createElement('div');
-      hint.textContent = '左の列でノードを選ぶと、その関係が出ます';
-      hint.style.cssText = `color:${TEXT_DIM};font-size:12px;padding:8px 2px;`;
-      bodyEl.appendChild(hint);
-      return;
-    }
+    if (!currentNodeId) return; // ノード未選択時は空白（ナビゲーションテキストは出さない）
     const nodeId = currentNodeId;
 
     const title = document.createElement('span');
@@ -190,10 +184,19 @@ export function createLineView(
     if (token !== renderToken) return;
 
     if (lines.length === 0) {
-      const empty = document.createElement('div');
-      empty.textContent = 'まだ関係はありません。「＋ 新しい関係」で作成';
-      empty.style.cssText = `color:${TEXT_DIM};font-size:12px;padding:8px 2px;`;
-      bodyEl.appendChild(empty);
+      // ノードパネルの空行と同じ □ を出す（クリックで関係を作成）。テキストの案内は出さない。
+      const row = document.createElement('div');
+      row.style.cssText = `display:flex;align-items:center;padding:2px 0;cursor:pointer;`;
+      const sp = document.createElement('span');
+      sp.style.cssText = `flex-shrink:0;width:6px;`;
+      const bw = document.createElement('span');
+      bw.style.cssText = `flex-shrink:0;display:flex;align-items:center;justify-content:center;width:18px;`;
+      const sq = document.createElement('span');
+      sq.style.cssText = `width:7px;height:7px;border-radius:1px;box-sizing:border-box;background:transparent;border:1.5px solid ${TEXT_DIM};`;
+      bw.appendChild(sq);
+      row.append(sp, bw);
+      row.addEventListener('click', async () => { await apiCreateRelation(ctx.gId, nodeId, lang, ''); await render(); });
+      bodyEl.appendChild(row);
       return;
     }
     for (const line of lines) bodyEl.appendChild(renderLine(line));

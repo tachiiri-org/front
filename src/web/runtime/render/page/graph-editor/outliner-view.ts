@@ -98,10 +98,10 @@ export function createOutlinerView(ctx: GraphEditorContext, paneOpts?: OutlinerP
   const el = document.createElement('div');
   el.style.cssText = `flex:1;display:flex;flex-direction:column;overflow:hidden;`;
 
-  // Breadcrumb bar (always visible)
+  // Breadcrumb bar — kept as a detached element (updateBreadcrumb still writes to it harmlessly),
+  // but no longer mounted: the pane shows just the tree, without a path bar or its divider line.
   const bcEl = document.createElement('div');
   bcEl.style.cssText = `display:flex;flex-shrink:0;align-items:center;gap:2px;flex-wrap:wrap;padding:4px 8px 4px 10px;border-bottom:1px solid ${BORDER};font-size:12px;`;
-  el.appendChild(bcEl);
 
   // Draft row — shown only when list is empty; structurally matches a node row at depth 0
   const draftEl = document.createElement('div');
@@ -822,10 +822,8 @@ export function createOutlinerView(ctx: GraphEditorContext, paneOpts?: OutlinerP
       arr.push(top);
     }
     const panelIds = sortPanelIds([...byPanel.keys()]);
-    // v1 (group-by-parent): show the parent-path header whenever a real parent panel exists
-    // (the only non-UNCLASSIFIED panel here), so the parent grouping is visible even though
-    // there is a single group. Bookmark/search panes (null parent → UNCLASSIFIED) stay headerless.
-    const showHeaders = panelIds.some(p => p !== UNCLASSIFIED);
+    // 素のツリー: 親パスのパネルヘッダ（区切り線つき）は出さない。occurrence はパネル順にそのまま並べる。
+    const showHeaders = false;
     for (const pid of panelIds) {
       if (showHeaders) listEl.appendChild(buildPanelHeader(pid));
       for (const top of byPanel.get(pid)!) appendSubtree(top);
