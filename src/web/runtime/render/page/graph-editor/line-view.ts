@@ -45,7 +45,12 @@ export function createLineView(
   const closeMenu = () => { menu.style.display = 'none'; menu.innerHTML = ''; mention = null; };
 
   const setActive = (line: ExplorerLine) => {
-    ctx.setActiveRelation({ lineId: line.lineId, participants: new Set(line.participants.map((p) => p.id)) });
+    const cur = ctx.activeRelation;
+    // Re-focusing the already-active relation keeps its live participant set (which may include
+    // additions made by right-clicking node squares since this row was rendered).
+    if (!cur || cur.lineId !== line.lineId) {
+      ctx.setActiveRelation({ lineId: line.lineId, participants: new Set(line.participants.map((p) => p.id)) });
+    }
     updateActiveHighlight();
   };
   const updateActiveHighlight = () => {
@@ -172,6 +177,10 @@ export function createLineView(
 
   void render();
 
+  // 四角の右クリックで参加が変わったら関係行を再取得（participants を最新に保つ）。
+  const refresh = () => { void render(); };
+  ctx.refreshRelations.add(refresh);
+
   const noPath: PaneViewPathEntry[] = [];
   return {
     el,
@@ -190,6 +199,6 @@ export function createLineView(
     acceptKeyMove: async () => { /* 関係列はノード移動先になれない */ },
     getEffectiveParentId: () => null,
     getNodeParentId: () => undefined,
-    unregister: () => { menu.remove(); },
+    unregister: () => { ctx.refreshRelations.delete(refresh); menu.remove(); },
   };
 }

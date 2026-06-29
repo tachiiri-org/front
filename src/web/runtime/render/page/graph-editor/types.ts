@@ -91,4 +91,7 @@ export interface GraphEditorContext {
   setActiveRelation: (r: { lineId: string; participants: Set<string> } | null) => void;
   // Right-click handler: add/remove the node as a participant of the active relation, then notify.
   toggleParticipant: (nodeId: string) => Promise<void>;
+  // Line panel(s) register a refresh here; called after a square right-click changes membership so
+  // the relation rows re-fetch fresh participants (keeps the active set authoritative on re-focus).
+  refreshRelations: Set<() => void>;
 }

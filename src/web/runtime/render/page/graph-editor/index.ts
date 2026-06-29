@@ -153,6 +153,7 @@ export function renderGraphEditor(
   const rootNodeId = comp.rootNodeId ?? null;
   const colorPalette = new Map<string, string>();
   const relationRerender = new Set<() => void>();
+  const refreshRelations = new Set<() => void>();
   const ctx = {
     gId, limit, rootNodeId, outer, state, childrenCache,
     colorPalette,
@@ -161,6 +162,7 @@ export function renderGraphEditor(
     paneDrag: null,
     activeRelation: null,
     relationRerender,
+    refreshRelations,
     setActiveRelation: (r: { lineId: string; participants: Set<string> } | null) => {
       ctx.activeRelation = r;
       relationRerender.forEach((f) => f());
@@ -176,6 +178,7 @@ export function renderGraphEditor(
         ar.participants.add(nodeId);
       }
       relationRerender.forEach((f) => f());
+      refreshRelations.forEach((f) => f()); // re-fetch relation rows so participants stay fresh
     },
   } as unknown as GraphEditorContext;
 
