@@ -59,34 +59,44 @@ export function createLineView(
   document.body.appendChild(menu);
   let mention: { anchor: HTMLTextAreaElement; onPick: (n: ExplorerNode, createLabel?: string) => Promise<void> } | null = null;
   let mentionSeq = 0;
-  const closeMenu = () => { menu.style.display = 'none'; menu.innerHTML = ''; mention = null; };
+  // メニュー（@ドロップダウン / チップ検索）共通のキーボード選択。
+  let navItems: Array<{ el: HTMLElement; act: () => void }> = [];
+  let navIdx = -1;
+  let menuOpen = false;
+  const navHighlight = () => navItems.forEach((it, i) => { it.el.style.background = i === navIdx ? 'rgba(255,255,255,.12)' : 'transparent'; });
+  const navMove = (d: number) => { if (!navItems.length) return; navIdx = (navIdx + d + navItems.length) % navItems.length; navHighlight(); navItems[navIdx].el.scrollIntoView({ block: 'nearest' }); };
+  const navPick = () => { if (navIdx >= 0 && navItems[navIdx]) navItems[navIdx].act(); };
+  const addMenuItem = (container: HTMLElement, label: string, act: () => void) => {
+    const item = document.createElement('div');
+    item.textContent = label;
+    item.style.cssText = `padding:4px 8px;cursor:pointer;color:${TEXT_MID};font-size:12px;white-space:nowrap;`;
+    const i = navItems.length;
+    item.addEventListener('mouseenter', () => { navIdx = i; navHighlight(); });
+    item.addEventListener('mousedown', (e) => { e.preventDefault(); act(); });
+    navItems.push({ el: item, act });
+    container.appendChild(item);
+  };
+  const closeMenu = () => { menu.style.display = 'none'; menu.innerHTML = ''; mention = null; navItems = []; navIdx = -1; menuOpen = false; };
   const showMenu = (anchor: HTMLTextAreaElement, query: string, nodes: ExplorerNode[]) => {
-    menu.innerHTML = '';
-    const rows: Array<{ label: string; act: () => void }> = nodes.slice(0, 20).map((n) => ({
-      label: labelOf(n, lang), act: () => void mention?.onPick(n),
-    }));
+    menu.innerHTML = ''; navItems = []; navIdx = -1;
+    nodes.slice(0, 20).forEach((n) => addMenuItem(menu, labelOf(n, lang), () => void mention?.onPick(n)));
     const exact = nodes.find((n) => labelOf(n, lang) === query);
-    if (query && !exact) rows.push({ label: `＋「${query}」を新規ノードで作成して挿入`, act: () => void mention?.onPick({ id: '' }, query) });
-    if (rows.length === 0) { closeMenu(); return; }
-    for (const r of rows) {
-      const item = document.createElement('div');
-      item.textContent = r.label;
-      item.style.cssText = `padding:4px 8px;cursor:pointer;color:${TEXT_MID};font-size:12px;white-space:nowrap;`;
-      item.addEventListener('mouseenter', () => { item.style.background = 'rgba(255,255,255,.07)'; });
-      item.addEventListener('mouseleave', () => { item.style.background = 'transparent'; });
-      item.addEventListener('mousedown', (e) => { e.preventDefault(); r.act(); });
-      menu.appendChild(item);
-    }
+    if (query && !exact) addMenuItem(menu, `＋「${query}」を新規ノードで作成して挿入`, () => void mention?.onPick({ id: '' }, query));
+    if (navItems.length === 0) { closeMenu(); return; }
     const rect = anchor.getBoundingClientRect();
     menu.style.left = `${rect.left}px`;
     menu.style.top = `${rect.bottom + 2}px`;
     menu.style.display = 'block';
+    navIdx = 0; navHighlight(); menuOpen = true;
   };
 
-  // チップ（ノードリンク）クリック時の検索ポップオーバー。入力欄つきで、選ぶとリンク先を差し替える。
-  const openSearchPopover = (anchor: HTMLElement, onPick: (n: ExplorerNode, createLabel?: string) => void) => {
-    menu.innerHTML = '';
-    mention = null;
+  // チップ（ノードリンク）クリック時の検索ポップオーバー。入力＋候補（先頭に「削除」）。↑↓/Enter 対応。
+  const openSearchPopover = (
+    anchor: HTMLElement,
+    onPick: (n: ExplorerNode, createLabel?: string) => void,
+    onDelete?: () => void,
+  ) => {
+    menu.innerHTML = ''; navItems = []; navIdx = -1; mention = null;
     const input = document.createElement('input');
     input.placeholder = 'ノードを検索…';
     input.style.cssText = `width:100%;box-sizing:border-box;background:transparent;border:none;border-bottom:1px solid ${BORDER};color:${TEXT_HIGH};font-size:12px;padding:4px 8px;outline:none;`;
@@ -94,19 +104,12 @@ export function createLineView(
     menu.append(input, list);
     let seq = 0;
     const renderList = (q: string, nodes: ExplorerNode[]) => {
-      list.innerHTML = '';
-      const rows: Array<{ label: string; act: () => void }> = nodes.slice(0, 20).map((n) => ({ label: labelOf(n, lang), act: () => { onPick(n); closeMenu(); } }));
+      list.innerHTML = ''; navItems = []; navIdx = -1;
+      if (onDelete) addMenuItem(list, '削除', () => { onDelete(); closeMenu(); });
+      nodes.slice(0, 20).forEach((n) => addMenuItem(list, labelOf(n, lang), () => { onPick(n); closeMenu(); }));
       const exact = nodes.find((n) => labelOf(n, lang) === q);
-      if (q && !exact) rows.push({ label: `＋「${q}」を新規作成`, act: () => { onPick({ id: '' }, q); closeMenu(); } });
-      for (const r of rows) {
-        const item = document.createElement('div');
-        item.textContent = r.label;
-        item.style.cssText = `padding:4px 8px;cursor:pointer;color:${TEXT_MID};font-size:12px;white-space:nowrap;`;
-        item.addEventListener('mouseenter', () => { item.style.background = 'rgba(255,255,255,.07)'; });
-        item.addEventListener('mouseleave', () => { item.style.background = 'transparent'; });
-        item.addEventListener('mousedown', (e) => { e.preventDefault(); r.act(); });
-        list.appendChild(item);
-      }
+      if (q && !exact) addMenuItem(list, `＋「${q}」を新規作成`, () => { onPick({ id: '' }, q); closeMenu(); });
+      navIdx = navItems.length ? 0 : -1; navHighlight();
     };
     input.addEventListener('input', async () => {
       const q = input.value.trim();
@@ -116,11 +119,17 @@ export function createLineView(
       renderList(q, nodes);
     });
     input.addEventListener('blur', () => setTimeout(closeMenu, 150));
-    input.addEventListener('keydown', (e) => { if (e.key === 'Escape') closeMenu(); });
+    input.addEventListener('keydown', (e) => {
+      if (e.key === 'ArrowDown') { e.preventDefault(); navMove(1); }
+      else if (e.key === 'ArrowUp') { e.preventDefault(); navMove(-1); }
+      else if (e.key === 'Enter') { e.preventDefault(); navPick(); }
+      else if (e.key === 'Escape') { closeMenu(); }
+    });
     const rect = anchor.getBoundingClientRect();
     menu.style.left = `${rect.left}px`;
     menu.style.top = `${rect.bottom + 2}px`;
     menu.style.display = 'block';
+    menuOpen = true;
     void (async () => { const { nodes } = await fetchAllNodes(ctx.gId, [], 0, lang); renderList('', nodes); })();
     setTimeout(() => input.focus(), 0);
   };
@@ -186,18 +195,15 @@ export function createLineView(
       const chip = document.createElement('span');
       chip.dataset.men = id;
       chip.contentEditable = 'false';
-      // 下線はテキストと同じ色（currentColor）。クリックでリンク先の差し替え検索。
-      chip.style.cssText = `position:relative;display:inline-block;vertical-align:top;line-height:1.5;font-size:14px;color:${TEXT_HIGH};border-bottom:1px solid currentColor;margin:0 3px 0 1px;user-select:none;cursor:pointer;`;
+      // 下線はテキストと同じ色。クリックで検索ポップオーバー（差し替え／削除）。× は廃止。
+      chip.style.cssText = `display:inline-block;vertical-align:top;line-height:1.5;font-size:14px;color:${TEXT_HIGH};border-bottom:1px solid currentColor;margin:0 2px;user-select:none;cursor:pointer;`;
       const txt = document.createElement('span');
       txt.textContent = label ?? labelById.get(id) ?? id;
-      txt.addEventListener('mousedown', (e) => { e.preventDefault(); openSearchPopover(chip, (n, cl) => void replaceChip(chip, n, cl)); });
       chip.appendChild(txt);
-      // × はノードの右上に小さく。
-      const x = document.createElement('span');
-      x.textContent = '×';
-      x.style.cssText = `position:absolute;top:-5px;right:-5px;font-size:9px;line-height:1;color:${TEXT_DIM};cursor:pointer;`;
-      x.addEventListener('mousedown', (e) => { e.preventDefault(); e.stopPropagation(); removeChip(chip); });
-      chip.appendChild(x);
+      chip.addEventListener('mousedown', (e) => {
+        e.preventDefault();
+        openSearchPopover(chip, (n, cl) => void replaceChip(chip, n, cl), () => removeChip(chip));
+      });
       return chip;
     };
 
@@ -231,6 +237,13 @@ export function createLineView(
       ta.addEventListener('input', () => { autosize(ta); void handleMention(ta); save(); });
       ta.addEventListener('blur', () => save(true));
       ta.addEventListener('keydown', (e) => {
+        // @ メニューが開いている間は ↑↓/Enter で候補選択。
+        if (menuOpen) {
+          if (e.key === 'ArrowDown') { e.preventDefault(); navMove(1); return; }
+          if (e.key === 'ArrowUp') { e.preventDefault(); navMove(-1); return; }
+          if (e.key === 'Enter') { e.preventDefault(); navPick(); return; }
+          if (e.key === 'Escape') { closeMenu(); return; }
+        }
         if (e.key === 'Escape') { closeMenu(); return; }
         const atStart = ta.selectionStart === 0 && ta.selectionEnd === 0;
         const atEnd = ta.selectionStart === ta.value.length && ta.selectionEnd === ta.value.length;
