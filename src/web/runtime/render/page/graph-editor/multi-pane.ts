@@ -9,20 +9,18 @@ type PaneConfig = {
   sourceId: string | null;   // null = root; or another pane id
   width: number;             // px
   lang: 'en' | 'ja';         // per-pane display/edit language
-  mode?: 'node' | 'line';    // 'node' (default) = hierarchy outliner; 'line' = relation (関係) view
   pinned?: boolean;          // true = frozen: ignore source-pane selection changes
   pinnedParentId?: string | null; // parent snapshot to restore the frozen view on reload
 };
 
 type PaneInstance = {
   config: PaneConfig;
-  view: PaneView;
+  view: ReturnType<typeof createOutlinerView>;
   containerEl: HTMLElement;   // the outer div (header + body)
   updateSrcBtn: () => void;
   updateFsBtn: () => void;
   updatePinBtn: () => void;
   updateLangBtn: () => void;
-  updateModeBtn: () => void;
 };
 
 const STORAGE_KEY = (gId: string) => `graph-editor-panes:${gId}`;
@@ -59,8 +57,49 @@ export function createMultiPaneView(ctx: GraphEditorContext): {
   search: (q: string) => Promise<void>;
   setAllLang: (lang: 'en' | 'ja') => void;
 } {
+  // Outer wrapper: a horizontally-scrolling node area on the left + one persistent line (relation)
+  // dock pinned to the right. Node panels (複数) drill the hierarchy; the line dock always shows
+  // the edges of the active node.
   const el = document.createElement('div');
-  el.style.cssText = `display:flex;flex-direction:row;flex:1;overflow-x:auto;overflow-y:hidden;`;
+  el.style.cssText = `display:flex;flex-direction:row;flex:1;overflow:hidden;`;
+
+  const nodeArea = document.createElement('div');
+  nodeArea.style.cssText = `display:flex;flex-direction:row;flex:1;overflow-x:auto;overflow-y:hidden;min-width:0;`;
+  el.appendChild(nodeArea);
+
+  // ── Line dock (常時表示) ────────────────────────────────────────────────────
+  const DOCK_KEY = `graph-editor-linedock:${ctx.gId}`;
+  const loadDockWidth = (): number => {
+    const raw = parseInt(localStorage.getItem(DOCK_KEY) ?? '', 10);
+    return Number.isFinite(raw) && raw >= 240 ? raw : Math.max(300, Math.round(window.innerWidth * 0.24));
+  };
+  const lineDock = document.createElement('div');
+  lineDock.style.cssText = `flex-shrink:0;display:flex;flex-direction:column;width:${loadDockWidth()}px;border-left:1px solid ${BORDER};overflow:hidden;position:relative;`;
+  // Left-edge resize handle for the dock.
+  const dockResize = document.createElement('div');
+  dockResize.style.cssText = `position:absolute;left:0;top:0;bottom:0;width:4px;cursor:col-resize;z-index:2;`;
+  dockResize.addEventListener('mousedown', (e) => {
+    e.preventDefault();
+    const startX = e.clientX;
+    const startW = lineDock.offsetWidth;
+    const onMove = (ev: MouseEvent) => {
+      const w = Math.max(240, startW - (ev.clientX - startX));
+      lineDock.style.width = `${w}px`;
+    };
+    const onUp = () => {
+      document.removeEventListener('mousemove', onMove);
+      document.removeEventListener('mouseup', onUp);
+      localStorage.setItem(DOCK_KEY, String(lineDock.offsetWidth));
+    };
+    document.addEventListener('mousemove', onMove);
+    document.addEventListener('mouseup', onUp);
+  });
+  lineDock.appendChild(dockResize);
+
+  const lineView: PaneView = createLineView(ctx, { lang: ctx.state.lang, initialNodeId: null });
+  lineView.el.style.flex = '1';
+  lineDock.appendChild(lineView.el);
+  el.appendChild(lineDock);
 
   const panes: PaneInstance[] = [];
   let fullscreenPaneId: string | null = null;
@@ -81,7 +120,7 @@ export function createMultiPaneView(ctx: GraphEditorContext): {
     if (to === -1) { panes.splice(from, 0, moved); return; }
     if (!before) to += 1;
     panes.splice(to, 0, moved);
-    for (const p of panes) el.insertBefore(p.containerEl, addPaneBtn);
+    for (const p of panes) nodeArea.insertBefore(p.containerEl, addPaneBtn);
     saveAll();
     updateAllSrcBtns();
   };
@@ -125,7 +164,7 @@ export function createMultiPaneView(ctx: GraphEditorContext): {
         cfg.sourceId = paneId;
         const inst = createPane(cfg);
         panes.push(inst);
-        el.insertBefore(inst.containerEl, addPaneBtn);
+        nodeArea.insertBefore(inst.containerEl, addPaneBtn);
         saveAll();
         updateAllSrcBtns();
       }
@@ -143,6 +182,8 @@ export function createMultiPaneView(ctx: GraphEditorContext): {
         void p.view.setParent(selectedNodeId, ancestorIds, path);
       }
     }
+    // The persistent line dock always reflects the most recently selected node (across all panes).
+    if (selectedNodeId !== null) void lineView.setParent(selectedNodeId);
   };
 
   // Move a node from `paneId` to the adjacent pane (Ctrl/Cmd+→/←). Reuses the cross-pane
@@ -187,7 +228,7 @@ export function createMultiPaneView(ctx: GraphEditorContext): {
     const active = document.activeElement as HTMLElement | null;
     // Swap positions in the array, then re-insert every container in the new order.
     [panes[idx], panes[targetIdx]] = [panes[targetIdx], panes[idx]];
-    for (const p of panes) el.insertBefore(p.containerEl, addPaneBtn);
+    for (const p of panes) nodeArea.insertBefore(p.containerEl, addPaneBtn);
     saveAll();
     updateAllSrcBtns();
     if (active && typeof active.focus === 'function') active.focus();
@@ -282,24 +323,6 @@ export function createMultiPaneView(ctx: GraphEditorContext): {
     });
     header.appendChild(langBtn);
 
-    // Mode toggle (ノード ⇄ 関係) — switch the column between the hierarchy outliner and the
-    // relation (line) view of the source pane's selected node. Toggling rebuilds the pane.
-    const modeBtn = document.createElement('button');
-    const updateModeBtn = () => {
-      const isLine = config.mode === 'line';
-      modeBtn.textContent = isLine ? '関係' : 'ノード';
-      modeBtn.title = isLine ? '関係(line)列。クリックでノード列へ' : 'ノード(階層)列。クリックで関係(line)列へ';
-      modeBtn.style.cssText = `background:${isLine ? SELECT_STRONG : 'transparent'};border:1px solid ${BORDER};color:${isLine ? '#fff' : TEXT_MID};cursor:pointer;font-size:10px;padding:1px 4px;border-radius:3px;flex-shrink:0;line-height:1.4;`;
-    };
-    updateModeBtn();
-    modeBtn.addEventListener('click', (e) => {
-      e.stopPropagation();
-      config.mode = config.mode === 'line' ? 'node' : 'line';
-      saveAll();
-      rebuildPane(config.id);
-    });
-    header.appendChild(modeBtn);
-
     // Source button
     const srcBtn = document.createElement('button');
     srcBtn.style.cssText = `background:transparent;border:1px solid ${BORDER};color:${TEXT_MID};cursor:pointer;font-size:10px;padding:1px 5px;border-radius:3px;flex-shrink:0;`;
@@ -392,28 +415,22 @@ export function createMultiPaneView(ctx: GraphEditorContext): {
     const panePath = (config.sourceId !== null && initParent && sourcePane)
       ? sourcePane.view.getNodePath(initParent) : [];
 
-    const view: PaneView = config.mode === 'line'
-      ? createLineView(ctx, {
-          lang: config.lang,
-          // A relation column shows the relations of its source pane's selected node.
-          initialNodeId: config.sourceId !== null ? (initParent ?? null) : null,
-        })
-      : createOutlinerView(ctx, {
-          paneParentId,
-          panePath,
-          lang: config.lang,
-          onNodeSelect: (nodeId) => onPaneSelect(config.id, nodeId),
-          onMoveNodeToPane: (nodeId, direction) => moveToAdjacentPane(config.id, nodeId, direction),
-          onReorderPane: (direction) => movePane(config.id, direction),
-          onContentWidthChange: (w) => {
-            // Measure only non-flex-1 header children to avoid feedback loop
-            // (header.scrollWidth includes labelEl which stretches to container width)
-            const minHeaderW = langBtn.offsetWidth + srcBtn.offsetWidth + pinBtn.offsetWidth + reloadBtn.offsetWidth + fsBtn.offsetWidth + closeBtn.offsetWidth + 36;
-            const actualW = Math.max(w, minHeaderW);
-            containerEl.style.width = `${actualW}px`;
-            config.width = actualW;
-          },
-        });
+    const view = createOutlinerView(ctx, {
+      paneParentId,
+      panePath,
+      lang: config.lang,
+      onNodeSelect: (nodeId) => onPaneSelect(config.id, nodeId),
+      onMoveNodeToPane: (nodeId, direction) => moveToAdjacentPane(config.id, nodeId, direction),
+      onReorderPane: (direction) => movePane(config.id, direction),
+      onContentWidthChange: (w) => {
+        // Measure only non-flex-1 header children to avoid feedback loop
+        // (header.scrollWidth includes labelEl which stretches to container width)
+        const minHeaderW = langBtn.offsetWidth + srcBtn.offsetWidth + pinBtn.offsetWidth + reloadBtn.offsetWidth + fsBtn.offsetWidth + closeBtn.offsetWidth + 36;
+        const actualW = Math.max(w, minHeaderW);
+        containerEl.style.width = `${actualW}px`;
+        config.width = actualW;
+      },
+    });
     view.el.style.flex = '1';
     containerEl.appendChild(view.el);
 
@@ -441,25 +458,9 @@ export function createMultiPaneView(ctx: GraphEditorContext): {
     });
     containerEl.appendChild(resizeHandle);
 
-    const instance: PaneInstance = { config, view, containerEl, updateSrcBtn, updateFsBtn, updatePinBtn, updateLangBtn, updateModeBtn };
+    const instance: PaneInstance = { config, view, containerEl, updateSrcBtn, updateFsBtn, updatePinBtn, updateLangBtn };
 
     return instance;
-  };
-
-  // Rebuild a pane in place (used when toggling its mode). Recreates the instance from its config
-  // — the new view re-derives its parent/node from the source pane's current selection — and swaps
-  // the DOM node at the same position so neighbouring panes and ordering are preserved.
-  const rebuildPane = (paneId: string) => {
-    const idx = panes.findIndex(p => p.config.id === paneId);
-    if (idx === -1) return;
-    const old = panes[idx];
-    old.view.unregister();
-    const inst = createPane(old.config);
-    panes[idx] = inst;
-    el.insertBefore(inst.containerEl, old.containerEl);
-    old.containerEl.remove();
-    updateAllSrcBtns();
-    void inst.view.load();
   };
 
   // ── Source selector popover ──────────────────────────────────────
@@ -548,7 +549,7 @@ export function createMultiPaneView(ctx: GraphEditorContext): {
     if (panes.length > 0) config.sourceId = panes[panes.length - 1].config.id;
     const inst = createPane(config);
     panes.push(inst);
-    el.insertBefore(inst.containerEl, addPaneBtn);
+    nodeArea.insertBefore(inst.containerEl, addPaneBtn);
     saveAll();
     updateAllSrcBtns();
     void inst.view.load();
@@ -587,7 +588,7 @@ export function createMultiPaneView(ctx: GraphEditorContext): {
 
   // ── Init ─────────────────────────────────────────────────────────
   const init = () => {
-    el.innerHTML = '';
+    nodeArea.innerHTML = '';
     panes.length = 0;
 
     const saved = loadPanes(ctx.gId, ctx.state.lang);
@@ -598,9 +599,9 @@ export function createMultiPaneView(ctx: GraphEditorContext): {
     for (const cfg of configs) {
       const inst = createPane(cfg);
       panes.push(inst);
-      el.appendChild(inst.containerEl);
+      nodeArea.appendChild(inst.containerEl);
     }
-    el.appendChild(addPaneBtn);
+    nodeArea.appendChild(addPaneBtn);
 
     // After all panes are created, update source buttons
     updateAllSrcBtns();
@@ -627,6 +628,7 @@ export function createMultiPaneView(ctx: GraphEditorContext): {
       p.updateLangBtn();
       p.view.setLang(lang);
     }
+    lineView.setLang(lang);
     saveAll();
   };
 

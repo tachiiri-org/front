@@ -579,7 +579,9 @@ export function createOutlinerView(ctx: GraphEditorContext, paneOpts?: OutlinerP
   // Expansion-driven flatten: each occurrence is grouped under its PARENT occurrence (its ancestor
   // PATH is the group header), so a multi-parent node appears once under each parent. Groups are
   // revealed as the user expands; initially only the root group shows.
-  const V2_FLAT = true;
+  // 素のツリー表示: false にして renderNested（インデント＋▸/▾のインライン入れ子ツリー）を使う。
+  // true の renderFlat（親 occurrence ごとのグループセクション）は廃止方針。
+  const V2_FLAT = false;
   const FLAT_MAX = 400;   // hard cap on rendered rows (guard against a runaway flatten)
 
   // Occurrences from the top-level root down to `occ` (inclusive), root-first.
