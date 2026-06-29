@@ -1,14 +1,14 @@
 import type { GraphEditorContext, PaneView, ExplorerNode, ExplorerLine, PaneViewPathEntry } from './types';
 import { BORDER, TEXT_HIGH, TEXT_MID, TEXT_DIM, SELECT_STRONG } from './constants';
 import {
-  fetchNodeLines, apiCreateRelation, apiSetLineBody, apiAddRay, apiRemoveRay,
-  fetchAllNodes, apiCreateNode,
+  fetchNodeLines, apiCreateRelation, apiSetLineBody, apiAddRay, fetchAllNodes, apiCreateNode,
 } from './api';
 
-// 関係 (line) 列。左の node 列で選ばれたノードを「主語」として、そのノードが参加している関係 line を
-// 一覧・作成・編集する。各 line はテキスト本文(body)＋順序付き参加者(participants, 先頭=主語)を持つ。
-// 参加者の追加は列内のノード検索（ヒットすれば紐付け、無ければ新規ノード化）で行う。
-// PaneView を満たすので multi-pane に node 列と同じように並ぶ。
+// 関係 (line) パネル。左で選んだノードの関係を素のテキスト行として読み書きする。
+// - 本文はノードラベルと同じく素のテキスト入力（ポップアップ無し）。
+// - 本文中で「@」を押すとノード検索が出て、選ぶとラベルを挿入＋参加者として紐付け(j_ray)。
+// - 関係にフォーカスするとその関係が「アクティブ」になり、ノードパネルの四角が
+//   塗り(参加)/空(非参加) を表す。四角の右クリックで link/unlink（outliner 側）。
 
 function labelOf(n: ExplorerNode, lang: 'en' | 'ja'): string {
   const primary = lang === 'ja' ? n.ja : n.en;
@@ -23,11 +23,12 @@ export function createLineView(
   let lang = opts.lang;
   let currentNodeId: string | null = opts.initialNodeId ?? null;
   let renderToken = 0;
+  // lineId → その行の textarea（アクティブ強調の付け替え用）。
+  const taByLine = new Map<string, HTMLTextAreaElement>();
 
   const el = document.createElement('div');
   el.style.cssText = `flex:1;display:flex;flex-direction:column;overflow:hidden;`;
 
-  // Header height matches the node pane header (multi-pane) — both 28px box-sized.
   const head = document.createElement('div');
   head.style.cssText = `flex-shrink:0;height:28px;box-sizing:border-box;padding:0 8px;border-bottom:1px solid ${BORDER};font-size:11px;color:${TEXT_MID};display:flex;align-items:center;gap:6px;`;
   el.appendChild(head);
@@ -36,125 +37,115 @@ export function createLineView(
   bodyEl.style.cssText = `flex:1;overflow-y:auto;padding:6px 8px;`;
   el.appendChild(bodyEl);
 
-  // ── 参加者の追加（列内ノード検索：ヒット→紐付け / 無し→新規ノード化）─────────────
-  const mountAddParticipant = (lineId: string, onAdded: () => void): HTMLElement => {
-    const wrap = document.createElement('div');
-    wrap.style.cssText = `position:relative;margin-top:4px;`;
-    const input = document.createElement('input');
-    input.placeholder = '＋参加者を検索／新規作成…';
-    input.style.cssText = `width:100%;box-sizing:border-box;background:transparent;border:1px solid ${BORDER};color:${TEXT_HIGH};font-size:12px;padding:3px 6px;border-radius:4px;outline:none;`;
-    wrap.appendChild(input);
+  // ── @メンション用ドロップダウン（1つを使い回す） ──────────────────────────────
+  const menu = document.createElement('div');
+  menu.style.cssText = `position:fixed;z-index:300;background:hsl(240,14%,9%);border:1px solid ${BORDER};border-radius:6px;max-height:200px;overflow-y:auto;min-width:180px;display:none;box-shadow:0 4px 12px rgba(0,0,0,.4);`;
+  document.body.appendChild(menu);
+  let mention: { ta: HTMLTextAreaElement; lineId: string; atStart: number; end: number } | null = null;
+  const closeMenu = () => { menu.style.display = 'none'; menu.innerHTML = ''; mention = null; };
 
-    const menu = document.createElement('div');
-    menu.style.cssText = `position:absolute;left:0;right:0;top:100%;z-index:50;background:hsl(240,14%,9%);border:1px solid ${BORDER};border-radius:0 0 6px 6px;max-height:180px;overflow-y:auto;display:none;`;
-    wrap.appendChild(menu);
-
-    let results: ExplorerNode[] = [];
-    let seq = 0;
-
-    const closeMenu = () => { menu.style.display = 'none'; menu.innerHTML = ''; };
-
-    const addNode = async (nodeId: string) => {
-      await apiAddRay(ctx.gId, lineId, nodeId);
-      input.value = '';
-      closeMenu();
-      onAdded();
-    };
-
-    const renderResults = (q: string) => {
-      menu.innerHTML = '';
-      const exact = results.find((n) => labelOf(n, lang) === q);
-      const rows: Array<{ label: string; act: () => void }> = results.map((n) => ({
-        label: labelOf(n, lang),
-        act: () => void addNode(n.id),
-      }));
-      // 完全一致が無ければ「新規作成」行を先頭に
-      if (q && !exact) {
-        rows.unshift({
-          label: `＋「${q}」を新規ノードで作成`,
-          act: async () => {
-            const created = await apiCreateNode(ctx.gId, null, lang, q);
-            if (created) await addNode(created.id);
-          },
-        });
-      }
-      if (rows.length === 0) { closeMenu(); return; }
-      for (const r of rows) {
-        const item = document.createElement('div');
-        item.textContent = r.label;
-        item.style.cssText = `padding:4px 8px;cursor:pointer;color:${TEXT_MID};font-size:12px;`;
-        item.addEventListener('mouseenter', () => { item.style.background = 'rgba(255,255,255,.07)'; });
-        item.addEventListener('mouseleave', () => { item.style.background = 'transparent'; });
-        item.addEventListener('mousedown', (e) => { e.preventDefault(); r.act(); });
-        menu.appendChild(item);
-      }
-      menu.style.display = 'block';
-    };
-
-    input.addEventListener('input', async () => {
-      const q = input.value.trim();
-      const my = ++seq;
-      if (!q) { closeMenu(); return; }
-      const { nodes } = await fetchAllNodes(ctx.gId, [], 0, lang, undefined, q);
-      if (my !== seq) return;
-      results = nodes;
-      renderResults(q);
-    });
-    input.addEventListener('keydown', (e) => {
-      if (e.key === 'Enter') {
-        e.preventDefault();
-        const q = input.value.trim();
-        if (!q) return;
-        const exact = results.find((n) => labelOf(n, lang) === q);
-        if (exact) void addNode(exact.id);
-        else void (async () => { const c = await apiCreateNode(ctx.gId, null, lang, q); if (c) await addNode(c.id); })();
-      } else if (e.key === 'Escape') {
-        input.value = ''; closeMenu();
-      }
-    });
-    input.addEventListener('blur', () => { setTimeout(closeMenu, 150); });
-
-    return wrap;
+  const setActive = (line: ExplorerLine) => {
+    ctx.setActiveRelation({ lineId: line.lineId, participants: new Set(line.participants.map((p) => p.id)) });
+    updateActiveHighlight();
+  };
+  const updateActiveHighlight = () => {
+    const activeId = ctx.activeRelation?.lineId ?? null;
+    for (const [lid, ta] of taByLine) {
+      ta.style.borderLeft = `2px solid ${lid === activeId ? SELECT_STRONG : 'transparent'}`;
+    }
   };
 
-  // ── 関係 line 1件のカード ─────────────────────────────────────────────────────
-  const renderLine = (line: ExplorerLine): HTMLElement => {
-    const card = document.createElement('div');
-    card.style.cssText = `border:1px solid ${BORDER};border-radius:6px;padding:6px 8px;margin-bottom:8px;`;
+  // メンション挿入: 「@query」を選んだノードのラベルに置換し、参加者に紐付け＋本文保存。
+  const insertMention = async (n: ExplorerNode, createLabel?: string) => {
+    if (!mention) return;
+    const { ta, lineId, atStart, end } = mention;
+    let nodeId = n.id;
+    if (createLabel) {
+      const created = await apiCreateNode(ctx.gId, null, lang, createLabel);
+      if (!created) { closeMenu(); return; }
+      nodeId = created.id;
+    }
+    const label = createLabel ?? labelOf(n, lang);
+    ta.value = ta.value.slice(0, atStart) + label + ta.value.slice(end);
+    const caret = atStart + label.length;
+    closeMenu();
+    ta.focus();
+    ta.setSelectionRange(caret, caret);
+    ta.style.height = 'auto'; ta.style.height = ta.scrollHeight + 'px';
+    await apiAddRay(ctx.gId, lineId, nodeId);
+    const ar = ctx.activeRelation;
+    if (ar && ar.lineId === lineId) { ar.participants.add(nodeId); ctx.setActiveRelation(ar); }
+    await apiSetLineBody(ctx.gId, lineId, lang, ta.value);
+  };
 
-    // 本文(body)
+  const showMenu = (ta: HTMLTextAreaElement, query: string, nodes: ExplorerNode[]) => {
+    menu.innerHTML = '';
+    const rows: Array<{ label: string; act: () => void }> = nodes.slice(0, 20).map((n) => ({
+      label: labelOf(n, lang), act: () => void insertMention(n),
+    }));
+    const exact = nodes.find((n) => labelOf(n, lang) === query);
+    if (query && !exact) rows.push({ label: `＋「${query}」を新規ノードで作成して挿入`, act: () => void insertMention({ id: '' }, query) });
+    if (rows.length === 0) { closeMenu(); return; }
+    for (const r of rows) {
+      const item = document.createElement('div');
+      item.textContent = r.label;
+      item.style.cssText = `padding:4px 8px;cursor:pointer;color:${TEXT_MID};font-size:12px;white-space:nowrap;`;
+      item.addEventListener('mouseenter', () => { item.style.background = 'rgba(255,255,255,.07)'; });
+      item.addEventListener('mouseleave', () => { item.style.background = 'transparent'; });
+      item.addEventListener('mousedown', (e) => { e.preventDefault(); r.act(); });
+      menu.appendChild(item);
+    }
+    const rect = ta.getBoundingClientRect();
+    menu.style.left = `${rect.left}px`;
+    menu.style.top = `${rect.bottom + 2}px`;
+    menu.style.display = 'block';
+  };
+
+  // 本文の input ごとに「@…」を検出してドロップダウンを出す。
+  const handleMention = async (ta: HTMLTextAreaElement, lineId: string) => {
+    const caret = ta.selectionStart;
+    const before = ta.value.slice(0, caret);
+    const m = before.match(/@([^\s@]*)$/);
+    if (!m) { closeMenu(); return; }
+    const q = m[1];
+    mention = { ta, lineId, atStart: caret - m[0].length, end: caret };
+    const seq = ++mentionSeq;
+    const { nodes } = await fetchAllNodes(ctx.gId, [], 0, lang, undefined, q || undefined);
+    if (seq !== mentionSeq || !mention) return;
+    showMenu(ta, q, nodes);
+  };
+  let mentionSeq = 0;
+
+  // ── 関係 1 件 = 素のテキスト行 ───────────────────────────────────────────────
+  const renderRelationRow = (line: ExplorerLine): HTMLElement => {
+    const row = document.createElement('div');
+    row.style.cssText = `padding:2px 0;`;
     const ta = document.createElement('textarea');
     ta.value = line.body[lang] ?? line.body[lang === 'ja' ? 'en' : 'ja'] ?? '';
-    ta.placeholder = '関係をテキストで（例: 車は道路を走る）';
-    ta.rows = 2;
-    ta.style.cssText = `width:100%;box-sizing:border-box;resize:vertical;background:transparent;border:none;border-bottom:1px solid ${BORDER};color:${TEXT_HIGH};font-size:13px;line-height:1.5;padding:2px 0 4px;outline:none;`;
+    ta.placeholder = '関係をテキストで（@ でノードを挿入・紐付け）';
+    ta.rows = 1;
+    ta.style.cssText = `width:100%;box-sizing:border-box;background:transparent;border:none;border-left:2px solid transparent;outline:none;resize:none;font-size:14px;font-family:inherit;line-height:1.5;padding:0 4px;overflow:hidden;color:${TEXT_HIGH};`;
+    taByLine.set(line.lineId, ta);
+    const resize = () => { ta.style.height = 'auto'; ta.style.height = ta.scrollHeight + 'px'; };
+    setTimeout(resize, 0);
+    ta.addEventListener('focus', () => setActive(line));
+    ta.addEventListener('input', () => { resize(); void handleMention(ta, line.lineId); });
     ta.addEventListener('blur', () => { void apiSetLineBody(ctx.gId, line.lineId, lang, ta.value); });
-    card.appendChild(ta);
+    ta.addEventListener('keydown', (e) => { if (e.key === 'Escape') closeMenu(); });
+    row.appendChild(ta);
+    return row;
+  };
 
-    // 参加者(順序付き、先頭=主語)
-    const chips = document.createElement('div');
-    chips.style.cssText = `display:flex;flex-wrap:wrap;gap:4px;margin-top:6px;`;
-    line.participants.forEach((p, i) => {
-      const chip = document.createElement('span');
-      chip.style.cssText = `display:inline-flex;align-items:center;gap:4px;border:1px solid ${i === 0 ? SELECT_STRONG : BORDER};color:${TEXT_HIGH};font-size:12px;padding:1px 4px 1px 7px;border-radius:10px;`;
-      const txt = document.createElement('span');
-      txt.textContent = (i === 0 ? '◉ ' : '') + labelOf(p, lang);
-      if (p.color) txt.style.color = p.color;
-      chip.appendChild(txt);
-      const x = document.createElement('button');
-      x.textContent = '×';
-      x.title = '参加者から外す';
-      x.style.cssText = `background:transparent;border:none;color:${TEXT_DIM};cursor:pointer;font-size:13px;line-height:1;padding:0 2px;`;
-      x.addEventListener('click', async () => { await apiRemoveRay(ctx.gId, line.lineId, p.id); void render(); });
-      chip.appendChild(x);
-      chips.appendChild(chip);
-    });
-    card.appendChild(chips);
-
-    // 参加者追加
-    card.appendChild(mountAddParticipant(line.lineId, () => void render()));
-
-    return card;
+  // ノードパネルの draft 行に倣った □「関係を追加」行。
+  const makeAddRow = (nodeId: string): HTMLElement => {
+    const row = document.createElement('div');
+    row.style.cssText = `display:flex;align-items:center;padding:2px 0;cursor:pointer;`;
+    const sp = document.createElement('span'); sp.style.cssText = `flex-shrink:0;width:6px;`;
+    const bw = document.createElement('span'); bw.style.cssText = `flex-shrink:0;display:flex;align-items:center;justify-content:center;width:18px;`;
+    const sq = document.createElement('span'); sq.style.cssText = `width:7px;height:7px;border-radius:1px;box-sizing:border-box;background:transparent;border:1.5px solid ${TEXT_DIM};`;
+    bw.appendChild(sq); row.append(sp, bw);
+    row.addEventListener('click', async () => { await apiCreateRelation(ctx.gId, nodeId, lang, ''); await render(); });
+    return row;
   };
 
   // ── 列全体の描画 ─────────────────────────────────────────────────────────────
@@ -162,8 +153,8 @@ export function createLineView(
     const token = ++renderToken;
     head.innerHTML = '';
     bodyEl.innerHTML = '';
-
-    if (!currentNodeId) return; // ノード未選択時は空白（ナビゲーションテキストは出さない）
+    taByLine.clear();
+    if (!currentNodeId) return;
     const nodeId = currentNodeId;
 
     const title = document.createElement('span');
@@ -174,38 +165,20 @@ export function createLineView(
     const lines = await fetchNodeLines(ctx.gId, nodeId);
     if (token !== renderToken) return;
 
-    for (const line of lines) bodyEl.appendChild(renderLine(line));
-    // 末尾に常設の □ 追加行（ノードパネルの空行と同じ見た目。クリックで関係を作成）。
+    for (const line of lines) bodyEl.appendChild(renderRelationRow(line));
     bodyEl.appendChild(makeAddRow(nodeId));
+    updateActiveHighlight();
   };
 
-  // ノードパネルの draft 行に倣った □ の「関係を追加」行。
-  const makeAddRow = (nodeId: string): HTMLElement => {
-    const row = document.createElement('div');
-    row.style.cssText = `display:flex;align-items:center;padding:2px 0;cursor:pointer;`;
-    const sp = document.createElement('span');
-    sp.style.cssText = `flex-shrink:0;width:6px;`;
-    const bw = document.createElement('span');
-    bw.style.cssText = `flex-shrink:0;display:flex;align-items:center;justify-content:center;width:18px;`;
-    const sq = document.createElement('span');
-    sq.style.cssText = `width:7px;height:7px;border-radius:1px;box-sizing:border-box;background:transparent;border:1.5px solid ${TEXT_DIM};`;
-    bw.appendChild(sq);
-    row.append(sp, bw);
-    row.addEventListener('click', async () => { await apiCreateRelation(ctx.gId, nodeId, lang, ''); await render(); });
-    return row;
-  };
-
-  // 初期描画
   void render();
 
-  // ── PaneView 実装 ───────────────────────────────────────────────────────────
-  // node 列専用のメソッド（key-move / ancestors / path）は line 列では無害な no-op。
   const noPath: PaneViewPathEntry[] = [];
   return {
     el,
     load: () => render(),
     refresh: () => { void render(); },
     search: async () => { /* top-bar 検索は関係列には作用しない */ },
+    // ノードを切り替えても「アクティブ関係」は保持する（両方に選択を持つ設計）。一覧だけ更新。
     setParent: async (nodeId) => { currentNodeId = nodeId; await render(); },
     getAncestorIds: () => new Set<string>(),
     getNodePath: () => noPath,
@@ -217,6 +190,6 @@ export function createLineView(
     acceptKeyMove: async () => { /* 関係列はノード移動先になれない */ },
     getEffectiveParentId: () => null,
     getNodeParentId: () => undefined,
-    unregister: () => { /* グローバル購読なし */ },
+    unregister: () => { menu.remove(); },
   };
 }

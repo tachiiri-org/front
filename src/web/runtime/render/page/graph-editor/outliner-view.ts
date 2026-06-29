@@ -1,5 +1,5 @@
 import type { ExplorerNode, GraphEditorContext } from './types';
-import { BG, BORDER, TEXT_HIGH, TEXT_MID, TEXT_DIM, primaryLabel, fallbackLabel } from './constants';
+import { BG, BORDER, TEXT_HIGH, TEXT_MID, TEXT_DIM, SELECT_STRONG, primaryLabel, fallbackLabel } from './constants';
 import {
   fetchChildren, fetchParents, fetchBookmarks, fetchBookmarkedNodes, fetchAllNodes,
   apiCreateNode, apiUpdateNode, apiDeleteNode, apiMoveNode, apiMoveBookmark, apiToggleLink,
@@ -989,6 +989,24 @@ export function createOutlinerView(ctx: GraphEditorContext, paneOpts?: OutlinerP
     const hasChildren = onode.childrenLoaded
       ? onode.children.length > 0
       : (ctx.childrenCache.get(onode.node.id)?.length ?? 1) > 0;
+    // 関係(line)が選択中なら、四角は「その関係の参加かどうか」を表す: 塗り=参加 / 空(輪郭のみ)=非参加。
+    const ar = ctx.activeRelation;
+    if (ar) {
+      if (ar.participants.has(onode.node.id)) {
+        m.style.border = 'none';
+        m.style.background = SELECT_STRONG;
+      } else {
+        m.style.background = 'transparent';
+        m.style.border = `1.5px solid ${TEXT_DIM}`;
+      }
+      const triA = row.querySelector<HTMLElement>('[data-expand-triangle]');
+      if (triA) {
+        triA.textContent = onode.expanded ? '▾' : '▸';
+        triA.style.opacity = hasChildren ? '1' : '0';
+        triA.style.pointerEvents = hasChildren ? 'auto' : 'none';
+      }
+      return;
+    }
     // Color the square from the node's LINKED concept nodes' own colors: 1 color → solid,
     // 2+ → split the square left/right with the first two colors (3rd onward omitted), so a
     // node linked to several colored concepts is distinguishable.
@@ -1249,10 +1267,10 @@ export function createOutlinerView(ctx: GraphEditorContext, paneOpts?: OutlinerP
     btnWrap.appendChild(marker);
     // 四角クリック = ズーム（Alt+→ と同じ）。旧来のノード紐付けメニューは出さない（リンクは「/」で可能）。
     btnWrap.addEventListener('click', (e) => { e.stopPropagation(); void doZoomIn(onode); });
+    // 四角を右クリック = アクティブ関係への参加 link/unlink トグル（関係が未選択なら何もしない）。
     btnWrap.addEventListener('contextmenu', (e) => {
       e.preventDefault(); e.stopPropagation();
-      const lbl = primaryLabel(onode.node, paneLang) ?? fallbackLabel(onode.node, paneLang) ?? '';
-      void navigator.clipboard.writeText(`[${onode.node.id}]${lbl}`).then(() => showToast('コピーしました'));
+      void ctx.toggleParticipant(onode.node.id);
     });
     row.appendChild(btnWrap);
 
@@ -1683,8 +1701,21 @@ export function createOutlinerView(ctx: GraphEditorContext, paneOpts?: OutlinerP
       }
     };
 
+    // 各ノード右のコピーアイコン（旧・四角右クリックのコピーを移植）: ノード参照 [id]ラベル をコピー。
+    const copyIcon = document.createElement('button');
+    copyIcon.textContent = '❐';
+    copyIcon.title = 'ノード参照をコピー';
+    copyIcon.style.cssText = `flex-shrink:0;background:transparent;border:none;color:${TEXT_DIM};cursor:pointer;font-size:12px;padding:0 6px;line-height:1;`;
+    copyIcon.addEventListener('mousedown', (e) => e.preventDefault()); // don't steal caret/focus
+    copyIcon.addEventListener('click', (e) => {
+      e.stopPropagation();
+      const lbl = primaryLabel(onode.node, paneLang) ?? fallbackLabel(onode.node, paneLang) ?? '';
+      void navigator.clipboard.writeText(`[${onode.node.id}]${lbl}`).then(() => showToast('コピーしました'));
+    });
+
     row.insertBefore(triBtn, btnWrap);
     row.appendChild(ta);
+    row.appendChild(copyIcon);
     updateExpandMarker(onode);
     return row;
   };
@@ -2790,8 +2821,14 @@ export function createOutlinerView(ctx: GraphEditorContext, paneOpts?: OutlinerP
 
   updateBreadcrumb(); // show "ルート" on initial render
 
+  // Redraw every square marker — registered so the line panel can refresh participation fills
+  // when the active relation (or its membership) changes.
+  const rerenderAllMarkers = () => { for (const o of byKey.values()) updateExpandMarker(o); };
+  ctx.relationRerender.add(rerenderAllMarkers);
+
   const unregister = () => {
     flushPendingReorders(true);
+    ctx.relationRerender.delete(rerenderAllMarkers);
     window.removeEventListener('pagehide', onPageHide);
   };
 

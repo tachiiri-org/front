@@ -79,4 +79,16 @@ export interface GraphEditorContext {
   // ── Persistence ──
   // Called after childrenCache is updated so callers can persist it to localStorage
   saveChildrenCache?: () => void;
+
+  // ── 関係(line)とノードの相互選択 ──
+  // The relation currently selected in the line panel. Node panes read `participants` to fill
+  // (塗り=参加) / empty (空=非参加) each node's square; right-click a square toggles membership.
+  activeRelation: { lineId: string; participants: Set<string> } | null;
+  // Each node pane registers a "redraw all my square markers" callback here so the line panel can
+  // notify them when the active relation (or its participants) change.
+  relationRerender: Set<() => void>;
+  // Set/clear the active relation and notify every registered node pane.
+  setActiveRelation: (r: { lineId: string; participants: Set<string> } | null) => void;
+  // Right-click handler: add/remove the node as a participant of the active relation, then notify.
+  toggleParticipant: (nodeId: string) => Promise<void>;
 }

@@ -4,6 +4,7 @@ import {
   BG, BORDER, TEXT_HIGH, TEXT_MID, SELECT_STRONG,
 } from './constants';
 import { createMultiPaneView } from './multi-pane';
+import { apiAddRay, apiRemoveRay } from './api';
 
 export function renderGraphEditor(
   id: string,
@@ -151,12 +152,31 @@ export function renderGraphEditor(
   // ── Context assembly ──────────────────────────────────────────────
   const rootNodeId = comp.rootNodeId ?? null;
   const colorPalette = new Map<string, string>();
+  const relationRerender = new Set<() => void>();
   const ctx = {
     gId, limit, rootNodeId, outer, state, childrenCache,
     colorPalette,
     tempNodeCounter: 0,
     saveChildrenCache,
     paneDrag: null,
+    activeRelation: null,
+    relationRerender,
+    setActiveRelation: (r: { lineId: string; participants: Set<string> } | null) => {
+      ctx.activeRelation = r;
+      relationRerender.forEach((f) => f());
+    },
+    toggleParticipant: async (nodeId: string) => {
+      const ar = ctx.activeRelation;
+      if (!ar) return;
+      if (ar.participants.has(nodeId)) {
+        await apiRemoveRay(gId, ar.lineId, nodeId);
+        ar.participants.delete(nodeId);
+      } else {
+        await apiAddRay(gId, ar.lineId, nodeId);
+        ar.participants.add(nodeId);
+      }
+      relationRerender.forEach((f) => f());
+    },
   } as unknown as GraphEditorContext;
 
   // ── Multi-pane view ───────────────────────────────────────────────
