@@ -989,9 +989,11 @@ export function createOutlinerView(ctx: GraphEditorContext, paneOpts?: OutlinerP
     const hasChildren = onode.childrenLoaded
       ? onode.children.length > 0
       : (ctx.childrenCache.get(onode.node.id)?.length ?? 1) > 0;
-    // 四角はデフォルトは塗らない（輪郭のみ）。関係(line)が選択中のときだけ、その関係の参加ノードを塗る。
+    // 四角はデフォルトは塗らない（輪郭のみ）。関係(line)が選択中ならその関係の参加ノードを塗り、
+    // 関係が無いときは「選択中のノード」を塗る。
     const ar = ctx.activeRelation;
-    if (ar && ar.participants.has(onode.node.id)) {
+    const blue = ar ? ar.participants.has(onode.node.id) : (onode.node.id === paneSelectedId);
+    if (blue) {
       m.style.border = 'none';
       m.style.background = SELECT_STRONG;
     } else {

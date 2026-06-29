@@ -123,10 +123,13 @@ export function createLineView(
   let mentionSeq = 0;
 
   // ── 関係 1 件 = 素のテキスト行 ───────────────────────────────────────────────
+  // ノード行と同じ桁構成: spacer(6px) + 四角(18px) + テキスト。
   const renderRelationRow = (line: ExplorerLine): HTMLElement => {
     const row = document.createElement('div');
     row.style.cssText = `display:flex;align-items:flex-start;padding:2px 0;`;
-    // 行頭の四角（ノード行と同じ見た目）。アクティブ関係なら塗る。クリックで本文にフォーカス＝アクティブ化。
+    const spacer = document.createElement('span');
+    spacer.style.cssText = `flex-shrink:0;width:6px;`;
+    // 行頭の四角。アクティブ関係なら塗る。クリックで本文にフォーカス＝アクティブ化。
     const bw = document.createElement('span');
     bw.style.cssText = `flex-shrink:0;display:flex;align-items:center;justify-content:center;width:18px;height:21px;cursor:pointer;`;
     const sq = document.createElement('span');
@@ -135,7 +138,6 @@ export function createLineView(
     sqByLine.set(line.lineId, sq);
     const ta = document.createElement('textarea');
     ta.value = line.body[lang] ?? line.body[lang === 'ja' ? 'en' : 'ja'] ?? '';
-    ta.placeholder = '関係をテキストで（@ でノードを挿入・紐付け）';
     ta.rows = 1;
     ta.style.cssText = `flex:1;background:transparent;border:none;outline:none;resize:none;font-size:14px;font-family:inherit;line-height:1.5;padding:0 4px;overflow:hidden;min-width:0;color:${TEXT_HIGH};`;
     bw.addEventListener('mousedown', (e) => e.preventDefault());
@@ -146,19 +148,37 @@ export function createLineView(
     ta.addEventListener('input', () => { resize(); void handleMention(ta, line.lineId); });
     ta.addEventListener('blur', () => { void apiSetLineBody(ctx.gId, line.lineId, lang, ta.value); });
     ta.addEventListener('keydown', (e) => { if (e.key === 'Escape') closeMenu(); });
-    row.append(bw, ta);
+    row.append(spacer, bw, ta);
     return row;
   };
 
-  // ノードパネルの draft 行に倣った □「関係を追加」行。
-  const makeAddRow = (nodeId: string): HTMLElement => {
+  // ノードパネルの draft 行と同じ構成のドラフト行（spacer+四角+入力）。テキストを書いて Enter で作成。
+  const makeDraftRow = (nodeId: string): HTMLElement => {
     const row = document.createElement('div');
-    row.style.cssText = `display:flex;align-items:center;padding:2px 0;cursor:pointer;`;
-    const sp = document.createElement('span'); sp.style.cssText = `flex-shrink:0;width:6px;`;
-    const bw = document.createElement('span'); bw.style.cssText = `flex-shrink:0;display:flex;align-items:center;justify-content:center;width:18px;`;
+    row.style.cssText = `display:flex;align-items:flex-start;padding:2px 0;`;
+    const spacer = document.createElement('span'); spacer.style.cssText = `flex-shrink:0;width:6px;`;
+    const bw = document.createElement('span'); bw.style.cssText = `flex-shrink:0;display:flex;align-items:center;justify-content:center;width:18px;height:21px;cursor:pointer;`;
     const sq = document.createElement('span'); sq.style.cssText = `width:7px;height:7px;border-radius:1px;box-sizing:border-box;background:transparent;border:1.5px solid ${TEXT_DIM};`;
-    bw.appendChild(sq); row.append(sp, bw);
-    row.addEventListener('click', async () => { await apiCreateRelation(ctx.gId, nodeId, lang, ''); await render(); });
+    bw.appendChild(sq);
+    const ta = document.createElement('textarea');
+    ta.rows = 1;
+    ta.style.cssText = `flex:1;background:transparent;border:none;outline:none;resize:none;font-size:14px;font-family:inherit;line-height:1.5;padding:0 4px;overflow:hidden;min-width:0;color:${TEXT_DIM};`;
+    const resize = () => { ta.style.height = 'auto'; ta.style.height = ta.scrollHeight + 'px'; };
+    ta.addEventListener('focus', () => { ta.style.color = TEXT_HIGH; });
+    ta.addEventListener('blur', () => { if (!ta.value.trim()) ta.style.color = TEXT_DIM; });
+    ta.addEventListener('input', resize);
+    ta.addEventListener('keydown', async (e) => {
+      if (e.key === 'Enter' && !e.shiftKey) {
+        e.preventDefault();
+        const body = ta.value.trim();
+        ta.value = '';
+        await apiCreateRelation(ctx.gId, nodeId, lang, body);
+        await render();
+      }
+    });
+    bw.addEventListener('mousedown', (e) => e.preventDefault());
+    bw.addEventListener('click', () => ta.focus());
+    row.append(spacer, bw, ta);
     return row;
   };
 
@@ -180,7 +200,7 @@ export function createLineView(
     if (token !== renderToken) return;
 
     for (const line of lines) bodyEl.appendChild(renderRelationRow(line));
-    bodyEl.appendChild(makeAddRow(nodeId));
+    bodyEl.appendChild(makeDraftRow(nodeId));
     updateActiveHighlight();
   };
 

@@ -140,7 +140,12 @@ export function createMultiPaneView(ctx: GraphEditorContext): {
       }
     }
     // The persistent line dock always reflects the most recently selected node (across all panes).
-    if (selectedNodeId !== null) void lineView.setParent(selectedNodeId);
+    // Selecting a different node clears the active relation, so squares fall back to marking the
+    // selected node (and setActiveRelation(null) also triggers a marker redraw for that).
+    if (selectedNodeId !== null) {
+      ctx.setActiveRelation(null);
+      void lineView.setParent(selectedNodeId);
+    }
   };
 
   // Move a node from `paneId` to the adjacent pane (Ctrl/Cmd+→/←). Reuses the cross-pane
