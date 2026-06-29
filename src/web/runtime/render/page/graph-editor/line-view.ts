@@ -2,6 +2,7 @@ import type { GraphEditorContext, PaneView, ExplorerNode, ExplorerLine, PaneView
 import { BORDER, TEXT_HIGH, TEXT_MID, TEXT_DIM, SELECT_STRONG } from './constants';
 import {
   fetchNodeLines, apiCreateRelation, apiSetLineBody, apiAddRay, apiRemoveRay, fetchAllNodes, apiCreateNode,
+  fetchOrphanLines, apiDeleteLine,
 } from './api';
 
 // 関係 (line) パネル。関係 = テキストとノード参照(チップ)が交互に並ぶ1行（セグメント分割編集）。
@@ -37,6 +38,7 @@ export function createLineView(
 ): PaneView {
   let lang = opts.lang;
   let currentNodeId: string | null = opts.initialNodeId ?? null;
+  let orphanMode = false; // true = 参加ノードを持たない「リンクなし関係」一覧を表示。
   let renderToken = 0;
   const sqByLine = new Map<string, HTMLElement>();
   const canvas = document.createElement('canvas');
@@ -271,7 +273,14 @@ export function createLineView(
         // Backspace（先頭）で直前チップ削除、Delete（末尾）で直後チップ削除。
         if (e.key === 'Backspace' && atStart) {
           const prev = ta.previousElementSibling as HTMLElement | null;
-          if (prev?.dataset.men) { e.preventDefault(); removeChip(prev); }
+          if (prev?.dataset.men) { e.preventDefault(); removeChip(prev); return; }
+          // 先頭の空テキスト片・チップも本文も無いなら、関係そのものを削除。
+          const hasChip = Array.from(content.children).some((c) => (c as HTMLElement).dataset.men);
+          if (!prev && ta.value === '' && !hasChip) {
+            e.preventDefault();
+            void (async () => { await apiDeleteLine(ctx.gId, line.lineId); await render(); })();
+            return;
+          }
         }
         if (e.key === 'Delete' && atEnd) {
           const next = ta.nextElementSibling as HTMLElement | null;
@@ -391,17 +400,31 @@ export function createLineView(
     head.innerHTML = '';
     bodyEl.innerHTML = '';
     sqByLine.clear();
-    if (!currentNodeId) return;
-    const nodeId = currentNodeId;
 
     const title = document.createElement('span');
-    title.textContent = '関係';
+    title.textContent = orphanMode ? 'リンクなし関係' : '関係';
     title.style.cssText = `color:${TEXT_HIGH};font-size:12px;`;
     head.appendChild(title);
+    // 「リンクなし」トグル: 参加ノードを持たない関係の一覧（移行・編集中の受け皿）。
+    const orphanBtn = document.createElement('button');
+    orphanBtn.textContent = 'リンクなし';
+    orphanBtn.title = '参加ノードを持たない関係（リンクなし）を表示';
+    orphanBtn.style.cssText = `margin-left:auto;background:${orphanMode ? SELECT_STRONG : 'transparent'};border:1px solid ${BORDER};color:${orphanMode ? '#fff' : TEXT_MID};cursor:pointer;font-size:10px;padding:1px 6px;border-radius:3px;`;
+    orphanBtn.addEventListener('click', () => { orphanMode = !orphanMode; void render(); });
+    head.appendChild(orphanBtn);
 
+    if (orphanMode) {
+      const lines = await fetchOrphanLines(ctx.gId);
+      if (token !== renderToken) return;
+      for (const line of lines) bodyEl.appendChild(renderRelationRow(line));
+      updateActiveHighlight();
+      return;
+    }
+
+    if (!currentNodeId) { updateActiveHighlight(); return; }
+    const nodeId = currentNodeId;
     const lines = await fetchNodeLines(ctx.gId, nodeId);
     if (token !== renderToken) return;
-
     // 追加用ドラフト行は常に先頭。
     bodyEl.appendChild(makeDraftRow(nodeId));
     for (const line of lines) bodyEl.appendChild(renderRelationRow(line));

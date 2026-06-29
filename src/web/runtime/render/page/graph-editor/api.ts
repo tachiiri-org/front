@@ -236,3 +236,16 @@ export async function apiReorderRay(graphId: string, lineId: string, order: stri
     body: JSON.stringify({ order }),
   });
 }
+
+// 参加ノードを1つも持たない関係（本文だけ＝リンクなし関係 / orphan）の一覧。
+export async function fetchOrphanLines(graphId: string): Promise<ExplorerLine[]> {
+  const r = await apiFetch(`/api/v1/graph/${graphId}/orphan-lines`);
+  if (!r.ok) return [];
+  const data = await r.json() as { lines: ExplorerLine[] };
+  return data.lines ?? [];
+}
+
+// 関係(line)を丸ごと削除（チップ削除とは別の、関係そのものの削除）。
+export async function apiDeleteLine(graphId: string, lineId: string): Promise<void> {
+  await apiFetch(`/api/v1/graph/${graphId}/line/${lineId}`, { method: 'DELETE' });
+}
