@@ -23,8 +23,8 @@ export function createLineView(
   let lang = opts.lang;
   let currentNodeId: string | null = opts.initialNodeId ?? null;
   let renderToken = 0;
-  // lineId → その行の textarea（アクティブ強調の付け替え用）。
-  const taByLine = new Map<string, HTMLTextAreaElement>();
+  // lineId → その行の頭の四角（アクティブ強調の付け替え用）。
+  const sqByLine = new Map<string, HTMLElement>();
 
   const el = document.createElement('div');
   el.style.cssText = `flex:1;display:flex;flex-direction:column;overflow:hidden;`;
@@ -55,8 +55,9 @@ export function createLineView(
   };
   const updateActiveHighlight = () => {
     const activeId = ctx.activeRelation?.lineId ?? null;
-    for (const [lid, ta] of taByLine) {
-      ta.style.borderLeft = `2px solid ${lid === activeId ? SELECT_STRONG : 'transparent'}`;
+    for (const [lid, sq] of sqByLine) {
+      if (lid === activeId) { sq.style.border = 'none'; sq.style.background = SELECT_STRONG; }
+      else { sq.style.background = 'transparent'; sq.style.border = `1.5px solid ${TEXT_DIM}`; }
     }
   };
 
@@ -124,20 +125,28 @@ export function createLineView(
   // ── 関係 1 件 = 素のテキスト行 ───────────────────────────────────────────────
   const renderRelationRow = (line: ExplorerLine): HTMLElement => {
     const row = document.createElement('div');
-    row.style.cssText = `padding:2px 0;`;
+    row.style.cssText = `display:flex;align-items:flex-start;padding:2px 0;`;
+    // 行頭の四角（ノード行と同じ見た目）。アクティブ関係なら塗る。クリックで本文にフォーカス＝アクティブ化。
+    const bw = document.createElement('span');
+    bw.style.cssText = `flex-shrink:0;display:flex;align-items:center;justify-content:center;width:18px;height:21px;cursor:pointer;`;
+    const sq = document.createElement('span');
+    sq.style.cssText = `width:7px;height:7px;border-radius:1px;box-sizing:border-box;background:transparent;border:1.5px solid ${TEXT_DIM};`;
+    bw.appendChild(sq);
+    sqByLine.set(line.lineId, sq);
     const ta = document.createElement('textarea');
     ta.value = line.body[lang] ?? line.body[lang === 'ja' ? 'en' : 'ja'] ?? '';
     ta.placeholder = '関係をテキストで（@ でノードを挿入・紐付け）';
     ta.rows = 1;
-    ta.style.cssText = `width:100%;box-sizing:border-box;background:transparent;border:none;border-left:2px solid transparent;outline:none;resize:none;font-size:14px;font-family:inherit;line-height:1.5;padding:0 4px;overflow:hidden;color:${TEXT_HIGH};`;
-    taByLine.set(line.lineId, ta);
+    ta.style.cssText = `flex:1;background:transparent;border:none;outline:none;resize:none;font-size:14px;font-family:inherit;line-height:1.5;padding:0 4px;overflow:hidden;min-width:0;color:${TEXT_HIGH};`;
+    bw.addEventListener('mousedown', (e) => e.preventDefault());
+    bw.addEventListener('click', () => ta.focus());
     const resize = () => { ta.style.height = 'auto'; ta.style.height = ta.scrollHeight + 'px'; };
     setTimeout(resize, 0);
     ta.addEventListener('focus', () => setActive(line));
     ta.addEventListener('input', () => { resize(); void handleMention(ta, line.lineId); });
     ta.addEventListener('blur', () => { void apiSetLineBody(ctx.gId, line.lineId, lang, ta.value); });
     ta.addEventListener('keydown', (e) => { if (e.key === 'Escape') closeMenu(); });
-    row.appendChild(ta);
+    row.append(bw, ta);
     return row;
   };
 
@@ -158,7 +167,7 @@ export function createLineView(
     const token = ++renderToken;
     head.innerHTML = '';
     bodyEl.innerHTML = '';
-    taByLine.clear();
+    sqByLine.clear();
     if (!currentNodeId) return;
     const nodeId = currentNodeId;
 

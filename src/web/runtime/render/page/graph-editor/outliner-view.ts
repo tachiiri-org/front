@@ -989,37 +989,14 @@ export function createOutlinerView(ctx: GraphEditorContext, paneOpts?: OutlinerP
     const hasChildren = onode.childrenLoaded
       ? onode.children.length > 0
       : (ctx.childrenCache.get(onode.node.id)?.length ?? 1) > 0;
-    // 関係(line)が選択中なら、四角は「その関係の参加かどうか」を表す: 塗り=参加 / 空(輪郭のみ)=非参加。
+    // 四角はデフォルトは塗らない（輪郭のみ）。関係(line)が選択中のときだけ、その関係の参加ノードを塗る。
     const ar = ctx.activeRelation;
-    if (ar) {
-      if (ar.participants.has(onode.node.id)) {
-        m.style.border = 'none';
-        m.style.background = SELECT_STRONG;
-      } else {
-        m.style.background = 'transparent';
-        m.style.border = `1.5px solid ${TEXT_DIM}`;
-      }
-      const triA = row.querySelector<HTMLElement>('[data-expand-triangle]');
-      if (triA) {
-        triA.textContent = onode.expanded ? '▾' : '▸';
-        triA.style.opacity = hasChildren ? '1' : '0';
-        triA.style.pointerEvents = hasChildren ? 'auto' : 'none';
-      }
-      return;
-    }
-    // Color the square from the node's LINKED concept nodes' own colors: 1 color → solid,
-    // 2+ → split the square left/right with the first two colors (3rd onward omitted), so a
-    // node linked to several colored concepts is distinguishable.
-    const linkColors = (linkTargets.get(onode.node.id) ?? [])
-      .map(tid => resolveColor(tid))
-      .filter((c): c is string => c != null);
-    m.style.border = 'none';
-    if (linkColors.length >= 2) {
-      m.style.background = `linear-gradient(90deg, ${linkColors[0]} 0 50%, ${linkColors[1]} 50% 100%)`;
-    } else if (linkColors.length === 1) {
-      m.style.background = linkColors[0];
+    if (ar && ar.participants.has(onode.node.id)) {
+      m.style.border = 'none';
+      m.style.background = SELECT_STRONG;
     } else {
-      m.style.background = hasChildren && !onode.expanded ? TEXT_MID : TEXT_DIM;
+      m.style.background = 'transparent';
+      m.style.border = `1.5px solid ${TEXT_DIM}`;
     }
     // Triangle expand button (right side)
     const tri = row.querySelector<HTMLElement>('[data-expand-triangle]');
