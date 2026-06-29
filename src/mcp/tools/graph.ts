@@ -211,6 +211,21 @@ export const GRAPH_TOOLS = [
       required: ["graph_id", "node_id"],
     },
   },
+  {
+    name: "graph_migrate_nodes_to_relations",
+    description:
+      "[migration] Convert long 'sentence' nodes into relation lines (orphan: body only, no participants). dryRun (default true) returns the candidate list; dryRun:false converts up to `limit` of them (node→relation + node deletion). Rule: ja-label length >= minLen (default 14), node is a leaf (no oriented children), not already a relation participant, EXCLUDING table-name nodes (en starts with m_/p_/j_/h_/v_/t_) and （実体） entity nodes. Review with dryRun, then execute in small batches.",
+    inputSchema: {
+      type: "object",
+      properties: {
+        graph_id: { type: "string", description: "Word graph ID (e.g. 'word-graph-1')" },
+        dryRun: { type: "boolean", description: "true (default): return candidates only. false: actually convert." },
+        minLen: { type: "number", description: "Min ja(or en) label length to qualify (default 14)" },
+        limit: { type: "number", description: "Max nodes to convert when dryRun is false (default 50, max 1000)" },
+      },
+      required: ["graph_id"],
+    },
+  },
 ];
 
 // --- Tool handler ---
@@ -324,6 +339,17 @@ export async function callGraphTool(
       if (!res.ok) throw new Error(`graph_orient_children_failed:${res.status}`);
       const data = (await res.json()) as { oriented: number };
       return { content: [{ type: "text", text: `Oriented ${data.oriented} edges of [${nodeId}] as parent${except.length ? ` (except parents: ${except.join(", ")})` : ""}` }] };
+    }
+
+    if (name === "graph_migrate_nodes_to_relations") {
+      const payload: Record<string, unknown> = {};
+      if (typeof args.dryRun === "boolean") payload.dryRun = args.dryRun;
+      if (typeof args.minLen === "number") payload.minLen = args.minLen;
+      if (typeof args.limit === "number") payload.limit = args.limit;
+      const res = await graphFetch(env, graphId, "migrate-relations", "POST", payload);
+      if (!res.ok) throw new Error(`graph_migrate_failed:${res.status}`);
+      const data = await res.json();
+      return { content: [{ type: "text", text: JSON.stringify(data) }] };
     }
 
     return { content: [{ type: "text", text: `Unknown graph tool: ${name}` }], isError: true };
