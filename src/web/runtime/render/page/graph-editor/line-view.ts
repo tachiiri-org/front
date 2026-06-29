@@ -83,6 +83,48 @@ export function createLineView(
     menu.style.display = 'block';
   };
 
+  // チップ（ノードリンク）クリック時の検索ポップオーバー。入力欄つきで、選ぶとリンク先を差し替える。
+  const openSearchPopover = (anchor: HTMLElement, onPick: (n: ExplorerNode, createLabel?: string) => void) => {
+    menu.innerHTML = '';
+    mention = null;
+    const input = document.createElement('input');
+    input.placeholder = 'ノードを検索…';
+    input.style.cssText = `width:100%;box-sizing:border-box;background:transparent;border:none;border-bottom:1px solid ${BORDER};color:${TEXT_HIGH};font-size:12px;padding:4px 8px;outline:none;`;
+    const list = document.createElement('div');
+    menu.append(input, list);
+    let seq = 0;
+    const renderList = (q: string, nodes: ExplorerNode[]) => {
+      list.innerHTML = '';
+      const rows: Array<{ label: string; act: () => void }> = nodes.slice(0, 20).map((n) => ({ label: labelOf(n, lang), act: () => { onPick(n); closeMenu(); } }));
+      const exact = nodes.find((n) => labelOf(n, lang) === q);
+      if (q && !exact) rows.push({ label: `＋「${q}」を新規作成`, act: () => { onPick({ id: '' }, q); closeMenu(); } });
+      for (const r of rows) {
+        const item = document.createElement('div');
+        item.textContent = r.label;
+        item.style.cssText = `padding:4px 8px;cursor:pointer;color:${TEXT_MID};font-size:12px;white-space:nowrap;`;
+        item.addEventListener('mouseenter', () => { item.style.background = 'rgba(255,255,255,.07)'; });
+        item.addEventListener('mouseleave', () => { item.style.background = 'transparent'; });
+        item.addEventListener('mousedown', (e) => { e.preventDefault(); r.act(); });
+        list.appendChild(item);
+      }
+    };
+    input.addEventListener('input', async () => {
+      const q = input.value.trim();
+      const my = ++seq;
+      const { nodes } = await fetchAllNodes(ctx.gId, [], 0, lang, undefined, q || undefined);
+      if (my !== seq) return;
+      renderList(q, nodes);
+    });
+    input.addEventListener('blur', () => setTimeout(closeMenu, 150));
+    input.addEventListener('keydown', (e) => { if (e.key === 'Escape') closeMenu(); });
+    const rect = anchor.getBoundingClientRect();
+    menu.style.left = `${rect.left}px`;
+    menu.style.top = `${rect.bottom + 2}px`;
+    menu.style.display = 'block';
+    void (async () => { const { nodes } = await fetchAllNodes(ctx.gId, [], 0, lang); renderList('', nodes); })();
+    setTimeout(() => input.focus(), 0);
+  };
+
   const setActive = (line: ExplorerLine) => {
     const cur = ctx.activeRelation;
     if (!cur || cur.lineId !== line.lineId) {
@@ -144,16 +186,40 @@ export function createLineView(
       const chip = document.createElement('span');
       chip.dataset.men = id;
       chip.contentEditable = 'false';
-      chip.style.cssText = `display:inline-flex;align-items:center;gap:1px;vertical-align:top;line-height:1.5;font-size:14px;color:${TEXT_HIGH};border-bottom:1px solid ${SELECT_STRONG};margin:0 1px;user-select:none;`;
+      // 下線はテキストと同じ色（currentColor）。クリックでリンク先の差し替え検索。
+      chip.style.cssText = `position:relative;display:inline-block;vertical-align:top;line-height:1.5;font-size:14px;color:${TEXT_HIGH};border-bottom:1px solid currentColor;margin:0 3px 0 1px;user-select:none;cursor:pointer;`;
       const txt = document.createElement('span');
       txt.textContent = label ?? labelById.get(id) ?? id;
+      txt.addEventListener('mousedown', (e) => { e.preventDefault(); openSearchPopover(chip, (n, cl) => void replaceChip(chip, n, cl)); });
       chip.appendChild(txt);
+      // × はノードの右上に小さく。
       const x = document.createElement('span');
       x.textContent = '×';
-      x.style.cssText = `cursor:pointer;color:${TEXT_DIM};font-size:12px;padding:0 1px;`;
-      x.addEventListener('mousedown', (e) => { e.preventDefault(); removeChip(chip); });
+      x.style.cssText = `position:absolute;top:-5px;right:-5px;font-size:9px;line-height:1;color:${TEXT_DIM};cursor:pointer;`;
+      x.addEventListener('mousedown', (e) => { e.preventDefault(); e.stopPropagation(); removeChip(chip); });
       chip.appendChild(x);
       return chip;
+    };
+
+    // チップのリンク先ノードを差し替える（ray も付け替え）。
+    const replaceChip = async (chip: HTMLElement, n: ExplorerNode, createLabel?: string) => {
+      const oldId = chip.dataset.men!;
+      let newId = n.id;
+      if (createLabel) { const c = await apiCreateNode(ctx.gId, null, lang, createLabel); if (!c) return; newId = c.id; }
+      if (newId === oldId) return;
+      const label = createLabel ?? labelOf(n, lang);
+      chip.dataset.men = newId;
+      (chip.firstChild as HTMLElement).textContent = label;
+      save(true);
+      await apiAddRay(ctx.gId, line.lineId, newId);
+      const ar = ctx.activeRelation;
+      const usesOld = Array.from(content.children).some((c) => (c as HTMLElement).dataset.men === oldId);
+      if (!usesOld) await apiRemoveRay(ctx.gId, line.lineId, oldId);
+      if (ar && ar.lineId === line.lineId) {
+        ar.participants.add(newId);
+        if (!usesOld) ar.participants.delete(oldId);
+        ctx.setActiveRelation(ar);
+      }
     };
 
     const mkTextarea = (v: string): HTMLTextAreaElement => {
@@ -166,9 +232,29 @@ export function createLineView(
       ta.addEventListener('blur', () => save(true));
       ta.addEventListener('keydown', (e) => {
         if (e.key === 'Escape') { closeMenu(); return; }
-        if (e.key === 'Backspace' && ta.selectionStart === 0 && ta.selectionEnd === 0) {
+        const atStart = ta.selectionStart === 0 && ta.selectionEnd === 0;
+        const atEnd = ta.selectionStart === ta.value.length && ta.selectionEnd === ta.value.length;
+        // 連続caret: 端で←→を押すと隣のテキスト片へ（チップを跨ぐ）。
+        if (e.key === 'ArrowLeft' && atStart) {
+          const chip = ta.previousElementSibling as HTMLElement | null;
+          const prevTa = chip?.previousElementSibling as HTMLTextAreaElement | null;
+          if (chip?.dataset.men && prevTa) { e.preventDefault(); prevTa.focus(); prevTa.setSelectionRange(prevTa.value.length, prevTa.value.length); }
+          return;
+        }
+        if (e.key === 'ArrowRight' && atEnd) {
+          const chip = ta.nextElementSibling as HTMLElement | null;
+          const nextTa = chip?.nextElementSibling as HTMLTextAreaElement | null;
+          if (chip?.dataset.men && nextTa) { e.preventDefault(); nextTa.focus(); nextTa.setSelectionRange(0, 0); }
+          return;
+        }
+        // Backspace（先頭）で直前チップ削除、Delete（末尾）で直後チップ削除。
+        if (e.key === 'Backspace' && atStart) {
           const prev = ta.previousElementSibling as HTMLElement | null;
-          if (prev && prev.dataset.men) { e.preventDefault(); removeChip(prev); }
+          if (prev?.dataset.men) { e.preventDefault(); removeChip(prev); }
+        }
+        if (e.key === 'Delete' && atEnd) {
+          const next = ta.nextElementSibling as HTMLElement | null;
+          if (next?.dataset.men) { e.preventDefault(); removeChip(next); }
         }
       });
       setTimeout(() => autosize(ta), 0);
@@ -295,8 +381,9 @@ export function createLineView(
     const lines = await fetchNodeLines(ctx.gId, nodeId);
     if (token !== renderToken) return;
 
-    for (const line of lines) bodyEl.appendChild(renderRelationRow(line));
+    // 追加用ドラフト行は常に先頭。
     bodyEl.appendChild(makeDraftRow(nodeId));
+    for (const line of lines) bodyEl.appendChild(renderRelationRow(line));
     updateActiveHighlight();
   };
 
