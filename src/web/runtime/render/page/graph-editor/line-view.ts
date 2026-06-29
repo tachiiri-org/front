@@ -27,8 +27,9 @@ export function createLineView(
   const el = document.createElement('div');
   el.style.cssText = `flex:1;display:flex;flex-direction:column;overflow:hidden;`;
 
+  // Header height matches the node pane header (multi-pane) — both 28px box-sized.
   const head = document.createElement('div');
-  head.style.cssText = `flex-shrink:0;padding:6px 8px;border-bottom:1px solid ${BORDER};font-size:11px;color:${TEXT_MID};display:flex;align-items:center;gap:6px;`;
+  head.style.cssText = `flex-shrink:0;height:28px;box-sizing:border-box;padding:0 8px;border-bottom:1px solid ${BORDER};font-size:11px;color:${TEXT_MID};display:flex;align-items:center;gap:6px;`;
   el.appendChild(head);
 
   const bodyEl = document.createElement('div');
@@ -170,36 +171,28 @@ export function createLineView(
     title.style.cssText = `color:${TEXT_HIGH};font-size:12px;`;
     head.appendChild(title);
 
-    const addBtn = document.createElement('button');
-    addBtn.textContent = '＋ 新しい関係';
-    addBtn.title = 'このノードを主語にした関係を作る';
-    addBtn.style.cssText = `margin-left:auto;background:transparent;border:1px solid ${BORDER};color:${TEXT_MID};cursor:pointer;font-size:11px;padding:2px 8px;border-radius:4px;`;
-    addBtn.addEventListener('click', async () => {
-      await apiCreateRelation(ctx.gId, nodeId, lang, '');
-      await render();
-    });
-    head.appendChild(addBtn);
-
     const lines = await fetchNodeLines(ctx.gId, nodeId);
     if (token !== renderToken) return;
 
-    if (lines.length === 0) {
-      // ノードパネルの空行と同じ □ を出す（クリックで関係を作成）。テキストの案内は出さない。
-      const row = document.createElement('div');
-      row.style.cssText = `display:flex;align-items:center;padding:2px 0;cursor:pointer;`;
-      const sp = document.createElement('span');
-      sp.style.cssText = `flex-shrink:0;width:6px;`;
-      const bw = document.createElement('span');
-      bw.style.cssText = `flex-shrink:0;display:flex;align-items:center;justify-content:center;width:18px;`;
-      const sq = document.createElement('span');
-      sq.style.cssText = `width:7px;height:7px;border-radius:1px;box-sizing:border-box;background:transparent;border:1.5px solid ${TEXT_DIM};`;
-      bw.appendChild(sq);
-      row.append(sp, bw);
-      row.addEventListener('click', async () => { await apiCreateRelation(ctx.gId, nodeId, lang, ''); await render(); });
-      bodyEl.appendChild(row);
-      return;
-    }
     for (const line of lines) bodyEl.appendChild(renderLine(line));
+    // 末尾に常設の □ 追加行（ノードパネルの空行と同じ見た目。クリックで関係を作成）。
+    bodyEl.appendChild(makeAddRow(nodeId));
+  };
+
+  // ノードパネルの draft 行に倣った □ の「関係を追加」行。
+  const makeAddRow = (nodeId: string): HTMLElement => {
+    const row = document.createElement('div');
+    row.style.cssText = `display:flex;align-items:center;padding:2px 0;cursor:pointer;`;
+    const sp = document.createElement('span');
+    sp.style.cssText = `flex-shrink:0;width:6px;`;
+    const bw = document.createElement('span');
+    bw.style.cssText = `flex-shrink:0;display:flex;align-items:center;justify-content:center;width:18px;`;
+    const sq = document.createElement('span');
+    sq.style.cssText = `width:7px;height:7px;border-radius:1px;box-sizing:border-box;background:transparent;border:1.5px solid ${TEXT_DIM};`;
+    bw.appendChild(sq);
+    row.append(sp, bw);
+    row.addEventListener('click', async () => { await apiCreateRelation(ctx.gId, nodeId, lang, ''); await render(); });
+    return row;
   };
 
   // 初期描画

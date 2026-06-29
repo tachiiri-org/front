@@ -98,10 +98,11 @@ export function createOutlinerView(ctx: GraphEditorContext, paneOpts?: OutlinerP
   const el = document.createElement('div');
   el.style.cssText = `flex:1;display:flex;flex-direction:column;overflow:hidden;`;
 
-  // Breadcrumb bar — kept as a detached element (updateBreadcrumb still writes to it harmlessly),
-  // but no longer mounted: the pane shows just the tree, without a path bar or its divider line.
+  // Breadcrumb bar (path). The separate parent-grouping panel header (見出し＋区切り線) is removed
+  // elsewhere (showHeaders=false); only this path bar shows above the tree.
   const bcEl = document.createElement('div');
   bcEl.style.cssText = `display:flex;flex-shrink:0;align-items:center;gap:2px;flex-wrap:wrap;padding:4px 8px 4px 10px;border-bottom:1px solid ${BORDER};font-size:12px;`;
+  el.appendChild(bcEl);
 
   // Draft row — shown only when list is empty; structurally matches a node row at depth 0
   const draftEl = document.createElement('div');
@@ -1246,7 +1247,8 @@ export function createOutlinerView(ctx: GraphEditorContext, paneOpts?: OutlinerP
     marker.dataset.expandMarker = '1';
     marker.style.cssText = `width:7px;height:7px;border-radius:1px;box-sizing:border-box;pointer-events:none;`;
     btnWrap.appendChild(marker);
-    btnWrap.addEventListener('click', (e) => { e.stopPropagation(); showPropertyMenu(onode, e.clientX, e.clientY); });
+    // 四角クリック = ズーム（Alt+→ と同じ）。旧来のノード紐付けメニューは出さない（リンクは「/」で可能）。
+    btnWrap.addEventListener('click', (e) => { e.stopPropagation(); void doZoomIn(onode); });
     btnWrap.addEventListener('contextmenu', (e) => {
       e.preventDefault(); e.stopPropagation();
       const lbl = primaryLabel(onode.node, paneLang) ?? fallbackLabel(onode.node, paneLang) ?? '';

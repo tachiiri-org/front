@@ -204,9 +204,10 @@ export function createMultiPaneView(ctx: GraphEditorContext): {
 
     // ── Header ──────────────────────────────────────────────────────
     const header = document.createElement('div');
+    // Fixed 28px (box-sized) so the node pane header and the relation panel header line up.
     header.style.cssText = `
       flex-shrink:0;display:flex;align-items:center;gap:4px;
-      padding:3px 6px;border-bottom:1px solid ${BORDER};
+      height:28px;box-sizing:border-box;padding:0 6px;border-bottom:1px solid ${BORDER};
       font-size:11px;color:${TEXT_MID};
     `;
 
