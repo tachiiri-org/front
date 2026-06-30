@@ -7,6 +7,11 @@ export const TEXT_MID = '#aaa';
 export const TEXT_DIM = '#555';
 export const SELECT_STRONG = '#3a6ea8';
 
+// Reserved id for the synthetic "リンクなし" entry (parentless nodes inbox). Selecting it in the
+// node panel makes the relation dock list the orphan nodes (GET /node/__orphan__/children).
+export const ORPHAN_ID = '__orphan__';
+export const ORPHAN_LABEL = 'リンクなし';
+
 export const PRESET_COLORS: Array<string | null> = [
   'rgba(255,190,60,0.90)',
   'rgba(200,120,255,0.90)',

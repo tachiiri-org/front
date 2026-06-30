@@ -1,8 +1,8 @@
 import type { GraphEditorContext, PaneView, ExplorerNode, ExplorerLine, PaneViewPathEntry } from './types';
-import { BORDER, TEXT_HIGH, TEXT_MID, TEXT_DIM, SELECT_STRONG } from './constants';
+import { BORDER, TEXT_HIGH, TEXT_MID, TEXT_DIM, SELECT_STRONG, ORPHAN_ID, ORPHAN_LABEL } from './constants';
 import {
   fetchNodeLines, apiCreateRelation, apiSetLineBody, apiAddRay, apiRemoveRay, fetchAllNodes, apiCreateNode,
-  fetchOrphanLines, apiDeleteLine,
+  fetchOrphanLines, apiDeleteLine, fetchChildren,
 } from './api';
 
 // 関係 (line) パネル。関係 = テキストとノード参照(チップ)が交互に並ぶ1行（セグメント分割編集）。
@@ -445,6 +445,24 @@ export function createLineView(
     return row;
   };
 
+  // 「リンクなし」選択時に出す orphan ノード行（親なしノード）。クリックでそのノードを選び、
+  // 関係ドックをそのノードの関係表示に切り替える（中身を確認・編集できるようにする）。
+  const renderOrphanNodeRow = (node: ExplorerNode): HTMLElement => {
+    const row = document.createElement('div');
+    row.style.cssText = `display:flex;align-items:flex-start;padding:2px 0;cursor:pointer;`;
+    const spacer = document.createElement('span'); spacer.style.cssText = `flex-shrink:0;width:6px;`;
+    const bw = document.createElement('span'); bw.style.cssText = `flex-shrink:0;display:flex;align-items:center;justify-content:center;width:18px;height:21px;`;
+    const sq = document.createElement('span'); sq.style.cssText = `width:7px;height:7px;border-radius:1px;box-sizing:border-box;background:transparent;border:1.5px solid ${TEXT_DIM};`;
+    bw.appendChild(sq);
+    const lbl = document.createElement('span');
+    const txt = labelOf(node, lang);
+    lbl.textContent = txt === node.id ? '(無題)' : txt;
+    lbl.style.cssText = `flex:1;font-size:14px;line-height:1.5;color:${TEXT_HIGH};padding:0 4px;min-width:0;word-break:break-word;`;
+    row.append(spacer, bw, lbl);
+    row.addEventListener('click', () => { currentNodeId = node.id; void render(); });
+    return row;
+  };
+
   // ── 列全体の描画 ─────────────────────────────────────────────────────────────
   const render = async (): Promise<void> => {
     const token = ++renderToken;
@@ -470,6 +488,17 @@ export function createLineView(
     orphanBtn.style.cssText = `background:${orphanMode ? SELECT_STRONG : 'transparent'};border:1px solid ${BORDER};color:${orphanMode ? '#fff' : TEXT_MID};cursor:pointer;font-size:10px;padding:1px 6px;border-radius:3px;`;
     orphanBtn.addEventListener('click', () => { orphanMode = !orphanMode; void render(); });
     head.appendChild(orphanBtn);
+
+    // ノードパネルの「リンクなし」を選択 → ここに親なしノード一覧を出す（関係ではなくノード）。
+    if (currentNodeId === ORPHAN_ID) {
+      title.textContent = ORPHAN_LABEL;
+      orphanBtn.style.display = 'none';
+      const nodes = (await fetchChildren(ctx.gId, ORPHAN_ID, 200)).filter((n) => n.id !== ctx.rootNodeId);
+      if (token !== renderToken) return;
+      for (const node of nodes) bodyEl.appendChild(renderOrphanNodeRow(node));
+      updateActiveHighlight();
+      return;
+    }
 
     if (orphanMode) {
       const lines = await fetchOrphanLines(ctx.gId);

@@ -1,5 +1,5 @@
 import type { ExplorerNode, GraphEditorContext } from './types';
-import { BG, BORDER, TEXT_HIGH, TEXT_MID, TEXT_DIM, SELECT_STRONG, primaryLabel, fallbackLabel } from './constants';
+import { BG, BORDER, TEXT_HIGH, TEXT_MID, TEXT_DIM, SELECT_STRONG, ORPHAN_ID, ORPHAN_LABEL, primaryLabel, fallbackLabel } from './constants';
 import {
   fetchChildren, fetchParents, fetchBookmarks, fetchBookmarkedNodes, fetchAllNodes,
   apiCreateNode, apiUpdateNode, apiDeleteNode, apiMoveNode, apiMoveBookmark, apiToggleLink,
@@ -34,11 +34,6 @@ type ONode = {
 const rootKey = (panelTargetId: string | null, nodeId: string): string =>
   `${panelTargetId ?? '@'}#${nodeId}`;
 
-// Reserved id for the synthetic "リンクなし" entry shown under ルート. Expanding it fetches
-// GET /node/__orphan__/children, which returns parentless nodes (hierarchy未配置・@で作った
-// 関係参加ノードを含む). It is a virtual row: not renamable / movable / deletable.
-const ORPHAN_ID = '__orphan__';
-const ORPHAN_LABEL = 'リンクなし';
 // Descendant occurrence key: parent occurrence key + this node id.
 const childKey = (parentKey: string, nodeId: string): string => `${parentKey}/${nodeId}`;
 
@@ -949,6 +944,9 @@ export function createOutlinerView(ctx: GraphEditorContext, paneOpts?: OutlinerP
   const ensureChildren = async (onode: ONode) => {
     if (onode.childrenLoaded) return;
     const id = onode.node.id;
+    // The synthetic "リンクなし" entry never expands inline — its nodes are shown in the relation
+    // dock instead. Mark it loaded-with-no-children so prefetch/expand both no-op on it.
+    if (id === ORPHAN_ID) { onode.children = []; onode.childrenLoaded = true; return; }
     let cached = ctx.childrenCache.get(id);
     // Refetch when missing OR when only a stale (unvalidated) localStorage entry exists.
     // ensureChildren runs before the subtree is rendered, so awaiting fresh data here keeps
@@ -1239,13 +1237,19 @@ export function createOutlinerView(ctx: GraphEditorContext, paneOpts?: OutlinerP
     row.style.cssText = `display:flex;align-items:center;padding:0;border:2px solid transparent;border-radius:3px;`;
     rowMap.set(onode.key, row);
 
-    // Synthetic "リンクなし" row: a static, non-editable entry that expands to the orphan
-    // (parentless) node list. No textarea / drag / delete — only a triangle + label that toggle.
+    // Synthetic "リンクなし" row: a static, non-editable, NON-expanding entry. Selecting it (like
+    // any node) drives the relation dock, which then lists the orphan (parentless) nodes — it does
+    // NOT expand the relation-looking list inline in the node panel. Layout mirrors a normal row
+    // ([spacer][triangle slot][marker][label]) so the label aligns; the triangle slot is an
+    // invisible placeholder since there is nothing to expand.
     if (onode.node.id === ORPHAN_ID) {
       const spc = document.createElement('span');
       spc.style.cssText = `flex-shrink:0;width:${(onode.depth - baseDepth) * 20 + 6}px;`;
+      const triSlot = document.createElement('span');
+      triSlot.textContent = '▸';
+      triSlot.style.cssText = `flex-shrink:0;font-size:10px;padding:0 4px;visibility:hidden;line-height:1;`;
       const bw = document.createElement('span');
-      bw.style.cssText = `flex-shrink:0;display:flex;align-items:center;justify-content:center;width:18px;`;
+      bw.style.cssText = `flex-shrink:0;display:flex;align-items:center;justify-content:center;width:18px;cursor:pointer;`;
       const mk = document.createElement('span');
       mk.dataset.expandMarker = '1';
       mk.style.cssText = `width:7px;height:7px;border-radius:1px;box-sizing:border-box;background:transparent;border:1.5px solid ${TEXT_DIM};pointer-events:none;`;
@@ -1253,13 +1257,10 @@ export function createOutlinerView(ctx: GraphEditorContext, paneOpts?: OutlinerP
       const lbl = document.createElement('span');
       lbl.textContent = ORPHAN_LABEL;
       lbl.style.cssText = `flex:1;font-size:14px;line-height:1.5;color:${TEXT_DIM};cursor:pointer;padding:0 4px 0 0;`;
-      lbl.addEventListener('click', () => void toggleExpand(onode));
-      const tri = document.createElement('button');
-      tri.dataset.expandTriangle = '1';
-      tri.textContent = '▸';
-      tri.style.cssText = `flex-shrink:0;background:transparent;border:none;color:${TEXT_DIM};cursor:pointer;font-size:10px;padding:0 4px;opacity:0;pointer-events:none;line-height:1;`;
-      tri.addEventListener('click', (e) => { e.stopPropagation(); void toggleExpand(onode); });
-      row.append(spc, bw, lbl, tri);
+      const select = () => setPaneSelected(ORPHAN_ID);
+      lbl.addEventListener('click', select);
+      bw.addEventListener('click', (e) => { e.stopPropagation(); select(); });
+      row.append(spc, triSlot, bw, lbl);
       requestAnimationFrame(() => updateExpandMarker(onode));
       return row;
     }
