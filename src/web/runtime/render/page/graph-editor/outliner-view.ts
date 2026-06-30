@@ -33,6 +33,12 @@ type ONode = {
 // (Step 2); '@' is the synthetic "no panel" marker used by the single-group layout.
 const rootKey = (panelTargetId: string | null, nodeId: string): string =>
   `${panelTargetId ?? '@'}#${nodeId}`;
+
+// Reserved id for the synthetic "リンクなし" entry shown under ルート. Expanding it fetches
+// GET /node/__orphan__/children, which returns parentless nodes (hierarchy未配置・@で作った
+// 関係参加ノードを含む). It is a virtual row: not renamable / movable / deletable.
+const ORPHAN_ID = '__orphan__';
+const ORPHAN_LABEL = 'リンクなし';
 // Descendant occurrence key: parent occurrence key + this node id.
 const childKey = (parentKey: string, nodeId: string): string => `${parentKey}/${nodeId}`;
 
@@ -1232,6 +1238,31 @@ export function createOutlinerView(ctx: GraphEditorContext, paneOpts?: OutlinerP
     row.dataset.occKey = onode.key;
     row.style.cssText = `display:flex;align-items:center;padding:0;border:2px solid transparent;border-radius:3px;`;
     rowMap.set(onode.key, row);
+
+    // Synthetic "リンクなし" row: a static, non-editable entry that expands to the orphan
+    // (parentless) node list. No textarea / drag / delete — only a triangle + label that toggle.
+    if (onode.node.id === ORPHAN_ID) {
+      const spc = document.createElement('span');
+      spc.style.cssText = `flex-shrink:0;width:${(onode.depth - baseDepth) * 20 + 6}px;`;
+      const bw = document.createElement('span');
+      bw.style.cssText = `flex-shrink:0;display:flex;align-items:center;justify-content:center;width:18px;`;
+      const mk = document.createElement('span');
+      mk.dataset.expandMarker = '1';
+      mk.style.cssText = `width:7px;height:7px;border-radius:1px;box-sizing:border-box;background:transparent;border:1.5px solid ${TEXT_DIM};pointer-events:none;`;
+      bw.appendChild(mk);
+      const lbl = document.createElement('span');
+      lbl.textContent = ORPHAN_LABEL;
+      lbl.style.cssText = `flex:1;font-size:14px;line-height:1.5;color:${TEXT_DIM};cursor:pointer;padding:0 4px 0 0;`;
+      lbl.addEventListener('click', () => void toggleExpand(onode));
+      const tri = document.createElement('button');
+      tri.dataset.expandTriangle = '1';
+      tri.textContent = '▸';
+      tri.style.cssText = `flex-shrink:0;background:transparent;border:none;color:${TEXT_DIM};cursor:pointer;font-size:10px;padding:0 4px;opacity:0;pointer-events:none;line-height:1;`;
+      tri.addEventListener('click', (e) => { e.stopPropagation(); void toggleExpand(onode); });
+      row.append(spc, bw, lbl, tri);
+      requestAnimationFrame(() => updateExpandMarker(onode));
+      return row;
+    }
 
     const spacer = document.createElement('span');
     spacer.style.cssText = `flex-shrink:0;width:${(onode.depth - baseDepth) * 20 + 6}px;`;
@@ -2711,7 +2742,10 @@ export function createOutlinerView(ctx: GraphEditorContext, paneOpts?: OutlinerP
 
     if (ctx.rootNodeId) {
       const rootId = ctx.rootNodeId;
-      const apply = (nodes: ExplorerNode[]) => applyRoots(nodes, rootId);
+      // Append the synthetic "リンクなし" entry as the last root row (parentless nodes inbox).
+      const withOrphan = (nodes: ExplorerNode[]): ExplorerNode[] =>
+        nodes.some(n => n.id === ORPHAN_ID) ? nodes : [...nodes, { id: ORPHAN_ID, ja: ORPHAN_LABEL }];
+      const apply = (nodes: ExplorerNode[]) => applyRoots(withOrphan(nodes), rootId);
       // Use same cache key (null) as column view so both views share the same root node list
       const cached = ctx.childrenCache.get(null);
       if (cached) apply(cached);
