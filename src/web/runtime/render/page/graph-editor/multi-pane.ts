@@ -144,7 +144,7 @@ export function createMultiPaneView(ctx: GraphEditorContext): {
     // selected node (and setActiveRelation(null) also triggers a marker redraw for that).
     if (selectedNodeId !== null) {
       ctx.setActiveRelation(null);
-      void lineView.setParent(selectedNodeId);
+      void lineView.setParent(selectedNodeId, ancestorIds, path);
     }
   };
 

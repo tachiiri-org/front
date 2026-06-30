@@ -1,5 +1,5 @@
 import type { GraphEditorContext, PaneView, ExplorerNode, ExplorerLine, PaneViewPathEntry } from './types';
-import { BORDER, TEXT_HIGH, TEXT_MID, TEXT_DIM, SELECT_STRONG } from './constants';
+import { BORDER, TEXT_HIGH, TEXT_MID, TEXT_DIM, SELECT_STRONG, ORPHAN_ID } from './constants';
 import {
   fetchNodeLines, apiCreateRelation, apiSetLineBody, apiAddRay, apiRemoveRay, fetchAllNodes, apiCreateNode,
   fetchOrphanLines, apiDeleteLine,
@@ -38,6 +38,7 @@ export function createLineView(
 ): PaneView {
   let lang = opts.lang;
   let currentNodeId: string | null = opts.initialNodeId ?? null;
+  let currentPath: PaneViewPathEntry[] | null = null; // ヘッダのパンくず（ルート›…›現在ノード）。
   let orphanMode = false; // true = 参加ノードを持たない「リンクなし関係」一覧を表示。
   let renderToken = 0;
   const sqByLine = new Map<string, HTMLElement>();
@@ -453,8 +454,25 @@ export function createLineView(
     sqByLine.clear();
 
     const title = document.createElement('span');
-    title.textContent = orphanMode ? 'リンクなし関係' : '関係';
-    title.style.cssText = `color:${TEXT_HIGH};font-size:12px;`;
+    title.style.cssText = `flex:1;min-width:0;color:${TEXT_HIGH};font-size:12px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;`;
+    if (orphanMode) {
+      title.textContent = 'リンクなし関係';
+    } else if (currentPath && currentPath.length) {
+      // ヘッダはパンくずリスト（ルート › … › 現在ノード）。
+      currentPath.forEach((e, i) => {
+        if (i > 0) {
+          const sep = document.createElement('span');
+          sep.textContent = ' › '; sep.style.color = TEXT_DIM;
+          title.appendChild(sep);
+        }
+        const seg = document.createElement('span');
+        seg.textContent = e.label || '(無題)';
+        seg.style.color = i === currentPath!.length - 1 ? TEXT_HIGH : TEXT_MID;
+        title.appendChild(seg);
+      });
+    } else {
+      title.textContent = '関係';
+    }
     head.appendChild(title);
     // パネル内更新ボタン（ノードパネルの ⟳ と同じ）。関係一覧を再取得する。
     const reloadBtn = document.createElement('button');
@@ -494,6 +512,38 @@ export function createLineView(
     (row?.querySelector('textarea') as HTMLTextAreaElement | null)?.focus();
   };
 
+  // ── ノードパネルからのドロップ ───────────────────────────────────────────────
+  // ノードパネルでドラッグしたノード X をこのドックにドロップ → X を主語にした関係を新規作成し、
+  // いま開いているノード Y(currentNodeId) を参加者として紐づける（本文に ⟦X⟧⟦Y⟧ を入れて
+  // テキストにノードリンクを持たせ、次回も Y の関係として出るようにする）。X ノード自体は残す。
+  const dropAsRelation = async (ids: string[]): Promise<void> => {
+    const y = currentNodeId && currentNodeId !== ORPHAN_ID ? currentNodeId : null;
+    for (const x of ids) {
+      const created = await apiCreateRelation(ctx.gId, x, lang, '');
+      if (!created) continue;
+      let body = `⟦${x}⟧`;
+      if (y && y !== x) { await apiAddRay(ctx.gId, created.lineId, y); body += `⟦${y}⟧`; }
+      await apiSetLineBody(ctx.gId, created.lineId, lang, body);
+    }
+    await render();
+  };
+  el.addEventListener('dragover', (e) => {
+    if (!ctx.paneDrag) return;          // ノードパネル発のノードドラッグのみ受ける
+    e.preventDefault();
+    if (e.dataTransfer) e.dataTransfer.dropEffect = 'copy';
+    bodyEl.style.boxShadow = `inset 0 0 0 2px ${SELECT_STRONG}`;
+  });
+  el.addEventListener('dragleave', (e) => {
+    if (!el.contains(e.relatedTarget as Node | null)) bodyEl.style.boxShadow = '';
+  });
+  el.addEventListener('drop', (e) => {
+    if (!ctx.paneDrag) return;
+    e.preventDefault();
+    bodyEl.style.boxShadow = '';
+    const ids = [...ctx.paneDrag.nodeIds];
+    if (ids.length) void dropAsRelation(ids);
+  });
+
   void render();
 
   // 四角の右クリックで参加が変わったら関係行を再取得（participants を最新に保つ）。
@@ -506,13 +556,13 @@ export function createLineView(
     load: () => render(),
     refresh: () => { void render(); },
     search: async () => { /* top-bar 検索は関係列には作用しない */ },
-    setParent: async (nodeId) => { currentNodeId = nodeId; await render(); },
+    setParent: async (nodeId, _excl, path) => { currentNodeId = nodeId; currentPath = path ?? null; await render(); },
     getAncestorIds: () => new Set<string>(),
     getNodePath: () => noPath,
     getSelectedId: () => currentNodeId,
     getPaneParentId: () => currentNodeId,
     setLang: (l) => { lang = l; void render(); },
-    setSourceRoot: async () => { currentNodeId = null; await render(); },
+    setSourceRoot: async () => { currentNodeId = null; currentPath = null; await render(); },
     beginKeyMove: () => false,
     acceptKeyMove: async () => { /* 関係列はノード移動先になれない */ },
     getEffectiveParentId: () => null,
