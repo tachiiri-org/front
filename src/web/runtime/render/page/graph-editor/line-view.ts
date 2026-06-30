@@ -266,7 +266,10 @@ export function createLineView(
       // focus/blur で autosize を呼び直し、先頭の空テキスト片を フォーカス時=8px / 非フォーカス時=0px に。
       ta.addEventListener('focus', () => { setActive(line); autosize(ta); });
       ta.addEventListener('input', () => { autosize(ta); void handleMention(ta); save(); });
-      ta.addEventListener('blur', () => { save(true); autosize(ta); });
+      // 他の場所を選んで textarea からフォーカスが外れたら、@ドロップダウンは閉じる。
+      // （項目は mousedown+preventDefault でフォーカスを奪わないので、項目選択では blur しない。
+      //   確定時は onPick が先に closeMenu→mention=null するため、ガードで二重閉じも防ぐ。）
+      ta.addEventListener('blur', () => { save(true); autosize(ta); if (mention?.anchor === ta) closeMenu(); });
       ta.addEventListener('keydown', (e) => {
         // @ メニューが開いている間は ↑↓/Enter で候補選択。
         if (menuOpen) {
