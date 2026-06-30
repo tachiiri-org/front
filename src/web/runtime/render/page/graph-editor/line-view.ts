@@ -168,25 +168,19 @@ export function createLineView(
     sqByLine.set(line.lineId, sq);
     // セグメント/チップを並べるインライン領域。
     const content = document.createElement('div');
-    // 左 8px は全行一律のクリック可能なガター。先頭の空テキスト片は幅0に畳む（下記 autosize）ので、
-    // 先頭がノードリンクの行もテキスト始まりの行も content 内容左端で揃い、かつ左端 8px で先頭位置を選択できる。
-    content.style.cssText = `flex:1;min-width:0;line-height:1.5;padding-left:8px;`;
+    content.style.cssText = `flex:1;min-width:0;line-height:1.5;`;
     row.append(spacer, bw, content);
     bw.addEventListener('mousedown', (e) => e.preventDefault());
     bw.addEventListener('click', () => { content.querySelector('textarea')?.focus(); });
-    // テキストの無い余白クリックでフォーカス。左ガター（先頭子要素より左）→ 先頭テキスト片の先頭、
-    // それ以外（末尾より右の余白）→ 末尾テキスト片の末尾。末尾を固定幅で広げない代わりにここで受ける。
+    // 末尾テキスト片より右の空白（テキストの無い右余白）クリックで、その末尾テキスト片の末尾にフォーカス。
+    // 末尾を固定幅で右端まで広げる代わりにこちらで受けることで、手前の片への入力で折り返さない。
     content.addEventListener('mousedown', (e) => {
       if (e.target !== content) return;
-      const first = content.firstElementChild as HTMLTextAreaElement | null;
       const last = content.lastElementChild as HTMLTextAreaElement | null;
-      const leftGutter = !!first && (e as MouseEvent).clientX < first.getBoundingClientRect().left;
-      const target = leftGutter ? first : last;
-      if (target && target.tagName === 'TEXTAREA') {
+      if (last && last.tagName === 'TEXTAREA') {
         e.preventDefault();
-        target.focus();
-        const pos = leftGutter ? 0 : target.value.length;
-        target.setSelectionRange(pos, pos);
+        last.focus();
+        last.setSelectionRange(last.value.length, last.value.length);
       }
     });
 
@@ -207,16 +201,10 @@ export function createLineView(
       // +2 はキャレット表示分のみ。以前は +6 で各テキスト片の右に余分な空きが出ていた。
       if (cctx) { cctx.font = '14px sans-serif'; w = cctx.measureText(text).width + 2; }
       const max = content.clientWidth || 99999;
-      const isFirst = content.firstElementChild === ta;
-      if (isFirst && content.lastElementChild !== ta && text === '') {
-        // 先頭の空テキスト片は幅0に畳み、直後のノードリンクを他行と左端で揃える。
-        // ←で入って入力すれば（else 経由で）展開し、空に戻れば再び畳まれる。
-        ta.style.width = '0px';
-      } else {
-        // 末尾も含めテキスト片は内容なりの自然幅。右端まで固定幅で広げると、手前の片に入力して
-        // 幅が増えたとき末尾が折り返してしまうため、右余白クリックは content 側で受ける（下記）。
-        ta.style.width = w <= max ? `${Math.max(8, w)}px` : '100%';
-      }
+      // テキスト片は内容なりの自然幅（空でも最小8px）。全行は先頭に空ガター片(8px)を持つので、
+      // 先頭がノードリンクの行もテキストの行も内容左端で揃い、先頭は常にクリック可・キャレット可視。
+      // 末尾は右端まで固定幅で広げない（手前への入力で折り返すため。右余白クリックは content 側で受ける）。
+      ta.style.width = w <= max ? `${Math.max(8, w)}px` : '100%';
       ta.style.height = 'auto';
       ta.style.height = `${ta.scrollHeight}px`;
     };
@@ -301,9 +289,12 @@ export function createLineView(
         if (e.key === 'Backspace' && atStart) {
           const prev = ta.previousElementSibling as HTMLElement | null;
           if (prev?.dataset.men) { e.preventDefault(); removeChip(prev); return; }
-          // 先頭の空テキスト片・チップも本文も無いなら、関係そのものを削除。
-          const hasChip = Array.from(content.children).some((c) => (c as HTMLElement).dataset.men);
-          if (!prev && ta.value === '' && !hasChip) {
+          // 先頭の空ガター片にいて、関係全体が空（チップも本文も無い）なら、関係そのものを削除。
+          // 全行が先頭に空ガター片を持つので、テキストのみの行を巻き込んで消さないよう全体の空を確認する。
+          const allEmpty = Array.from(content.children).every(
+            (c) => !(c as HTMLElement).dataset.men && (c as HTMLTextAreaElement).value === '',
+          );
+          if (!prev && allEmpty) {
             e.preventDefault();
             void (async () => { await apiDeleteLine(ctx.gId, line.lineId); await render(); })();
             return;
@@ -383,8 +374,14 @@ export function createLineView(
     };
 
     // 初期トークンを並べる（必ずテキスト片で始まり/終わる）。
+    // 全行の先頭に空ガター片(8px)を1つ置く: 先頭がノードリンクの行もテキストの行も内容左端で揃い、
+    // 先頭は常にクリック可能でキャレットも見える。splitTokens は必ず先頭が txt なので、
+    // 先頭が空 txt ならそれをガターに使い（重複させない）、非空なら空ガターを足してから並べる。
     const body = line.body[lang] ?? line.body[lang === 'ja' ? 'en' : 'ja'] ?? '';
-    for (const tok of splitTokens(body)) {
+    const toks = splitTokens(body);
+    if (toks[0]?.t === 'txt' && toks[0].v === '') toks.shift();
+    content.appendChild(mkTextarea(''));
+    for (const tok of toks) {
       if (tok.t === 'txt') content.appendChild(mkTextarea(tok.v));
       else content.appendChild(mkChip(tok.id));
     }
