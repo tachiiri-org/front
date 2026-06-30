@@ -168,19 +168,25 @@ export function createLineView(
     sqByLine.set(line.lineId, sq);
     // セグメント/チップを並べるインライン領域。
     const content = document.createElement('div');
-    content.style.cssText = `flex:1;min-width:0;line-height:1.5;`;
+    // 左 8px は全行一律のクリック可能なガター。先頭の空テキスト片は幅0に畳む（下記 autosize）ので、
+    // 先頭がノードリンクの行もテキスト始まりの行も content 内容左端で揃い、かつ左端 8px で先頭位置を選択できる。
+    content.style.cssText = `flex:1;min-width:0;line-height:1.5;padding-left:8px;`;
     row.append(spacer, bw, content);
     bw.addEventListener('mousedown', (e) => e.preventDefault());
     bw.addEventListener('click', () => { content.querySelector('textarea')?.focus(); });
-    // 末尾テキスト片より右の空白（テキストの無い右余白）クリックで、その末尾テキスト片の末尾にフォーカス。
-    // 末尾を固定幅で右端まで広げる代わりにこちらで受けることで、手前の片への入力で折り返さない。
+    // テキストの無い余白クリックでフォーカス。左ガター（先頭子要素より左）→ 先頭テキスト片の先頭、
+    // それ以外（末尾より右の余白）→ 末尾テキスト片の末尾。末尾を固定幅で広げない代わりにここで受ける。
     content.addEventListener('mousedown', (e) => {
       if (e.target !== content) return;
+      const first = content.firstElementChild as HTMLTextAreaElement | null;
       const last = content.lastElementChild as HTMLTextAreaElement | null;
-      if (last && last.tagName === 'TEXTAREA') {
+      const leftGutter = !!first && (e as MouseEvent).clientX < first.getBoundingClientRect().left;
+      const target = leftGutter ? first : last;
+      if (target && target.tagName === 'TEXTAREA') {
         e.preventDefault();
-        last.focus();
-        last.setSelectionRange(last.value.length, last.value.length);
+        target.focus();
+        const pos = leftGutter ? 0 : target.value.length;
+        target.setSelectionRange(pos, pos);
       }
     });
 
@@ -198,7 +204,8 @@ export function createLineView(
     const autosize = (ta: HTMLTextAreaElement) => {
       const text = ta.value || '';
       let w = 8;
-      if (cctx) { cctx.font = '14px sans-serif'; w = cctx.measureText(text).width + 6; }
+      // +2 はキャレット表示分のみ。以前は +6 で各テキスト片の右に余分な空きが出ていた。
+      if (cctx) { cctx.font = '14px sans-serif'; w = cctx.measureText(text).width + 2; }
       const max = content.clientWidth || 99999;
       const isFirst = content.firstElementChild === ta;
       if (isFirst && content.lastElementChild !== ta && text === '') {
