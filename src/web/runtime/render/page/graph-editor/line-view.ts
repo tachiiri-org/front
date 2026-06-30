@@ -189,7 +189,20 @@ export function createLineView(
       let w = 8;
       if (cctx) { cctx.font = '14px sans-serif'; w = cctx.measureText(text).width + 6; }
       const max = content.clientWidth || 99999;
-      ta.style.width = w <= max ? `${Math.max(8, w)}px` : '100%';
+      const isFirst = content.firstElementChild === ta;
+      const isLast = content.lastElementChild === ta;
+      if (isFirst && !isLast && text === '') {
+        // 先頭の空テキスト片は幅0に畳み、直後のノードリンクを他行と左端で揃える。
+        // ←で入って入力すれば（else 経由で）展開し、空に戻れば再び畳まれる。
+        ta.style.width = '0px';
+      } else {
+        ta.style.width = w <= max ? `${Math.max(8, w)}px` : '100%';
+        // 末尾のテキスト片はパネル右端まで広げ、テキストの無い右余白クリックでも入力開始できるようにする。
+        if (isLast) {
+          const remain = content.getBoundingClientRect().right - ta.getBoundingClientRect().left - 1;
+          if (remain > ta.offsetWidth) ta.style.width = `${remain}px`;
+        }
+      }
       ta.style.height = 'auto';
       ta.style.height = `${ta.scrollHeight}px`;
     };
@@ -199,7 +212,7 @@ export function createLineView(
       chip.dataset.men = id;
       chip.contentEditable = 'false';
       // 下線はテキストと同じ色。クリックで検索ポップオーバー（差し替え／削除）。× は廃止。
-      chip.style.cssText = `display:inline-block;vertical-align:top;line-height:1.5;font-size:14px;color:${TEXT_HIGH};border-bottom:1px solid currentColor;margin:0 2px;user-select:none;cursor:pointer;`;
+      chip.style.cssText = `display:inline-block;vertical-align:top;line-height:1.5;font-size:14px;color:${TEXT_HIGH};border-bottom:1px solid currentColor;margin:0;user-select:none;cursor:pointer;`;
       const txt = document.createElement('span');
       txt.textContent = label ?? labelById.get(id) ?? id;
       chip.appendChild(txt);
