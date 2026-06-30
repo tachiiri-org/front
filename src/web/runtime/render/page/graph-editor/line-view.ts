@@ -172,6 +172,17 @@ export function createLineView(
     row.append(spacer, bw, content);
     bw.addEventListener('mousedown', (e) => e.preventDefault());
     bw.addEventListener('click', () => { content.querySelector('textarea')?.focus(); });
+    // 末尾テキスト片より右の空白（テキストの無い右余白）クリックで、その末尾テキスト片の末尾にフォーカス。
+    // 末尾を固定幅で右端まで広げる代わりにこちらで受けることで、手前の片への入力で折り返さない。
+    content.addEventListener('mousedown', (e) => {
+      if (e.target !== content) return;
+      const last = content.lastElementChild as HTMLTextAreaElement | null;
+      if (last && last.tagName === 'TEXTAREA') {
+        e.preventDefault();
+        last.focus();
+        last.setSelectionRange(last.value.length, last.value.length);
+      }
+    });
 
     const rebuild = (): string => Array.from(content.children).map((c) => {
       const id = (c as HTMLElement).dataset.men;
@@ -190,18 +201,14 @@ export function createLineView(
       if (cctx) { cctx.font = '14px sans-serif'; w = cctx.measureText(text).width + 6; }
       const max = content.clientWidth || 99999;
       const isFirst = content.firstElementChild === ta;
-      const isLast = content.lastElementChild === ta;
-      if (isFirst && !isLast && text === '') {
+      if (isFirst && content.lastElementChild !== ta && text === '') {
         // 先頭の空テキスト片は幅0に畳み、直後のノードリンクを他行と左端で揃える。
         // ←で入って入力すれば（else 経由で）展開し、空に戻れば再び畳まれる。
         ta.style.width = '0px';
       } else {
+        // 末尾も含めテキスト片は内容なりの自然幅。右端まで固定幅で広げると、手前の片に入力して
+        // 幅が増えたとき末尾が折り返してしまうため、右余白クリックは content 側で受ける（下記）。
         ta.style.width = w <= max ? `${Math.max(8, w)}px` : '100%';
-        // 末尾のテキスト片はパネル右端まで広げ、テキストの無い右余白クリックでも入力開始できるようにする。
-        if (isLast) {
-          const remain = content.getBoundingClientRect().right - ta.getBoundingClientRect().left - 1;
-          if (remain > ta.offsetWidth) ta.style.width = `${remain}px`;
-        }
       }
       ta.style.height = 'auto';
       ta.style.height = `${ta.scrollHeight}px`;
