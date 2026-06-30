@@ -48,9 +48,10 @@ export function createLineView(
   const el = document.createElement('div');
   el.style.cssText = `flex:1;display:flex;flex-direction:column;overflow:hidden;`;
 
-  // ノードパネルと同じ2行構成: 1行目=操作（言語切替 + ⟳ + リンクなし）、2行目=パンくず。
+  // ノードパネルと同じ2行構成: 1行目=操作（言語切替 + ⟳ + リンクなし, 28px）、2行目=パンくず。
+  // 各行が自分の border-bottom を持つので行間にも線が入り、ノードパネルと高さ・見た目が揃う。
   const head = document.createElement('div');
-  head.style.cssText = `flex-shrink:0;box-sizing:border-box;padding:2px 8px;border-bottom:1px solid ${BORDER};font-size:11px;color:${TEXT_MID};display:flex;flex-direction:column;gap:1px;`;
+  head.style.cssText = `flex-shrink:0;box-sizing:border-box;display:flex;flex-direction:column;font-size:11px;color:${TEXT_MID};`;
   el.appendChild(head);
 
   const bodyEl = document.createElement('div');
@@ -454,9 +455,9 @@ export function createLineView(
     bodyEl.innerHTML = '';
     sqByLine.clear();
 
-    // ── 1行目: 操作（言語切替 + ⟳ + リンクなし） ──
+    // ── 1行目: 操作（言語切替 + ⟳ + リンクなし） ── ノードペインヘッダと同じ 28px+下線。
     const ctrlRow = document.createElement('div');
-    ctrlRow.style.cssText = `display:flex;align-items:center;gap:6px;min-height:20px;`;
+    ctrlRow.style.cssText = `display:flex;align-items:center;gap:4px;height:28px;box-sizing:border-box;padding:0 6px;border-bottom:1px solid ${BORDER};`;
     // 言語切替（ノードパネルのパネル別 JA/EN と同じ）。
     const langBtn = document.createElement('button');
     langBtn.textContent = lang.toUpperCase();
@@ -480,9 +481,9 @@ export function createLineView(
     ctrlRow.appendChild(orphanBtn);
     head.appendChild(ctrlRow);
 
-    // ── 2行目: パンくず（ルート › … › 現在ノード） ──
+    // ── 2行目: パンくず（ルート › … › 現在ノード） ── アウトラインの bcEl と同じ見た目。
     const bcRow = document.createElement('div');
-    bcRow.style.cssText = `display:flex;align-items:center;min-width:0;`;
+    bcRow.style.cssText = `display:flex;align-items:center;gap:2px;padding:4px 8px 4px 10px;border-bottom:1px solid ${BORDER};font-size:12px;min-width:0;`;
     const title = document.createElement('span');
     title.style.cssText = `flex:1;min-width:0;color:${TEXT_HIGH};font-size:12px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;`;
     if (orphanMode) {

@@ -64,60 +64,7 @@ export function renderGraphEditor(
   `;
   outer.appendChild(style);
 
-  // ── Top bar ───────────────────────────────────────────────────────
-  const topBar = document.createElement('div');
-  topBar.style.cssText = `display:flex;align-items:center;padding:3px 8px;border-bottom:1px solid ${BORDER};flex-shrink:0;gap:4px;`;
-
-  // 言語切替はパネルごと（各ノードパネル / 関係パネルの JA/EN）に移動。トップバーの全体トグル
-  // （他言語 / JA / EN）は廃止した。
-
-  // ── Search input (in topBar) ──────────────────────────────────────
-  const searchSep = document.createElement('span');
-  searchSep.style.cssText = `width:1px;height:14px;background:${BORDER};margin:0 2px;flex-shrink:0;`;
-
-  const searchInput = document.createElement('input');
-  searchInput.type = 'text';
-  Object.assign(searchInput.style, {
-    flex: '1', background: 'transparent', border: 'none', outline: 'none',
-    color: TEXT_HIGH, fontSize: '12px', fontFamily: 'inherit', lineHeight: '1.5',
-    minWidth: '60px',
-  });
-
-  const clearBtn = document.createElement('button');
-  clearBtn.textContent = '✕';
-  clearBtn.style.cssText = `background:transparent;border:none;color:${TEXT_MID};cursor:pointer;font-size:12px;padding:0 2px;display:none;flex-shrink:0;`;
-  clearBtn.addEventListener('click', () => {
-    searchInput.value = '';
-    clearBtn.style.display = 'none';
-    doSearch('');
-    searchInput.focus();
-  });
-
-  // doSearch is overwritten after the view is created (see below)
-  let doSearch = (q: string) => {
-    state.searchQuery = q;
-  };
-
-  let searchTimer: ReturnType<typeof setTimeout> | null = null;
-  searchInput.addEventListener('input', () => {
-    const q = searchInput.value.trim();
-    clearBtn.style.display = q ? 'block' : 'none';
-    if (searchTimer) clearTimeout(searchTimer);
-    searchTimer = setTimeout(() => doSearch(q), 250);
-  });
-
-  topBar.appendChild(searchSep);
-  topBar.appendChild(searchInput);
-  topBar.appendChild(clearBtn);
-  outer.appendChild(topBar);
-
-  // Esc → focus search from anywhere inside the graph editor
-  outer.addEventListener('keydown', (e) => {
-    if (e.key === 'Escape' && document.activeElement !== searchInput) {
-      e.preventDefault();
-      searchInput.focus();
-    }
-  }, true);
+  // 上部バー（全体ヘッダ）は廃止。言語切替はパネルごと、検索バーも撤去した。
 
   // ── Context assembly ──────────────────────────────────────────────
   const rootNodeId = comp.rootNodeId ?? null;
@@ -156,11 +103,6 @@ export function renderGraphEditor(
   const multiPane = createMultiPaneView(ctx);
   multiPane.el.style.display = 'flex';
   outer.appendChild(multiPane.el);
-
-  doSearch = (q: string) => {
-    state.searchQuery = q;
-    void multiPane.search(q);
-  };
 
   void multiPane.load();
 
