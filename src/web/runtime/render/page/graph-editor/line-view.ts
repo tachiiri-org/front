@@ -168,19 +168,25 @@ export function createLineView(
     sqByLine.set(line.lineId, sq);
     // セグメント/チップを並べるインライン領域。
     const content = document.createElement('div');
-    content.style.cssText = `flex:1;min-width:0;line-height:1.5;`;
+    // padding-left:8px = 全行一律の先頭インデント（クリック可能なガター）。先頭の空テキスト片は
+    // 非フォーカス時 0px に畳むので、先頭がノードリンクの行もテキストの行も content 内容左端で揃う。
+    content.style.cssText = `flex:1;min-width:0;line-height:1.5;padding-left:8px;`;
     row.append(spacer, bw, content);
     bw.addEventListener('mousedown', (e) => e.preventDefault());
     bw.addEventListener('click', () => { content.querySelector('textarea')?.focus(); });
-    // 末尾テキスト片より右の空白（テキストの無い右余白）クリックで、その末尾テキスト片の末尾にフォーカス。
-    // 末尾を固定幅で右端まで広げる代わりにこちらで受けることで、手前の片への入力で折り返さない。
+    // テキストの無い余白クリックでフォーカス。左ガター（先頭子要素より左＝padding 部）→ 先頭テキスト片の先頭、
+    // それ以外（末尾より右の余白）→ 末尾テキスト片の末尾。末尾を固定幅で広げない代わりにここで受ける。
     content.addEventListener('mousedown', (e) => {
       if (e.target !== content) return;
+      const first = content.firstElementChild as HTMLTextAreaElement | null;
       const last = content.lastElementChild as HTMLTextAreaElement | null;
-      if (last && last.tagName === 'TEXTAREA') {
+      const leftGutter = !!first && (e as MouseEvent).clientX < first.getBoundingClientRect().left;
+      const target = leftGutter ? first : last;
+      if (target && target.tagName === 'TEXTAREA') {
         e.preventDefault();
-        last.focus();
-        last.setSelectionRange(last.value.length, last.value.length);
+        target.focus();
+        const pos = leftGutter ? 0 : target.value.length;
+        target.setSelectionRange(pos, pos);
       }
     });
 
@@ -201,10 +207,16 @@ export function createLineView(
       // +2 はキャレット表示分のみ。以前は +6 で各テキスト片の右に余分な空きが出ていた。
       if (cctx) { cctx.font = '14px sans-serif'; w = cctx.measureText(text).width + 2; }
       const max = content.clientWidth || 99999;
-      // テキスト片は内容なりの自然幅（空でも最小8px）。全行は先頭に空ガター片(8px)を持つので、
-      // 先頭がノードリンクの行もテキストの行も内容左端で揃い、先頭は常にクリック可・キャレット可視。
+      // 先頭の空テキスト片: 非フォーカス時は幅0（直後のノードリンク/テキストを他行と content 内容左端で揃える）、
+      // フォーカス時のみキャレットが見える幅に広げる（focus/blur で autosize を呼び直す）。入力した文字は
+      // content 内容左端(=padding-left の右)から右へ伸びるので、入力テキストの左端も他行と揃う。
       // 末尾は右端まで固定幅で広げない（手前への入力で折り返すため。右余白クリックは content 側で受ける）。
-      ta.style.width = w <= max ? `${Math.max(8, w)}px` : '100%';
+      const isFirst = content.firstElementChild === ta;
+      if (isFirst && content.lastElementChild !== ta && text === '') {
+        ta.style.width = document.activeElement === ta ? '8px' : '0px';
+      } else {
+        ta.style.width = w <= max ? `${Math.max(8, w)}px` : '100%';
+      }
       ta.style.height = 'auto';
       ta.style.height = `${ta.scrollHeight}px`;
     };
@@ -251,9 +263,10 @@ export function createLineView(
       ta.value = v;
       ta.rows = 1;
       ta.style.cssText = `display:inline-block;vertical-align:top;background:transparent;border:none;outline:none;resize:none;font-size:14px;font-family:inherit;line-height:1.5;padding:0;margin:0;overflow:hidden;color:${TEXT_HIGH};`;
-      ta.addEventListener('focus', () => setActive(line));
+      // focus/blur で autosize を呼び直し、先頭の空テキスト片を フォーカス時=8px / 非フォーカス時=0px に。
+      ta.addEventListener('focus', () => { setActive(line); autosize(ta); });
       ta.addEventListener('input', () => { autosize(ta); void handleMention(ta); save(); });
-      ta.addEventListener('blur', () => save(true));
+      ta.addEventListener('blur', () => { save(true); autosize(ta); });
       ta.addEventListener('keydown', (e) => {
         // @ メニューが開いている間は ↑↓/Enter で候補選択。
         if (menuOpen) {
@@ -263,6 +276,19 @@ export function createLineView(
           if (e.key === 'Escape') { closeMenu(); return; }
         }
         if (e.key === 'Escape') { closeMenu(); return; }
+        // Ctrl+Shift+Backspace で関係(行)そのものを削除。
+        if (e.key === 'Backspace' && e.ctrlKey && e.shiftKey) {
+          e.preventDefault();
+          void (async () => { await apiDeleteLine(ctx.gId, line.lineId); await render(); })();
+          return;
+        }
+        // テキストを範囲選択して @ → 選択ワードを検索初期値にメニューを開き、選択範囲をチップに置換。
+        if (e.key === '@' && ta.selectionStart !== ta.selectionEnd) {
+          e.preventDefault();
+          const s = ta.selectionStart, en = ta.selectionEnd;
+          void openMention(ta, ta.value.slice(0, s), ta.value.slice(en), ta.value.slice(s, en));
+          return;
+        }
         // 既存リレーションで Enter は改行ではなく「新しいリレーションを追加」（Shift+Enterで改行）。
         if (e.key === 'Enter' && !e.shiftKey) {
           e.preventDefault();
@@ -333,13 +359,10 @@ export function createLineView(
       }
     };
 
-    const handleMention = async (ta: HTMLTextAreaElement) => {
-      const caret = ta.selectionStart;
-      const before = ta.value.slice(0, caret);
-      const mm = before.match(/@([^\s@]*)$/);
-      if (!mm) { closeMenu(); return; }
-      const q = mm[1];
-      const atStart = caret - mm[0].length;
+    // メニューを開いて、選んだら ta を leftStr / チップ / rightStr に割って参照を差し込む共通処理。
+    // - @入力: leftStr=@より前, rightStr=caret以降, query=@に続く文字。
+    // - 範囲選択+@: leftStr=選択前, rightStr=選択後, query=選択テキスト（選択範囲をチップに置換）。
+    const openMention = async (ta: HTMLTextAreaElement, leftStr: string, rightStr: string, query: string) => {
       mention = {
         anchor: ta,
         onPick: async (n, createLabel) => {
@@ -350,12 +373,10 @@ export function createLineView(
             nodeId = created.id;
           }
           const label = createLabel ?? labelOf(n, lang);
-          const left = ta.value.slice(0, atStart);
-          const right = ta.value.slice(ta.selectionStart);
-          ta.value = left;
+          ta.value = leftStr;
           autosize(ta);
           const chip = mkChip(nodeId, label);
-          const newTa = mkTextarea(right);
+          const newTa = mkTextarea(rightStr);
           content.insertBefore(chip, ta.nextSibling);
           content.insertBefore(newTa, chip.nextSibling);
           closeMenu();
@@ -368,20 +389,23 @@ export function createLineView(
         },
       };
       const seq = ++mentionSeq;
-      const { nodes } = await fetchAllNodes(ctx.gId, [], 0, lang, undefined, q || undefined);
+      const { nodes } = await fetchAllNodes(ctx.gId, [], 0, lang, undefined, query || undefined);
       if (seq !== mentionSeq || !mention) return;
-      showMenu(ta, q, nodes);
+      showMenu(ta, query, nodes);
+    };
+
+    const handleMention = async (ta: HTMLTextAreaElement) => {
+      const caret = ta.selectionStart;
+      const before = ta.value.slice(0, caret);
+      const mm = before.match(/@([^\s@]*)$/);
+      if (!mm) { closeMenu(); return; }
+      const atStart = caret - mm[0].length;
+      await openMention(ta, ta.value.slice(0, atStart), ta.value.slice(ta.selectionStart), mm[1]);
     };
 
     // 初期トークンを並べる（必ずテキスト片で始まり/終わる）。
-    // 全行の先頭に空ガター片(8px)を1つ置く: 先頭がノードリンクの行もテキストの行も内容左端で揃い、
-    // 先頭は常にクリック可能でキャレットも見える。splitTokens は必ず先頭が txt なので、
-    // 先頭が空 txt ならそれをガターに使い（重複させない）、非空なら空ガターを足してから並べる。
     const body = line.body[lang] ?? line.body[lang === 'ja' ? 'en' : 'ja'] ?? '';
-    const toks = splitTokens(body);
-    if (toks[0]?.t === 'txt' && toks[0].v === '') toks.shift();
-    content.appendChild(mkTextarea(''));
-    for (const tok of toks) {
+    for (const tok of splitTokens(body)) {
       if (tok.t === 'txt') content.appendChild(mkTextarea(tok.v));
       else content.appendChild(mkChip(tok.id));
     }
@@ -429,11 +453,18 @@ export function createLineView(
     title.textContent = orphanMode ? 'リンクなし関係' : '関係';
     title.style.cssText = `color:${TEXT_HIGH};font-size:12px;`;
     head.appendChild(title);
+    // パネル内更新ボタン（ノードパネルの ⟳ と同じ）。関係一覧を再取得する。
+    const reloadBtn = document.createElement('button');
+    reloadBtn.textContent = '⟳';
+    reloadBtn.title = '関係を再読み込み';
+    reloadBtn.style.cssText = `margin-left:auto;background:transparent;border:none;color:${TEXT_DIM};cursor:pointer;font-size:13px;padding:0 2px;line-height:1;flex-shrink:0;`;
+    reloadBtn.addEventListener('click', () => { reloadBtn.style.color = TEXT_HIGH; void render().finally(() => { reloadBtn.style.color = TEXT_DIM; }); });
+    head.appendChild(reloadBtn);
     // 「リンクなし」トグル: 参加ノードを持たない関係の一覧（移行・編集中の受け皿）。
     const orphanBtn = document.createElement('button');
     orphanBtn.textContent = 'リンクなし';
     orphanBtn.title = '参加ノードを持たない関係（リンクなし）を表示';
-    orphanBtn.style.cssText = `margin-left:auto;background:${orphanMode ? SELECT_STRONG : 'transparent'};border:1px solid ${BORDER};color:${orphanMode ? '#fff' : TEXT_MID};cursor:pointer;font-size:10px;padding:1px 6px;border-radius:3px;`;
+    orphanBtn.style.cssText = `background:${orphanMode ? SELECT_STRONG : 'transparent'};border:1px solid ${BORDER};color:${orphanMode ? '#fff' : TEXT_MID};cursor:pointer;font-size:10px;padding:1px 6px;border-radius:3px;`;
     orphanBtn.addEventListener('click', () => { orphanMode = !orphanMode; void render(); });
     head.appendChild(orphanBtn);
 
