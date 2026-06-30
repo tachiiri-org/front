@@ -94,4 +94,8 @@ export interface GraphEditorContext {
   // Line panel(s) register a refresh here; called after a square right-click changes membership so
   // the relation rows re-fetch fresh participants (keeps the active set authoritative on re-focus).
   refreshRelations: Set<() => void>;
+  // Set by the line panel: convert a node into a relation (its label becomes the relation body,
+  // linked to the panel's current node) and DELETE the node. Used by node→relation drag-drop and
+  // the Shift+Alt+→ shortcut. The caller removes the node from its own pane afterwards.
+  moveNodeToRelation?: (node: ExplorerNode, targetNodeId: string | null) => Promise<void>;
 }

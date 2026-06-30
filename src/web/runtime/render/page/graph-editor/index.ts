@@ -68,31 +68,8 @@ export function renderGraphEditor(
   const topBar = document.createElement('div');
   topBar.style.cssText = `display:flex;align-items:center;padding:3px 8px;border-bottom:1px solid ${BORDER};flex-shrink:0;gap:4px;`;
 
-  const makeLangBtnStyle = (l: 'en' | 'ja') => {
-    const active = state.lang === l;
-    return `background:${active ? SELECT_STRONG : 'transparent'};border:1px solid ${active ? SELECT_STRONG : BORDER};color:${active ? TEXT_HIGH : TEXT_MID};cursor:pointer;font-size:11px;padding:1px 7px;border-radius:3px;line-height:1.5;`;
-  };
-
-  const jaBtn = document.createElement('button');
-  jaBtn.textContent = 'JA';
-  const enBtn = document.createElement('button');
-  enBtn.textContent = 'EN';
-
-  const refreshLangBtns = () => {
-    jaBtn.style.cssText = makeLangBtnStyle('ja');
-    enBtn.style.cssText = makeLangBtnStyle('en');
-  };
-  refreshLangBtns();
-
-  // Toggle: show/hide nodes that only exist in the other language
-  const makeFallbackBtnStyle = () => {
-    const active = state.showFallback;
-    return `background:${active ? SELECT_STRONG : 'transparent'};border:1px solid ${active ? SELECT_STRONG : BORDER};color:${active ? TEXT_HIGH : TEXT_MID};cursor:pointer;font-size:11px;padding:1px 7px;border-radius:3px;line-height:1.5;`;
-  };
-  const fallbackBtn = document.createElement('button');
-  fallbackBtn.textContent = '他言語';
-  fallbackBtn.title = '現在の言語にテキストがなく他言語にのみあるノードの表示切り替え';
-  fallbackBtn.style.cssText = makeFallbackBtnStyle();
+  // 言語切替はパネルごと（各ノードパネル / 関係パネルの JA/EN）に移動。トップバーの全体トグル
+  // （他言語 / JA / EN）は廃止した。
 
   // ── Search input (in topBar) ──────────────────────────────────────
   const searchSep = document.createElement('span');
@@ -129,16 +106,9 @@ export function renderGraphEditor(
     searchTimer = setTimeout(() => doSearch(q), 250);
   });
 
-  const langSep = document.createElement('span');
-  langSep.style.cssText = `width:1px;height:14px;background:${BORDER};margin:0 2px;flex-shrink:0;`;
-
   topBar.appendChild(searchSep);
   topBar.appendChild(searchInput);
   topBar.appendChild(clearBtn);
-  topBar.appendChild(langSep);
-  topBar.appendChild(fallbackBtn);
-  topBar.appendChild(jaBtn);
-  topBar.appendChild(enBtn);
   outer.appendChild(topBar);
 
   // Esc → focus search from anywhere inside the graph editor
@@ -191,30 +161,6 @@ export function renderGraphEditor(
     state.searchQuery = q;
     void multiPane.search(q);
   };
-
-  // ── Language / fallback wiring ─────────────────────────────────────
-  // Language is now per-pane (each pane has its own JA/EN toggle). The top-bar buttons act
-  // as "set all panes" and also update the default applied to newly-created panes.
-  jaBtn.title = '全パネルを日本語に';
-  enBtn.title = '全パネルを英語に';
-  jaBtn.addEventListener('click', () => {
-    state.lang = 'ja';
-    refreshLangBtns();
-    fallbackBtn.style.cssText = makeFallbackBtnStyle();
-    multiPane.setAllLang('ja');
-  });
-  enBtn.addEventListener('click', () => {
-    state.lang = 'en';
-    refreshLangBtns();
-    fallbackBtn.style.cssText = makeFallbackBtnStyle();
-    multiPane.setAllLang('en');
-  });
-
-  fallbackBtn.addEventListener('click', () => {
-    state.showFallback = !state.showFallback;
-    fallbackBtn.style.cssText = makeFallbackBtnStyle();
-    void multiPane.load();
-  });
 
   void multiPane.load();
 

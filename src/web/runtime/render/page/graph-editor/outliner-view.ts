@@ -1421,6 +1421,16 @@ export function createOutlinerView(ctx: GraphEditorContext, paneOpts?: OutlinerP
         return;
       }
 
+      // Shift+Alt+→ : ノードを関係パネルへ移動（関係に変換してこのノードは削除）。ドラッグでの
+      // ノード→関係ドロップと同じ操作のキーボード版。
+      if (e.key === 'ArrowRight' && e.shiftKey && e.altKey && !e.ctrlKey && !e.metaKey) {
+        e.preventDefault();
+        const node = onode.node;
+        const parent = onode.parentId; // 紐づけ先＝親（focus でドックは X 自身に切り替わっているため）
+        void (async () => { await ctx.moveNodeToRelation?.(node, parent); detachNodes([node]); })();
+        return;
+      }
+
       // Tab: indent / dedent (multi or single)
       if (e.key === 'Tab') {
         e.preventDefault();

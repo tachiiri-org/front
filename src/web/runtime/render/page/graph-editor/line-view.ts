@@ -2,7 +2,7 @@ import type { GraphEditorContext, PaneView, ExplorerNode, ExplorerLine, PaneView
 import { BORDER, TEXT_HIGH, TEXT_MID, TEXT_DIM, SELECT_STRONG, ORPHAN_ID } from './constants';
 import {
   fetchNodeLines, apiCreateRelation, apiSetLineBody, apiAddRay, apiRemoveRay, fetchAllNodes, apiCreateNode,
-  fetchOrphanLines, apiDeleteLine,
+  fetchOrphanLines, apiDeleteLine, apiDeleteNode,
 } from './api';
 
 // 関係 (line) パネル。関係 = テキストとノード参照(チップ)が交互に並ぶ1行（セグメント分割編集）。
@@ -48,8 +48,9 @@ export function createLineView(
   const el = document.createElement('div');
   el.style.cssText = `flex:1;display:flex;flex-direction:column;overflow:hidden;`;
 
+  // ノードパネルと同じ2行構成: 1行目=操作（言語切替 + ⟳ + リンクなし）、2行目=パンくず。
   const head = document.createElement('div');
-  head.style.cssText = `flex-shrink:0;height:28px;box-sizing:border-box;padding:0 8px;border-bottom:1px solid ${BORDER};font-size:11px;color:${TEXT_MID};display:flex;align-items:center;gap:6px;`;
+  head.style.cssText = `flex-shrink:0;box-sizing:border-box;padding:2px 8px;border-bottom:1px solid ${BORDER};font-size:11px;color:${TEXT_MID};display:flex;flex-direction:column;gap:1px;`;
   el.appendChild(head);
 
   const bodyEl = document.createElement('div');
@@ -453,12 +454,40 @@ export function createLineView(
     bodyEl.innerHTML = '';
     sqByLine.clear();
 
+    // ── 1行目: 操作（言語切替 + ⟳ + リンクなし） ──
+    const ctrlRow = document.createElement('div');
+    ctrlRow.style.cssText = `display:flex;align-items:center;gap:6px;min-height:20px;`;
+    // 言語切替（ノードパネルのパネル別 JA/EN と同じ）。
+    const langBtn = document.createElement('button');
+    langBtn.textContent = lang.toUpperCase();
+    langBtn.title = lang === 'ja' ? 'この関係パネルの言語: 日本語（クリックでEN）' : 'この関係パネルの言語: 英語（クリックでJA）';
+    langBtn.style.cssText = `background:transparent;border:1px solid ${BORDER};color:${TEXT_MID};cursor:pointer;font-size:10px;padding:1px 4px;border-radius:3px;flex-shrink:0;line-height:1.4;`;
+    langBtn.addEventListener('click', () => { lang = lang === 'ja' ? 'en' : 'ja'; void render(); });
+    ctrlRow.appendChild(langBtn);
+    // パネル内更新ボタン（ノードパネルの ⟳ と同じ）。関係一覧を再取得する。
+    const reloadBtn = document.createElement('button');
+    reloadBtn.textContent = '⟳';
+    reloadBtn.title = '関係を再読み込み';
+    reloadBtn.style.cssText = `margin-left:auto;background:transparent;border:none;color:${TEXT_DIM};cursor:pointer;font-size:13px;padding:0 2px;line-height:1;flex-shrink:0;`;
+    reloadBtn.addEventListener('click', () => { reloadBtn.style.color = TEXT_HIGH; void render().finally(() => { reloadBtn.style.color = TEXT_DIM; }); });
+    ctrlRow.appendChild(reloadBtn);
+    // 「リンクなし」トグル: 参加ノードを持たない関係の一覧（移行・編集中の受け皿）。
+    const orphanBtn = document.createElement('button');
+    orphanBtn.textContent = 'リンクなし';
+    orphanBtn.title = '参加ノードを持たない関係（リンクなし）を表示';
+    orphanBtn.style.cssText = `flex-shrink:0;background:${orphanMode ? SELECT_STRONG : 'transparent'};border:1px solid ${BORDER};color:${orphanMode ? '#fff' : TEXT_MID};cursor:pointer;font-size:10px;padding:1px 6px;border-radius:3px;`;
+    orphanBtn.addEventListener('click', () => { orphanMode = !orphanMode; void render(); });
+    ctrlRow.appendChild(orphanBtn);
+    head.appendChild(ctrlRow);
+
+    // ── 2行目: パンくず（ルート › … › 現在ノード） ──
+    const bcRow = document.createElement('div');
+    bcRow.style.cssText = `display:flex;align-items:center;min-width:0;`;
     const title = document.createElement('span');
     title.style.cssText = `flex:1;min-width:0;color:${TEXT_HIGH};font-size:12px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;`;
     if (orphanMode) {
       title.textContent = 'リンクなし関係';
     } else if (currentPath && currentPath.length) {
-      // ヘッダはパンくずリスト（ルート › … › 現在ノード）。
       currentPath.forEach((e, i) => {
         if (i > 0) {
           const sep = document.createElement('span');
@@ -473,21 +502,8 @@ export function createLineView(
     } else {
       title.textContent = '関係';
     }
-    head.appendChild(title);
-    // パネル内更新ボタン（ノードパネルの ⟳ と同じ）。関係一覧を再取得する。
-    const reloadBtn = document.createElement('button');
-    reloadBtn.textContent = '⟳';
-    reloadBtn.title = '関係を再読み込み';
-    reloadBtn.style.cssText = `margin-left:auto;background:transparent;border:none;color:${TEXT_DIM};cursor:pointer;font-size:13px;padding:0 2px;line-height:1;flex-shrink:0;`;
-    reloadBtn.addEventListener('click', () => { reloadBtn.style.color = TEXT_HIGH; void render().finally(() => { reloadBtn.style.color = TEXT_DIM; }); });
-    head.appendChild(reloadBtn);
-    // 「リンクなし」トグル: 参加ノードを持たない関係の一覧（移行・編集中の受け皿）。
-    const orphanBtn = document.createElement('button');
-    orphanBtn.textContent = 'リンクなし';
-    orphanBtn.title = '参加ノードを持たない関係（リンクなし）を表示';
-    orphanBtn.style.cssText = `background:${orphanMode ? SELECT_STRONG : 'transparent'};border:1px solid ${BORDER};color:${orphanMode ? '#fff' : TEXT_MID};cursor:pointer;font-size:10px;padding:1px 6px;border-radius:3px;`;
-    orphanBtn.addEventListener('click', () => { orphanMode = !orphanMode; void render(); });
-    head.appendChild(orphanBtn);
+    bcRow.appendChild(title);
+    head.appendChild(bcRow);
 
     if (orphanMode) {
       const lines = await fetchOrphanLines(ctx.gId);
@@ -512,21 +528,33 @@ export function createLineView(
     (row?.querySelector('textarea') as HTMLTextAreaElement | null)?.focus();
   };
 
-  // ── ノードパネルからのドロップ ───────────────────────────────────────────────
-  // ノードパネルでドラッグしたノード X をこのドックにドロップ → X を主語にした関係を新規作成し、
-  // いま開いているノード Y(currentNodeId) を参加者として紐づける（本文に ⟦X⟧⟦Y⟧ を入れて
-  // テキストにノードリンクを持たせ、次回も Y の関係として出るようにする）。X ノード自体は残す。
-  const dropAsRelation = async (ids: string[]): Promise<void> => {
-    const y = currentNodeId && currentNodeId !== ORPHAN_ID ? currentNodeId : null;
-    for (const x of ids) {
-      const created = await apiCreateRelation(ctx.gId, x, lang, '');
-      if (!created) continue;
-      let body = `⟦${x}⟧`;
-      if (y && y !== x) { await apiAddRay(ctx.gId, created.lineId, y); body += `⟦${y}⟧`; }
-      await apiSetLineBody(ctx.gId, created.lineId, lang, body);
+  // ── ノード → 関係への変換 ─────────────────────────────────────────────────────
+  // ノード X を関係に変換する：X のラベルを本文にした関係を作り、紐づけ先ノード Y を参加者に
+  // （本文に ⟦Y⟧ チップを入れてテキストにノードリンクを持たせ、次回も Y の関係として出るように）、
+  // X ノード自体は削除する。Y が無ければ X を主語に作るだけ（削除しない）。戻り値 = X を削除したか。
+  const makeRelationFromNode = async (node: ExplorerNode, y: string | null): Promise<boolean> => {
+    const xLabel = labelOf(node, lang);
+    if (y && y !== node.id) {
+      const created = await apiCreateRelation(ctx.gId, y, lang, '');
+      if (!created) return false;
+      await apiSetLineBody(ctx.gId, created.lineId, lang, `${xLabel}⟦${y}⟧`);
+      await apiDeleteNode(ctx.gId, node.id);
+      return true;
     }
+    const created = await apiCreateRelation(ctx.gId, node.id, lang, '');
+    if (created) await apiSetLineBody(ctx.gId, created.lineId, lang, `⟦${node.id}⟧`);
+    return false;
+  };
+  // Shift+Alt+→ ショートカット用フック（ノードパネルから呼ぶ）。focus でドックが X 自身に切り替わる
+  // ため、紐づけ先 Y はノードパネル側が渡す親 (targetNodeId)。変換後はドックを Y の関係表示に。
+  ctx.moveNodeToRelation = async (node, targetNodeId) => {
+    const y = targetNodeId && targetNodeId !== ORPHAN_ID ? targetNodeId : null;
+    await makeRelationFromNode(node, y);
+    if (y) { currentNodeId = y; currentPath = null; }
     await render();
   };
+
+  // ── ノードパネルからのドロップ ───────────────────────────────────────────────
   el.addEventListener('dragover', (e) => {
     if (!ctx.paneDrag) return;          // ノードパネル発のノードドラッグのみ受ける
     e.preventDefault();
@@ -540,8 +568,16 @@ export function createLineView(
     if (!ctx.paneDrag) return;
     e.preventDefault();
     bodyEl.style.boxShadow = '';
-    const ids = [...ctx.paneDrag.nodeIds];
-    if (ids.length) void dropAsRelation(ids);
+    const pd = ctx.paneDrag;
+    const movers = [...pd.movers];
+    // ドロップ先 = いま開いているノード Y（ドラッグは focus を変えないので currentNodeId が Y のまま）。
+    const y = currentNodeId && currentNodeId !== ORPHAN_ID ? currentNodeId : null;
+    void (async () => {
+      const deleted: ExplorerNode[] = [];
+      for (const m of movers) { if (await makeRelationFromNode(m.node, y)) deleted.push(m.node); }
+      if (deleted.length) pd.detachFromSource(deleted); // ノードパネルから消す
+      await render();
+    })();
   });
 
   void render();
