@@ -2,9 +2,21 @@ import type { ExplorerNode, GraphEditorContext } from './types';
 import { BG, BORDER, TEXT_HIGH, TEXT_MID, TEXT_DIM, SELECT_STRONG, ORPHAN_ID, ORPHAN_LABEL, primaryLabel, fallbackLabel } from './constants';
 import {
   fetchChildren, fetchParents, fetchBookmarks, fetchBookmarkedNodes, fetchAllNodes,
-  apiCreateNode, apiUpdateNode, apiDeleteNode, apiMoveNode, apiMoveBookmark, apiToggleLink,
-  apiSetNodeColor, apiLinkNode, apiUnlinkNode, fetchColors,
+  apiCreateNode as _apiCreateNode, apiUpdateNode, apiDeleteNode, apiMoveNode as _apiMoveNode, apiMoveBookmark,
+  apiToggleLink as _apiToggleLink, apiSetNodeColor, apiLinkNode, apiUnlinkNode, fetchColors,
 } from './api';
+
+// '__orphan__' is a synthetic grouping, NOT a real node. Orphan nodes are rendered under it (so
+// parentId === ORPHAN_ID), but sending it to the backend as a parent / link target would write a
+// phantom edge to a non-existent node. Wrap the parent-bearing APIs to neutralise it: reorder
+// AMONG orphans (parent = ORPHAN_ID) has no persistence target → no-op; reparenting an orphan onto
+// a REAL node still goes through; creating a "sibling" of an orphan makes another parentless node.
+const apiMoveNode = (graphId: string, nodeId: string, parentId: string, direction: 'up' | 'down', afterSwapSiblingIds: string[], keepalive = false): Promise<void> =>
+  parentId === ORPHAN_ID ? Promise.resolve() : _apiMoveNode(graphId, nodeId, parentId, direction, afterSwapSiblingIds, keepalive);
+const apiToggleLink = (graphId: string, sourceId: string, targetId: string): Promise<boolean> =>
+  targetId === ORPHAN_ID ? Promise.resolve(false) : _apiToggleLink(graphId, sourceId, targetId);
+const apiCreateNode = (graphId: string, parentId: string | null, lang: 'en' | 'ja', label: string, insertAfterId?: string): Promise<ExplorerNode | null> =>
+  _apiCreateNode(graphId, parentId === ORPHAN_ID ? null : parentId, lang, label, insertAfterId);
 
 // ── Occurrence model ───────────────────────────────────────────────────
 // A node id can appear MULTIPLE times in one pane (multi-membership: the same node
@@ -944,9 +956,6 @@ export function createOutlinerView(ctx: GraphEditorContext, paneOpts?: OutlinerP
   const ensureChildren = async (onode: ONode) => {
     if (onode.childrenLoaded) return;
     const id = onode.node.id;
-    // The synthetic "リンクなし" entry never expands inline — its nodes are shown in the relation
-    // dock instead. Mark it loaded-with-no-children so prefetch/expand both no-op on it.
-    if (id === ORPHAN_ID) { onode.children = []; onode.childrenLoaded = true; return; }
     let cached = ctx.childrenCache.get(id);
     // Refetch when missing OR when only a stale (unvalidated) localStorage entry exists.
     // ensureChildren runs before the subtree is rendered, so awaiting fresh data here keeps
@@ -1237,17 +1246,18 @@ export function createOutlinerView(ctx: GraphEditorContext, paneOpts?: OutlinerP
     row.style.cssText = `display:flex;align-items:center;padding:0;border:2px solid transparent;border-radius:3px;`;
     rowMap.set(onode.key, row);
 
-    // Synthetic "リンクなし" row: a static, non-editable, NON-expanding entry. Selecting it (like
-    // any node) drives the relation dock, which then lists the orphan (parentless) nodes — it does
-    // NOT expand the relation-looking list inline in the node panel. Layout mirrors a normal row
-    // ([spacer][triangle slot][marker][label]) so the label aligns; the triangle slot is an
-    // invisible placeholder since there is nothing to expand.
+    // Synthetic "リンクなし" group header: a static (non-renamable/movable) row that EXPANDS inline
+    // to the orphan (parentless) nodes. The orphan nodes themselves are rendered by the normal
+    // buildRow path, so they get the full node treatment (edit / drag-drop / shift+alt reorder /
+    // shortcuts). Layout mirrors a normal row ([spacer][triangle][marker][label]) so it aligns.
     if (onode.node.id === ORPHAN_ID) {
       const spc = document.createElement('span');
       spc.style.cssText = `flex-shrink:0;width:${(onode.depth - baseDepth) * 20 + 6}px;`;
-      const triSlot = document.createElement('span');
-      triSlot.textContent = '▸';
-      triSlot.style.cssText = `flex-shrink:0;font-size:10px;padding:0 4px;visibility:hidden;line-height:1;`;
+      const triBtn = document.createElement('button');
+      triBtn.dataset.expandTriangle = '1';
+      triBtn.textContent = '▸';
+      triBtn.style.cssText = `flex-shrink:0;background:transparent;border:none;color:${TEXT_DIM};cursor:pointer;font-size:10px;padding:0 4px;opacity:0;pointer-events:none;line-height:1;`;
+      triBtn.addEventListener('click', (e) => { e.stopPropagation(); void toggleExpand(onode); });
       const bw = document.createElement('span');
       bw.style.cssText = `flex-shrink:0;display:flex;align-items:center;justify-content:center;width:18px;cursor:pointer;`;
       const mk = document.createElement('span');
@@ -1256,11 +1266,10 @@ export function createOutlinerView(ctx: GraphEditorContext, paneOpts?: OutlinerP
       bw.appendChild(mk);
       const lbl = document.createElement('span');
       lbl.textContent = ORPHAN_LABEL;
-      lbl.style.cssText = `flex:1;font-size:14px;line-height:1.5;color:${TEXT_DIM};cursor:pointer;padding:0 4px 0 0;`;
-      const select = () => setPaneSelected(ORPHAN_ID);
-      lbl.addEventListener('click', select);
-      bw.addEventListener('click', (e) => { e.stopPropagation(); select(); });
-      row.append(spc, triSlot, bw, lbl);
+      lbl.style.cssText = `flex:1;font-size:14px;line-height:1.5;color:${TEXT_MID};cursor:pointer;padding:0 4px 0 0;`;
+      lbl.addEventListener('click', () => void toggleExpand(onode));
+      bw.addEventListener('click', (e) => { e.stopPropagation(); void toggleExpand(onode); });
+      row.append(spc, triBtn, bw, lbl);
       requestAnimationFrame(() => updateExpandMarker(onode));
       return row;
     }
