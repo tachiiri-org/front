@@ -2,7 +2,7 @@ import type { GraphEditorContext, PaneView, ExplorerNode, ExplorerLine, PaneView
 import { BORDER, TEXT_HIGH, TEXT_MID, TEXT_DIM, SELECT_STRONG, ORPHAN_ID } from './constants';
 import {
   fetchNodeLines, apiCreateRelation, apiSetLineBody, apiAddRay, apiRemoveRay, fetchAllNodes, apiCreateNode,
-  fetchOrphanLines, apiDeleteLine, apiDeleteNode,
+  fetchOrphanLines, apiDeleteLine, apiDeleteNode, apiReorderNodeRelations,
 } from './api';
 
 // 関係 (line) パネル。関係 = テキストとノード参照(チップ)が交互に並ぶ1行（セグメント分割編集）。
@@ -41,6 +41,10 @@ export function createLineView(
   let currentPath: PaneViewPathEntry[] | null = null; // ヘッダのパンくず（ルート›…›現在ノード）。
   let orphanMode = false; // true = 参加ノードを持たない「リンクなし関係」一覧を表示。
   let renderToken = 0;
+  // 複数選択: アンカー(固定端)とカーソル(移動端)の関係 lineId。両者の間の行が選択範囲。
+  // ノードパネルと同じ Shift+↑↓ で範囲を伸縮、Shift+Alt+↑↓ で選択ブロックを並び替え。
+  let selAnchor: string | null = null;
+  let selCursor: string | null = null;
   const sqByLine = new Map<string, HTMLElement>();
   const canvas = document.createElement('canvas');
   const cctx = canvas.getContext('2d');
@@ -153,6 +157,90 @@ export function createLineView(
       else { sq.style.background = 'transparent'; sq.style.border = `1.5px solid ${TEXT_DIM}`; }
     }
   };
+
+  // ── 複数選択（関係行）─────────────────────────────────────────────────────────
+  // 関係行(data-line-id を持つ行)を上から順に。draft 行は含まれない。
+  const relationRows = (): HTMLElement[] =>
+    Array.from(bodyEl.querySelectorAll<HTMLElement>('[data-line-id]'));
+  // アンカー〜カーソル間の連続する lineId 群。未選択なら空。
+  const selectedLineIds = (): string[] => {
+    if (!selAnchor) return [];
+    const ids = relationRows().map((r) => r.dataset.lineId!);
+    const ai = ids.indexOf(selAnchor);
+    if (ai === -1) return [];
+    const ci = selCursor ? ids.indexOf(selCursor) : ai;
+    if (ci === -1) return [ids[ai]];
+    return ids.slice(Math.min(ai, ci), Math.max(ai, ci) + 1);
+  };
+  // 複数選択中(2件以上)のみ行背景を塗る。1件はフォーカス＋四角ハイライトで足りる。
+  const updateSelHighlight = () => {
+    const sel = selectedLineIds();
+    const set = new Set(sel.length > 1 ? sel : []);
+    for (const row of relationRows()) {
+      row.style.backgroundColor = set.has(row.dataset.lineId!) ? 'rgba(99,102,241,0.12)' : '';
+    }
+  };
+  const clearSelection = () => { selAnchor = null; selCursor = null; updateSelHighlight(); };
+  // 上下カーソルで上下の行へフォーカス移動（ノードパネルと同じ挙動）。draft 行も含めて上下移動する。
+  // 行内は複数のテキスト片に分かれるので、セグメント単位ではなく「行」単位で移動する。
+  const focusAdjacentRow = (ta: HTMLTextAreaElement, dir: 'up' | 'down') => {
+    const rows = Array.from(bodyEl.children) as HTMLElement[];
+    const idx = rows.findIndex((r) => r.contains(ta));
+    if (idx === -1) return;
+    const target = rows[idx + (dir === 'down' ? 1 : -1)];
+    const nta = target?.querySelector('textarea') as HTMLTextAreaElement | null;
+    if (nta) { nta.focus(); const p = nta.value.length; nta.setSelectionRange(p, p); }
+  };
+  // Shift+↑↓: カーソル端を上下に動かして選択範囲を伸縮（フォーカスはアンカー行に残す）。
+  const extendSelection = (dir: 'up' | 'down') => {
+    const ids = relationRows().map((r) => r.dataset.lineId!);
+    if (!selAnchor || ids.indexOf(selAnchor) === -1) return;
+    const cur = selCursor && ids.includes(selCursor) ? selCursor : selAnchor;
+    const ci = ids.indexOf(cur);
+    const ni = dir === 'down' ? Math.min(ids.length - 1, ci + 1) : Math.max(0, ci - 1);
+    selCursor = ids[ni];
+    updateSelHighlight();
+  };
+  // Shift+Alt+↑↓: 選択ブロックを1つ上/下へ。DOM を並べ替えて全順序をバックエンドへ保存。
+  const moveSelectedRelations = async (dir: 'up' | 'down') => {
+    if (orphanMode || !currentNodeId) return; // 並び順はノード別。orphan/未選択時は不可。
+    const rows = relationRows();
+    const ids = rows.map((r) => r.dataset.lineId!);
+    const sel = selectedLineIds();
+    if (!sel.length) return;
+    const idxs = sel.map((id) => ids.indexOf(id)).filter((i) => i >= 0).sort((a, b) => a - b);
+    const first = idxs[0], last = idxs[idxs.length - 1];
+    if (dir === 'up') {
+      if (first <= 0) return;
+      rows[last].after(rows[first - 1]); // 直上の行を選択ブロックの下へ = ブロックが1つ上がる
+    } else {
+      if (last >= rows.length - 1) return;
+      rows[first].before(rows[last + 1]); // 直下の行を選択ブロックの上へ = ブロックが1つ下がる
+    }
+    updateSelHighlight();
+    await apiReorderNodeRelations(ctx.gId, currentNodeId, relationRows().map((r) => r.dataset.lineId!));
+  };
+
+  // 関係(行)の楽観削除。全体を render() し直すと点滅＆フォーカスが飛ぶので、対象の行だけ
+  // DOM から外し、隣の行へフォーカスを送ってそのまま編集を続けられるようにする。
+  const deleteLinesOptimistic = (lineIds: string[]) => {
+    if (!lineIds.length) return;
+    const rows = relationRows();
+    const targetSet = new Set(lineIds);
+    const idxs = rows.map((r, i) => (targetSet.has(r.dataset.lineId!) ? i : -1)).filter((i) => i >= 0);
+    const firstIdx = idxs.length ? Math.min(...idxs) : 0;
+    const remaining = rows.filter((r) => !targetSet.has(r.dataset.lineId!));
+    const focusTarget = remaining[Math.min(firstIdx, remaining.length - 1)] ?? null;
+    for (const id of lineIds) {
+      rows.find((r) => r.dataset.lineId === id)?.remove();
+      sqByLine.delete(id);
+      if (ctx.activeRelation?.lineId === id) ctx.setActiveRelation(null);
+      void apiDeleteLine(ctx.gId, id);
+    }
+    clearSelection();
+    (focusTarget?.querySelector('textarea') as HTMLTextAreaElement | null)?.focus();
+  };
+  const deleteLineOptimistic = (lineId: string) => deleteLinesOptimistic([lineId]);
 
   // ── 関係 1 件 = セグメント分割行 ─────────────────────────────────────────────
   const renderRelationRow = (line: ExplorerLine): HTMLElement => {
@@ -267,7 +355,12 @@ export function createLineView(
       ta.rows = 1;
       ta.style.cssText = `display:inline-block;vertical-align:top;background:transparent;border:none;outline:none;resize:none;font-size:14px;font-family:inherit;line-height:1.5;padding:0;margin:0;overflow:hidden;color:${TEXT_HIGH};`;
       // focus/blur で autosize を呼び直し、先頭の空テキスト片を フォーカス時=8px / 非フォーカス時=0px に。
-      ta.addEventListener('focus', () => { setActive(line); autosize(ta); });
+      // フォーカスした行を選択アンカーにし、複数選択はリセット（Shift+↑↓ でここから伸ばす）。
+      ta.addEventListener('focus', () => {
+        setActive(line);
+        selAnchor = line.lineId; selCursor = null; updateSelHighlight();
+        autosize(ta);
+      });
       ta.addEventListener('input', () => { autosize(ta); void handleMention(ta); save(); });
       // 他の場所を選んで textarea からフォーカスが外れたら、@ドロップダウンは閉じる。
       // （項目は mousedown+preventDefault でフォーカスを奪わないので、項目選択では blur しない。
@@ -281,11 +374,26 @@ export function createLineView(
           if (e.key === 'Enter') { e.preventDefault(); navPick(); return; }
           if (e.key === 'Escape') { closeMenu(); return; }
         }
-        if (e.key === 'Escape') { closeMenu(); return; }
-        // Ctrl+Shift+Backspace で関係(行)そのものを削除。
-        if (e.key === 'Backspace' && e.ctrlKey && e.shiftKey) {
+        if (e.key === 'Escape') { closeMenu(); clearSelection(); return; }
+        // Ctrl/Cmd+Shift+Backspace で関係(行)そのものを削除。複数選択中は選択行すべて。
+        if (e.key === 'Backspace' && (e.ctrlKey || e.metaKey) && e.shiftKey) {
           e.preventDefault();
-          void (async () => { await apiDeleteLine(ctx.gId, line.lineId); await render(); })();
+          const sel = selectedLineIds();
+          deleteLinesOptimistic(sel.length > 1 ? sel : [line.lineId]);
+          return;
+        }
+        // Shift+Alt+↑↓: 選択(または現在行)を並び替え。Shift+↑↓: 選択範囲を伸縮。
+        if ((e.key === 'ArrowUp' || e.key === 'ArrowDown') && e.shiftKey && !e.ctrlKey && !e.metaKey) {
+          e.preventDefault();
+          if (e.altKey) void moveSelectedRelations(e.key === 'ArrowDown' ? 'down' : 'up');
+          else extendSelection(e.key === 'ArrowDown' ? 'down' : 'up');
+          return;
+        }
+        // ↑↓（修飾なし）: 上下の行へフォーカス移動。複数選択は解除。
+        if ((e.key === 'ArrowUp' || e.key === 'ArrowDown') && !e.shiftKey && !e.ctrlKey && !e.metaKey && !e.altKey) {
+          e.preventDefault();
+          clearSelection();
+          focusAdjacentRow(ta, e.key === 'ArrowDown' ? 'down' : 'up');
           return;
         }
         // テキストを範囲選択して @ → 選択ワードを検索初期値にメニューを開き、選択範囲をチップに置換。
@@ -328,7 +436,7 @@ export function createLineView(
           );
           if (!prev && allEmpty) {
             e.preventDefault();
-            void (async () => { await apiDeleteLine(ctx.gId, line.lineId); await render(); })();
+            deleteLineOptimistic(line.lineId);
             return;
           }
         }
@@ -430,7 +538,7 @@ export function createLineView(
     ta.rows = 1;
     ta.style.cssText = `flex:1;background:transparent;border:none;outline:none;resize:none;font-size:14px;font-family:inherit;line-height:1.5;padding:0 4px;overflow:hidden;min-width:0;color:${TEXT_DIM};`;
     const resize = () => { ta.style.height = 'auto'; ta.style.height = ta.scrollHeight + 'px'; };
-    ta.addEventListener('focus', () => { ta.style.color = TEXT_HIGH; });
+    ta.addEventListener('focus', () => { ta.style.color = TEXT_HIGH; clearSelection(); });
     ta.addEventListener('blur', () => { if (!ta.value.trim()) ta.style.color = TEXT_DIM; });
     ta.addEventListener('input', resize);
     ta.addEventListener('keydown', async (e) => {
@@ -440,6 +548,12 @@ export function createLineView(
         ta.value = '';
         await apiCreateRelation(ctx.gId, nodeId, lang, body);
         await render();
+        return;
+      }
+      // ↑↓（修飾なし）: 下の関係行 / 上の行へフォーカス移動。
+      if ((e.key === 'ArrowUp' || e.key === 'ArrowDown') && !e.shiftKey && !e.ctrlKey && !e.metaKey && !e.altKey) {
+        e.preventDefault();
+        focusAdjacentRow(ta, e.key === 'ArrowDown' ? 'down' : 'up');
       }
     });
     bw.addEventListener('mousedown', (e) => e.preventDefault());
@@ -454,31 +568,33 @@ export function createLineView(
     head.innerHTML = '';
     bodyEl.innerHTML = '';
     sqByLine.clear();
+    selAnchor = null; selCursor = null; // 行を作り直すので複数選択はリセット。
 
-    // ── 1行目: 操作（言語切替 + ⟳ + リンクなし） ── ノードペインヘッダと同じ 28px+下線。
+    // ── 1行目: 操作（リンクなし + ⟳ + 言語切替） ── ノードペインヘッダと同じ 28px+下線。
+    // 並び: 左=リンクなし、右寄せで ⟳・JA/EN（ノードパネルと同様に言語切替を右端へ）。
     const ctrlRow = document.createElement('div');
     ctrlRow.style.cssText = `display:flex;align-items:center;gap:4px;height:28px;box-sizing:border-box;padding:0 6px;border-bottom:1px solid ${BORDER};`;
-    // 言語切替（ノードパネルのパネル別 JA/EN と同じ）。
-    const langBtn = document.createElement('button');
-    langBtn.textContent = lang.toUpperCase();
-    langBtn.title = lang === 'ja' ? 'この関係パネルの言語: 日本語（クリックでEN）' : 'この関係パネルの言語: 英語（クリックでJA）';
-    langBtn.style.cssText = `background:transparent;border:1px solid ${BORDER};color:${TEXT_MID};cursor:pointer;font-size:10px;padding:1px 4px;border-radius:3px;flex-shrink:0;line-height:1.4;`;
-    langBtn.addEventListener('click', () => { lang = lang === 'ja' ? 'en' : 'ja'; void render(); });
-    ctrlRow.appendChild(langBtn);
-    // パネル内更新ボタン（ノードパネルの ⟳ と同じ）。関係一覧を再取得する。
-    const reloadBtn = document.createElement('button');
-    reloadBtn.textContent = '⟳';
-    reloadBtn.title = '関係を再読み込み';
-    reloadBtn.style.cssText = `margin-left:auto;background:transparent;border:none;color:${TEXT_DIM};cursor:pointer;font-size:13px;padding:0 2px;line-height:1;flex-shrink:0;`;
-    reloadBtn.addEventListener('click', () => { reloadBtn.style.color = TEXT_HIGH; void render().finally(() => { reloadBtn.style.color = TEXT_DIM; }); });
-    ctrlRow.appendChild(reloadBtn);
-    // 「リンクなし」トグル: 参加ノードを持たない関係の一覧（移行・編集中の受け皿）。
+    // 「リンクなし」トグル: 参加ノードを持たない関係の一覧（移行・編集中の受け皿）。左端。
     const orphanBtn = document.createElement('button');
     orphanBtn.textContent = 'リンクなし';
     orphanBtn.title = '参加ノードを持たない関係（リンクなし）を表示';
     orphanBtn.style.cssText = `flex-shrink:0;background:${orphanMode ? SELECT_STRONG : 'transparent'};border:1px solid ${BORDER};color:${orphanMode ? '#fff' : TEXT_MID};cursor:pointer;font-size:10px;padding:1px 6px;border-radius:3px;`;
     orphanBtn.addEventListener('click', () => { orphanMode = !orphanMode; void render(); });
     ctrlRow.appendChild(orphanBtn);
+    // パネル内更新ボタン（ノードパネルの ⟳ と同じ）。関係一覧を再取得する。右寄せの先頭。
+    const reloadBtn = document.createElement('button');
+    reloadBtn.textContent = '⟳';
+    reloadBtn.title = '関係を再読み込み';
+    reloadBtn.style.cssText = `margin-left:auto;background:transparent;border:none;color:${TEXT_DIM};cursor:pointer;font-size:13px;padding:0 2px;line-height:1;flex-shrink:0;`;
+    reloadBtn.addEventListener('click', () => { reloadBtn.style.color = TEXT_HIGH; void render().finally(() => { reloadBtn.style.color = TEXT_DIM; }); });
+    ctrlRow.appendChild(reloadBtn);
+    // 言語切替（ノードパネルのパネル別 JA/EN と同じ）。右端。
+    const langBtn = document.createElement('button');
+    langBtn.textContent = lang.toUpperCase();
+    langBtn.title = lang === 'ja' ? 'この関係パネルの言語: 日本語（クリックでEN）' : 'この関係パネルの言語: 英語（クリックでJA）';
+    langBtn.style.cssText = `background:transparent;border:1px solid ${BORDER};color:${TEXT_MID};cursor:pointer;font-size:10px;padding:1px 4px;border-radius:3px;flex-shrink:0;line-height:1.4;`;
+    langBtn.addEventListener('click', () => { lang = lang === 'ja' ? 'en' : 'ja'; void render(); });
+    ctrlRow.appendChild(langBtn);
     head.appendChild(ctrlRow);
 
     // ── 2行目: パンくず（ルート › … › 現在ノード） ── アウトラインの bcEl と同じ見た目。
@@ -593,7 +709,11 @@ export function createLineView(
     load: () => render(),
     refresh: () => { void render(); },
     search: async () => { /* top-bar 検索は関係列には作用しない */ },
-    setParent: async (nodeId, _excl, path) => { currentNodeId = nodeId; currentPath = path ?? null; await render(); },
+    setParent: async (nodeId, _excl, path) => {
+      // ノードを選んだら「リンクなし」表示は解除し、他と同様にそのノードの関係を出す。
+      if (nodeId !== null) orphanMode = false;
+      currentNodeId = nodeId; currentPath = path ?? null; await render();
+    },
     getAncestorIds: () => new Set<string>(),
     getNodePath: () => noPath,
     getSelectedId: () => currentNodeId,

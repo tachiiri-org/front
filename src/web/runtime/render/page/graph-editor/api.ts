@@ -237,6 +237,15 @@ export async function apiReorderRay(graphId: string, lineId: string, order: stri
   });
 }
 
+// ノードの関係(line)行の並び順を明示配列で保存（h_node_relation チェーンを貼り直す）。
+export async function apiReorderNodeRelations(graphId: string, nodeId: string, order: string[]): Promise<void> {
+  await apiFetch(`/api/v1/graph/${graphId}/node/${nodeId}/lines/order`, {
+    method: 'PATCH',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ order }),
+  });
+}
+
 // 参加ノードを1つも持たない関係（本文だけ＝リンクなし関係 / orphan）の一覧。
 export async function fetchOrphanLines(graphId: string): Promise<ExplorerLine[]> {
   const r = await apiFetch(`/api/v1/graph/${graphId}/orphan-lines`);

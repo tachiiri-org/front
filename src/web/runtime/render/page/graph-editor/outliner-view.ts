@@ -1079,6 +1079,34 @@ export function createOutlinerView(ctx: GraphEditorContext, paneOpts?: OutlinerP
     focusRow(onode);
   };
 
+  // Ctrl/Cmd+Shift+↓/↑: 子孫すべてを一括で展開/折り畳み（1レベルの toggleExpand の再帰版）。
+  const expandAllDescendants = async (onode: ONode) => {
+    if (expandingSet.has(onode.key)) return;
+    expandingSet.add(onode.key);
+    // 子をたどりながら（未読なら取得して）全ノードを expanded=true に。祖先除外で有限 DAG に収束する。
+    const loadRec = async (o: ONode, depth: number): Promise<void> => {
+      if (depth > 100) return; // 予期せぬ深さでの暴走を防ぐ保険。
+      if (!o.childrenLoaded) await ensureChildren(o);
+      o.expanded = true;
+      for (const c of o.children) await loadRec(c, depth + 1);
+    };
+    try { await loadRec(onode, 0); } finally { expandingSet.delete(onode.key); }
+    if (onode.children.length === 0) { onode.expanded = false; updateExpandMarker(onode); focusRow(onode); return; }
+    if (V2_FLAT) { renderFlat(); }
+    else { collapseInDom(onode); expandInDom(onode); } // データモデルの全 expanded を DOM へ反映。
+    if (paneOpts?.onContentWidthChange) scheduleWidthUpdate();
+    focusRow(onode);
+  };
+  const collapseAllDescendants = (onode: ONode) => {
+    // まず現在の展開状態のまま DOM から子孫行を除去し、その後モデル側で全子孫を畳む
+    // （順序を逆にすると removeSubtree が畳んだ子の下を辿らず、孫行が DOM に取り残される）。
+    const markRec = (o: ONode) => { for (const c of o.children) { markRec(c); c.expanded = false; } };
+    if (V2_FLAT) { markRec(onode); onode.expanded = false; renderFlat(); }
+    else { collapseInDom(onode); markRec(onode); }
+    if (paneOpts?.onContentWidthChange) scheduleWidthUpdate();
+    focusRow(onode);
+  };
+
   // ── Breadcrumb ───────────────────────────────────────────────────────
   const updateBreadcrumb = () => {
     // Flat (v2) mode: every group renders its own breadcrumb, so the pane-level breadcrumb bar
@@ -1356,6 +1384,13 @@ export function createOutlinerView(ctx: GraphEditorContext, paneOpts?: OutlinerP
       const vis = flatVisible();
       const i = vis.indexOf(onode);
 
+      // Ctrl/Cmd+Shift+↓ 子孫すべて展開, Ctrl/Cmd+Shift+↑ 子孫すべて折り畳み
+      if (e.key === 'ArrowDown' && (e.ctrlKey || e.metaKey) && e.shiftKey && !e.altKey) {
+        e.preventDefault(); void expandAllDescendants(onode); return;
+      }
+      if (e.key === 'ArrowUp' && (e.ctrlKey || e.metaKey) && e.shiftKey && !e.altKey) {
+        e.preventDefault(); collapseAllDescendants(onode); return;
+      }
       // Ctrl/Cmd+↓ expand, Ctrl/Cmd+↑ collapse
       if (e.key === 'ArrowDown' && (e.ctrlKey || e.metaKey) && !e.shiftKey && !e.altKey) {
         e.preventDefault(); void toggleExpand(onode, true); return;
