@@ -1080,17 +1080,26 @@ export function createOutlinerView(ctx: GraphEditorContext, paneOpts?: OutlinerP
   };
 
   // Ctrl/Cmd+Shift+↓/↑: 子孫すべてを一括で展開/折り畳み（1レベルの toggleExpand の再帰版）。
+  // グラフはハブ/多親ノード（ダイヤ）を含むため、occurrence ツリーを素朴に全展開すると組合せ爆発で
+  // 固まる。ノード id で1度だけ展開して（子はどの出現でも同一）作業量をグラフ規模に抑え、さらに総数を
+  // 上限で打ち切る。重複出現は畳んだまま（マーカー整合のため expanded=false のまま）にする。
+  const EXPAND_ALL_MAX = 2000;
   const expandAllDescendants = async (onode: ONode) => {
     if (expandingSet.has(onode.key)) return;
     expandingSet.add(onode.key);
-    // 子をたどりながら（未読なら取得して）全ノードを expanded=true に。祖先除外で有限 DAG に収束する。
+    const visited = new Set<string>();
+    let count = 0, truncated = false;
     const loadRec = async (o: ONode, depth: number): Promise<void> => {
-      if (depth > 100) return; // 予期せぬ深さでの暴走を防ぐ保険。
+      if (truncated || depth > 200) return;
+      if (visited.has(o.node.id)) return; // 同一ノードは1度だけ（爆発と再取得を防ぐ）
+      visited.add(o.node.id);
+      if (count++ >= EXPAND_ALL_MAX) { truncated = true; return; }
       if (!o.childrenLoaded) await ensureChildren(o);
       o.expanded = true;
       for (const c of o.children) await loadRec(c, depth + 1);
     };
     try { await loadRec(onode, 0); } finally { expandingSet.delete(onode.key); }
+    if (truncated) console.warn(`expandAllDescendants: ${EXPAND_ALL_MAX} ノードで打ち切りました`);
     if (onode.children.length === 0) { onode.expanded = false; updateExpandMarker(onode); focusRow(onode); return; }
     if (V2_FLAT) { renderFlat(); }
     else { collapseInDom(onode); expandInDom(onode); } // データモデルの全 expanded を DOM へ反映。
