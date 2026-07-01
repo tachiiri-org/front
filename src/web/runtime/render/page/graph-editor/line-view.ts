@@ -562,7 +562,29 @@ export function createLineView(
     const resize = () => { ta.style.height = 'auto'; ta.style.height = ta.scrollHeight + 'px'; };
     ta.addEventListener('focus', () => { ta.style.color = TEXT_HIGH; clearSelection(); });
     ta.addEventListener('blur', () => { if (!ta.value.trim()) ta.style.color = TEXT_DIM; });
-    ta.addEventListener('input', resize);
+    ta.addEventListener('input', () => {
+      resize();
+      // ドラフト行は素の1行 textarea なので参照チップを差し込めない。@ を打ったら、その時点の
+      // テキストで関係を作って本物の関係行に変換し、その行の @ メンション（新規作成＋親選択も含む）へ
+      // 引き継ぐ（新しい行の textarea に input を発火して handleMention を起動）。
+      const caret = ta.selectionStart ?? ta.value.length;
+      if (ta.value[caret - 1] !== '@') return;
+      const text = ta.value;
+      ta.value = '';
+      void (async () => {
+        const created = await apiCreateRelation(ctx.gId, nodeId, lang, text);
+        await render();
+        if (!created) return;
+        const rrow = bodyEl.querySelector(`[data-line-id="${CSS.escape(created.lineId)}"]`);
+        const rta = rrow?.querySelector('textarea') as HTMLTextAreaElement | null;
+        if (rta) {
+          rta.focus();
+          const p = Math.min(caret, rta.value.length);
+          rta.setSelectionRange(p, p);
+          rta.dispatchEvent(new Event('input', { bubbles: true }));
+        }
+      })();
+    });
     ta.addEventListener('keydown', async (e) => {
       if (e.key === 'Enter' && !e.shiftKey) {
         e.preventDefault();
