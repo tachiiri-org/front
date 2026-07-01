@@ -1027,7 +1027,7 @@ export function createOutlinerView(ctx: GraphEditorContext, paneOpts?: OutlinerP
   // 行の右端バッジに関係件数を反映（0 は非表示）。バッジの無い行（リンクなしヘッダ等）は無視。
   const applyRowCount = (row: HTMLElement, count: number) => {
     const badge = row.querySelector<HTMLElement>('[data-line-count]');
-    if (badge) badge.textContent = count > 0 ? String(count) : '';
+    if (badge) badge.textContent = String(count);
   };
 
   // 可視ノードのうち未取得のぶんを 1 リクエストで取得し、各行のバッジを更新する。
@@ -1331,7 +1331,7 @@ export function createOutlinerView(ctx: GraphEditorContext, paneOpts?: OutlinerP
       const triBtn = document.createElement('button');
       triBtn.dataset.expandTriangle = '1';
       triBtn.textContent = '▸';
-      triBtn.style.cssText = `flex-shrink:0;background:transparent;border:none;color:${TEXT_DIM};cursor:pointer;font-size:15px;padding:0 4px;opacity:0;pointer-events:none;line-height:1;`;
+      triBtn.style.cssText = `flex-shrink:0;background:transparent;border:none;color:${TEXT_MID};cursor:pointer;font-size:15px;padding:0 4px;opacity:0;pointer-events:none;line-height:1;`;
       triBtn.addEventListener('click', (e) => { e.stopPropagation(); void toggleExpand(onode); });
       const bw = document.createElement('span');
       bw.style.cssText = `flex-shrink:0;display:flex;align-items:center;justify-content:center;width:18px;cursor:pointer;`;
@@ -1562,7 +1562,7 @@ export function createOutlinerView(ctx: GraphEditorContext, paneOpts?: OutlinerP
     const triBtn = document.createElement('button');
     triBtn.dataset.expandTriangle = '1';
     triBtn.textContent = '▸';
-    triBtn.style.cssText = `flex-shrink:0;background:transparent;border:none;color:${TEXT_DIM};cursor:pointer;font-size:15px;padding:0 4px;opacity:0;pointer-events:none;line-height:1;`;
+    triBtn.style.cssText = `flex-shrink:0;background:transparent;border:none;color:${TEXT_MID};cursor:pointer;font-size:15px;padding:0 4px;opacity:0;pointer-events:none;line-height:1;`;
     triBtn.addEventListener('click', (e) => { e.stopPropagation(); void toggleExpand(onode); });
 
     // Long press (350ms) on row body → enable drag
@@ -1828,7 +1828,7 @@ export function createOutlinerView(ctx: GraphEditorContext, paneOpts?: OutlinerP
     countBadge.title = 'リレーションテキスト件数';
     countBadge.style.cssText = `flex-shrink:0;font-size:11px;color:${TEXT_MID};padding:0 4px;line-height:1;min-width:12px;text-align:right;font-variant-numeric:tabular-nums;`;
     const cachedCount = lineCountCache.get(onode.node.id);
-    if (cachedCount != null) countBadge.textContent = cachedCount > 0 ? String(cachedCount) : '';
+    if (cachedCount != null) countBadge.textContent = String(cachedCount);
 
     row.insertBefore(triBtn, btnWrap);
     row.appendChild(ta);
