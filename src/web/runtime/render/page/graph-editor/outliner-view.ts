@@ -2242,10 +2242,18 @@ export function createOutlinerView(ctx: GraphEditorContext, paneOpts?: OutlinerP
       const cc = ctx.childrenCache.get(onode.parentId);
       if (cc) { const ci = cc.findIndex(x => x.id === oldId); if (ci >= 0) cc[ci] = node; }
 
-      // Delete old placeholder node; link found node to parent
-      void apiDeleteNode(ctx.gId, oldId);
+      // Delete old placeholder node; link the found node to the parent AND orient it under that
+      // parent. ドラッグでの再親付けと同じ手順: toggleLink で辺を作り、move で親向き(h_orientation)と
+      // 並び順を確定する。orient しないと親を持たない扱いのままで「リンクなし」から消えないため。
       const edgeTarget = onode.parentId ?? ctx.rootNodeId;
-      if (edgeTarget) void apiToggleLink(ctx.gId, node.id, edgeTarget);
+      const sibIds = getSiblings(onode).map(s => s.node.id);
+      void (async () => {
+        await apiDeleteNode(ctx.gId, oldId);
+        if (edgeTarget) {
+          await apiToggleLink(ctx.gId, node.id, edgeTarget);
+          await apiMoveNode(ctx.gId, node.id, edgeTarget, 'down', sibIds);
+        }
+      })();
 
       focusRow(onode);
     };
