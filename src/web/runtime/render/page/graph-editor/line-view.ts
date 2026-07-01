@@ -316,8 +316,8 @@ export function createLineView(
       const chip = document.createElement('span');
       chip.dataset.men = id;
       chip.contentEditable = 'false';
-      // 下線はテキストと同じ色。クリックで検索ポップオーバー（差し替え／削除）。× は廃止。
-      chip.style.cssText = `display:inline-block;vertical-align:top;line-height:1.5;font-size:14px;color:${TEXT_HIGH};border-bottom:1px solid currentColor;margin:0;user-select:none;cursor:pointer;`;
+      // 下線はテキストと同じ色・dashed。クリックで検索ポップオーバー（差し替え／削除）。× は廃止。
+      chip.style.cssText = `display:inline-block;vertical-align:top;line-height:1.5;font-size:14px;color:${TEXT_HIGH};border-bottom:1px dashed currentColor;margin:0;user-select:none;cursor:pointer;`;
       const txt = document.createElement('span');
       txt.textContent = label ?? labelById.get(id) ?? id;
       chip.appendChild(txt);
