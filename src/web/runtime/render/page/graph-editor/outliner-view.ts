@@ -1562,7 +1562,7 @@ export function createOutlinerView(ctx: GraphEditorContext, paneOpts?: OutlinerP
     const triBtn = document.createElement('button');
     triBtn.dataset.expandTriangle = '1';
     triBtn.textContent = '▸';
-    triBtn.style.cssText = `flex-shrink:0;background:transparent;border:none;color:${TEXT_DIM};cursor:pointer;font-size:10px;padding:0 4px;opacity:0;pointer-events:none;line-height:1;`;
+    triBtn.style.cssText = `flex-shrink:0;background:transparent;border:none;color:${TEXT_DIM};cursor:pointer;font-size:15px;padding:0 4px;opacity:0;pointer-events:none;line-height:1;`;
     triBtn.addEventListener('click', (e) => { e.stopPropagation(); void toggleExpand(onode); });
 
     // Long press (350ms) on row body → enable drag
