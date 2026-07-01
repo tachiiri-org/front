@@ -92,8 +92,11 @@ export async function apiUpdateNode(
   });
 }
 
-export async function apiDeleteNode(graphId: string, nodeId: string): Promise<void> {
-  await apiFetch(`/api/v1/graph/${graphId}/node/${nodeId}`, { method: 'DELETE' });
+// ノード削除。promoteToId を渡すと、削除ノードの子をその親(=祖父母)へ昇格させてから消す
+// （子が「リンクなし」に落ちないように）。省略時は従来通り。
+export async function apiDeleteNode(graphId: string, nodeId: string, promoteToId?: string): Promise<void> {
+  const q = promoteToId ? `?promoteTo=${encodeURIComponent(promoteToId)}` : '';
+  await apiFetch(`/api/v1/graph/${graphId}/node/${nodeId}${q}`, { method: 'DELETE' });
 }
 
 export async function apiToggleLink(graphId: string, sourceId: string, targetId: string): Promise<boolean> {

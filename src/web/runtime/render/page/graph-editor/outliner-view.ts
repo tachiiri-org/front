@@ -1760,14 +1760,18 @@ export function createOutlinerView(ctx: GraphEditorContext, paneOpts?: OutlinerP
         render();
 
         await Promise.all(movers.map(m => awaitRealId(m)));
+        // 新しい親への辺作成は await してから向き付け(apiMoveNode)を呼ぶ。並行のままだと向き付けが
+        // 辺作成より先に届き、そのノードだけ向きが付かず＝「リンクなし」に落ちるレースが起きるため。
+        const newLinks: Promise<unknown>[] = [];
         for (const mover of movers) {
           const oldPid = oldParents.get(mover) ?? null;
           if (oldPid !== newParentId) {
             if (oldPid !== null) void apiToggleLink(ctx.gId, mover.node.id, oldPid);
-            if (newParentId !== null) void apiToggleLink(ctx.gId, mover.node.id, newParentId);
+            if (newParentId !== null) newLinks.push(apiToggleLink(ctx.gId, mover.node.id, newParentId));
           }
         }
         if (newParentId !== null) {
+          if (newLinks.length) await Promise.all(newLinks);
           void apiMoveNode(ctx.gId, movers[0].node.id, newParentId, 'down', newSibs.map(s => s.node.id));
         }
       } else {
@@ -1868,14 +1872,17 @@ export function createOutlinerView(ctx: GraphEditorContext, paneOpts?: OutlinerP
 
     // Resolve any temp ids before hitting the API.
     await pd.awaitRealIds();
+    // 新しい親への辺作成を await してから向き付け（レースで向きが付かず＝リンクなし化するのを防ぐ）。
+    const newLinks: Promise<unknown>[] = [];
     for (const m of movers) {
       const oldPid = m.oldParentId;
       if (oldPid !== newParentId) {
         if (oldPid !== null) void apiToggleLink(ctx.gId, m.node.id, oldPid);
-        if (newParentId !== null) void apiToggleLink(ctx.gId, m.node.id, newParentId);
+        if (newParentId !== null) newLinks.push(apiToggleLink(ctx.gId, m.node.id, newParentId));
       }
     }
     if (newParentId !== null) {
+      if (newLinks.length) await Promise.all(newLinks);
       void apiMoveNode(ctx.gId, movers[0].node.id, newParentId, 'down', newSibs.map(s => s.node.id));
     }
   };
@@ -2313,21 +2320,27 @@ export function createOutlinerView(ctx: GraphEditorContext, paneOpts?: OutlinerP
     let targetKey: string | null = null;
     for (let k = firstRowIdx - 1; k >= 0; k--) { const key = rows[k]?.dataset.occKey; if (key && !selKeys.has(key)) { targetKey = key; break; } }
     if (!targetKey) for (let k = lastRowIdx + 1; k < rows.length; k++) { const key = rows[k]?.dataset.occKey; if (key && !selKeys.has(key)) { targetKey = key; break; } }
+    // 各ノードの昇格先＝そのノードの親（選択内の親は削除されるので昇格先にしない）。
+    const parentOf = new Map<string, string | null>();
+    for (const o of sel) if (!parentOf.has(o.node.id)) parentOf.set(o.node.id, o.parentId);
     clearSelection();
     for (const nodeId of selNodeIds) {
       for (const n of occsOf(nodeId)) {
-        if (n.expanded) collapseInDom(n);
-        rowMap.get(n.key)?.remove(); rowMap.delete(n.key);
+        promoteChildren(n);
         const sibs = getSiblings(n);
         const idx = sibs.indexOf(n); if (idx !== -1) sibs.splice(idx, 1);
         if (n.parentKey === null) { const ri = rootNodeList.indexOf(n.node); if (ri >= 0) rootNodeList.splice(ri, 1); }
         unindexOcc(n);
-        const cc = ctx.childrenCache.get(n.parentId);
-        if (cc) { const ci = cc.findIndex(x => x.id === nodeId); if (ci >= 0) cc.splice(ci, 1); }
+        ctx.childrenCache.delete(n.parentId);
       }
       linkTargets.delete(nodeId);
-      void apiDeleteNode(ctx.gId, nodeId);
+      ctx.childrenCache.delete(nodeId);
+      const p = parentOf.get(nodeId);
+      const promoteTo = p && p !== ORPHAN_ID && !selNodeIds.has(p) ? p : undefined;
+      void apiDeleteNode(ctx.gId, nodeId, promoteTo);
     }
+    ctx.saveChildrenCache?.();
+    render();
     const target = targetKey ? byKey.get(targetKey) : undefined;
     if (target) focusRow(target);
   };
@@ -2581,8 +2594,37 @@ export function createOutlinerView(ctx: GraphEditorContext, paneOpts?: OutlinerP
     return no;
   };
 
+  // 削除するノード o の（読み込み済みの）子を、o の親（＝子から見た祖父母）の位置へ昇格させる。
+  // o 自体はこの後で除去される。DOM は呼び出し側の render() で再構築する。
+  const promoteChildren = (o: ONode) => {
+    const kids = o.children;
+    if (kids.length === 0) return;
+    const sibs = getSiblings(o);              // o の親の子配列（＝祖父母の子）
+    let at = sibs.indexOf(o);
+    if (at < 0) at = sibs.length - 1;
+    const toRoot = o.parentKey === null;
+    const panelId = toRoot ? (panelOfRoot(o) === UNCLASSIFIED ? null : panelOfRoot(o)) : null;
+    const rootAt = toRoot ? rootNodeList.indexOf(o.node) : -1;
+    for (let i = 0; i < kids.length; i++) {
+      const c = kids[i];
+      c.parentId = o.parentId;
+      c.parentKey = o.parentKey;
+      fixDepths(c, o.depth);
+      if (toRoot) {
+        rekeyOcc(c, rootKey(panelId, c.node.id));
+        rootNodeList.splice((rootAt < 0 ? rootNodeList.length : rootAt + 1 + i), 0, c.node);
+      } else {
+        rekeyOcc(c, childKey(o.parentKey!, c.node.id));
+      }
+      sibs.splice(at + 1 + i, 0, c);          // o の直後に順に差し込む（o 除去後にその位置を継ぐ）
+    }
+    o.children = [];
+  };
+
   const doDelete = (onode: ONode, _visIdx: number, _vis: ONode[]) => {
     const nodeId = onode.node.id;
+    // 子は祖父母（このノードの親）へ昇格させる。親が無い/リンクなし配下なら昇格先なし。
+    const promoteTo = onode.parentId && onode.parentId !== ORPHAN_ID ? onode.parentId : undefined;
     // Pick the focus target from the VISIBLE (DOM) order by occurrence key — capture the DOM
     // neighbour (row above, else below) of THIS occurrence while it's still in the list.
     const rowEl = rowMap.get(onode.key);
@@ -2592,21 +2634,22 @@ export function createOutlinerView(ctx: GraphEditorContext, paneOpts?: OutlinerP
       const di = rows.indexOf(rowEl);
       targetKey = (rows[di - 1] ?? rows[di + 1])?.dataset.occKey ?? null;
     }
-    // Delete is node-level → remove every occurrence of this node id.
+    // Delete is node-level → for every occurrence, promote its children up, then remove it.
     for (const o of occsOf(nodeId)) {
-      if (o.expanded) collapseInDom(o);
-      rowMap.get(o.key)?.remove(); rowMap.delete(o.key);
+      promoteChildren(o);
       const sibs = getSiblings(o);
       const si = sibs.indexOf(o); if (si >= 0) sibs.splice(si, 1);
       if (o.parentKey === null) { const ri = rootNodeList.indexOf(o.node); if (ri >= 0) rootNodeList.splice(ri, 1); }
       unindexOcc(o);
-      const cc = ctx.childrenCache.get(o.parentId);
-      if (cc) { const ci = cc.findIndex(n => n.id === nodeId); if (ci >= 0) cc.splice(ci, 1); }
+      ctx.childrenCache.delete(o.parentId);
     }
     linkTargets.delete(nodeId);
+    ctx.childrenCache.delete(nodeId);
+    ctx.saveChildrenCache?.();
+    render();
     const target = targetKey ? byKey.get(targetKey) : undefined;
     if (target) focusRow(target);
-    void apiDeleteNode(ctx.gId, nodeId);
+    void apiDeleteNode(ctx.gId, nodeId, promoteTo);
   };
 
   const doMove = async (onode: ONode, direction: 'up' | 'down') => {
