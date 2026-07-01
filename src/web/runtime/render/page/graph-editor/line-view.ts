@@ -560,32 +560,50 @@ export function createLineView(
     ta.rows = 1;
     ta.style.cssText = `flex:1;background:transparent;border:none;outline:none;resize:none;font-size:14px;font-family:inherit;line-height:1.5;padding:0 4px;overflow:hidden;min-width:0;color:${TEXT_DIM};`;
     const resize = () => { ta.style.height = 'auto'; ta.style.height = ta.scrollHeight + 'px'; };
-    ta.addEventListener('focus', () => { ta.style.color = TEXT_HIGH; clearSelection(); });
-    ta.addEventListener('blur', () => { if (!ta.value.trim()) ta.style.color = TEXT_DIM; });
-    ta.addEventListener('input', () => {
-      resize();
-      // ドラフト行は素の1行 textarea なので参照チップを差し込めない。@ を打ったら、その時点の
-      // テキストで関係を作って本物の関係行に変換し、その行の @ メンション（新規作成＋親選択も含む）へ
-      // 引き継ぐ（新しい行の textarea に input を発火して handleMention を起動）。
+    // ドラフト行でも @ メンションを使えるようにする。素の1行 textarea なのでチップは差し込めないため、
+    // 候補を選んだ時点で「本文に ⟦id⟧ を埋めた関係」を作成して本物の関係行へ切り替える。新規作成なら
+    // 続けて親ノードを選べる（関係行と同じフロー）。入力中はライブで候補を絞り込む（変換は選択時のみ）。
+    const draftMention = async () => {
       const caret = ta.selectionStart ?? ta.value.length;
-      if (ta.value[caret - 1] !== '@') return;
-      const text = ta.value;
-      ta.value = '';
-      void (async () => {
-        const created = await apiCreateRelation(ctx.gId, nodeId, lang, text);
-        await render();
-        if (!created) return;
-        const rrow = bodyEl.querySelector(`[data-line-id="${CSS.escape(created.lineId)}"]`);
-        const rta = rrow?.querySelector('textarea') as HTMLTextAreaElement | null;
-        if (rta) {
-          rta.focus();
-          const p = Math.min(caret, rta.value.length);
-          rta.setSelectionRange(p, p);
-          rta.dispatchEvent(new Event('input', { bubbles: true }));
-        }
-      })();
-    });
+      const mm = ta.value.slice(0, caret).match(/@([^\s@]*)$/);
+      if (!mm) { if (mention?.anchor === ta) closeMenu(); return; }
+      const query = mm[1];
+      const atIdx = caret - mm[0].length;
+      const leftStr = ta.value.slice(0, atIdx);
+      const rightStr = ta.value.slice(caret);
+      mention = {
+        anchor: ta,
+        onPick: async (n, createLabel) => {
+          let mentionId = n.id;
+          if (createLabel) { const c = await apiCreateNode(ctx.gId, null, lang, createLabel); if (!c) { closeMenu(); return; } mentionId = c.id; }
+          closeMenu();
+          ta.value = ''; ta.style.color = TEXT_DIM;
+          const rel = await apiCreateRelation(ctx.gId, nodeId, lang, `${leftStr}⟦${mentionId}⟧${rightStr}`);
+          await render();
+          if (!rel) return;
+          await apiAddRay(ctx.gId, rel.lineId, mentionId);
+          const rrow = bodyEl.querySelector(`[data-line-id="${CSS.escape(rel.lineId)}"]`);
+          const chip = rrow?.querySelector(`[data-men="${CSS.escape(mentionId)}"]`) as HTMLElement | null;
+          ((chip?.nextElementSibling as HTMLTextAreaElement | null) ?? (rrow?.querySelector('textarea') as HTMLTextAreaElement | null))?.focus();
+          if (createLabel && chip) openParentPicker(mentionId, chip);
+        },
+      };
+      const seq = ++mentionSeq;
+      const { nodes } = await fetchAllNodes(ctx.gId, [], 0, lang, undefined, query || undefined);
+      if (seq !== mentionSeq || mention?.anchor !== ta) return;
+      showMenu(ta, query, nodes);
+    };
+    ta.addEventListener('focus', () => { ta.style.color = TEXT_HIGH; clearSelection(); });
+    ta.addEventListener('blur', () => { if (!ta.value.trim()) ta.style.color = TEXT_DIM; if (mention?.anchor === ta) closeMenu(); });
+    ta.addEventListener('input', () => { resize(); void draftMention(); });
     ta.addEventListener('keydown', async (e) => {
+      // @ メニューが開いている間は ↑↓/Enter で候補選択、Esc で閉じる。
+      if (menuOpen) {
+        if (e.key === 'ArrowDown') { e.preventDefault(); navMove(1); return; }
+        if (e.key === 'ArrowUp') { e.preventDefault(); navMove(-1); return; }
+        if (e.key === 'Enter') { e.preventDefault(); navPick(); return; }
+        if (e.key === 'Escape') { closeMenu(); return; }
+      }
       if (e.key === 'Enter' && !e.shiftKey) {
         e.preventDefault();
         const body = ta.value.trim();
