@@ -53,6 +53,8 @@ const childKey = (parentKey: string, nodeId: string): string => `${parentKey}/${
 export type PathEntry = { id: string | null; label: string };
 
 export type OutlinerPaneOpts = {
+  /** Stable pane id (survives reload) — used to persist this pane's expansion state per-pane. */
+  paneId?: string;
   /** If set, this pane shows children of this node (null = empty until setParent called) */
   paneParentId?: string | null;
   /** Breadcrumb path (root-first) to paneParentId, for panel-sourced panes */
@@ -272,6 +274,30 @@ export function createOutlinerView(ctx: GraphEditorContext, paneOpts?: OutlinerP
   // Entries hydrated from localStorage are stale until revalidated, so the first access of an
   // unvalidated key refetches before use — keeping reloads fast without serving stale data.
   const validated = new Set<string | null>();
+
+  // ── 展開状態の永続化 ───────────────────────────────────────────────────────────
+  // どの occurrence（＝ルートからのパス）を開いていたかを localStorage に保持し、リロード時に
+  // 復元する。occurrence キーはノード id とパスから決まる安定文字列なので再読込後も一致する。
+  const EXPAND_STORE_KEY = `ge-expanded:${ctx.gId}:${paneOpts?.paneId ?? 'main'}`;
+  let expandedKeys = new Set<string>();
+  try {
+    const raw = localStorage.getItem(EXPAND_STORE_KEY);
+    if (raw) expandedKeys = new Set(JSON.parse(raw) as string[]);
+  } catch { /* ignore corrupt cache */ }
+  let expandReady = false; // 初回の復元が済むまで保存しない（未展開の初期描画で上書きしないため）。
+  let persistExpandTimer: ReturnType<typeof setTimeout> | null = null;
+  // 現在のモデルから「開いている occurrence キー」を集めて保存（デバウンス）。差分管理より確実。
+  const persistExpanded = () => {
+    if (!expandReady) return;
+    if (persistExpandTimer) clearTimeout(persistExpandTimer);
+    persistExpandTimer = setTimeout(() => {
+      persistExpandTimer = null;
+      const keys: string[] = [];
+      for (const o of byKey.values()) if (o.expanded) keys.push(o.key);
+      expandedKeys = new Set(keys);
+      try { localStorage.setItem(EXPAND_STORE_KEY, JSON.stringify(keys)); } catch { /* quota */ }
+    }, 400);
+  };
 
   // Per-pane language (display + edit). Falls back to the global default when unset.
   let paneLang: 'en' | 'ja' = paneOpts?.lang ?? ctx.state.lang;
@@ -1038,6 +1064,7 @@ export function createOutlinerView(ctx: GraphEditorContext, paneOpts?: OutlinerP
     };
     insertSubtree(onode.children);
     schedulePrefetch();
+    persistExpanded();
   };
 
   const collapseInDom = (onode: ONode) => {
@@ -1050,6 +1077,24 @@ export function createOutlinerView(ctx: GraphEditorContext, paneOpts?: OutlinerP
       }
     };
     removeSubtree(onode.children);
+    persistExpanded();
+  };
+
+  // リロード時に、保存済みの occurrence キーを上から辿って開き直す（子は必要に応じて取得）。
+  // 作業量は「前回開いていた分」に限られるので、全展開のような爆発は起きない。
+  const restoreExpansion = async () => {
+    if (expandedKeys.size) {
+      const walk = async (o: ONode): Promise<void> => {
+        if (!expandedKeys.has(o.key)) return;
+        if (!o.childrenLoaded) await ensureChildren(o);
+        o.expanded = true;
+        for (const c of o.children) await walk(c);
+      };
+      for (const r of [...roots]) await walk(r);
+      render();
+      if (paneOpts?.onContentWidthChange) scheduleWidthUpdate();
+    }
+    expandReady = true; // 復元後は保存を許可（以降のユーザー操作を localStorage に反映）。
   };
 
   const expandingSet = new Set<string>();
@@ -1075,43 +1120,6 @@ export function createOutlinerView(ctx: GraphEditorContext, paneOpts?: OutlinerP
     if (next) expandInDom(onode); else collapseInDom(onode);
     // expand/collapse mutate the DOM directly (no full render), so re-measure the pane
     // width here — otherwise collapsing long rows leaves the column stuck at its wide size.
-    if (paneOpts?.onContentWidthChange) scheduleWidthUpdate();
-    focusRow(onode);
-  };
-
-  // Ctrl/Cmd+Shift+↓/↑: 子孫すべてを一括で展開/折り畳み（1レベルの toggleExpand の再帰版）。
-  // グラフはハブ/多親ノード（ダイヤ）を含むため、occurrence ツリーを素朴に全展開すると組合せ爆発で
-  // 固まる。ノード id で1度だけ展開して（子はどの出現でも同一）作業量をグラフ規模に抑え、さらに総数を
-  // 上限で打ち切る。重複出現は畳んだまま（マーカー整合のため expanded=false のまま）にする。
-  const EXPAND_ALL_MAX = 2000;
-  const expandAllDescendants = async (onode: ONode) => {
-    if (expandingSet.has(onode.key)) return;
-    expandingSet.add(onode.key);
-    const visited = new Set<string>();
-    let count = 0, truncated = false;
-    const loadRec = async (o: ONode, depth: number): Promise<void> => {
-      if (truncated || depth > 200) return;
-      if (visited.has(o.node.id)) return; // 同一ノードは1度だけ（爆発と再取得を防ぐ）
-      visited.add(o.node.id);
-      if (count++ >= EXPAND_ALL_MAX) { truncated = true; return; }
-      if (!o.childrenLoaded) await ensureChildren(o);
-      o.expanded = true;
-      for (const c of o.children) await loadRec(c, depth + 1);
-    };
-    try { await loadRec(onode, 0); } finally { expandingSet.delete(onode.key); }
-    if (truncated) console.warn(`expandAllDescendants: ${EXPAND_ALL_MAX} ノードで打ち切りました`);
-    if (onode.children.length === 0) { onode.expanded = false; updateExpandMarker(onode); focusRow(onode); return; }
-    if (V2_FLAT) { renderFlat(); }
-    else { collapseInDom(onode); expandInDom(onode); } // データモデルの全 expanded を DOM へ反映。
-    if (paneOpts?.onContentWidthChange) scheduleWidthUpdate();
-    focusRow(onode);
-  };
-  const collapseAllDescendants = (onode: ONode) => {
-    // まず現在の展開状態のまま DOM から子孫行を除去し、その後モデル側で全子孫を畳む
-    // （順序を逆にすると removeSubtree が畳んだ子の下を辿らず、孫行が DOM に取り残される）。
-    const markRec = (o: ONode) => { for (const c of o.children) { markRec(c); c.expanded = false; } };
-    if (V2_FLAT) { markRec(onode); onode.expanded = false; renderFlat(); }
-    else { collapseInDom(onode); markRec(onode); }
     if (paneOpts?.onContentWidthChange) scheduleWidthUpdate();
     focusRow(onode);
   };
@@ -1393,13 +1401,6 @@ export function createOutlinerView(ctx: GraphEditorContext, paneOpts?: OutlinerP
       const vis = flatVisible();
       const i = vis.indexOf(onode);
 
-      // Ctrl/Cmd+Shift+↓ 子孫すべて展開, Ctrl/Cmd+Shift+↑ 子孫すべて折り畳み
-      if (e.key === 'ArrowDown' && (e.ctrlKey || e.metaKey) && e.shiftKey && !e.altKey) {
-        e.preventDefault(); void expandAllDescendants(onode); return;
-      }
-      if (e.key === 'ArrowUp' && (e.ctrlKey || e.metaKey) && e.shiftKey && !e.altKey) {
-        e.preventDefault(); collapseAllDescendants(onode); return;
-      }
       // Ctrl/Cmd+↓ expand, Ctrl/Cmd+↑ collapse
       if (e.key === 'ArrowDown' && (e.ctrlKey || e.metaKey) && !e.shiftKey && !e.altKey) {
         e.preventDefault(); void toggleExpand(onode, true); return;
@@ -2801,6 +2802,7 @@ export function createOutlinerView(ctx: GraphEditorContext, paneOpts?: OutlinerP
       } else {
         applyRoots([], null);
       }
+      await restoreExpansion();
       return;
     }
 
@@ -2816,6 +2818,7 @@ export function createOutlinerView(ctx: GraphEditorContext, paneOpts?: OutlinerP
       // Stale-while-revalidate against the backend so edits persisted since the cache was
       // written are reflected on reload (rather than reverting to the cached snapshot).
       await revalidate(null, rootId, cached, apply);
+      await restoreExpansion();
       return;
     }
 
@@ -2827,6 +2830,7 @@ export function createOutlinerView(ctx: GraphEditorContext, paneOpts?: OutlinerP
     const lang = ctx.state.showFallback ? undefined : paneLang;
     const { nodes } = await fetchBookmarkedNodes(ctx.gId, [...ctx.state.bookmarks], lang);
     applyRoots(nodes, null);
+    await restoreExpansion();
   };
 
   // Ancestor NODE ids of a node visible in this pane (walk any occurrence's parentKey chain).
@@ -2861,8 +2865,10 @@ export function createOutlinerView(ctx: GraphEditorContext, paneOpts?: OutlinerP
       const cached = ctx.childrenCache.get(nid);
       if (cached) apply(cached);
       await revalidate(nid, nid, cached, apply);
+      await restoreExpansion();
     } else {
       applyRoots([], null);
+      await restoreExpansion();
     }
   };
 

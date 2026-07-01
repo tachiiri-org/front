@@ -389,6 +389,7 @@ export function createMultiPaneView(ctx: GraphEditorContext): {
       ? sourcePane.view.getNodePath(initParent) : [];
 
     const view = createOutlinerView(ctx, {
+      paneId: config.id,
       paneParentId,
       panePath,
       lang: config.lang,
