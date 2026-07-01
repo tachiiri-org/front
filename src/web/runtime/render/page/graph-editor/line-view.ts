@@ -2,7 +2,7 @@ import type { GraphEditorContext, PaneView, ExplorerNode, ExplorerLine, PaneView
 import { BORDER, TEXT_HIGH, TEXT_MID, TEXT_DIM, SELECT_STRONG, ORPHAN_ID } from './constants';
 import {
   fetchNodeLines, apiCreateRelation, apiSetLineBody, apiAddRay, apiRemoveRay, fetchAllNodes, apiCreateNode,
-  fetchOrphanLines, apiDeleteLine, apiDeleteNode, apiReorderNodeRelations,
+  fetchOrphanLines, apiDeleteLine, apiDeleteNode, apiReorderNodeRelations, apiLinkNode, apiOrient,
 } from './api';
 
 // 関係 (line) パネル。関係 = テキストとノード参照(チップ)が交互に並ぶ1行（セグメント分割編集）。
@@ -104,10 +104,11 @@ export function createLineView(
     anchor: HTMLElement,
     onPick: (n: ExplorerNode, createLabel?: string) => void,
     onDelete?: () => void,
+    placeholder = 'ノードを検索…',
   ) => {
     menu.innerHTML = ''; navItems = []; navIdx = -1; mention = null;
     const input = document.createElement('input');
-    input.placeholder = 'ノードを検索…';
+    input.placeholder = placeholder;
     input.style.cssText = `width:100%;box-sizing:border-box;background:transparent;border:none;border-bottom:1px solid ${BORDER};color:${TEXT_HIGH};font-size:12px;padding:4px 8px;outline:none;`;
     const list = document.createElement('div');
     menu.append(input, list);
@@ -141,6 +142,25 @@ export function createLineView(
     menuOpen = true;
     void (async () => { const { nodes } = await fetchAllNodes(ctx.gId, [], 0, lang); renderList('', nodes); })();
     setTimeout(() => input.focus(), 0);
+  };
+
+  // @から新規作成したノードは親が無く「リンクなし」になる。選んだ既存ノードの子として配置する
+  // （構造リンク＋親向き付け）。辺作成を await してから向き付けし、向き漏れ＝リンクなし化を防ぐ。
+  const placeUnderParent = async (childId: string, parentNode: ExplorerNode, createLabel?: string) => {
+    let parentId = parentNode.id;
+    if (createLabel) { const c = await apiCreateNode(ctx.gId, null, lang, createLabel); if (!c) return; parentId = c.id; }
+    if (!parentId || parentId === childId) return;
+    await apiLinkNode(ctx.gId, childId, parentId);
+    await apiOrient(ctx.gId, childId, parentId);
+  };
+  // 新規ノードの親を既存ノードから検索して選ばせるポップオーバー。Escでスキップ（従来通りリンクなし）。
+  const openParentPicker = (childId: string, anchorEl: HTMLElement, afterPlace?: () => void) => {
+    openSearchPopover(
+      anchorEl,
+      (parentNode, createLabel) => { void placeUnderParent(childId, parentNode, createLabel).then(() => afterPlace?.()); },
+      undefined,
+      '親ノードを検索（Escでスキップ）…',
+    );
   };
 
   const setActive = (line: ExplorerLine) => {
@@ -500,6 +520,8 @@ export function createLineView(
           await apiAddRay(ctx.gId, line.lineId, nodeId);
           const ar = ctx.activeRelation;
           if (ar && ar.lineId === line.lineId) { ar.participants.add(nodeId); ctx.setActiveRelation(ar); }
+          // 新規作成ノードは親を持たない＝リンクなしになるので、続けて親を選べるようにする。
+          if (createLabel) openParentPicker(nodeId, chip, () => { newTa.focus(); newTa.setSelectionRange(0, 0); });
         },
       };
       const seq = ++mentionSeq;

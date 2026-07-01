@@ -154,6 +154,15 @@ export async function apiLinkNode(graphId: string, nodeId: string, targetNodeId:
   return data.linked;
 }
 
+// 構造リンクの親向き(h_orientation)を設定。parentId が線の親側になる（clear=true で無向へ戻す）。
+export async function apiOrient(graphId: string, nodeId: string, parentId: string, clear = false): Promise<void> {
+  await apiFetch(`/api/v1/graph/${graphId}/orient`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ nodeId, parentId, ...(clear ? { clear: true } : {}) }),
+  });
+}
+
 // 冪等アンリンク: node→target の辺を外す（無ければ何もしない）。返り値は最終状態。
 export async function apiUnlinkNode(graphId: string, nodeId: string, targetNodeId: string): Promise<boolean> {
   const r = await apiFetch(`/api/v1/graph/${graphId}/link`, {
