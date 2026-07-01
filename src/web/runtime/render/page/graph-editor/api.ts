@@ -199,6 +199,16 @@ export async function fetchNodeLines(graphId: string, nodeId: string): Promise<E
   return data.lines ?? [];
 }
 
+// 複数ノードの「関係 line 件数」を一括取得（各ノードが参加する p_line_body 付き line の数）。
+// ノードパネルの件数表示用。件数 0 のノードは戻り値から省かれる（呼び出し側は 0 とみなす）。
+export async function fetchLineCounts(graphId: string, nodeIds: string[]): Promise<Record<string, number>> {
+  if (nodeIds.length === 0) return {};
+  const r = await apiFetch(`/api/v1/graph/${graphId}/node-line-counts?ids=${encodeURIComponent(nodeIds.join(','))}`);
+  if (!r.ok) return {};
+  const data = await r.json() as { counts?: Record<string, number> };
+  return data.counts ?? {};
+}
+
 // nodeId を主語（先頭参加者）にした関係 line を新規作成。
 export async function apiCreateRelation(
   graphId: string, nodeId: string, lang: 'en' | 'ja', body?: string,

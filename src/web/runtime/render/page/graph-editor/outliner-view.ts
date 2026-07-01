@@ -4,6 +4,7 @@ import {
   fetchChildren, fetchParents, fetchBookmarks, fetchBookmarkedNodes, fetchAllNodes,
   apiCreateNode as _apiCreateNode, apiUpdateNode, apiDeleteNode, apiMoveNode as _apiMoveNode, apiMoveBookmark,
   apiToggleLink as _apiToggleLink, apiSetNodeColor, apiLinkNode, apiUnlinkNode, fetchColors,
+  fetchLineCounts,
 } from './api';
 
 // '__orphan__' is a synthetic grouping, NOT a real node. Orphan nodes are rendered under it (so
@@ -209,6 +210,9 @@ export function createOutlinerView(ctx: GraphEditorContext, paneOpts?: OutlinerP
   const occByNode = new Map<string, Set<string>>();
   // Occurrence key → row element. (Was keyed by node id.)
   const rowMap = new Map<string, HTMLElement>();
+  // node id → 関係(line)件数。ノード行の右端バッジに表示する。可視ノードぶんをまとめて
+  // /node-line-counts で取得しキャッシュ（再描画は即時、追加取得は 1 リクエストに集約）。
+  const lineCountCache = new Map<string, number>();
   // First (any) occurrence of a node id, or undefined. Convenience for node-level lookups
   // that only need one representative ONode.
   const anyOccOf = (nodeId: string): ONode | undefined => {
@@ -841,7 +845,7 @@ export function createOutlinerView(ctx: GraphEditorContext, paneOpts?: OutlinerP
     if (paneOpts?.onContentWidthChange) scheduleWidthUpdate();
   };
 
-  const render = () => { if (V2_FLAT) renderFlat(); else renderNested(); };
+  const render = () => { if (V2_FLAT) renderFlat(); else renderNested(); scheduleCountFetch(); };
 
   const renderNested = () => {
     rowMap.clear();
@@ -1020,6 +1024,31 @@ export function createOutlinerView(ctx: GraphEditorContext, paneOpts?: OutlinerP
     }, 150);
   };
 
+  // 行の右端バッジに関係件数を反映（0 は非表示）。バッジの無い行（リンクなしヘッダ等）は無視。
+  const applyRowCount = (row: HTMLElement, count: number) => {
+    const badge = row.querySelector<HTMLElement>('[data-line-count]');
+    if (badge) badge.textContent = count > 0 ? String(count) : '';
+  };
+
+  // 可視ノードのうち未取得のぶんを 1 リクエストで取得し、各行のバッジを更新する。
+  let countTimer: ReturnType<typeof setTimeout> | null = null;
+  const scheduleCountFetch = () => {
+    if (countTimer) clearTimeout(countTimer);
+    countTimer = setTimeout(() => {
+      countTimer = null;
+      const ids = [...new Set(flatVisible().map(o => o.node.id))]
+        .filter(id => id !== ORPHAN_ID && !id.startsWith('temp-') && !lineCountCache.has(id));
+      if (ids.length === 0) return;
+      void fetchLineCounts(ctx.gId, ids).then(counts => {
+        for (const id of ids) lineCountCache.set(id, counts[id] ?? 0);
+        for (const o of flatVisible()) {
+          const row = rowMap.get(o.key);
+          if (row) applyRowCount(row, lineCountCache.get(o.node.id) ?? 0);
+        }
+      });
+    }, 150);
+  };
+
   const updateExpandMarker = (onode: ONode) => {
     const row = rowMap.get(onode.key);
     if (!row) return;
@@ -1064,6 +1093,7 @@ export function createOutlinerView(ctx: GraphEditorContext, paneOpts?: OutlinerP
     };
     insertSubtree(onode.children);
     schedulePrefetch();
+    scheduleCountFetch();
     persistExpanded();
   };
 
@@ -1301,7 +1331,7 @@ export function createOutlinerView(ctx: GraphEditorContext, paneOpts?: OutlinerP
       const triBtn = document.createElement('button');
       triBtn.dataset.expandTriangle = '1';
       triBtn.textContent = '▸';
-      triBtn.style.cssText = `flex-shrink:0;background:transparent;border:none;color:${TEXT_DIM};cursor:pointer;font-size:10px;padding:0 4px;opacity:0;pointer-events:none;line-height:1;`;
+      triBtn.style.cssText = `flex-shrink:0;background:transparent;border:none;color:${TEXT_DIM};cursor:pointer;font-size:15px;padding:0 4px;opacity:0;pointer-events:none;line-height:1;`;
       triBtn.addEventListener('click', (e) => { e.stopPropagation(); void toggleExpand(onode); });
       const bw = document.createElement('span');
       bw.style.cssText = `flex-shrink:0;display:flex;align-items:center;justify-content:center;width:18px;cursor:pointer;`;
@@ -1792,8 +1822,17 @@ export function createOutlinerView(ctx: GraphEditorContext, paneOpts?: OutlinerP
       void navigator.clipboard.writeText(`[${onode.node.id}]${lbl}`).then(() => showToast('コピーしました'));
     });
 
+    // 紐づくリレーションテキストの件数バッジ（ラベルの右、コピーアイコンの手前）。件数 0 は非表示。
+    const countBadge = document.createElement('span');
+    countBadge.dataset.lineCount = '1';
+    countBadge.title = 'リレーションテキスト件数';
+    countBadge.style.cssText = `flex-shrink:0;font-size:11px;color:${TEXT_MID};padding:0 4px;line-height:1;min-width:12px;text-align:right;font-variant-numeric:tabular-nums;`;
+    const cachedCount = lineCountCache.get(onode.node.id);
+    if (cachedCount != null) countBadge.textContent = cachedCount > 0 ? String(cachedCount) : '';
+
     row.insertBefore(triBtn, btnWrap);
     row.appendChild(ta);
+    row.appendChild(countBadge);
     row.appendChild(copyIcon);
     updateExpandMarker(onode);
     return row;
@@ -2829,6 +2868,12 @@ export function createOutlinerView(ctx: GraphEditorContext, paneOpts?: OutlinerP
   const load = async () => {
     flushPendingReorders(); // send any queued reorder before the tree is rebuilt
     clearIndex();
+    // Treat every cached subtree as stale-until-revalidated, exactly like a fresh page load.
+    // Otherwise an expanded subtree whose key is already in `validated` (fetched earlier this
+    // page load) is restored from the stale cache, so nodes added elsewhere since then — e.g.
+    // a node created + parented from the relation panel — don't appear until a browser reload.
+    // Clearing this makes ensureChildren refetch each expanded subtree from the backend.
+    validated.clear();
     zoomStack.splice(0);
     baseDepth = 0;
     updateBreadcrumb();
