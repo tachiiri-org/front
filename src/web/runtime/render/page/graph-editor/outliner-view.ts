@@ -524,33 +524,14 @@ export function createOutlinerView(ctx: GraphEditorContext, paneOpts?: OutlinerP
     onode.childrenLoaded = true;
   };
 
-  // Warm childrenCache for visible-but-unexpanded nodes serially, so the expand triangle shows
-  // correctly and expanding is instant. Capped + non-overlapping: a large expanded tree must not
-  // fan out a fetch per visible node (that stampedes the 429-sensitive backend). Nodes past the
-  // cap keep an optimistic triangle until expanded — a fine trade for staying within rate limits.
-  let prefetchTimer: ReturnType<typeof setTimeout> | null = null;
-  let prefetching = false;
-  const PREFETCH_MAX = 24; // per pass
-  const schedulePrefetch = () => {
-    if (prefetchTimer) clearTimeout(prefetchTimer);
-    prefetchTimer = setTimeout(() => {
-      prefetchTimer = null;
-      if (prefetching) return; // one chain at a time — avoid overlapping fetch storms
-      const queue = flatVisible()
-        .filter(o => !o.childrenLoaded && !ctx.childrenCache.has(o.node.id))
-        .slice(0, PREFETCH_MAX);
-      if (queue.length === 0) return;
-      prefetching = true;
-      let i = 0;
-      const next = () => {
-        if (i >= queue.length) { prefetching = false; return; }
-        const o = queue[i++];
-        if (!o.childrenLoaded && !ctx.childrenCache.has(o.node.id)) void ensureChildren(o).then(next, () => { prefetching = false; });
-        else next();
-      };
-      next();
-    }, 150);
-  };
+  // Children pre-warming is intentionally DISABLED. It used to fetch children for every visible
+  // node (to make the expand triangle exact and expanding instant), but on a large tree that was
+  // ~25 reads on load alone — enough to trip the backend's 120-reads/60s limit and starve the
+  // single-threaded per-tenant DO (which also made /move writes 500). The expand triangle now
+  // shows optimistically (updateExpandMarker defaults to "has children" when unknown); children
+  // load lazily on expand — one read, only when actually needed. Kept as a no-op so callers in
+  // render()/expandInDom() need no change.
+  const schedulePrefetch = () => { /* disabled: see comment above */ };
 
   // 行の右端バッジに関係件数を反映（0 は非表示）。バッジの無い行（リンクなしヘッダ等）は無視。
   const applyRowCount = (row: HTMLElement, count: number) => {
