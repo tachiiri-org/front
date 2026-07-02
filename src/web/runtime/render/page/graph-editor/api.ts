@@ -65,6 +65,16 @@ export async function fetchParents(graphId: string, nodeId: string): Promise<Exp
   return (data.nodes ?? []).filter((n) => (seen.has(n.id) ? false : (seen.add(n.id), true)));
 }
 
+// How many places a node appears as a child in the tree (structural placements, oriented OR not).
+// Used by delete to decide "multi-placed → unlink this spot" vs "last placement → delete entity".
+// More reliable than fetchParents (which only counts ORIENTED parents) for that decision.
+export async function fetchPlacementCount(graphId: string, nodeId: string): Promise<number> {
+  const r = await apiFetch(`/api/v1/graph/${graphId}/node/${nodeId}/placement-count`);
+  if (!r.ok) return 1;
+  const data = await r.json() as { count?: number };
+  return data.count ?? 1;
+}
+
 export async function apiCreateNode(
   graphId: string, parentId: string | null, lang: 'en' | 'ja', label: string,
   insertAfterId?: string,

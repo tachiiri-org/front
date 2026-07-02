@@ -4,7 +4,7 @@ import {
   fetchChildren, fetchParents, fetchBookmarks, fetchBookmarkedNodes, fetchAllNodes,
   apiCreateNode as _apiCreateNode, apiUpdateNode, apiDeleteNode, apiMoveNode as _apiMoveNode, apiMoveBookmark,
   apiToggleLink as _apiToggleLink, apiSetNodeColor, apiLinkNode, apiUnlinkNode, fetchColors,
-  fetchLineCounts,
+  fetchLineCounts, fetchPlacementCount,
 } from './api';
 
 // '__orphan__' is a synthetic grouping, NOT a real node. Orphan nodes are rendered under it (so
@@ -2372,10 +2372,10 @@ export function createOutlinerView(ctx: GraphEditorContext, paneOpts?: OutlinerP
     const selOccByNode = new Map<string, ONode>();
     for (const o of sel) if (!selOccByNode.has(o.node.id)) selOccByNode.set(o.node.id, o);
     clearSelection();
-    // 本物の親数を先に並列取得（親エッジ解除 vs 実体削除の判定用）。
+    // 配置数を先に並列取得（親エッジ解除 vs 実体削除の判定用）。
     const parentCount = new Map<string, number>();
     await Promise.all([...selOccByNode.entries()].map(async ([nodeId, occ]) => {
-      if (occ.parentId && occ.parentId !== ORPHAN_ID) parentCount.set(nodeId, (await fetchParents(ctx.gId, nodeId)).length);
+      if (occ.parentId && occ.parentId !== ORPHAN_ID) parentCount.set(nodeId, await fetchPlacementCount(ctx.gId, nodeId));
     }));
     const blocked: string[] = [];
     const delPromises: Promise<boolean>[] = [];
@@ -2572,10 +2572,14 @@ export function createOutlinerView(ctx: GraphEditorContext, paneOpts?: OutlinerP
     if (sel[0]) focusRow(sel[0]);
 
     await Promise.all(sel.map(n => awaitRealId(n)));
+    // 新親への辺作成を await → queueReorder で順序＋向き付けを永続化（未実施だとリロードで位置が戻る）。
+    const newLinks: Promise<unknown>[] = [];
     for (const n of sel) {
       void apiToggleLink(ctx.gId, n.node.id, oldParentId);
-      void apiToggleLink(ctx.gId, n.node.id, targetParent.node.id);
+      newLinks.push(apiToggleLink(ctx.gId, n.node.id, targetParent.node.id));
     }
+    await Promise.all(newLinks);
+    queueReorder(targetParent.node.id);
   };
 
   const doTabMulti = async (sel: ONode[], dedent: boolean) => {
@@ -2713,10 +2717,10 @@ export function createOutlinerView(ctx: GraphEditorContext, paneOpts?: OutlinerP
     const focusTarget = () => { const t = targetKey ? byKey.get(targetKey) : undefined; if (t) focusRow(t); };
 
     // ── 複数箇所に配置されたノードは、この箇所（親エッジ）だけリンク解除し、実体と他の箇所は残す ──
-    // 削除するのは「最後の1箇所」のときだけ。判定は本物の親数（向き付き親）を正とする。
+    // 削除するのは「最後の1箇所」のときだけ。判定は配置数（向き付き親に限らない実際の出現数）。
     if (parentId && parentId !== ORPHAN_ID) {
-      const parents = await fetchParents(ctx.gId, nodeId);
-      if (parents.length > 1) {
+      const placements = await fetchPlacementCount(ctx.gId, nodeId);
+      if (placements > 1) {
         // Unlink ONLY this occurrence's parent edge. The node (with its children) survives under its
         // other parent(s), so remove this occurrence's whole subtree from the UI — do NOT promote.
         const sibs = getSiblings(onode);
@@ -2840,8 +2844,11 @@ export function createOutlinerView(ctx: GraphEditorContext, paneOpts?: OutlinerP
     render();
     focusRow(onode);
     await awaitRealId(onode);
+    // 新親への辺作成を await してから順序＋向き付け(apiMoveNode 経由)を永続化する。並行のままだと
+    // 向き付けが辺作成より先に届き、このノードだけ向きが付かず＝リロードで位置が失われる（ドラッグ処理と同じ理由）。
     void apiToggleLink(ctx.gId, onode.node.id, oldParentId);
-    void apiToggleLink(ctx.gId, onode.node.id, targetParent.node.id);
+    await apiToggleLink(ctx.gId, onode.node.id, targetParent.node.id);
+    queueReorder(targetParent.node.id);
   };
 
   const doIndent = async (onode: ONode, vis: ONode[], i: number) => {
@@ -2870,7 +2877,9 @@ export function createOutlinerView(ctx: GraphEditorContext, paneOpts?: OutlinerP
 
     await awaitRealId(onode);
     if (oldParentId !== null) void apiToggleLink(ctx.gId, onode.node.id, oldParentId);
-    void apiToggleLink(ctx.gId, onode.node.id, prev.node.id);
+    // 新親への辺作成を await → queueReorder で順序＋向き付けを永続化（未実施だとリロードで位置が戻る）。
+    await apiToggleLink(ctx.gId, onode.node.id, prev.node.id);
+    queueReorder(prev.node.id);
   };
 
   const doDedent = async (onode: ONode) => {
@@ -2904,7 +2913,11 @@ export function createOutlinerView(ctx: GraphEditorContext, paneOpts?: OutlinerP
 
     await awaitRealId(onode);
     void apiToggleLink(ctx.gId, onode.node.id, oldParentId);
-    if (onode.parentId !== null) void apiToggleLink(ctx.gId, onode.node.id, onode.parentId);
+    // 新親（＝旧親の親）への辺作成を await → queueReorder で順序＋向き付けを永続化。
+    if (onode.parentId !== null) {
+      await apiToggleLink(ctx.gId, onode.node.id, onode.parentId);
+      queueReorder(onode.parentId);
+    }
   };
 
   // Shallow structural comparison of two child lists — detects whether a revalidation
