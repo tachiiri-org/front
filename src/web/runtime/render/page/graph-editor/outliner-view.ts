@@ -1,9 +1,9 @@
 import type { ExplorerNode, GraphEditorContext } from './types';
 import { BG, BORDER, TEXT_HIGH, TEXT_MID, TEXT_DIM, SELECT_STRONG, ORPHAN_ID, ORPHAN_LABEL, primaryLabel, fallbackLabel } from './constants';
 import {
-  fetchChildren, fetchParents, fetchBookmarks, fetchBookmarkedNodes, fetchAllNodes,
+  fetchChildren, fetchBookmarks, fetchBookmarkedNodes, fetchAllNodes,
   apiCreateNode as _apiCreateNode, apiUpdateNode, apiDeleteNode, apiMoveNode as _apiMoveNode, apiMoveBookmark,
-  apiToggleLink as _apiToggleLink, apiSetNodeColor, apiLinkNode, apiUnlinkNode, fetchColors,
+  apiToggleLink as _apiToggleLink, apiUnlinkNode, fetchColors,
   fetchLineCounts, fetchPlacementCount,
 } from './api';
 
@@ -19,20 +19,17 @@ const apiToggleLink = (graphId: string, sourceId: string, targetId: string): Pro
 const apiCreateNode = (graphId: string, parentId: string | null, lang: 'en' | 'ja', label: string, insertAfterId?: string): Promise<ExplorerNode | null> =>
   _apiCreateNode(graphId, parentId === ORPHAN_ID ? null : parentId, lang, label, insertAfterId);
 
-// ── Occurrence model ───────────────────────────────────────────────────
-// A node id can appear MULTIPLE times in one pane (multi-membership: the same node
-// shown under several link panels, or reached via two paths in a DAG/diamond). So row /
-// tree state is keyed by a per-OCCURRENCE key (`key`), not the node id. The key is the
-// path from the pane top down to this occurrence, which is unique even when node.id
-// repeats:
-//   root occurrence  : `<panelTargetId|'@'>#<node.id>`   (see rootKey)
-//   descendant       : `<parentKey>/<node.id>`            (see childKey)
-// `node.id` still identifies the underlying graph node (used by the API / drag / caches).
+// ── Tree model (single-parent outliner) ────────────────────────────────
+// Each node appears at MOST ONCE in a pane (single placement: a node is shown under one
+// parent only — see ensureChildren's dedup). So a row is keyed by the node id directly.
+// `key` equals node.id (kept as a field so row / selection / index sites read uniformly);
+// `parentKey` is the parent row's node id (null at the pane top); `parentId` is the
+// underlying parent NODE id for the link/API layer (may be non-null even at the top).
 type ONode = {
   node: ExplorerNode;
-  /** Unique occurrence key — the path from the pane top to this occurrence. */
+  /** Row key — equals node.id (single placement, so unique within the pane). */
   key: string;
-  /** Occurrence key of the parent ONode (null for a pane top-level row). */
+  /** Parent row's key (= parent node id), or null for a pane top-level row. */
   parentKey: string | null;
   /** Underlying parent NODE id (kept for the link API / drag, which speak node ids). */
   parentId: string | null;
@@ -42,13 +39,10 @@ type ONode = {
   children: ONode[];
 };
 
-// Root occurrence key. `panelTargetId` is the link panel this occurrence belongs to
-// (Step 2); '@' is the synthetic "no panel" marker used by the single-group layout.
-const rootKey = (panelTargetId: string | null, nodeId: string): string =>
-  `${panelTargetId ?? '@'}#${nodeId}`;
-
-// Descendant occurrence key: parent occurrence key + this node id.
-const childKey = (parentKey: string, nodeId: string): string => `${parentKey}/${nodeId}`;
+// Row keys are just the node id now (single placement). Kept as tiny helpers so the call
+// sites that build keys stay readable; both ignore their former panel/path arguments.
+const rootKey = (_panel: string | null, nodeId: string): string => nodeId;
+const childKey = (_parentKey: string, nodeId: string): string => nodeId;
 
 /** One breadcrumb hop: the node id and its display label, root-first. */
 export type PathEntry = { id: string | null; label: string };
@@ -145,14 +139,12 @@ export function createOutlinerView(ctx: GraphEditorContext, paneOpts?: OutlinerP
       draftTa.value = ''; draftResize(); draftTa.style.color = TEXT_DIM;
       const parentId = paneParentSet ? paneParentId : (ctx.rootNodeId ?? null);
       if (!parentId) return;
-      // Optimistic: insert temp node immediately (same pattern as doAddSibling). A fresh
-      // node links to nothing yet → it lands in the UNCLASSIFIED panel (rootKey null panel).
+      // Optimistic: insert temp node immediately (same pattern as doAddSibling).
       const tempId = `temp-${++ctx.tempNodeCounter}`;
       const tempNode: ExplorerNode = { id: tempId, [paneLang]: label };
       const tempKey = rootKey(null, tempId);
       const o = make(tempNode, parentId, baseDepth, tempKey, null);
       o.childrenLoaded = true;
-      linkTargets.set(tempId, []);
       rootNodeList.unshift(tempNode);
       roots.unshift(o);
       let resolveTemp!: () => void;
@@ -164,14 +156,12 @@ export function createOutlinerView(ctx: GraphEditorContext, paneOpts?: OutlinerP
         resolveTemp(); tempReady.delete(tempId);
         roots.splice(roots.indexOf(o), 1); unindexOcc(o);
         const rli = rootNodeList.indexOf(tempNode); if (rli >= 0) rootNodeList.splice(rli, 1);
-        linkTargets.delete(tempId);
         rowMap.get(tempKey)?.remove(); rowMap.delete(tempKey);
         render(); // restore draft row
         return;
       }
       const typedText = rowMap.get(o.key)?.querySelector<HTMLTextAreaElement>('textarea')?.value ?? '';
-      // temp id → real id: swap link-target cache key, re-key the occurrence + row + indices.
-      linkTargets.delete(tempId); linkTargets.set(nn.id, []);
+      // temp id → real id: swap the row's id + key + index.
       swapNodeId(o, tempId, nn.id, rootKey(null, nn.id));
       Object.assign(tempNode, nn); // copy labels/color (id already set to real by swapNodeId)
       resolveTemp(); tempReady.delete(tempId);
@@ -201,87 +191,43 @@ export function createOutlinerView(ctx: GraphEditorContext, paneOpts?: OutlinerP
   // Underlying parent NODE id for the current top-level rows (pane parent / zoom node / null).
   let rootParentNodeId: string | null = null;
   let baseDepth = 0; // depth of current root level (for relative indent display)
-  // Primary index: occurrence key → ONode. (Was byId keyed by node id; multi-membership
-  // means a node id can map to several occurrences, so we key by occurrence here.)
+  // Row index: node id → ONode. Single placement means at most one ONode per id.
   const byKey = new Map<string, ONode>();
-  // Secondary index: node id → set of its occurrence keys. Maintained alongside byKey so
-  // node-level operations (rename / color / delete / property change) can reach EVERY
-  // occurrence of a node, while row-level operations use a single occurrence via byKey.
-  const occByNode = new Map<string, Set<string>>();
-  // Occurrence key → row element. (Was keyed by node id.)
+  // node id → row element.
   const rowMap = new Map<string, HTMLElement>();
   // node id → 関係(line)件数。ノード行の右端バッジに表示する。localStorage 永続の共有キャッシュ
   // (ctx)を使い、リロード直後も前回値で即表示。今セッションで実取得済みの id は countFetched で管理し、
   // 永続値があっても必ず一度は再取得して最新化する（移動＋更新で件数が一瞬空になる見え方を防ぐ）。
   const lineCountCache = ctx.lineCountCache;
   const countFetched = new Set<string>();
-  // First (any) occurrence of a node id, or undefined. Convenience for node-level lookups
-  // that only need one representative ONode.
-  const anyOccOf = (nodeId: string): ONode | undefined => {
-    const keys = occByNode.get(nodeId);
-    if (!keys) return undefined;
-    for (const k of keys) { const o = byKey.get(k); if (o) return o; }
-    return undefined;
-  };
-  // All live ONodes for a node id.
-  const occsOf = (nodeId: string): ONode[] => {
-    const keys = occByNode.get(nodeId);
-    if (!keys) return [];
-    const out: ONode[] = [];
-    for (const k of keys) { const o = byKey.get(k); if (o) out.push(o); }
-    return out;
-  };
-  // Index helpers — always mutate byKey + occByNode together.
-  const indexOcc = (o: ONode) => {
-    byKey.set(o.key, o);
-    let set = occByNode.get(o.node.id);
-    if (!set) { set = new Set(); occByNode.set(o.node.id, set); }
-    set.add(o.key);
-  };
-  const unindexOcc = (o: ONode) => {
-    byKey.delete(o.key);
-    const set = occByNode.get(o.node.id);
-    if (set) { set.delete(o.key); if (set.size === 0) occByNode.delete(o.node.id); }
-  };
-  // Unindex an occurrence AND its whole displayed subtree. Used when removing just ONE occurrence
-  // of a multi-placed node (its children under this occurrence go away here but survive elsewhere).
+  // The ONode for a node id, or undefined (one per id under single placement).
+  const anyOccOf = (nodeId: string): ONode | undefined => byKey.get(nodeId);
+  // The live ONode(s) for a node id — 0 or 1 under single placement. Kept as an array so the
+  // node-level call sites (rename / delete) read uniformly.
+  const occsOf = (nodeId: string): ONode[] => { const o = byKey.get(nodeId); return o ? [o] : []; };
+  // Index helpers.
+  const indexOcc = (o: ONode) => { byKey.set(o.key, o); };
+  const unindexOcc = (o: ONode) => { byKey.delete(o.key); };
+  // Unindex a row AND its whole displayed subtree (used when a subtree is removed from the pane).
   const unindexSubtree = (o: ONode) => {
     for (const c of o.children) unindexSubtree(c);
     rowMap.delete(o.key);
     unindexOcc(o);
   };
-  const clearIndex = () => { byKey.clear(); occByNode.clear(); };
-  // Re-key an existing ONode (and its whole subtree) under a new occurrence key, keeping
-  // the indices and rowMap consistent. Used when an occurrence is re-parented to a different
-  // key (drag / move). Assumes node.id is unchanged.
-  const rekeyOcc = (o: ONode, newKey: string) => {
-    if (o.key === newKey) return;
-    const row = rowMap.get(o.key);
-    unindexOcc(o);
-    rowMap.delete(o.key);
-    o.key = newKey;
-    indexOcc(o);
-    if (row) rowMap.set(newKey, row);
-    for (const c of o.children) rekeyOcc(c, childKey(newKey, c.node.id));
-  };
+  const clearIndex = () => { byKey.clear(); };
 
-  // Swap an occurrence's underlying node id (temp → real) and its occurrence key in one go,
-  // keeping byKey / occByNode / rowMap consistent. The ONode's node object must NOT yet have
-  // had its id mutated (we unindex under the old id first). Recurses into the subtree.
-  const swapNodeId = (o: ONode, oldId: string, newId: string, newKey: string) => {
+  // Swap a row's underlying node id (temp → real), keeping byKey / rowMap consistent. The key
+  // equals the node id, so newKey is the new id. Recurses into the subtree (child keys are just
+  // their own node ids, unchanged).
+  const swapNodeId = (o: ONode, _oldId: string, newId: string, newKey: string) => {
     const row = rowMap.get(o.key);
-    // Unindex under the CURRENT (old) id/key.
     byKey.delete(o.key);
-    const set = occByNode.get(oldId);
-    if (set) { set.delete(o.key); if (set.size === 0) occByNode.delete(oldId); }
     rowMap.delete(o.key);
-    // Apply the new id + key, then re-index.
     o.node.id = newId;
     o.key = newKey;
     indexOcc(o);
     if (row) { rowMap.set(newKey, row); row.dataset.nodeId = newId; }
-    // Children keys embed the parent key (not the changed node id), so just re-derive them.
-    for (const c of o.children) swapNodeId(c, c.node.id, c.node.id, childKey(newKey, c.node.id));
+    for (const c of o.children) swapNodeId(c, c.node.id, c.node.id, c.node.id);
   };
   // Cache keys whose children we've fetched (or revalidated) from the backend THIS page load.
   // Entries hydrated from localStorage are stale until revalidated, so the first access of an
@@ -401,486 +347,49 @@ export function createOutlinerView(ctx: GraphEditorContext, paneOpts?: OutlinerP
     return out;
   };
 
-  // ── Link panels ─────────────────────────────────────────────────────
-  // Top-level rows are clustered into PANELS by the nodes they LINK TO (their neighbours via
-  // fetchChildren, minus the pane parent). The same root can appear in several panels
-  // (multi-membership), once per linked target.
-  // Cap on how many top-level roots we prefetch link-targets for per pane (the panel-grouping
-  // N+1: one fetchChildren per root). A large hub pane (100+ members) would otherwise fire
-  // 100+ requests on open. Roots beyond the cap stay unclassified until grouped.
-  // TODO: load more on scroll / a bulk depth-2 read.
-  const LINK_PANEL_PREFETCH_LIMIT = 50;
-  // Max characters shown in a (combined) panel header before truncating with an ellipsis.
-  // Combined keys can list many targets, so cap the displayed text length.
-  const PANEL_HEADER_MAX_CHARS = 24;
-
-  // The synthetic panel id for roots that link to no other node ("未分類", sorts last).
-  const UNCLASSIFIED = ' 未分類';
-
-  // Per-node cache (this pane) of the link targets that define which panels a root joins.
-  // Keyed by node id. Populated lazily by ensureLinkTargets before a render that needs it.
-  const linkTargets = new Map<string, string[]>();
-  // Labels for panel headers, keyed by target node id (filled from childrenCache / roots).
-  const panelLabelCache = new Map<string, string>();
-
-  // A panel is keyed by the WHOLE SET of a node's link targets (sorted, joined), not one
-  // target. So a node with several links appears in exactly ONE combined panel (no
-  // multi-membership) whose header lists all its targets. UUIDs contain no '+'/'#'/'/', so
-  // the combined key stays safe as a rootKey prefix.
-  const COMBO_SEP = '+';
-  const comboKey = (targetIds: string[]): string => [...targetIds].sort().join(COMBO_SEP);
-  const parseCombo = (key: string): string[] =>
-    (key === UNCLASSIFIED || key === '' || key === '@') ? [] : key.split(COMBO_SEP);
-
-  // Resolve a single target node's label from anything we know (the node itself or the
-  // cache). Falls back to the id prefix.
-  const targetLabel = (targetId: string): string => {
-    const o = anyOccOf(targetId);
-    if (o) return labelOf(o.node);
-    const cached = panelLabelCache.get(targetId);
-    if (cached) return cached;
-    for (const nodes of ctx.childrenCache.values()) {
-      const n = nodes.find(x => x.id === targetId);
-      if (n) { const l = labelOf(n); panelLabelCache.set(targetId, l); return l; }
-    }
-    return targetId.slice(0, 8);
-  };
-
-  // Resolve a node's color CODE (the linked concept's own color) from anything we know —
-  // any live occurrence or the children cache. Returns undefined when unknown / uncolored.
-  const resolveColor = (nodeId: string): string | undefined => {
-    const o = anyOccOf(nodeId);
-    if (o?.node.color) return o.node.color;
-    for (const nodes of ctx.childrenCache.values()) {
-      const n = nodes.find(x => x.id === nodeId);
-      if (n?.color) return n.color;
-    }
-    return undefined;
-  };
-
-  // Panel header label: '未分類' for the no-link panel, otherwise all target labels joined.
-  const panelLabel = (key: string): string => {
-    if (key === UNCLASSIFIED) return '未分類';
-    // v1 (group-by-parent): the parent panel is labelled by the ancestor PATH to the pane
-    // parent (root-first), e.g. "ルート" / "ルート / ドメイン" — we group by parent, not by a
-    // node's own link targets.
-    if (rootParentNodeId !== null && key === rootParentNodeId) {
-      const p = selfPathPrefix();
-      if (p.length) return p.map(e => e.label).join(' / ');
-    }
-    return parseCombo(key).map(targetLabel).join(' , ');
-  };
-
-  // The panel target ids a root belongs to: the OTHER nodes it links to, excluding the pane
-  // parent (and the graph root). Empty → it joins only the UNCLASSIFIED panel.
-  // TODO: bulk depth-2 read to avoid N+1 (one fetchChildren per root here).
-  const ensureLinkTargets = async (rootNodeId: string) => {
-    if (linkTargets.has(rootNodeId)) return;
-    const parentNodeId = rootParentNodeId;
-    let cached = ctx.childrenCache.get(rootNodeId);
-    if (!cached) { cached = await fetchChildrenFiltered(rootNodeId); setCachedChildren(rootNodeId, cached); validated.add(rootNodeId); }
-    const targets: string[] = [];
-    for (const n of cached) {
-      if (n.id === parentNodeId || n.id === rootNodeId) continue;
-      // Skip blank-label targets: an unlabelled node is not a meaningful panel, so don't
-      // form a panel for it (the root then folds into 未分類 instead of producing an empty
-      // header). Covers both '' and null labels in either language.
-      if (!(n.ja?.trim() || n.en?.trim())) continue;
-      targets.push(n.id);
-      if (!panelLabelCache.has(n.id)) panelLabelCache.set(n.id, labelOf(n));
-    }
-    linkTargets.set(rootNodeId, targets);
-  };
-
-  // ── Mirror per-path grouping (orientation-based) ───────────────────────
-  // When a pane is rooted at a SHARED node (≥2 oriented parents), render one group per parent —
-  // i.e. per PATH the node is reached by — each headed by the full path to the root via that
-  // parent. Children are uniform (the B context-filter is retired); only the placement differs.
-  let rootCtxParents: string[] | null = null;          // the pane root's parent ids, or null
-  const rootCtxPaths = new Map<string, PathEntry[]>(); // parentId → full path to the pane root via it
-  const parentCache = new Map<string, ExplorerNode[]>();
-  const nodeLabelCache = new Map<string, string>();
-  const parentNodesOf = async (id: string): Promise<ExplorerNode[]> => {
-    let p = parentCache.get(id);
-    if (!p) { p = await fetchParents(ctx.gId, id); parentCache.set(id, p); for (const n of p) nodeLabelCache.set(n.id, labelOf(n)); }
-    return p;
-  };
-  const labelForId = (id: string): string => {
-    const o = anyOccOf(id);
-    if (o) return labelOf(o.node);
-    if (nodeLabelCache.has(id)) return nodeLabelCache.get(id)!;
-    for (const nodes of ctx.childrenCache.values()) { const n = nodes.find(x => x.id === id); if (n) return labelOf(n); }
-    if (id === ctx.rootNodeId) return 'ルート';
-    return id.slice(0, 8);
-  };
-  // Full breadcrumb path to a node, walking up via its first oriented parent (root-first).
-  const pathToNode = async (id: string): Promise<PathEntry[]> => {
-    const chain: PathEntry[] = [];
-    const seen = new Set<string>();
-    let cur: string | null = id;
-    while (cur && !seen.has(cur) && chain.length < 20) {
-      seen.add(cur);
-      chain.unshift({ id: cur, label: labelForId(cur) });
-      const parents = await parentNodesOf(cur);
-      cur = parents[0]?.id ?? null;
-    }
-    if (ctx.rootNodeId && chain[0]?.id !== ctx.rootNodeId) chain.unshift({ id: ctx.rootNodeId, label: 'ルート' });
-    return chain;
-  };
-
-  // The panel(s) a top-level node belongs to. Ordinary panes: the single pane parent (one group).
-  // Multi-parent mirror panes: every parent panel (each child appears under every path group).
-  const panelsForNode = (_nodeId: string): string[] => {
-    if (rootCtxParents) return [...rootCtxParents];
-    return [rootParentNodeId ?? UNCLASSIFIED];
-  };
-
-  // Stable, deterministic panel ordering: by header label, UNCLASSIFIED always last.
-  const sortPanelIds = (ids: string[]): string[] =>
-    [...ids].sort((a, b) => {
-      if (a === UNCLASSIFIED) return 1;
-      if (b === UNCLASSIFIED) return -1;
-      const la = panelLabel(a), lb = panelLabel(b);
-      return la < lb ? -1 : la > lb ? 1 : (a < b ? -1 : a > b ? 1 : 0);
-    });
-
-  // Panel header row (target node's label) + a divider rule under it, so each panel reads as
-  // a titled section. Shown only when >1 panel is present. The rule (#4a4a4a) matches
-  // buildGroupDivider; top margin separates it from the previous panel's rows.
-  const buildPanelHeader = (targetId: string): HTMLElement => {
-    const h = document.createElement('div');
-    h.dataset.panelHeader = '1';
-    h.dataset.panelTarget = targetId;
-    const full = panelLabel(targetId);
-    h.textContent = full.length > PANEL_HEADER_MAX_CHARS ? full.slice(0, PANEL_HEADER_MAX_CHARS) + '…' : full;
-    h.style.cssText = `margin:8px 8px 3px 0;padding:0 0 3px 0;border-bottom:1px solid #4a4a4a;color:${TEXT_MID};font-size:11px;font-weight:600;pointer-events:none;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;`;
-    return h;
-  };
-
-  // The raw panel-prefix segment of a root occurrence key (`<prefix>#<id>` → prefix). '@' is
-  // the no-panel marker. Returns null when the key isn't a root key.
-  const rootPanelPrefix = (key: string): string | null => {
-    const hash = key.indexOf('#');
-    return hash < 0 ? null : key.slice(0, hash);
-  };
-  // The panel target id a root occurrence belongs to (UNCLASSIFIED marker for the '@' prefix).
-  const panelOfRoot = (root: ONode): string => {
-    const p = rootPanelPrefix(root.key);
-    return p == null || p === '@' ? UNCLASSIFIED : p;
-  };
-
-  // (Re)build the `roots` ONode array from `rootNodeList`, preserving the expand/loaded
-  // state of any occurrence whose key still exists. Every node is emitted once per panel it
-  // belongs to (multi-membership). Re-indexes byKey/occByNode for the top level only
-  // (descendant occurrences are recreated lazily by ensureChildren).
+  // (Re)build the `roots` ONode array from `rootNodeList` — one row per node, in list order —
+  // preserving the expand/loaded state of any row whose key (= node id) still exists.
+  // Re-indexes byKey for the top level only (descendants are recreated lazily by ensureChildren).
   const buildRoots = () => {
-    // Remember which root occurrence keys were expanded so a rebuild keeps them open.
+    // Remember which roots were expanded so a rebuild keeps them open.
     const prevExpanded = new Set<string>();
     for (const r of roots) if (r.expanded) prevExpanded.add(r.key);
-    // Detach old root occurrences (and their subtrees) from the indices.
+    // Detach old root rows (and their subtrees) from the index.
     const dropSubtree = (o: ONode) => { for (const c of o.children) dropSubtree(c); unindexOcc(o); };
     for (const r of roots) dropSubtree(r);
 
     const next: ONode[] = [];
-    // Emit grouped by panel, in the SAME panel order render() uses, so the `roots` array
-    // order matches DOM order (multi-select range / flatVisible rely on this). Within a
-    // panel, preserve rootNodeList order.
-    const byPanel = new Map<string, ExplorerNode[]>();
     for (const node of rootNodeList) {
-      for (const panel of panelsForNode(node.id)) {
-        let arr = byPanel.get(panel); if (!arr) { arr = []; byPanel.set(panel, arr); }
-        arr.push(node);
-      }
-    }
-    for (const panel of sortPanelIds([...byPanel.keys()])) {
-      const panelId = panel === UNCLASSIFIED ? null : panel;
-      for (const node of byPanel.get(panel)!) {
-        const key = rootKey(panelId, node.id);
-        const o = make(node, rootParentNodeId, baseDepth, key, null);
-        if (prevExpanded.has(key)) o.expanded = true;
-        next.push(o);
-      }
+      const o = make(node, rootParentNodeId, baseDepth, node.id, null);
+      if (prevExpanded.has(node.id)) o.expanded = true;
+      next.push(o);
     }
     roots = next;
   };
 
-  // Set the pane's top-level node list, rebuild root occurrences, and render. Also kicks off
-  // async loading of each root's link targets (N+1; see ensureLinkTargets) and re-renders once
-  // they resolve so panels appear. `parentNodeId` is the underlying parent node id for the top
-  // level. `excl` filters out nodes that must not appear as roots.
+  // Set the pane's top-level node list, rebuild root rows, and render. `parentNodeId` is the
+  // underlying parent node id for the top level; `excl` filters out nodes that must not appear
+  // as roots.
   const applyRoots = (nodes: ExplorerNode[], parentNodeId: string | null, excl?: Set<string>) => {
     rootParentNodeId = parentNodeId;
     baseDepth = 0;
     rootNodeList = excl ? nodes.filter(n => !excl.has(n.id)) : nodes.slice();
     buildRoots();
     render();
-    if (V2_FLAT) void flatten(); else void loadLinkPanels();
   };
 
-  // Async: load every root's link targets, then rebuild + re-render so panels surface. Guarded
-  // against clobbering an in-progress edit. TODO: bulk depth-2 read to avoid N+1.
-  let linkPanelsToken = 0;
-  const loadLinkPanels = async () => {
-    // v1 (group-by-parent): panels are keyed by the pane parent, not by per-node link targets,
-    // so we no longer prefetch each root's children to build headers. This skips the old N+1
-    // fetch + deferred rebuild; panels are correct on the first synchronous render.
-    linkPanelsToken++;
-    return;
-  };
-
-  // ── v2: flattened, parent-grouped view ─────────────────────────────────
-  // Expansion-driven flatten: each occurrence is grouped under its PARENT occurrence (its ancestor
-  // PATH is the group header), so a multi-parent node appears once under each parent. Groups are
-  // revealed as the user expands; initially only the root group shows.
-  // 素のツリー表示: false にして renderNested（インデント＋▸/▾のインライン入れ子ツリー）を使う。
-  // true の renderFlat（親 occurrence ごとのグループセクション）は廃止方針。
-  const V2_FLAT = false;
-  const FLAT_MAX = 400;   // hard cap on rendered rows (guard against a runaway flatten)
-
-  // Occurrences from the top-level root down to `occ` (inclusive), root-first.
-  const occChainOcc = (occ: ONode): ONode[] => {
-    const chain: ONode[] = []; const seen = new Set<string>(); let cur: ONode | undefined = occ;
-    while (cur) { if (seen.has(cur.key)) break; seen.add(cur.key); chain.unshift(cur); if (cur.parentKey == null) break; cur = byKey.get(cur.parentKey); }
-    return chain;
-  };
-  // Root-first path entries (id+label) to a group's parent: pane prefix + occurrence chain.
-  const flatGroupPath = (parentOcc: ONode | null): PathEntry[] => {
-    const base = selfPathPrefix();
-    const chain = parentOcc ? occChainOcc(parentOcc).map(o => ({ id: o.node.id, label: labelOf(o.node) })) : [];
-    const all = [...base, ...chain];
-    return all.length ? all : [{ id: null, label: 'ルート' }];
-  };
-  // ── Flat group reordering (sibling groups → persisted node order) ───────
-  // A group is identified by its PARENT occurrence key (the root group uses a sentinel and is not
-  // reorderable). Dragging group X onto a SIBLING group Y (same parent occurrence) reorders the
-  // two group-parents among their shared parent's children — which persists via the node-order
-  // API (queueReorder). Cross-hierarchy drops are rejected: the tree shape must hold.
-  const groupKeyOf = (parentOcc: ONode | null): string => parentOcc ? parentOcc.key : '__root__';
-  let draggingGroupKey: string | null = null;
-  // A drop is valid only onto a different SIBLING group (same parent occurrence) — used to gate
-  // both the drop indicator and the drop itself, so invalid targets give no misleading feedback.
-  const canDropGroup = (dragKey: string, dropKey: string): boolean => {
-    const xo = byKey.get(dragKey), yo = byKey.get(dropKey);
-    return !!(xo && yo && xo !== yo && xo.parentKey === yo.parentKey);
-  };
-  const reorderGroup = (fromKey: string, toKey: string, before: boolean) => {
-    const xo = byKey.get(fromKey), yo = byKey.get(toKey);
-    if (!xo || !yo || xo === yo) return;
-    if (xo.parentKey !== yo.parentKey) { showToast('同じ階層（兄弟）のグループ同士でのみ並び替えできます'); return; }
-    const parentOcc = xo.parentKey ? byKey.get(xo.parentKey) : null;
-    const sibs = parentOcc ? parentOcc.children : roots; // sibling occurrences to reorder
-    const fi = sibs.indexOf(xo); if (fi < 0) return;
-    sibs.splice(fi, 1);
-    const ti = sibs.indexOf(yo); if (ti < 0) { sibs.splice(fi, 0, xo); return; }
-    sibs.splice(before ? ti : ti + 1, 0, xo);
-    const parentNodeId = parentOcc ? parentOcc.node.id : rootParentNodeId;
-    if (!parentOcc) rootNodeList = roots.map((o) => o.node); // keep the canonical root order in sync
-    renderFlat();
-    if (parentNodeId) queueReorder(parentNodeId); // persist the new sibling order (debounced)
-  };
-
-  // A group header styled like the pane breadcrumb bar (bcEl/updateBreadcrumb): the ancestor
-  // path as ' › '-separated crumbs, plus per-group controls — copy-path, language toggle, and
-  // refresh — relocated here from the pane chrome so each parent group reads as its own panel.
-  const buildFlatGroupHeader = (parentOcc: ONode | null, ctxPath?: PathEntry[]): HTMLElement => {
-    const h = document.createElement('div');
-    h.dataset.panelHeader = '1';
-    // Group header band: a single bottom BORDER divider only (no top border — the band above it
-    // already supplies its own bottom line, so a top border here would double it), BG fill, flush.
-    // Padding matches the pane chrome header (3px 6px) so the drag grip aligns with the pane's.
-    h.style.cssText = `display:flex;align-items:center;gap:4px;flex-wrap:nowrap;overflow:hidden;margin:0;padding:3px 6px;background:${BG};border-bottom:1px solid ${BORDER};font-size:12px;color:${TEXT_MID};`;
-
-    // Drag grip — drag a group's header to reorder group sections (like the pane reorder grip).
-    // Skipped for path/context groups (ctxPath): those are the node's parent-paths, not reorderable.
-    if (!ctxPath) {
-      const groupKey = groupKeyOf(parentOcc);
-      const grip = document.createElement('span');
-      grip.textContent = '⠿';
-      grip.title = 'ドラッグでグループを並び替え';
-      grip.draggable = true;
-      grip.style.cssText = `flex-shrink:0;cursor:grab;color:${TEXT_DIM};font-size:13px;user-select:none;padding:0 2px;`;
-      grip.addEventListener('dragstart', (e) => {
-        e.stopPropagation();
-        draggingGroupKey = groupKey;
-        e.dataTransfer?.setData('text/x-flat-group', groupKey);
-        if (e.dataTransfer) e.dataTransfer.effectAllowed = 'move';
-      });
-      grip.addEventListener('dragend', () => { draggingGroupKey = null; h.style.boxShadow = ''; });
-      h.appendChild(grip);
-      // The header is the drop target; show a blue insertion line on the half nearest the cursor.
-      h.addEventListener('dragover', (e) => {
-        if (!draggingGroupKey || !canDropGroup(draggingGroupKey, groupKey)) return;
-        e.preventDefault();
-        if (e.dataTransfer) e.dataTransfer.dropEffect = 'move';
-        const rect = h.getBoundingClientRect();
-        const before = (e.clientY - rect.top) < rect.height / 2;
-        h.style.boxShadow = before ? 'inset 0 2px 0 0 #4a9eff' : 'inset 0 -2px 0 0 #4a9eff';
-      });
-      h.addEventListener('dragleave', () => { h.style.boxShadow = ''; });
-      h.addEventListener('drop', (e) => {
-        if (!draggingGroupKey || !canDropGroup(draggingGroupKey, groupKey)) return;
-        e.preventDefault();
-        const rect = h.getBoundingClientRect();
-        const before = (e.clientY - rect.top) < rect.height / 2;
-        const from = draggingGroupKey;
-        draggingGroupKey = null; h.style.boxShadow = '';
-        reorderGroup(from, groupKey, before);
-      });
-    }
-
-    const path = ctxPath ?? flatGroupPath(parentOcc);
-    // Crumbs go in a shrinkable container so the controls stay visible; long paths collapse the
-    // middle to "…" to keep a single line: root › … › <parent> › <node> (the tail keeps the
-    // distinguishing context, e.g. 認証DB vs グループDB).
-    const crumbsWrap = document.createElement('span');
-    crumbsWrap.dataset.crumbs = '1';
-    crumbsWrap.style.cssText = `flex:1;min-width:0;display:flex;align-items:center;gap:2px;overflow:hidden;white-space:nowrap;`;
-    type Crumb = { label: string; dim?: boolean; active?: boolean };
-    const crumbs: Crumb[] = path.length > 3
-      ? [
-          { label: path[0].label },
-          { label: '…', dim: true },
-          { label: path[path.length - 2].label },
-          { label: path[path.length - 1].label, active: true },
-        ]
-      : path.map((e, i) => ({ label: e.label, active: i === path.length - 1 }));
-    crumbs.forEach((cr, i) => {
-      if (i > 0) {
-        const sep = document.createElement('span');
-        sep.textContent = ' › ';
-        sep.style.cssText = `color:${TEXT_DIM};flex-shrink:0;`;
-        crumbsWrap.appendChild(sep);
-      }
-      const span = document.createElement('span');
-      span.textContent = cr.label;
-      span.title = cr.label;
-      span.style.cssText = `color:${cr.dim ? TEXT_DIM : cr.active ? TEXT_HIGH : TEXT_MID};font-size:12px;padding:0 2px;white-space:nowrap;max-width:160px;overflow:hidden;text-overflow:ellipsis;flex-shrink:0;`;
-      crumbsWrap.appendChild(span);
-    });
-    h.appendChild(crumbsWrap);
-
-    const ctrls = document.createElement('span');
-    ctrls.style.cssText = `display:flex;align-items:center;gap:2px;flex-shrink:0;`;
-    const mkBtn = (text: string, title: string, onClick: () => void): HTMLButtonElement => {
-      const b = document.createElement('button');
-      b.textContent = text;
-      b.title = title;
-      b.style.cssText = `background:transparent;border:none;color:${TEXT_MID};cursor:pointer;font-size:12px;padding:0 4px;line-height:1;flex-shrink:0;`;
-      b.addEventListener('click', (e) => { e.stopPropagation(); onClick(); });
-      return b;
-    };
-    // Bordered "chip" style shared by the copy and language buttons so they read as a set.
-    const chip = (b: HTMLButtonElement): HTMLButtonElement => {
-      b.style.border = `1px solid ${BORDER}`;
-      b.style.borderRadius = '3px';
-      b.style.fontSize = '10px';
-      b.style.padding = '1px 4px';
-      b.style.lineHeight = '1.4';
-      return b;
-    };
-    const pathStr = path.map(p => p.label).join('/');
-    ctrls.appendChild(chip(mkBtn('コピー', 'パスをコピー', () => {
-      if (pathStr) void navigator.clipboard.writeText(pathStr).then(() => showToast('パスをコピーしました'));
-    })));
-    ctrls.appendChild(chip(mkBtn(paneLang.toUpperCase(), 'このパネルの言語を切替（JA⇄EN）', () => setLang(paneLang === 'ja' ? 'en' : 'ja'))));
-    ctrls.appendChild(mkBtn('⟳', 'このパネルを再読み込み', () => { void load(); }));
-    h.appendChild(ctrls);
-    return h;
-  };
-  // Render the flat view. If the pane root is a SHARED node (≥2 oriented parents), pre-compute the
-  // per-parent path groups so the mirror shows the node under each of its paths. No auto-expand.
-  const flatten = async (): Promise<void> => {
-    rootCtxParents = null;
-    rootCtxPaths.clear();
-    if (paneParentSet && paneParentId) {
-      const parents = await parentNodesOf(paneParentId);
-      if (parents.length >= 2) {
-        rootCtxParents = parents.map(p => p.id);
-        const rootEntry: PathEntry = { id: paneParentId, label: labelForId(paneParentId) };
-        for (const p of parents) rootCtxPaths.set(p.id, [...(await pathToNode(p.id)), rootEntry]);
-        buildRoots(); // re-key roots into per-parent panels (panelsForNode now returns the parents)
-      }
-    }
-    if (listEl.contains(document.activeElement)) return; // don't clobber an active edit
-    renderFlat();
-  };
-  // Flat render: pre-order over the occurrence tree, emitting one panel section per parent
-  // (header = its ancestor path) listing that parent's child occurrences. Multi-parent nodes
-  // recur once per parent. Indentation is flattened so every row in a group sits at one level.
-  const renderFlat = () => {
-    rowMap.clear();
-    listEl.innerHTML = '';
-    let count = 0; let truncated = false;
-    // Emit a group's rows + closing divider (no header), flattening indentation to one level.
-    const emitRows = (children: ONode[]) => {
-      const saved = baseDepth;
-      if (children.length) baseDepth = children[0].depth;
-      for (const c of children) { if (count >= FLAT_MAX) { truncated = true; break; } listEl.appendChild(buildRow(c)); count++; }
-      baseDepth = saved;
-      const div = document.createElement('div');
-      div.style.cssText = `border-bottom:1px solid ${BORDER};`;
-      listEl.appendChild(div);
-    };
-    const emitGroup = (parentOcc: ONode | null, children: ONode[]) => {
-      if (!children.length || truncated) return;
-      listEl.appendChild(buildFlatGroupHeader(parentOcc));
-      emitRows(children);
-    };
-    // Reveal a child group only when its parent occurrence is expanded (expansion-driven flatten):
-    // initially just the root group(s); expanding a row inserts that node's group section inline.
-    const dfs = (o: ONode) => { if (truncated || !o.expanded) return; if (o.children.length) { emitGroup(o, o.children); o.children.forEach(dfs); } };
-    if (rootCtxParents) {
-      // Multi-parent mirror root: one group per parent (the node's paths), each headed by the full
-      // path to the root via that parent. Roots are multi-membership-keyed by their parent panel.
-      const byCtx = new Map<string, ONode[]>();
-      for (const top of roots) { const p = panelOfRoot(top); let a = byCtx.get(p); if (!a) { a = []; byCtx.set(p, a); } a.push(top); }
-      for (const ctxId of rootCtxParents) {
-        if (truncated) break;
-        const tops = byCtx.get(ctxId) ?? [];
-        listEl.appendChild(buildFlatGroupHeader(null, rootCtxPaths.get(ctxId)));
-        emitRows(tops);
-        tops.forEach(dfs);
-      }
-    } else {
-      // Emit groups in natural DFS pre-order (parent before its descendants). Sibling order
-      // reflects the underlying node order, which group-drag reordering mutates + persists.
-      emitGroup(null, roots);
-      roots.forEach(dfs);
-    }
-    const draftParentId = paneParentSet ? paneParentId : (ctx.rootNodeId ?? null);
-    draftEl.style.display = (roots.length === 0 && draftParentId !== null) ? 'flex' : 'none';
-    updateSelectionHighlight();
-    schedulePrefetch();
-    if (paneOpts?.onContentWidthChange) scheduleWidthUpdate();
-  };
-
-  const render = () => { if (V2_FLAT) renderFlat(); else renderNested(); scheduleCountFetch(); };
+  const render = () => { renderNested(); scheduleCountFetch(); };
 
   const renderNested = () => {
     rowMap.clear();
     listEl.innerHTML = '';
-    // Render a top-level node and, when expanded, its visible subtree.
+    // Render a top-level node and, when expanded, its visible subtree. Roots are rendered in
+    // rootNodeList order (no panel grouping) — a stable, single-parent outline.
     const appendSubtree = (o: ONode) => {
       listEl.appendChild(buildRow(o));
       if (o.expanded) for (const c of o.children) appendSubtree(c);
     };
-
-    // ── Link panels: cluster roots by the node they link to. Each root is already a
-    // per-panel occurrence (its key encodes the panel target); group by that, order panels
-    // by header label (UNCLASSIFIED last), show a header when >1 panel. ──
-    const byPanel = new Map<string, ONode[]>();
-    for (const top of roots) {
-      const p = panelOfRoot(top);
-      let arr = byPanel.get(p); if (!arr) { arr = []; byPanel.set(p, arr); }
-      arr.push(top);
-    }
-    const panelIds = sortPanelIds([...byPanel.keys()]);
-    // 素のツリー: 親パスのパネルヘッダ（区切り線つき）は出さない。occurrence はパネル順にそのまま並べる。
-    const showHeaders = false;
-    for (const pid of panelIds) {
-      if (showHeaders) listEl.appendChild(buildPanelHeader(pid));
-      for (const top of byPanel.get(pid)!) appendSubtree(top);
-    }
+    for (const top of roots) appendSubtree(top);
     // Show draft row only when list is empty AND a valid parent is known
     const draftParentId = paneParentSet ? paneParentId : (ctx.rootNodeId ?? null);
     draftEl.style.display = (roots.length === 0 && draftParentId !== null) ? 'flex' : 'none';
@@ -1004,12 +513,12 @@ export function createOutlinerView(ctx: GraphEditorContext, paneOpts?: OutlinerP
       setCachedChildren(id, cached);
       validated.add(id);
     }
+    // Single placement: show each node under ONE parent only. Exclude ancestors (surfaced as
+    // neighbours by undirected edges) AND any node already placed elsewhere in this pane
+    // (byKey.has) — so a node reachable via two parents (diamond) appears under whichever
+    // parent was expanded first, never twice. This is what keeps row keys (= node ids) unique.
     const excl = ancestorIds(onode); excl.add(onode.node.id);
-    const kids = cached.filter(c => !excl.has(c.id));
-    // (B context-filter retired: hierarchy direction is now expressed by edge orientation
-    // (h_orientation) on the backend, so a node's children are uniform — same wherever it appears.)
-    // Child occurrence keys embed THIS occurrence's key, so the same child node reached via
-    // two parent occurrences gets two distinct keys (multi-membership / diamond-safe).
+    const kids = cached.filter(c => !excl.has(c.id) && !byKey.has(c.id));
     onode.children = kids
       .map(c => make(c, onode.node.id, onode.depth + 1, childKey(onode.key, c.id), onode.key));
     onode.childrenLoaded = true;
@@ -1149,15 +658,6 @@ export function createOutlinerView(ctx: GraphEditorContext, paneOpts?: OutlinerP
       expandingSet.delete(onode.key);
     }
     if (next && onode.children.length === 0) { updateExpandMarker(onode); focusRow(onode); return; }
-    if (V2_FLAT) {
-      // Flat mode: expansion reveals/hides the node's group SECTION, so re-render the flat view
-      // rather than nesting rows in place.
-      onode.expanded = next;
-      renderFlat();
-      if (paneOpts?.onContentWidthChange) scheduleWidthUpdate();
-      focusRow(onode);
-      return;
-    }
     if (next) expandInDom(onode); else collapseInDom(onode);
     // expand/collapse mutate the DOM directly (no full render), so re-measure the pane
     // width here — otherwise collapsing long rows leaves the column stuck at its wide size.
@@ -1167,9 +667,6 @@ export function createOutlinerView(ctx: GraphEditorContext, paneOpts?: OutlinerP
 
   // ── Breadcrumb ───────────────────────────────────────────────────────
   const updateBreadcrumb = () => {
-    // Flat (v2) mode: every group renders its own breadcrumb, so the pane-level breadcrumb bar
-    // is redundant — hide it.
-    if (V2_FLAT) { bcEl.style.display = 'none'; return; }
     bcEl.style.display = '';
     bcEl.innerHTML = '';
 
@@ -1309,7 +806,6 @@ export function createOutlinerView(ctx: GraphEditorContext, paneOpts?: OutlinerP
         const cc = ctx.childrenCache.get(o.parentId);
         if (cc) { const ci = cc.findIndex(n => n.id === node.id); if (ci >= 0) cc.splice(ci, 1); }
       }
-      linkTargets.delete(node.id);
     }
     ctx.saveChildrenCache?.();
     render();
@@ -1735,38 +1231,10 @@ export function createOutlinerView(ctx: GraphEditorContext, paneOpts?: OutlinerP
 
         const topLevelDrop = zone !== 'child' && newSibs === roots;
 
-        // ── Case 1: top-level→top-level = panel relink + reorder. The node stays top-level
-        // (same pane parent), only its panel membership changes. Rebuild from rootNodeList +
-        // linkTargets so multi-membership stays consistent. ──
-        if (topLevelDrop && movers.every(m => m.parentKey === null)) {
-          const destPanel = panelOfRoot(onode); // combined key (or UNCLASSIFIED)
-          // Drop onto a panel = make each mover's link set equal that panel's target set.
-          for (const m of movers) {
-            const fromPanel = panelOfRoot(m);
-            if (fromPanel !== destPanel) void relinkPanel(m.node.id, fromPanel, destPanel);
-          }
-          // Move mover nodes adjacent to the target in rootNodeList (panel is a display group;
-          // ordering is the canonical list).
-          const moverNodes = movers.map(m => m.node);
-          const moverSet = new Set(moverNodes);
-          rootNodeList = rootNodeList.filter(n => !moverSet.has(n));
-          let ti = rootNodeList.indexOf(onode.node);
-          if (ti < 0) ti = rootNodeList.length - 1;
-          rootNodeList.splice(zone === 'before' ? ti : ti + 1, 0, ...moverNodes);
-          buildRoots();
-          ctx.saveChildrenCache?.();
-          render();
-          const back = anyOccOf(moverNodes[0].id); if (back) focusRow(back);
-          if (rootParentNodeId !== null) {
-            await Promise.all(movers.map(m => awaitRealId(m)));
-            void apiMoveNode(ctx.gId, moverNodes[0].id, rootParentNodeId, 'down', rootNodeList.map(n => n.id));
-          }
-          return;
-        }
-
-        // ── Case 2: reparent (child zone, or a child being lifted to top level). ──
-        // Capture each mover's pre-move parent NODE id (keyed by the mover ONode itself, which
-        // is stable across the re-keying below) for the link-toggle pass.
+        // Reparent / reorder. A top-level→top-level drop is just a same-parent reorder (newParentId
+        // === the movers' current parent), so the link-toggle pass below no-ops for it. Row keys
+        // equal node ids and don't change on reparent, so no re-keying is needed.
+        // Capture each mover's pre-move parent NODE id for the link-toggle pass.
         const oldParents = new Map<ONode, string | null>(movers.map(o => [o, o.parentId]));
         for (const mover of movers) {
           const sibs = getSiblings(mover);
@@ -1783,16 +1251,11 @@ export function createOutlinerView(ctx: GraphEditorContext, paneOpts?: OutlinerP
           mover.parentId = newParentId;
           fixDepths(mover, childDepth);
           newSibs.splice(at + i, 0, mover);
-          // Re-derive the occurrence key for the new location, then re-index the subtree.
           if (topLevelDrop) {
-            const panelId = panelOfRoot(onode) === UNCLASSIFIED ? null : panelOfRoot(onode);
             mover.parentKey = null;
-            rekeyOcc(mover, rootKey(panelId, mover.node.id));
             rootNodeList.splice(Math.min(at + i, rootNodeList.length), 0, mover.node);
-            linkTargets.delete(mover.node.id);
           } else {
-            mover.parentKey = onode.key; // child zone → onode is the new parent occurrence
-            rekeyOcc(mover, childKey(onode.key, mover.node.id));
+            mover.parentKey = onode.key; // child zone → onode is the new parent row
           }
         }
         const affectedParents = new Set<string | null>([...oldParents.values(), newParentId]);
@@ -1907,7 +1370,7 @@ export function createOutlinerView(ctx: GraphEditorContext, paneOpts?: OutlinerP
     }
     for (let i = 0; i < inserted.length; i++) {
       newSibs.splice(insertAt + i, 0, inserted[i]);
-      if (intoRoots) { rootNodeList.splice(Math.min(insertAt + i, rootNodeList.length), 0, inserted[i].node); linkTargets.delete(inserted[i].node.id); }
+      if (intoRoots) { rootNodeList.splice(Math.min(insertAt + i, rootNodeList.length), 0, inserted[i].node); }
     }
 
     // Invalidate caches for source + target parents so other views refetch fresh data.
@@ -2001,222 +1464,6 @@ export function createOutlinerView(ctx: GraphEditorContext, paneOpts?: OutlinerP
     void moveAcrossPanes(pd, targetParentId, roots, roots.length, baseDepth);
   });
 
-  // ── Property menu (right-click on expand marker) ─────────────────────
-
-  // ── Node link + color menu (click on expand marker) ──────────────────
-
-  // Set a concept node's color CODE locally (childrenCache + every live occurrence) and
-  // refresh the markers/text of every row, so a color change to a linked concept shows up
-  // everywhere it is referenced. Persisted separately by the caller via apiSetNodeColor.
-  const setConceptColor = (nodeId: string, code: string | null) => {
-    for (const o of occsOf(nodeId)) o.node.color = code ?? undefined;
-    ctx.childrenCache.forEach(nodes => { for (const n of nodes) if (n.id === nodeId) n.color = code ?? undefined; });
-    ctx.saveChildrenCache?.();
-    // The color of a linked concept feeds every referrer's marker → refresh all markers.
-    rowMap.forEach((_, k) => { const o = byKey.get(k); if (o) updateExpandMarker(o); });
-    // The concept node's own rows show the color as their text color too.
-    for (const o of occsOf(nodeId)) {
-      const ta = rowMap.get(o.key)?.querySelector<HTMLTextAreaElement>('textarea');
-      if (ta) ta.style.color = code ?? TEXT_HIGH;
-    }
-  };
-
-  // Link-panel relink: drop onto a panel = make the node's link set
-  // EQUAL that panel's target set. fromKey/toKey are combined panel keys (or UNCLASSIFIED).
-  // We diff the sets: drop links only in `from`, add links only in `to`. apiToggleLink toggles,
-  // and the drag invariant (node IS linked to its from-set, NOT to the added to-targets) makes
-  // plain toggles reach the right final state. Updates the local linkTargets cache too.
-  const relinkPanel = async (nodeId: string, fromKey: string, toKey: string) => {
-    const fromSet = new Set(parseCombo(fromKey));
-    const toSet = new Set(parseCombo(toKey));
-    const toRemove = [...fromSet].filter(t => !toSet.has(t));
-    const toAdd = [...toSet].filter(t => !fromSet.has(t));
-    linkTargets.set(nodeId, [...toSet]);
-    for (const t of toRemove) await apiToggleLink(ctx.gId, nodeId, t); // unlink
-    for (const t of toAdd) await apiToggleLink(ctx.gId, nodeId, t);    // link
-  };
-
-  // Color picker popover for a CONCEPT NODE (the linked node). Applies the chosen palette
-  // code to the node and persists via apiSetNodeColor (null clears). `onChanged` refreshes
-  // the caller UI (the link menu) after the change.
-  const showColorPickerFor = (nodeId: string, anchorEl: HTMLElement, onChanged: () => void) => {
-    document.querySelector('[data-color-picker]')?.remove();
-    const picker = document.createElement('div');
-    picker.dataset.colorPicker = '1';
-    picker.style.cssText = `position:fixed;z-index:101;background:hsl(240,14%,12%);border:1px solid ${BORDER};border-radius:6px;padding:6px;display:grid;grid-template-columns:repeat(6,1fr);gap:4px;box-shadow:0 4px 12px rgba(0,0,0,.5);`;
-    const ar = anchorEl.getBoundingClientRect();
-    picker.style.left = `${ar.left}px`;
-    picker.style.top = `${ar.bottom + 4}px`;
-
-    const current = resolveColor(nodeId); // current color CODE
-    const apply = (code: string | null) => {
-      setConceptColor(nodeId, code);
-      void apiSetNodeColor(ctx.gId, nodeId, code);
-      picker.remove();
-      onChanged();
-    };
-    const noneBtn = document.createElement('button');
-    noneBtn.title = '色なし'; noneBtn.textContent = '×';
-    noneBtn.style.cssText = `width:20px;height:20px;border-radius:4px;border:1.5px solid ${BORDER};background:transparent;cursor:pointer;grid-column:span 2;font-size:10px;color:${TEXT_DIM};`;
-    noneBtn.addEventListener('click', () => apply(null));
-    picker.appendChild(noneBtn);
-    for (const [id, code] of ctx.colorPalette) {
-      const btn = document.createElement('button');
-      btn.title = id;
-      btn.style.cssText = `width:20px;height:20px;border-radius:4px;border:${current === code ? `2px solid ${TEXT_HIGH}` : 'none'};background:${code};cursor:pointer;`;
-      btn.addEventListener('click', () => apply(code));
-      picker.appendChild(btn);
-    }
-    document.body.appendChild(picker);
-    const closePicker = (e: MouseEvent) => {
-      if (!picker.contains(e.target as Node)) { picker.remove(); document.removeEventListener('click', closePicker, true); }
-    };
-    setTimeout(() => document.addEventListener('click', closePicker, true), 0);
-  };
-
-  // Click on a row's left square opens this menu: shows the node's LINKED concept nodes as
-  // chips (× unlinks, clicking the label assigns a color to that concept), plus a node SEARCH
-  // that links the chosen (or a newly-created) node to this one.
-  const showPropertyMenu = (onode: ONode, x: number, y: number) => {
-    document.querySelector('[data-prop-menu]')?.remove();
-    document.querySelector('[data-color-picker]')?.remove();
-
-    const menu = document.createElement('div');
-    menu.dataset.propMenu = '1';
-    menu.style.cssText = `position:fixed;left:${x}px;top:${y}px;z-index:100;width:260px;background:hsl(240,14%,9%);border:1px solid ${BORDER};border-radius:6px;padding:8px;font-size:13px;box-shadow:0 4px 16px rgba(0,0,0,.4);`;
-
-    const sid = onode.node.id;
-
-    // Refresh this node's marker + panels after a link change.
-    const refreshAfterLink = () => {
-      for (const o of occsOf(sid)) updateExpandMarker(o);
-      buildRoots();
-      render();
-    };
-
-    // Link an existing node to this one (idempotent). Optimistically updates linkTargets +
-    // childrenCache so chips/markers/panels reflect it at once.
-    const linkExisting = async (target: ExplorerNode) => {
-      if (target.id === sid) return;
-      const cur = linkTargets.get(sid) ?? [];
-      if (!cur.includes(target.id)) { cur.push(target.id); linkTargets.set(sid, cur); }
-      if (!panelLabelCache.has(target.id)) panelLabelCache.set(target.id, labelOf(target));
-      const cc = ctx.childrenCache.get(sid);
-      if (cc && !cc.find(n => n.id === target.id)) { cc.push(target); ctx.saveChildrenCache?.(); }
-      refreshAfterLink();
-      await apiLinkNode(ctx.gId, sid, target.id);
-    };
-
-    // Create a brand-new node (no parent) and link it.
-    const createAndLink = async (label: string) => {
-      const nn = await apiCreateNode(ctx.gId, null, paneLang, label);
-      if (nn) await linkExisting(nn);
-    };
-
-    const rebuild = () => {
-      menu.innerHTML = '';
-
-      // ── Linked concept chips: the node's link targets (pane parent already excluded by
-      // ensureLinkTargets). × unlinks; clicking the label assigns a color to that concept. ──
-      const tagsEl = document.createElement('div');
-      tagsEl.style.cssText = `display:flex;flex-wrap:wrap;gap:4px;margin-bottom:6px;min-height:4px;`;
-      for (const tid of (linkTargets.get(sid) ?? [])) {
-        const col = resolveColor(tid) ?? TEXT_DIM;
-        const tag = document.createElement('span');
-        tag.style.cssText = `display:inline-flex;align-items:center;gap:3px;padding:2px 8px;border-radius:4px;background:${col};color:#fff;font-size:12px;font-weight:500;`;
-        const namePart = document.createElement('span');
-        namePart.textContent = targetLabel(tid);
-        namePart.style.cursor = 'pointer';
-        namePart.addEventListener('click', (e) => { e.stopPropagation(); showColorPickerFor(tid, tag, rebuild); });
-        const xBtn = document.createElement('button');
-        xBtn.textContent = '×';
-        xBtn.style.cssText = `background:transparent;border:none;color:#fff;opacity:.7;cursor:pointer;padding:0 0 0 3px;font-size:11px;line-height:1;`;
-        xBtn.addEventListener('click', async (e) => {
-          e.stopPropagation();
-          // Unlink the edge between this node and the target.
-          linkTargets.set(sid, (linkTargets.get(sid) ?? []).filter(t => t !== tid));
-          refreshAfterLink();
-          rebuild();
-          await apiUnlinkNode(ctx.gId, sid, tid);
-        });
-        tag.append(namePart, xBtn);
-        tagsEl.appendChild(tag);
-      }
-      menu.appendChild(tagsEl);
-
-      // ── Node search input: links the chosen node; Enter with no exact match creates one. ──
-      const searchIn = document.createElement('input');
-      searchIn.placeholder = '';
-      searchIn.style.cssText = `width:100%;box-sizing:border-box;background:transparent;border:1px solid ${BORDER};border-radius:3px;padding:4px 6px;color:${TEXT_HIGH};font-size:12px;outline:none;font-family:inherit;margin-bottom:4px;`;
-      menu.appendChild(searchIn);
-
-      const divider = document.createElement('div');
-      divider.style.cssText = `border-top:1px solid ${BORDER};margin:2px 0 4px;`;
-      menu.appendChild(divider);
-
-      const listContainer = document.createElement('div');
-      listContainer.style.cssText = `max-height:220px;overflow-y:auto;`;
-      menu.appendChild(listContainer);
-
-      let resultNodes: ExplorerNode[] = [];
-      let timer: ReturnType<typeof setTimeout> | null = null;
-      const runSearch = async () => {
-        const q = searchIn.value.trim();
-        listContainer.innerHTML = '';
-        resultNodes = [];
-        if (!q) return;
-        const lang = ctx.state.showFallback ? undefined : paneLang;
-        const { nodes } = await fetchAllNodes(ctx.gId, [], 0, lang, undefined, q, 20);
-        const linked = new Set(linkTargets.get(sid) ?? []);
-        resultNodes = nodes.filter(n => n.id !== sid && !linked.has(n.id));
-        for (const n of resultNodes) {
-          const lbl = (primaryLabel(n, paneLang) ?? fallbackLabel(n, paneLang)) || n.id.slice(0, 8);
-          const item = document.createElement('div');
-          item.textContent = lbl;
-          item.style.cssText = `padding:4px 6px;cursor:pointer;font-size:13px;color:${TEXT_MID};white-space:nowrap;overflow:hidden;text-overflow:ellipsis;border-radius:3px;`;
-          item.addEventListener('mouseenter', () => { item.style.background = 'rgba(255,255,255,.05)'; });
-          item.addEventListener('mouseleave', () => { item.style.background = ''; });
-          item.addEventListener('click', () => { void linkExisting(n); searchIn.value = ''; rebuild(); });
-          listContainer.appendChild(item);
-        }
-      };
-      searchIn.addEventListener('input', () => { if (timer) clearTimeout(timer); timer = setTimeout(() => void runSearch(), 200); });
-      searchIn.addEventListener('keydown', (e) => {
-        if (e.key !== 'Enter') return;
-        e.preventDefault();
-        const val = searchIn.value.trim();
-        if (!val) return;
-        // Exact label match among current results → link it; otherwise create a new node.
-        const exact = resultNodes.find(n => (primaryLabel(n, paneLang) ?? fallbackLabel(n, paneLang)) === val);
-        if (exact) { void linkExisting(exact); } else { void createAndLink(val); }
-        searchIn.value = '';
-        rebuild();
-      });
-      searchIn.focus();
-    };
-
-    rebuild();
-    // Chips need this node's link targets; load them (lazy for non-root rows) then refill.
-    void ensureLinkTargets(sid).then(() => { if (document.body.contains(menu)) rebuild(); });
-    document.body.appendChild(menu);
-    requestAnimationFrame(() => {
-      const r = menu.getBoundingClientRect();
-      if (r.right > window.innerWidth) menu.style.left = `${window.innerWidth - r.width - 8}px`;
-      if (r.bottom > window.innerHeight) menu.style.top = `${y - r.height}px`;
-    });
-    const onOutside = (e: MouseEvent) => {
-      const t = e.target as Element;
-      if (!menu.contains(t) && !t?.closest('[data-color-picker]'))
-        { menu.remove(); document.removeEventListener('mousedown', onOutside); }
-    };
-    const onKey = (e: KeyboardEvent) => {
-      if (e.key === 'Escape') {
-        document.querySelector('[data-color-picker]')?.remove();
-        menu.remove(); document.removeEventListener('keydown', onKey);
-      }
-    };
-    setTimeout(() => { document.addEventListener('mousedown', onOutside); document.addEventListener('keydown', onKey); }, 0);
-  };
 
   // ── Link-search (/) ──────────────────────────────────────────────────
 
@@ -2277,15 +1524,12 @@ export function createOutlinerView(ctx: GraphEditorContext, paneOpts?: OutlinerP
       const oldNode = onode.node;
       restoreRow();
 
-      // Replace this occurrence's underlying node with the found node, then re-key it
-      // (the occurrence key embeds the node id). unindex under old id, swap, re-index.
-      const prefix = rootPanelPrefix(onode.key); // preserve which panel this root sat in
+      // Replace this row's underlying node with the found node, then re-index under the new id
+      // (the row key is just the node id): unindex under the old id, swap, re-index.
       unindexOcc(onode);
       rowMap.delete(onode.key);
       onode.node = node;
-      onode.key = wasRoot
-        ? rootKey(prefix === '@' || prefix == null ? null : prefix, node.id)
-        : childKey(onode.parentKey!, node.id);
+      onode.key = node.id;
       indexOcc(onode);
       row.dataset.nodeId = node.id;
       row.dataset.occKey = onode.key;
@@ -2408,7 +1652,6 @@ export function createOutlinerView(ctx: GraphEditorContext, paneOpts?: OutlinerP
         unindexOcc(n);
         ctx.childrenCache.delete(n.parentId);
       }
-      linkTargets.delete(nodeId);
       ctx.childrenCache.delete(nodeId);
       const promoteTo = parentId && parentId !== ORPHAN_ID && !selNodeIds.has(parentId) ? parentId : undefined;
       delPromises.push(apiDeleteNode(ctx.gId, nodeId, promoteTo).then(res => {
@@ -2558,13 +1801,12 @@ export function createOutlinerView(ctx: GraphEditorContext, paneOpts?: OutlinerP
     const selIds = new Set(sel.map(n => n.node.id));
     if (oldCc) oldCc.splice(0, oldCc.length, ...oldCc.filter(x => !selIds.has(x.id)));
 
-    // Re-parent, fix depths, and re-key each occurrence under the new parent occurrence.
+    // Re-parent and fix depths (row keys equal node ids, so no re-keying needed).
     const newDepth = targetParent.depth + 1;
     for (const n of sel) {
       n.parentId = targetParent.node.id;
       n.parentKey = targetParent.key;
       fixDepths(n, newDepth);
-      rekeyOcc(n, childKey(targetParent.key, n.node.id));
     }
 
     if (direction === 'down') targetParent.children.unshift(...sel);
@@ -2609,18 +1851,15 @@ export function createOutlinerView(ctx: GraphEditorContext, paneOpts?: OutlinerP
     // Capture previous sibling before splice (needed when inserting before the first node)
     const prevSibNode = before && idx > 0 ? sibs[idx - 1] : undefined;
     const isRoot = onode.parentKey === null;
-    // New sibling shares onode's parent occurrence (and, for a root, its panel).
-    const tempKey = isRoot
-      ? rootKey(panelOfRoot(onode) === UNCLASSIFIED ? null : panelOfRoot(onode), tempId)
-      : childKey(onode.parentKey!, tempId);
+    // New sibling shares onode's parent row.
+    const tempKey = rootKey(null, tempId);
     const no = make(tempNode, onode.parentId, onode.depth, tempKey, onode.parentKey);
     no.childrenLoaded = true;
-    linkTargets.set(tempId, []);
     sibs.splice(before ? idx : idx + 1, 0, no);
     if (isRoot) { const ai = rootNodeList.indexOf(onode.node); rootNodeList.splice(ai < 0 ? rootNodeList.length : (before ? ai : ai + 1), 0, tempNode); }
 
     const cleanupTemp = () => {
-      sibs.splice(sibs.indexOf(no), 1); unindexOcc(no); linkTargets.delete(tempId);
+      sibs.splice(sibs.indexOf(no), 1); unindexOcc(no);
       if (isRoot) { const ri = rootNodeList.indexOf(tempNode); if (ri >= 0) rootNodeList.splice(ri, 1); }
     };
 
@@ -2655,12 +1894,8 @@ export function createOutlinerView(ctx: GraphEditorContext, paneOpts?: OutlinerP
     }
 
     const typedText = newRow.querySelector<HTMLTextAreaElement>('textarea')?.value ?? '';
-    // temp id → real id: swap the occurrence id + key + indices + row, and the cache key.
-    linkTargets.delete(tempId); linkTargets.set(nn.id, []);
-    const newKey = isRoot
-      ? rootKey(panelOfRoot(onode) === UNCLASSIFIED ? null : panelOfRoot(onode), nn.id)
-      : childKey(onode.parentKey!, nn.id);
-    swapNodeId(no, tempId, nn.id, newKey);
+    // temp id → real id: swap the row's id + key + index + row element.
+    swapNodeId(no, tempId, nn.id, nn.id);
     Object.assign(tempNode, nn); // copy labels/color (id already real via swapNodeId)
     resolveTemp();
     tempReady.delete(tempId);
@@ -2688,7 +1923,6 @@ export function createOutlinerView(ctx: GraphEditorContext, paneOpts?: OutlinerP
     let at = sibs.indexOf(o);
     if (at < 0) at = sibs.length - 1;
     const toRoot = o.parentKey === null;
-    const panelId = toRoot ? (panelOfRoot(o) === UNCLASSIFIED ? null : panelOfRoot(o)) : null;
     const rootAt = toRoot ? rootNodeList.indexOf(o.node) : -1;
     for (let i = 0; i < kids.length; i++) {
       const c = kids[i];
@@ -2696,10 +1930,7 @@ export function createOutlinerView(ctx: GraphEditorContext, paneOpts?: OutlinerP
       c.parentKey = o.parentKey;
       fixDepths(c, o.depth);
       if (toRoot) {
-        rekeyOcc(c, rootKey(panelId, c.node.id));
         rootNodeList.splice((rootAt < 0 ? rootNodeList.length : rootAt + 1 + i), 0, c.node);
-      } else {
-        rekeyOcc(c, childKey(o.parentKey!, c.node.id));
       }
       sibs.splice(at + 1 + i, 0, c);          // o の直後に順に差し込む（o 除去後にその位置を継ぐ）
     }
@@ -2756,7 +1987,6 @@ export function createOutlinerView(ctx: GraphEditorContext, paneOpts?: OutlinerP
       unindexOcc(o);
       ctx.childrenCache.delete(o.parentId);
     }
-    linkTargets.delete(nodeId);
     ctx.childrenCache.delete(nodeId);
     ctx.saveChildrenCache?.();
     render();
@@ -2839,7 +2069,6 @@ export function createOutlinerView(ctx: GraphEditorContext, paneOpts?: OutlinerP
     onode.parentId = targetParent.node.id;
     onode.parentKey = targetParent.key;
     fixDepths(onode, targetParent.depth + 1);
-    rekeyOcc(onode, childKey(targetParent.key, onode.node.id));
     if (direction === 'down') targetParent.children.unshift(onode);
     else targetParent.children.push(onode);
     targetParent.expanded = true;
@@ -2871,7 +2100,6 @@ export function createOutlinerView(ctx: GraphEditorContext, paneOpts?: OutlinerP
     onode.parentId = prev.node.id;
     onode.parentKey = prev.key;
     fixDepths(onode, prev.depth + 1);
-    rekeyOcc(onode, childKey(prev.key, onode.node.id));
     prev.children.push(onode);
     prev.expanded = true;
     ctx.childrenCache.delete(prev.node.id);
@@ -2901,14 +2129,11 @@ export function createOutlinerView(ctx: GraphEditorContext, paneOpts?: OutlinerP
     onode.parentKey = parent.parentKey;
     fixDepths(onode, parent.depth);
     grandSibs.splice(parentIdx + 1, 0, onode);
-    // Re-key under the new parent occurrence (or as a root, preserving the parent's panel).
+    // Row keys equal node ids, so no re-keying is needed; just keep rootNodeList in sync when the
+    // node becomes a top-level row.
     if (parent.parentKey === null) {
-      const newKey = rootKey(panelOfRoot(parent) === UNCLASSIFIED ? null : panelOfRoot(parent), onode.node.id);
-      rekeyOcc(onode, newKey);
       const pi = rootNodeList.indexOf(parent.node);
       rootNodeList.splice(pi < 0 ? rootNodeList.length : pi + 1, 0, onode.node);
-    } else {
-      rekeyOcc(onode, childKey(parent.parentKey, onode.node.id));
     }
     if (onode.parentId !== null) ctx.childrenCache.delete(onode.parentId);
 
