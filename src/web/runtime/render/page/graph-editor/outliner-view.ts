@@ -4,7 +4,7 @@ import {
   fetchChildren, fetchBookmarks, fetchBookmarkedNodes, fetchAllNodes,
   apiCreateNode as _apiCreateNode, apiUpdateNode, apiDeleteNode, apiMoveNode as _apiMoveNode, apiMoveBookmark,
   apiToggleLink as _apiToggleLink, apiUnlinkNode, fetchColors,
-  fetchLineCounts, fetchPlacementCount,
+  fetchPlacementCount,
 } from './api';
 
 // '__orphan__' is a synthetic grouping, NOT a real node. Orphan nodes are rendered under it (so
@@ -165,9 +165,6 @@ export function createOutlinerView(ctx: GraphEditorContext, paneOpts?: OutlinerP
       swapNodeId(o, tempId, nn.id, rootKey(null, nn.id));
       Object.assign(tempNode, nn); // copy labels/color (id already set to real by swapNodeId)
       resolveTemp(); tempReady.delete(tempId);
-      const cc = ctx.childrenCache.get(parentId);
-      if (cc) cc.unshift(nn); else setCachedChildren(parentId, [nn]);
-      ctx.saveChildrenCache?.();
       if (typedText.trim() && typedText.trim() !== label) void apiUpdateNode(ctx.gId, nn.id, paneLang, typedText.trim());
       // Move to front in backend (was appended to chain end)
       void apiMoveNode(ctx.gId, nn.id, parentId, 'up', rootNodeList.map(r => r.id));
@@ -195,11 +192,6 @@ export function createOutlinerView(ctx: GraphEditorContext, paneOpts?: OutlinerP
   const byKey = new Map<string, ONode>();
   // node id → row element.
   const rowMap = new Map<string, HTMLElement>();
-  // node id → 関係(line)件数。ノード行の右端バッジに表示する。localStorage 永続の共有キャッシュ
-  // (ctx)を使い、リロード直後も前回値で即表示。今セッションで実取得済みの id は countFetched で管理し、
-  // 永続値があっても必ず一度は再取得して最新化する（移動＋更新で件数が一瞬空になる見え方を防ぐ）。
-  const lineCountCache = ctx.lineCountCache;
-  const countFetched = new Set<string>();
   // The ONode for a node id, or undefined (one per id under single placement).
   const anyOccOf = (nodeId: string): ONode | undefined => byKey.get(nodeId);
   // The live ONode(s) for a node id — 0 or 1 under single placement. Kept as an array so the
@@ -229,34 +221,9 @@ export function createOutlinerView(ctx: GraphEditorContext, paneOpts?: OutlinerP
     if (row) { rowMap.set(newKey, row); row.dataset.nodeId = newId; }
     for (const c of o.children) swapNodeId(c, c.node.id, c.node.id, c.node.id);
   };
-  // Cache keys whose children we've fetched (or revalidated) from the backend THIS page load.
-  // Entries hydrated from localStorage are stale until revalidated, so the first access of an
-  // unvalidated key refetches before use — keeping reloads fast without serving stale data.
-  const validated = new Set<string | null>();
-
-  // ── 展開状態の永続化 ───────────────────────────────────────────────────────────
-  // どの occurrence（＝ルートからのパス）を開いていたかを localStorage に保持し、リロード時に
-  // 復元する。occurrence キーはノード id とパスから決まる安定文字列なので再読込後も一致する。
-  const EXPAND_STORE_KEY = `ge-expanded:${ctx.gId}:${paneOpts?.paneId ?? 'main'}`;
-  let expandedKeys = new Set<string>();
-  try {
-    const raw = localStorage.getItem(EXPAND_STORE_KEY);
-    if (raw) expandedKeys = new Set(JSON.parse(raw) as string[]);
-  } catch { /* ignore corrupt cache */ }
-  let expandReady = false; // 初回の復元が済むまで保存しない（未展開の初期描画で上書きしないため）。
-  let persistExpandTimer: ReturnType<typeof setTimeout> | null = null;
-  // 現在のモデルから「開いている occurrence キー」を集めて保存（デバウンス）。差分管理より確実。
-  const persistExpanded = () => {
-    if (!expandReady) return;
-    if (persistExpandTimer) clearTimeout(persistExpandTimer);
-    persistExpandTimer = setTimeout(() => {
-      persistExpandTimer = null;
-      const keys: string[] = [];
-      for (const o of byKey.values()) if (o.expanded) keys.push(o.key);
-      expandedKeys = new Set(keys);
-      try { localStorage.setItem(EXPAND_STORE_KEY, JSON.stringify(keys)); } catch { /* quota */ }
-    }, 400);
-  };
+  // No-cache / always-online model: every read hits the DO (the single source of truth); the
+  // frontend keeps no persistent cache and does not restore expansion across reloads. Reload shows
+  // the root's children collapsed (one /children call).
 
   // Per-pane language (display + edit). Falls back to the global default when unset.
   let paneLang: 'en' | 'ja' = paneOpts?.lang ?? ctx.state.lang;
@@ -378,7 +345,7 @@ export function createOutlinerView(ctx: GraphEditorContext, paneOpts?: OutlinerP
     render();
   };
 
-  const render = () => { renderNested(); scheduleCountFetch(); };
+  const render = () => { renderNested(); };
 
   const renderNested = () => {
     rowMap.clear();
@@ -394,7 +361,6 @@ export function createOutlinerView(ctx: GraphEditorContext, paneOpts?: OutlinerP
     const draftParentId = paneParentSet ? paneParentId : (ctx.rootNodeId ?? null);
     draftEl.style.display = (roots.length === 0 && draftParentId !== null) ? 'flex' : 'none';
     updateSelectionHighlight();
-    schedulePrefetch();
     if (paneOpts?.onContentWidthChange) scheduleWidthUpdate();
   };
 
@@ -495,69 +461,20 @@ export function createOutlinerView(ctx: GraphEditorContext, paneOpts?: OutlinerP
     return ctx.rootNodeId ? nodes.filter(n => n.id !== ctx.rootNodeId) : nodes;
   };
 
-  // Sets childrenCache and triggers localStorage persistence
-  const setCachedChildren = (key: string | null, val: ExplorerNode[]) => {
-    ctx.childrenCache.set(key, val);
-    ctx.saveChildrenCache?.();
-  };
-
   const ensureChildren = async (onode: ONode) => {
     if (onode.childrenLoaded) return;
-    const id = onode.node.id;
-    let cached = ctx.childrenCache.get(id);
-    // Refetch when missing OR when only a stale (unvalidated) localStorage entry exists.
-    // ensureChildren runs before the subtree is rendered, so awaiting fresh data here keeps
-    // expanded children in sync with the backend without any in-place rebuild.
-    if (!cached || !validated.has(id)) {
-      cached = await fetchChildrenFiltered(id);
-      setCachedChildren(id, cached);
-      validated.add(id);
-    }
+    // Always fetch fresh from the DO (no cache). childrenLoaded still short-circuits a re-expand,
+    // so expanding a node stays exactly one /children call.
+    const fresh = await fetchChildrenFiltered(onode.node.id);
     // Single placement: show each node under ONE parent only. Exclude ancestors (surfaced as
     // neighbours by undirected edges) AND any node already placed elsewhere in this pane
     // (byKey.has) — so a node reachable via two parents (diamond) appears under whichever
     // parent was expanded first, never twice. This is what keeps row keys (= node ids) unique.
     const excl = ancestorIds(onode); excl.add(onode.node.id);
-    const kids = cached.filter(c => !excl.has(c.id) && !byKey.has(c.id));
+    const kids = fresh.filter(c => !excl.has(c.id) && !byKey.has(c.id));
     onode.children = kids
       .map(c => make(c, onode.node.id, onode.depth + 1, childKey(onode.key, c.id), onode.key));
     onode.childrenLoaded = true;
-  };
-
-  // Children pre-warming is intentionally DISABLED. It used to fetch children for every visible
-  // node (to make the expand triangle exact and expanding instant), but on a large tree that was
-  // ~25 reads on load alone — enough to trip the backend's 120-reads/60s limit and starve the
-  // single-threaded per-tenant DO (which also made /move writes 500). The expand triangle now
-  // shows optimistically (updateExpandMarker defaults to "has children" when unknown); children
-  // load lazily on expand — one read, only when actually needed. Kept as a no-op so callers in
-  // render()/expandInDom() need no change.
-  const schedulePrefetch = () => { /* disabled: see comment above */ };
-
-  // 行の右端バッジに関係件数を反映（0 は非表示）。バッジの無い行（リンクなしヘッダ等）は無視。
-  const applyRowCount = (row: HTMLElement, count: number) => {
-    const badge = row.querySelector<HTMLElement>('[data-line-count]');
-    if (badge) badge.textContent = String(count);
-  };
-
-  // 可視ノードのうち未取得のぶんを 1 リクエストで取得し、各行のバッジを更新する。
-  let countTimer: ReturnType<typeof setTimeout> | null = null;
-  const scheduleCountFetch = () => {
-    if (countTimer) clearTimeout(countTimer);
-    countTimer = setTimeout(() => {
-      countTimer = null;
-      // 永続キャッシュに値があっても、今セッションで未取得(countFetched外)の id は必ず1回取得して最新化。
-      const ids = [...new Set(flatVisible().map(o => o.node.id))]
-        .filter(id => id !== ORPHAN_ID && !id.startsWith('temp-') && !countFetched.has(id));
-      if (ids.length === 0) return;
-      void fetchLineCounts(ctx.gId, ids).then(counts => {
-        for (const id of ids) { lineCountCache.set(id, counts[id] ?? 0); countFetched.add(id); }
-        ctx.saveLineCountCache?.();
-        for (const o of flatVisible()) {
-          const row = rowMap.get(o.key);
-          if (row) applyRowCount(row, lineCountCache.get(o.node.id) ?? 0);
-        }
-      });
-    }, 150);
   };
 
   const updateExpandMarker = (onode: ONode) => {
@@ -565,9 +482,6 @@ export function createOutlinerView(ctx: GraphEditorContext, paneOpts?: OutlinerP
     if (!row) return;
     const m = row.querySelector<HTMLElement>('[data-expand-marker]');
     if (!m) return;
-    const hasChildren = onode.childrenLoaded
-      ? onode.children.length > 0
-      : (ctx.childrenCache.get(onode.node.id)?.length ?? 1) > 0;
     // 四角はデフォルトは塗らない（輪郭のみ）。関係(line)が選択中ならその関係の参加ノードを塗り、
     // 関係が無いときは「選択中のノード」を塗る。
     const ar = ctx.activeRelation;
@@ -579,13 +493,9 @@ export function createOutlinerView(ctx: GraphEditorContext, paneOpts?: OutlinerP
       m.style.background = 'transparent';
       m.style.border = `1.5px solid ${TEXT_DIM}`;
     }
-    // Triangle expand button (right side)
+    // 展開中の行だけ静的な ▾ を表示（葉に ▸ は出さない＝子の有無を推測しない）。非インタラクティブ。
     const tri = row.querySelector<HTMLElement>('[data-expand-triangle]');
-    if (tri) {
-      tri.textContent = onode.expanded ? '▾' : '▸';
-      tri.style.opacity = hasChildren ? '1' : '0';
-      tri.style.pointerEvents = hasChildren ? 'auto' : 'none';
-    }
+    if (tri) tri.textContent = onode.expanded ? '▾' : '';
   };
 
   const expandInDom = (onode: ONode) => {
@@ -603,9 +513,6 @@ export function createOutlinerView(ctx: GraphEditorContext, paneOpts?: OutlinerP
       }
     };
     insertSubtree(onode.children);
-    schedulePrefetch();
-    scheduleCountFetch();
-    persistExpanded();
   };
 
   const collapseInDom = (onode: ONode) => {
@@ -618,24 +525,6 @@ export function createOutlinerView(ctx: GraphEditorContext, paneOpts?: OutlinerP
       }
     };
     removeSubtree(onode.children);
-    persistExpanded();
-  };
-
-  // リロード時に、保存済みの occurrence キーを上から辿って開き直す（子は必要に応じて取得）。
-  // 作業量は「前回開いていた分」に限られるので、全展開のような爆発は起きない。
-  const restoreExpansion = async () => {
-    if (expandedKeys.size) {
-      const walk = async (o: ONode): Promise<void> => {
-        if (!expandedKeys.has(o.key)) return;
-        if (!o.childrenLoaded) await ensureChildren(o);
-        o.expanded = true;
-        for (const c of o.children) await walk(c);
-      };
-      for (const r of [...roots]) await walk(r);
-      render();
-      if (paneOpts?.onContentWidthChange) scheduleWidthUpdate();
-    }
-    expandReady = true; // 復元後は保存を許可（以降のユーザー操作を localStorage に反映）。
   };
 
   const expandingSet = new Set<string>();
@@ -794,11 +683,8 @@ export function createOutlinerView(ctx: GraphEditorContext, paneOpts?: OutlinerP
         if (idx >= 0) sibs.splice(idx, 1);
         if (o.parentKey === null) { const ri = rootNodeList.indexOf(o.node); if (ri >= 0) rootNodeList.splice(ri, 1); }
         unindexOcc(o);
-        const cc = ctx.childrenCache.get(o.parentId);
-        if (cc) { const ci = cc.findIndex(n => n.id === node.id); if (ci >= 0) cc.splice(ci, 1); }
       }
     }
-    ctx.saveChildrenCache?.();
     render();
   };
 
@@ -913,9 +799,6 @@ export function createOutlinerView(ctx: GraphEditorContext, paneOpts?: OutlinerP
         // consistent at once; mirror the new label into the other occurrences' textareas too
         // so multi-membership twins update visibly without a full re-render.
         if (paneLang === 'en') onode.node.en = newVal; else onode.node.ja = newVal;
-        const cc = ctx.childrenCache.get(onode.parentId);
-        const cn = cc?.find(n => n.id === onode.node.id);
-        if (cn) { if (paneLang === 'en') cn.en = newVal; else cn.ja = newVal; }
         for (const twin of occsOf(onode.node.id)) {
           if (twin === onode) continue;
           const twinTa = rowMap.get(twin.key)?.querySelector<HTMLTextAreaElement>('textarea');
@@ -1056,12 +939,11 @@ export function createOutlinerView(ctx: GraphEditorContext, paneOpts?: OutlinerP
       }
     });
 
-    // Triangle expand button (right side)
-    const triBtn = document.createElement('button');
+    // 展開インジケータ（非インタラクティブ）。展開/折畳みはキーボードのみ（Ctrl/Cmd+↓/↑）。
+    // updateExpandMarker が「展開中は ▾ / それ以外は空」を設定する（葉に ▸ は出さない）。
+    const triBtn = document.createElement('span');
     triBtn.dataset.expandTriangle = '1';
-    triBtn.textContent = '▸';
-    triBtn.style.cssText = `flex-shrink:0;background:transparent;border:none;color:${TEXT_MID};cursor:pointer;font-size:15px;padding:0 4px;opacity:0;pointer-events:none;line-height:1;`;
-    triBtn.addEventListener('click', (e) => { e.stopPropagation(); void toggleExpand(onode); });
+    triBtn.style.cssText = `flex-shrink:0;color:${TEXT_MID};font-size:15px;padding:0 4px;pointer-events:none;line-height:1;`;
 
     // Long press (350ms) on row body → enable drag
     let pressTimer: ReturnType<typeof setTimeout> | null = null;
@@ -1232,8 +1114,6 @@ export function createOutlinerView(ctx: GraphEditorContext, paneOpts?: OutlinerP
           const idx = sibs.indexOf(mover);
           if (idx >= 0) sibs.splice(idx, 1);
           if (mover.parentKey === null) { const ri = rootNodeList.indexOf(mover.node); if (ri >= 0) rootNodeList.splice(ri, 1); }
-          const cc = ctx.childrenCache.get(mover.parentId);
-          if (cc) { const ci = cc.findIndex(n => n.id === mover.node.id); if (ci >= 0) cc.splice(ci, 1); }
         }
         // Recompute insert index after removals (removals above the target shift it left).
         const at = insertAtFor();
@@ -1250,8 +1130,6 @@ export function createOutlinerView(ctx: GraphEditorContext, paneOpts?: OutlinerP
           }
         }
         const affectedParents = new Set<string | null>([...oldParents.values(), newParentId]);
-        for (const pid of affectedParents) { if (pid !== null) ctx.childrenCache.delete(pid); }
-        ctx.saveChildrenCache?.();
         render();
 
         await Promise.all(movers.map(m => awaitRealId(m)));
@@ -1269,6 +1147,8 @@ export function createOutlinerView(ctx: GraphEditorContext, paneOpts?: OutlinerP
           if (newLinks.length) await Promise.all(newLinks);
           void apiMoveNode(ctx.gId, movers[0].node.id, newParentId, 'down', newSibs.map(s => s.node.id));
         }
+        // Reconcile every affected parent (old + new) to the DO once the writes settle.
+        for (const pid of affectedParents) if (pid !== null) scheduleConfirm(pid);
       } else {
         // ── Cross-pane move (movers came from another pane) ──
         await moveAcrossPanes(pd, newParentId, newSibs, insertAtFor(), childDepth);
@@ -1287,17 +1167,8 @@ export function createOutlinerView(ctx: GraphEditorContext, paneOpts?: OutlinerP
       void navigator.clipboard.writeText(`[${onode.node.id}]${lbl}`).then(() => showToast('コピーしました'));
     });
 
-    // 紐づくリレーションテキストの件数バッジ（ラベルの右、コピーアイコンの手前）。件数 0 は非表示。
-    const countBadge = document.createElement('span');
-    countBadge.dataset.lineCount = '1';
-    countBadge.title = 'リレーションテキスト件数';
-    countBadge.style.cssText = `flex-shrink:0;font-size:11px;color:${TEXT_MID};padding:0 4px;line-height:1;min-width:12px;text-align:right;font-variant-numeric:tabular-nums;`;
-    const cachedCount = lineCountCache.get(onode.node.id);
-    if (cachedCount != null) countBadge.textContent = String(cachedCount);
-
     row.insertBefore(triBtn, btnWrap);
     row.appendChild(ta);
-    row.appendChild(countBadge);
     row.appendChild(copyIcon);
     updateExpandMarker(onode);
     return row;
@@ -1365,10 +1236,6 @@ export function createOutlinerView(ctx: GraphEditorContext, paneOpts?: OutlinerP
     }
 
     // Invalidate caches for source + target parents so other views refetch fresh data.
-    const affected = new Set<string | null>([newParentId]);
-    for (const m of movers) affected.add(m.oldParentId);
-    for (const pid of affected) { if (pid !== null) ctx.childrenCache.delete(pid); }
-    ctx.saveChildrenCache?.();
     render();
 
     // Remove the nodes from the source pane (re-renders it).
@@ -1388,6 +1255,7 @@ export function createOutlinerView(ctx: GraphEditorContext, paneOpts?: OutlinerP
     if (newParentId !== null) {
       if (newLinks.length) await Promise.all(newLinks);
       void apiMoveNode(ctx.gId, movers[0].node.id, newParentId, 'down', newSibs.map(s => s.node.id));
+      scheduleConfirm(newParentId); // reconcile the destination pane to the DO after the move
     }
   };
 
@@ -1530,10 +1398,6 @@ export function createOutlinerView(ctx: GraphEditorContext, paneOpts?: OutlinerP
       // Update textarea to show found node's label
       ta.value = (primaryLabel(node, paneLang) ?? fallbackLabel(node, paneLang)) || '';
 
-      // Update childrenCache entry
-      const cc = ctx.childrenCache.get(onode.parentId);
-      if (cc) { const ci = cc.findIndex(x => x.id === oldId); if (ci >= 0) cc[ci] = node; }
-
       // Delete old placeholder node; link the found node to the parent AND orient it under that
       // parent. ドラッグでの再親付けと同じ手順: toggleLink で辺を作り、move で親向き(h_orientation)と
       // 並び順を確定する。orient しないと親を持たない扱いのままで「リンクなし」から消えないため。
@@ -1616,7 +1480,6 @@ export function createOutlinerView(ctx: GraphEditorContext, paneOpts?: OutlinerP
     await Promise.all([...selOccByNode.entries()].map(async ([nodeId, occ]) => {
       if (occ.parentId && occ.parentId !== ORPHAN_ID) parentCount.set(nodeId, await fetchPlacementCount(ctx.gId, nodeId));
     }));
-    const blocked: string[] = [];
     const delPromises: Promise<boolean>[] = [];
     for (const nodeId of selNodeIds) {
       const occ = selOccByNode.get(nodeId)!;
@@ -1627,36 +1490,28 @@ export function createOutlinerView(ctx: GraphEditorContext, paneOpts?: OutlinerP
         const sibs = getSiblings(occ);
         const idx = sibs.indexOf(occ); if (idx !== -1) sibs.splice(idx, 1);
         unindexSubtree(occ);
-        const cc = ctx.childrenCache.get(parentId);
-        if (cc) { const ci = cc.findIndex(n => n.id === nodeId); if (ci >= 0) cc.splice(ci, 1); }
         void apiUnlinkNode(ctx.gId, nodeId, parentId);
+        if (parentId) scheduleConfirm(parentId);
         continue;
       }
-      // 最後の1箇所 → 実体削除（関係テキストが紐づくならブロック）。
-      const relCount = lineCountCache.get(nodeId);
-      if (relCount != null && relCount > 0) { blocked.push(nodeId); continue; }
+      // 最後の1箇所 → 実体削除。関係テキストが紐づくノードはバックエンドが 409 で拒否するので、
+      // 楽観削除→失敗なら下の load() で復元される（フロントの件数事前チェックは廃止）。
       for (const n of occsOf(nodeId)) {
         promoteChildren(n);
         const sibs = getSiblings(n);
         const idx = sibs.indexOf(n); if (idx !== -1) sibs.splice(idx, 1);
         if (n.parentKey === null) { const ri = rootNodeList.indexOf(n.node); if (ri >= 0) rootNodeList.splice(ri, 1); }
         unindexOcc(n);
-        ctx.childrenCache.delete(n.parentId);
       }
-      ctx.childrenCache.delete(nodeId);
       const promoteTo = parentId && parentId !== ORPHAN_ID && !selNodeIds.has(parentId) ? parentId : undefined;
-      delPromises.push(apiDeleteNode(ctx.gId, nodeId, promoteTo).then(res => {
-        if (!res.ok && res.relationCount) { lineCountCache.set(nodeId, res.relationCount); ctx.saveLineCountCache?.(); }
-        return res.ok;
-      }));
+      delPromises.push(apiDeleteNode(ctx.gId, nodeId, promoteTo).then(res => res.ok));
+      if (parentId) scheduleConfirm(parentId);
     }
-    ctx.saveChildrenCache?.();
     render();
     const target = targetKey ? byKey.get(targetKey) : undefined;
     if (target) focusRow(target);
-    if (blocked.length) showToast(`関係テキストが紐づくため${blocked.length}件は削除できませんでした`);
     if (delPromises.length) void Promise.all(delPromises).then(oks => {
-      if (oks.some(ok => !ok)) { showToast('一部のノードは削除できませんでした'); void load(); }
+      if (oks.some(ok => !ok)) { showToast('関係テキストが紐づくため削除できないノードがありました'); void load(); }
     });
   };
 
@@ -1691,6 +1546,7 @@ export function createOutlinerView(ctx: GraphEditorContext, paneOpts?: OutlinerP
     const ids = siblingIdsForParent(parentId);
     await Promise.all(ids.map(id => { const o = anyOccOf(id); return o ? awaitRealId(o) : Promise.resolve(); }));
     await sendReorder(parentId);
+    scheduleConfirm(parentId); // reconcile the view to the DO once the reorder has landed
   };
 
   const queueReorder = (parentId: string | null) => {
@@ -1711,6 +1567,94 @@ export function createOutlinerView(ctx: GraphEditorContext, paneOpts?: OutlinerP
   };
   const onPageHide = () => flushPendingReorders(true);
   window.addEventListener('pagehide', onPageHide);
+
+  // ── Confirm-refetch reconciliation ────────────────────────────────────
+  // After a structural write settles, refetch the affected parent's children ONCE and reconcile
+  // the view to the DO (the single source of truth). This snaps a lost/mangled write back to the
+  // real state within ~400ms instead of only on reload — the session-time half of "no revert".
+  const CONFIRM_DEBOUNCE_MS = 400;
+  const confirmTimers = new Map<string, ReturnType<typeof setTimeout>>();
+
+  // The sibling ONode list for a parent id: the pane's top level (roots) when parentId is the pane
+  // parent, else the parent occurrence's children. null when the parent isn't currently visible.
+  const siblingListFor = (parentId: string): { parent: ONode | null; list: ONode[] } | null => {
+    if (parentId === rootParentNodeId) return { parent: null, list: roots };
+    const occ = anyOccOf(parentId);
+    return occ ? { parent: occ, list: occ.children } : null;
+  };
+
+  // Apply the same top-level transforms load() uses (pane-parent exclusion / synthetic リンクなし)
+  // so a top-level confirm doesn't drop the orphan row or re-show the pane parent.
+  const transformTopLevel = (fresh: ExplorerNode[]): ExplorerNode[] => {
+    if (paneParentSet) return paneParentId ? fresh.filter(n => n.id !== paneParentId) : fresh;
+    if (ctx.rootNodeId) return fresh.some(n => n.id === ORPHAN_ID) ? fresh : [...fresh, { id: ORPHAN_ID, ja: ORPHAN_LABEL }];
+    return fresh;
+  };
+
+  // Reconcile a parent's displayed children to `fresh` (DO order + membership), REUSING existing
+  // ONodes by id so their expand state + already-loaded subtree survive. New nodes are added
+  // collapsed; vanished nodes (and their subtrees) are dropped. Excludes ancestors/self and nodes
+  // already placed elsewhere in this pane, exactly like ensureChildren.
+  const reconcileSiblings = (parent: ONode | null, fresh: ExplorerNode[]) => {
+    const parentId = parent ? parent.node.id : rootParentNodeId;
+    const depth = parent ? parent.depth + 1 : baseDepth;
+    const parentKey = parent ? parent.key : null;
+    const list = parent ? parent.children : roots;
+    const ownIds = new Set(list.map(o => o.node.id));
+    const bySurviving = new Map(list.map(o => [o.node.id, o] as const));
+    const excl = new Set<string>();
+    if (parent) { for (const a of ancestorIds(parent)) excl.add(a); excl.add(parent.node.id); }
+    const freshIds = new Set(fresh.map(n => n.id));
+    for (const o of list) if (!freshIds.has(o.node.id)) unindexSubtree(o); // drop rows gone from DO
+    const next: ONode[] = [];
+    for (const n of fresh) {
+      if (excl.has(n.id)) continue;
+      if (byKey.has(n.id) && !ownIds.has(n.id)) continue; // already placed elsewhere in this pane
+      const existing = bySurviving.get(n.id);
+      if (existing) {
+        Object.assign(existing.node, n); // refresh labels/color
+        existing.depth = depth; existing.parentId = parentId; existing.parentKey = parentKey;
+        next.push(existing);
+      } else {
+        next.push(make(n, parentId, depth, n.id, parentKey));
+      }
+    }
+    if (parent) parent.children = next;
+    else { roots = next; rootNodeList = next.map(o => o.node); }
+    render();
+  };
+
+  // true when the caret sits inside parentId's displayed subtree — defer the confirm so an edit
+  // (or the row currently being renamed) is never clobbered.
+  const focusInSubtree = (parentId: string): boolean => {
+    const active = document.activeElement as HTMLElement | null;
+    if (!active || !listEl.contains(active)) return false;
+    if (parentId === rootParentNodeId) return true; // any list focus defers a top-level confirm
+    const key = active.closest<HTMLElement>('[data-occ-key]')?.dataset.occKey;
+    const focused = key ? byKey.get(key) : undefined;
+    const parent = anyOccOf(parentId);
+    return !!(focused && parent && isInSubtree(focused, parent));
+  };
+
+  const confirmChildren = async (parentId: string) => {
+    if (reorderTimers.has(parentId)) { scheduleConfirm(parentId); return; } // let the pending write land first
+    const sl = siblingListFor(parentId);
+    if (!sl) return; // parent not visible → nothing to reconcile
+    await Promise.all(sl.list.map(o => awaitRealId(o))); // never fetch while a temp id is in flight
+    let fresh = await fetchChildrenFiltered(parentId);
+    if (fresh.length === 0 && sl.list.length > 0) return; // suspected transient error — keep the view
+    if (parentId === rootParentNodeId) fresh = transformTopLevel(fresh);
+    if (focusInSubtree(parentId)) { scheduleConfirm(parentId); return; } // don't clobber an edit
+    const cur = siblingListFor(parentId); // re-read: may have changed while awaiting
+    if (cur) reconcileSiblings(cur.parent, fresh);
+  };
+
+  const scheduleConfirm = (parentId: string | null) => {
+    if (parentId === null || parentId === ORPHAN_ID) return; // bookmark/root-null + synthetic: no /children
+    const t = confirmTimers.get(parentId);
+    if (t) clearTimeout(t);
+    confirmTimers.set(parentId, setTimeout(() => { confirmTimers.delete(parentId); void confirmChildren(parentId); }, CONFIRM_DEBOUNCE_MS));
+  };
 
   const doMoveMulti = async (direction: 'up' | 'down') => {
     const sel = getSelectedONodes();
@@ -1735,7 +1679,6 @@ export function createOutlinerView(ctx: GraphEditorContext, paneOpts?: OutlinerP
       render();
       const back = anyOccOf(selNodes[0].id); if (back) focusRow(back);
       if (rootParentNodeId !== null) queueReorder(rootParentNodeId);
-      ctx.saveChildrenCache?.();
       return;
     }
     const sibs = getSiblings(sel[0]);
@@ -1750,11 +1693,8 @@ export function createOutlinerView(ctx: GraphEditorContext, paneOpts?: OutlinerP
       let anchor: HTMLElement | undefined = lastDescRow(sel[sel.length - 1]);
       if (!anchor) return;
       for (const r of displacedRows) { anchor.insertAdjacentElement('afterend', r); anchor = r; }
-      const cc = ctx.childrenCache.get(parentId);
-      if (cc) { const order = new Map(sibs.map((n, i) => [n.node.id, i])); cc.sort((a, b) => (order.get(a.id) ?? 0) - (order.get(b.id) ?? 0)); }
       updateSelectionHighlight();
       if (parentId !== null) queueReorder(parentId);
-      ctx.saveChildrenCache?.();
       return;
     }
     if (direction === 'down' && maxIdx < sibs.length - 1) {
@@ -1764,11 +1704,8 @@ export function createOutlinerView(ctx: GraphEditorContext, paneOpts?: OutlinerP
       const firstGroupRow = rowMap.get(sel[0].key);
       if (!firstGroupRow) return;
       for (const r of displacedRows) listEl.insertBefore(r, firstGroupRow);
-      const cc = ctx.childrenCache.get(parentId);
-      if (cc) { const order = new Map(sibs.map((n, i) => [n.node.id, i])); cc.sort((a, b) => (order.get(a.id) ?? 0) - (order.get(b.id) ?? 0)); }
       updateSelectionHighlight();
       if (parentId !== null) queueReorder(parentId);
-      ctx.saveChildrenCache?.();
       return;
     }
 
@@ -1788,9 +1725,6 @@ export function createOutlinerView(ctx: GraphEditorContext, paneOpts?: OutlinerP
     // Remove group from old parent (iterate descending to avoid index shift)
     const selSet = new Set(sel);
     for (let i = sibs.length - 1; i >= 0; i--) { if (selSet.has(sibs[i])) sibs.splice(i, 1); }
-    const oldCc = ctx.childrenCache.get(oldParentId);
-    const selIds = new Set(sel.map(n => n.node.id));
-    if (oldCc) oldCc.splice(0, oldCc.length, ...oldCc.filter(x => !selIds.has(x.id)));
 
     // Re-parent and fix depths (row keys equal node ids, so no re-keying needed).
     const newDepth = targetParent.depth + 1;
@@ -1803,7 +1737,6 @@ export function createOutlinerView(ctx: GraphEditorContext, paneOpts?: OutlinerP
     if (direction === 'down') targetParent.children.unshift(...sel);
     else targetParent.children.push(...sel);
     targetParent.expanded = true;
-    ctx.childrenCache.delete(targetParent.node.id);
 
     render();
     if (sel[0]) focusRow(sel[0]);
@@ -1816,7 +1749,8 @@ export function createOutlinerView(ctx: GraphEditorContext, paneOpts?: OutlinerP
       newLinks.push(apiToggleLink(ctx.gId, n.node.id, targetParent.node.id));
     }
     await Promise.all(newLinks);
-    queueReorder(targetParent.node.id);
+    queueReorder(targetParent.node.id); // targetParent confirmed via flushReorder
+    scheduleConfirm(oldParentId);       // reconcile the parent the group left
   };
 
   const doTabMulti = async (sel: ONode[], dedent: boolean) => {
@@ -1891,15 +1825,11 @@ export function createOutlinerView(ctx: GraphEditorContext, paneOpts?: OutlinerP
     resolveTemp();
     tempReady.delete(tempId);
 
-    const cc = ctx.childrenCache.get(onode.parentId);
-    if (cc) { const ci = cc.findIndex(n => n.id === onode.node.id); if (ci >= 0) cc.splice(before ? ci : ci + 1, 0, nn); }
-
     // If inserting before the first node, the backend appended it to chain end → move to front
     if (before && !prevSibNode && onode.parentId !== null) {
       void apiMoveNode(ctx.gId, nn.id, onode.parentId, 'up', siblingIdsForParent(onode.parentId));
     }
 
-    ctx.saveChildrenCache?.();
     // Persist later edits, but skip when the label already matches what we created with (paste path).
     if (typedText.trim() && typedText.trim() !== initialText.trim()) void apiUpdateNode(ctx.gId, nn.id, paneLang, typedText);
     return no;
@@ -1952,22 +1882,16 @@ export function createOutlinerView(ctx: GraphEditorContext, paneOpts?: OutlinerP
         const sibs = getSiblings(onode);
         const si = sibs.indexOf(onode); if (si >= 0) sibs.splice(si, 1);
         unindexSubtree(onode);
-        const cc = ctx.childrenCache.get(parentId);
-        if (cc) { const ci = cc.findIndex(n => n.id === nodeId); if (ci >= 0) cc.splice(ci, 1); }
-        ctx.saveChildrenCache?.();
         render();
         focusTarget();
         void apiUnlinkNode(ctx.gId, nodeId, parentId);
+        if (parentId) scheduleConfirm(parentId);
         return;
       }
     }
 
-    // ── 最後の1箇所 → 実体削除。関係テキストが紐づくノードは削除不可（可視ノードは件数がキャッシュ済）──
-    const relCount = lineCountCache.get(nodeId);
-    if (relCount != null && relCount > 0) {
-      showToast(`関係テキストが${relCount}件紐づくため削除できません（先に関係を外してください）`);
-      return;
-    }
+    // ── 最後の1箇所 → 実体削除。関係テキストが紐づくノードはバックエンドが 409 で拒否するので、
+    // 楽観削除→失敗なら下で load() 復元＋トースト（フロントの件数事前チェックは廃止）。
     // 子は祖父母（このノードの親）へ昇格させる。親が無い/リンクなし配下なら昇格先なし。
     const promoteTo = parentId && parentId !== ORPHAN_ID ? parentId : undefined;
     for (const o of occsOf(nodeId)) {
@@ -1976,17 +1900,14 @@ export function createOutlinerView(ctx: GraphEditorContext, paneOpts?: OutlinerP
       const si = sibs.indexOf(o); if (si >= 0) sibs.splice(si, 1);
       if (o.parentKey === null) { const ri = rootNodeList.indexOf(o.node); if (ri >= 0) rootNodeList.splice(ri, 1); }
       unindexOcc(o);
-      ctx.childrenCache.delete(o.parentId);
     }
-    ctx.childrenCache.delete(nodeId);
-    ctx.saveChildrenCache?.();
     render();
     focusTarget();
     const res = await apiDeleteNode(ctx.gId, nodeId, promoteTo);
+    if (res.ok) { if (parentId) scheduleConfirm(parentId); } // reconcile parent (promoted children) with the DO
     if (!res.ok) {
       // Backend guard (or other failure): restore the optimistically-removed rows.
       if (res.relationCount && res.relationCount > 0) {
-        lineCountCache.set(nodeId, res.relationCount); ctx.saveLineCountCache?.();
         showToast(`関係テキストが${res.relationCount}件紐づくため削除できません（先に関係を外してください）`);
       } else {
         showToast('削除できませんでした');
@@ -2009,7 +1930,6 @@ export function createOutlinerView(ctx: GraphEditorContext, paneOpts?: OutlinerP
       const back = anyOccOf(onode.node.id); if (back) focusRow(back);
       if (onode.parentId === null) void apiMoveBookmark(ctx.gId, onode.node.id, direction);
       else if (rootParentNodeId !== null) queueReorder(rootParentNodeId);
-      ctx.saveChildrenCache?.();
       return;
     }
 
@@ -2020,8 +1940,6 @@ export function createOutlinerView(ctx: GraphEditorContext, paneOpts?: OutlinerP
     if (newIdx >= 0 && newIdx < sibs.length) {
       const neighbor = sibs[newIdx];
       sibs.splice(idx, 1); sibs.splice(newIdx, 0, onode);
-      const cc = ctx.childrenCache.get(onode.parentId);
-      if (cc) { const ci = cc.findIndex(n => n.id === onode.node.id); if (ci >= 0) { cc.splice(ci, 1); cc.splice(newIdx, 0, onode.node); } }
       const group = visibleRowGroup(onode);
       if (direction === 'up') {
         const neighborRow = rowMap.get(neighbor.key);
@@ -2036,7 +1954,6 @@ export function createOutlinerView(ctx: GraphEditorContext, paneOpts?: OutlinerP
       focusRow(onode);
       if (onode.parentId === null) void apiMoveBookmark(ctx.gId, onode.node.id, direction);
       else queueReorder(onode.parentId);
-      ctx.saveChildrenCache?.();
       return;
     }
 
@@ -2054,8 +1971,6 @@ export function createOutlinerView(ctx: GraphEditorContext, paneOpts?: OutlinerP
     if (!targetParent.childrenLoaded) await ensureChildren(targetParent);
 
     sibs.splice(idx, 1);
-    const oldCc = ctx.childrenCache.get(oldParentId);
-    if (oldCc) { const ci = oldCc.findIndex(n => n.id === onode.node.id); if (ci >= 0) oldCc.splice(ci, 1); }
 
     onode.parentId = targetParent.node.id;
     onode.parentKey = targetParent.key;
@@ -2063,7 +1978,6 @@ export function createOutlinerView(ctx: GraphEditorContext, paneOpts?: OutlinerP
     if (direction === 'down') targetParent.children.unshift(onode);
     else targetParent.children.push(onode);
     targetParent.expanded = true;
-    ctx.childrenCache.delete(targetParent.node.id);
 
     render();
     focusRow(onode);
@@ -2072,7 +1986,8 @@ export function createOutlinerView(ctx: GraphEditorContext, paneOpts?: OutlinerP
     // 向き付けが辺作成より先に届き、このノードだけ向きが付かず＝リロードで位置が失われる（ドラッグ処理と同じ理由）。
     void apiToggleLink(ctx.gId, onode.node.id, oldParentId);
     await apiToggleLink(ctx.gId, onode.node.id, targetParent.node.id);
-    queueReorder(targetParent.node.id);
+    queueReorder(targetParent.node.id); // targetParent confirmed via flushReorder
+    scheduleConfirm(oldParentId);        // reconcile the parent the node left
   };
 
   const doIndent = async (onode: ONode, vis: ONode[], i: number) => {
@@ -2085,15 +2000,12 @@ export function createOutlinerView(ctx: GraphEditorContext, paneOpts?: OutlinerP
     const oldSibs = getSiblings(onode);
     oldSibs.splice(oldSibs.indexOf(onode), 1);
     if (onode.parentKey === null) { const ri = rootNodeList.indexOf(onode.node); if (ri >= 0) rootNodeList.splice(ri, 1); }
-    const oldCc = ctx.childrenCache.get(oldParentId);
-    if (oldCc) { const ci = oldCc.findIndex(n => n.id === onode.node.id); if (ci >= 0) oldCc.splice(ci, 1); }
 
     onode.parentId = prev.node.id;
     onode.parentKey = prev.key;
     fixDepths(onode, prev.depth + 1);
     prev.children.push(onode);
     prev.expanded = true;
-    ctx.childrenCache.delete(prev.node.id);
 
     render();
     focusRow(onode);
@@ -2102,7 +2014,8 @@ export function createOutlinerView(ctx: GraphEditorContext, paneOpts?: OutlinerP
     if (oldParentId !== null) void apiToggleLink(ctx.gId, onode.node.id, oldParentId);
     // 新親への辺作成を await → queueReorder で順序＋向き付けを永続化（未実施だとリロードで位置が戻る）。
     await apiToggleLink(ctx.gId, onode.node.id, prev.node.id);
-    queueReorder(prev.node.id);
+    queueReorder(prev.node.id);          // new parent confirmed via flushReorder
+    if (oldParentId !== null) scheduleConfirm(oldParentId); // reconcile the parent the node left
   };
 
   const doDedent = async (onode: ONode) => {
@@ -2112,7 +2025,6 @@ export function createOutlinerView(ctx: GraphEditorContext, paneOpts?: OutlinerP
     const oldParentId = onode.parentId;
 
     parent.children.splice(parent.children.indexOf(onode), 1);
-    ctx.childrenCache.delete(oldParentId);
 
     const grandSibs = getSiblings(parent);
     const parentIdx = grandSibs.indexOf(parent);
@@ -2126,7 +2038,6 @@ export function createOutlinerView(ctx: GraphEditorContext, paneOpts?: OutlinerP
       const pi = rootNodeList.indexOf(parent.node);
       rootNodeList.splice(pi < 0 ? rootNodeList.length : pi + 1, 0, onode.node);
     }
-    if (onode.parentId !== null) ctx.childrenCache.delete(onode.parentId);
 
     render();
     focusRow(onode);
@@ -2136,52 +2047,14 @@ export function createOutlinerView(ctx: GraphEditorContext, paneOpts?: OutlinerP
     // 新親（＝旧親の親）への辺作成を await → queueReorder で順序＋向き付けを永続化。
     if (onode.parentId !== null) {
       await apiToggleLink(ctx.gId, onode.node.id, onode.parentId);
-      queueReorder(onode.parentId);
+      queueReorder(onode.parentId);       // new parent confirmed via flushReorder
     }
-  };
-
-  // Shallow structural comparison of two child lists — detects whether a revalidation
-  // fetch returned anything that affects rendering (order, labels, color).
-  const childrenDiffer = (a: ExplorerNode[], b: ExplorerNode[]): boolean => {
-    if (a.length !== b.length) return true;
-    for (let i = 0; i < a.length; i++) {
-      const x = a[i], y = b[i];
-      if (x.id !== y.id || (x.en ?? '') !== (y.en ?? '') || (x.ja ?? '') !== (y.ja ?? '') || (x.color ?? '') !== (y.color ?? '')) return true;
-    }
-    return false;
-  };
-
-  // Stale-while-revalidate: after the caller paints from the (possibly stale) localStorage
-  // cache for an instant reload, fetch fresh children from the backend and re-render if the
-  // data changed. Without this, edits persisted to the backend appear to "revert" on reload
-  // because the editor renders from a cache that is never revalidated. Bails on a likely
-  // transient fetch error (empty result replacing a non-empty cache) to avoid blanking the
-  // tree, and skips the re-render while the user is mid-edit so focus isn't clobbered.
-  const revalidate = async (
-    cacheKey: string | null,
-    fetchId: string,
-    painted: ExplorerNode[] | undefined,
-    apply: (nodes: ExplorerNode[]) => void,
-  ) => {
-    const fresh = await fetchChildrenFiltered(fetchId);
-    if (fresh.length === 0 && painted && painted.length > 0) return; // suspected transient error
-    setCachedChildren(cacheKey, fresh);
-    validated.add(cacheKey);
-    if (painted && !childrenDiffer(painted, fresh)) return; // nothing changed since the paint
-    if (listEl.contains(document.activeElement)) return;     // don't clobber an active edit
-    clearIndex();
-    apply(fresh);
+    scheduleConfirm(oldParentId);          // reconcile the parent the node left
   };
 
   const load = async () => {
     flushPendingReorders(); // send any queued reorder before the tree is rebuilt
     clearIndex();
-    // Treat every cached subtree as stale-until-revalidated, exactly like a fresh page load.
-    // Otherwise an expanded subtree whose key is already in `validated` (fetched earlier this
-    // page load) is restored from the stale cache, so nodes added elsewhere since then — e.g.
-    // a node created + parented from the relation panel — don't appear until a browser reload.
-    // Clearing this makes ensureChildren refetch each expanded subtree from the backend.
-    validated.clear();
     zoomStack.splice(0);
     baseDepth = 0;
     updateBreadcrumb();
@@ -2193,20 +2066,16 @@ export function createOutlinerView(ctx: GraphEditorContext, paneOpts?: OutlinerP
       for (const { id, code } of palette) ctx.colorPalette.set(id, code);
     }
 
+    // No cache: fetch fresh from the DO and render collapsed (root only). No expansion restore.
     // Pane-specific parent override
     if (paneParentSet) {
       if (paneParentId !== null) {
         const pid = paneParentId;
         // Exclude the pane parent itself (appears via undirected edges)
-        const excl = new Set([pid]);
-        const apply = (nodes: ExplorerNode[]) => applyRoots(nodes, pid, excl);
-        const cached = ctx.childrenCache.get(pid);
-        if (cached) apply(cached);
-        await revalidate(pid, pid, cached, apply);
+        applyRoots(await fetchChildrenFiltered(pid), pid, new Set([pid]));
       } else {
         applyRoots([], null);
       }
-      await restoreExpansion();
       return;
     }
 
@@ -2215,18 +2084,11 @@ export function createOutlinerView(ctx: GraphEditorContext, paneOpts?: OutlinerP
       // Append the synthetic "リンクなし" entry as the last root row (parentless nodes inbox).
       const withOrphan = (nodes: ExplorerNode[]): ExplorerNode[] =>
         nodes.some(n => n.id === ORPHAN_ID) ? nodes : [...nodes, { id: ORPHAN_ID, ja: ORPHAN_LABEL }];
-      const apply = (nodes: ExplorerNode[]) => applyRoots(withOrphan(nodes), rootId);
-      // Use same cache key (null) as column view so both views share the same root node list
-      const cached = ctx.childrenCache.get(null);
-      if (cached) apply(cached);
-      // Stale-while-revalidate against the backend so edits persisted since the cache was
-      // written are reflected on reload (rather than reverting to the cached snapshot).
-      await revalidate(null, rootId, cached, apply);
-      await restoreExpansion();
+      applyRoots(withOrphan(await fetchChildrenFiltered(rootId)), rootId);
       return;
     }
 
-    // Bookmarks root (no rootNodeId): always fetched fresh, no persistent cache.
+    // Bookmarks root (no rootNodeId): always fetched fresh.
     if (ctx.state.bookmarks.size === 0) {
       const ids = await fetchBookmarks(ctx.gId);
       ctx.state.bookmarks = new Set(ids);
@@ -2234,7 +2096,6 @@ export function createOutlinerView(ctx: GraphEditorContext, paneOpts?: OutlinerP
     const lang = ctx.state.showFallback ? undefined : paneLang;
     const { nodes } = await fetchBookmarkedNodes(ctx.gId, [...ctx.state.bookmarks], lang);
     applyRoots(nodes, null);
-    await restoreExpansion();
   };
 
   // Ancestor NODE ids of a node visible in this pane (walk any occurrence's parentKey chain).
@@ -2265,14 +2126,9 @@ export function createOutlinerView(ctx: GraphEditorContext, paneOpts?: OutlinerP
       const nid = nodeId;
       // Exclude the pane parent itself and any specified ancestors (they appear via undirected edges)
       const excl = new Set([nid, ...(excludeIds ?? [])]);
-      const apply = (nodes: ExplorerNode[]) => applyRoots(nodes, nid, excl);
-      const cached = ctx.childrenCache.get(nid);
-      if (cached) apply(cached);
-      await revalidate(nid, nid, cached, apply);
-      await restoreExpansion();
+      applyRoots(await fetchChildrenFiltered(nid), nid, excl);
     } else {
       applyRoots([], null);
-      await restoreExpansion();
     }
   };
 
@@ -2315,6 +2171,7 @@ export function createOutlinerView(ctx: GraphEditorContext, paneOpts?: OutlinerP
 
   const unregister = () => {
     flushPendingReorders(true);
+    for (const t of confirmTimers.values()) clearTimeout(t);
     ctx.relationRerender.delete(rerenderAllMarkers);
     window.removeEventListener('pagehide', onPageHide);
   };

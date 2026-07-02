@@ -69,20 +69,12 @@ export interface GraphEditorContext {
   outer: HTMLElement;
   // ── Shared mutable state ──
   state: ExplorerState;
-  childrenCache: Map<string | null, ExplorerNode[]>;
-  // node id → 関係(line)件数。localStorage 永続でリロード直後もバッジを即表示（裏で再取得し更新）。
-  lineCountCache: Map<string, number>;
   // m_color palette: id → code
   colorPalette: Map<string, string>;
   tempNodeCounter: number;
   // ── Cross-pane (multi-pane outliner) DnD shared state ──
   // Set by the source pane on dragstart, read by the target pane on drop; null when idle.
   paneDrag: PaneDragState | null;
-  // ── Persistence ──
-  // Called after childrenCache is updated so callers can persist it to localStorage
-  saveChildrenCache?: () => void;
-  // Called after lineCountCache is updated so callers can persist it to localStorage
-  saveLineCountCache?: () => void;
 
   // ── 関係(line)とノードの相互選択 ──
   // The relation currently selected in the line panel. Node panes read `participants` to fill
