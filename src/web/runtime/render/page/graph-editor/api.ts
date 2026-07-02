@@ -1,9 +1,44 @@
 import type { ExplorerNode, ExplorerLine } from './types';
 
+// ── Client-side request throttle ──────────────────────────────────────────
+// The graph backend is 429-sensitive: the editor can fan out many children/lines/count reads
+// at once (child prefetch + relation dock), which trips the rate limit and lets writes fail
+// with a throttled 500. Cap concurrency and retry 429s with backoff so the editor stays within
+// the backend's limits instead of stampeding it. All requests funnel through apiFetch, so this
+// one choke point governs the whole editor.
+const MAX_CONCURRENT = 5;
+let active = 0;
+const waiters: Array<() => void> = [];
+const acquire = (): Promise<void> =>
+  active < MAX_CONCURRENT
+    ? (active++, Promise.resolve())
+    : new Promise<void>((resolve) => waiters.push(() => { active++; resolve(); }));
+const release = () => { active--; waiters.shift()?.(); };
+const sleep = (ms: number) => new Promise<void>((r) => setTimeout(r, ms));
+
 export async function apiFetch(input: string, init?: RequestInit): Promise<Response> {
-  const r = await fetch(input, init);
-  if (r.status === 401) { window.location.href = '/login'; }
-  return r;
+  // keepalive requests fire during page unload (reorder flush) — never queue/delay them.
+  if (init?.keepalive) {
+    const r = await fetch(input, init);
+    if (r.status === 401) { window.location.href = '/login'; }
+    return r;
+  }
+  await acquire();
+  try {
+    let r = await fetch(input, init);
+    // Retry a rate-limited request a few times with backoff (honour Retry-After when present).
+    // The concurrency slot is held across the wait, which naturally eases pressure on the backend.
+    for (let attempt = 0; r.status === 429 && attempt < 4; attempt++) {
+      const ra = Number(r.headers.get('retry-after'));
+      const wait = Number.isFinite(ra) && ra > 0 ? ra * 1000 : 300 * 2 ** attempt;
+      await sleep(Math.min(wait, 4000));
+      r = await fetch(input, init);
+    }
+    if (r.status === 401) { window.location.href = '/login'; }
+    return r;
+  } finally {
+    release();
+  }
 }
 
 export async function fetchAllNodes(

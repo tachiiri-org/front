@@ -524,18 +524,28 @@ export function createOutlinerView(ctx: GraphEditorContext, paneOpts?: OutlinerP
     onode.childrenLoaded = true;
   };
 
-  // Warm childrenCache for visible-but-unexpanded nodes serially
+  // Warm childrenCache for visible-but-unexpanded nodes serially, so the expand triangle shows
+  // correctly and expanding is instant. Capped + non-overlapping: a large expanded tree must not
+  // fan out a fetch per visible node (that stampedes the 429-sensitive backend). Nodes past the
+  // cap keep an optimistic triangle until expanded — a fine trade for staying within rate limits.
   let prefetchTimer: ReturnType<typeof setTimeout> | null = null;
+  let prefetching = false;
+  const PREFETCH_MAX = 24; // per pass
   const schedulePrefetch = () => {
     if (prefetchTimer) clearTimeout(prefetchTimer);
     prefetchTimer = setTimeout(() => {
       prefetchTimer = null;
-      const queue = flatVisible().filter(o => !o.childrenLoaded && !ctx.childrenCache.has(o.node.id));
+      if (prefetching) return; // one chain at a time — avoid overlapping fetch storms
+      const queue = flatVisible()
+        .filter(o => !o.childrenLoaded && !ctx.childrenCache.has(o.node.id))
+        .slice(0, PREFETCH_MAX);
+      if (queue.length === 0) return;
+      prefetching = true;
       let i = 0;
       const next = () => {
-        if (i >= queue.length) return;
+        if (i >= queue.length) { prefetching = false; return; }
         const o = queue[i++];
-        if (!o.childrenLoaded && !ctx.childrenCache.has(o.node.id)) void ensureChildren(o).then(next);
+        if (!o.childrenLoaded && !ctx.childrenCache.has(o.node.id)) void ensureChildren(o).then(next, () => { prefetching = false; });
         else next();
       };
       next();
