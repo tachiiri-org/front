@@ -50,6 +50,31 @@ export function renderGraphEditor(
     }, 1500);
   };
 
+  // ── Persistent relation-line count cache (localStorage) ──────────────
+  // node id → 関係(line)件数。node id は不変なので、リロード直後もバッジを前回値で即表示し、
+  // 裏の再取得(fetchLineCounts)で最新に更新する。これで移動＋更新時に件数が一瞬空になる見え方を防ぐ。
+  const lineCountCache = new Map<string, number>();
+  const LC_KEY = `ge-linecounts:${gId}`;
+  try {
+    const raw = localStorage.getItem(LC_KEY);
+    if (raw) {
+      const saved: { ts: number; entries: [string, number][] } = JSON.parse(raw);
+      if (Date.now() - saved.ts < 12 * 60 * 60 * 1000) {
+        for (const [k, v] of saved.entries) lineCountCache.set(k, v);
+      }
+    }
+  } catch {}
+  let _lcTimer: ReturnType<typeof setTimeout> | null = null;
+  const saveLineCountCache = () => {
+    if (_lcTimer) clearTimeout(_lcTimer);
+    _lcTimer = setTimeout(() => {
+      try {
+        localStorage.setItem(LC_KEY, JSON.stringify({ ts: Date.now(), entries: [...lineCountCache.entries()] }));
+      } catch {}
+      _lcTimer = null;
+    }, 1500);
+  };
+
   const outer = document.createElement('div');
   outer.id = id;
   outer.style.cssText = `position:relative;display:flex;flex-direction:column;height:100%;background:${BG};color:${TEXT_HIGH};font-family:sans-serif;font-size:13px;line-height:1.5;overflow:hidden;`;
@@ -76,6 +101,8 @@ export function renderGraphEditor(
     colorPalette,
     tempNodeCounter: 0,
     saveChildrenCache,
+    lineCountCache,
+    saveLineCountCache,
     paneDrag: null,
     activeRelation: null,
     relationRerender,

@@ -210,9 +210,11 @@ export function createOutlinerView(ctx: GraphEditorContext, paneOpts?: OutlinerP
   const occByNode = new Map<string, Set<string>>();
   // Occurrence key → row element. (Was keyed by node id.)
   const rowMap = new Map<string, HTMLElement>();
-  // node id → 関係(line)件数。ノード行の右端バッジに表示する。可視ノードぶんをまとめて
-  // /node-line-counts で取得しキャッシュ（再描画は即時、追加取得は 1 リクエストに集約）。
-  const lineCountCache = new Map<string, number>();
+  // node id → 関係(line)件数。ノード行の右端バッジに表示する。localStorage 永続の共有キャッシュ
+  // (ctx)を使い、リロード直後も前回値で即表示。今セッションで実取得済みの id は countFetched で管理し、
+  // 永続値があっても必ず一度は再取得して最新化する（移動＋更新で件数が一瞬空になる見え方を防ぐ）。
+  const lineCountCache = ctx.lineCountCache;
+  const countFetched = new Set<string>();
   // First (any) occurrence of a node id, or undefined. Convenience for node-level lookups
   // that only need one representative ONode.
   const anyOccOf = (nodeId: string): ONode | undefined => {
@@ -1043,11 +1045,13 @@ export function createOutlinerView(ctx: GraphEditorContext, paneOpts?: OutlinerP
     if (countTimer) clearTimeout(countTimer);
     countTimer = setTimeout(() => {
       countTimer = null;
+      // 永続キャッシュに値があっても、今セッションで未取得(countFetched外)の id は必ず1回取得して最新化。
       const ids = [...new Set(flatVisible().map(o => o.node.id))]
-        .filter(id => id !== ORPHAN_ID && !id.startsWith('temp-') && !lineCountCache.has(id));
+        .filter(id => id !== ORPHAN_ID && !id.startsWith('temp-') && !countFetched.has(id));
       if (ids.length === 0) return;
       void fetchLineCounts(ctx.gId, ids).then(counts => {
-        for (const id of ids) lineCountCache.set(id, counts[id] ?? 0);
+        for (const id of ids) { lineCountCache.set(id, counts[id] ?? 0); countFetched.add(id); }
+        ctx.saveLineCountCache?.();
         for (const o of flatVisible()) {
           const row = rowMap.get(o.key);
           if (row) applyRowCount(row, lineCountCache.get(o.node.id) ?? 0);
@@ -2408,7 +2412,7 @@ export function createOutlinerView(ctx: GraphEditorContext, paneOpts?: OutlinerP
       ctx.childrenCache.delete(nodeId);
       const promoteTo = parentId && parentId !== ORPHAN_ID && !selNodeIds.has(parentId) ? parentId : undefined;
       delPromises.push(apiDeleteNode(ctx.gId, nodeId, promoteTo).then(res => {
-        if (!res.ok && res.relationCount) lineCountCache.set(nodeId, res.relationCount);
+        if (!res.ok && res.relationCount) { lineCountCache.set(nodeId, res.relationCount); ctx.saveLineCountCache?.(); }
         return res.ok;
       }));
     }
@@ -2761,7 +2765,7 @@ export function createOutlinerView(ctx: GraphEditorContext, paneOpts?: OutlinerP
     if (!res.ok) {
       // Backend guard (or other failure): restore the optimistically-removed rows.
       if (res.relationCount && res.relationCount > 0) {
-        lineCountCache.set(nodeId, res.relationCount);
+        lineCountCache.set(nodeId, res.relationCount); ctx.saveLineCountCache?.();
         showToast(`関係テキストが${res.relationCount}件紐づくため削除できません（先に関係を外してください）`);
       } else {
         showToast('削除できませんでした');
