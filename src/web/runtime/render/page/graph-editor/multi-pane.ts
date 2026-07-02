@@ -122,7 +122,16 @@ export function createMultiPaneView(ctx: GraphEditorContext): {
   };
 
   // ── Inter-pane wiring ──────────────────────────────────────────────
+  // Selection changes are debounced: navigating (arrow keys, expanding — each focuses a row) fires
+  // a selection per step, and every propagation refetches the line dock's /lines plus any sourced
+  // pane's /children. Coalescing to the final selection after a short quiet period keeps the editor
+  // well under the backend's read rate limit without a perceptible lag.
+  let selectTimer: ReturnType<typeof setTimeout> | null = null;
   const onPaneSelect = (paneId: string, selectedNodeId: string | null) => {
+    if (selectTimer) clearTimeout(selectTimer);
+    selectTimer = setTimeout(() => { selectTimer = null; propagateSelect(paneId, selectedNodeId); }, 180);
+  };
+  const propagateSelect = (paneId: string, selectedNodeId: string | null) => {
     // Selecting a node no longer auto-opens a child pane — drilling is done inline (▸/▾) within
     // the panel. Selection only (a) updates any pane the user has explicitly sourced from this one
     // and (b) feeds the persistent line dock. Extra node panels are added manually (＋).
