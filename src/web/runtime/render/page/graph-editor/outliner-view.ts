@@ -241,6 +241,13 @@ export function createOutlinerView(ctx: GraphEditorContext, paneOpts?: OutlinerP
     const set = occByNode.get(o.node.id);
     if (set) { set.delete(o.key); if (set.size === 0) occByNode.delete(o.node.id); }
   };
+  // Unindex an occurrence AND its whole displayed subtree. Used when removing just ONE occurrence
+  // of a multi-placed node (its children under this occurrence go away here but survive elsewhere).
+  const unindexSubtree = (o: ONode) => {
+    for (const c of o.children) unindexSubtree(c);
+    rowMap.delete(o.key);
+    unindexOcc(o);
+  };
   const clearIndex = () => { byKey.clear(); occByNode.clear(); };
   // Re-key an existing ONode (and its whole subtree) under a new occurrence key, keeping
   // the indices and rowMap consistent. Used when an occurrence is re-parented to a different
@@ -1522,7 +1529,7 @@ export function createOutlinerView(ctx: GraphEditorContext, paneOpts?: OutlinerP
       // Ctrl+Shift+Backspace: delete (multi or single)
       if (e.key === 'Backspace' && (e.ctrlKey || e.metaKey) && e.shiftKey) {
         e.preventDefault();
-        if (isMultiSelect()) doDeleteMulti();
+        if (isMultiSelect()) void doDeleteMulti();
         else void doDelete(onode, i, vis);
         return;
       }
@@ -2344,10 +2351,12 @@ export function createOutlinerView(ctx: GraphEditorContext, paneOpts?: OutlinerP
 
   // ── Multi-select operations ───────────────────────────────────────────
 
-  const doDeleteMulti = () => {
+  const doDeleteMulti = async () => {
     const sel = getSelectedONodes();
     if (sel.length === 0) return;
-    // Delete acts on NODES → every occurrence of each selected node id is removed.
+    // Delete acts on NODES. Per node: if it sits in multiple places (>1 oriented parent), only the
+    // SELECTED occurrence's edge is unlinked (entity survives). Otherwise it's the last place → entity
+    // delete, blocked when relation texts are attached.
     const selNodeIds = new Set(sel.map(n => n.node.id));
     // Focus target in VISIBLE (DOM) order, keyed by occurrence: first non-selected row above
     // the block, else below it.
@@ -2359,11 +2368,34 @@ export function createOutlinerView(ctx: GraphEditorContext, paneOpts?: OutlinerP
     let targetKey: string | null = null;
     for (let k = firstRowIdx - 1; k >= 0; k--) { const key = rows[k]?.dataset.occKey; if (key && !selKeys.has(key)) { targetKey = key; break; } }
     if (!targetKey) for (let k = lastRowIdx + 1; k < rows.length; k++) { const key = rows[k]?.dataset.occKey; if (key && !selKeys.has(key)) { targetKey = key; break; } }
-    // 各ノードの昇格先＝そのノードの親（選択内の親は削除されるので昇格先にしない）。
-    const parentOf = new Map<string, string | null>();
-    for (const o of sel) if (!parentOf.has(o.node.id)) parentOf.set(o.node.id, o.parentId);
+    // 選択されたノードごとに、その選択オカレンスを1つ保持（親エッジ解除の対象）。
+    const selOccByNode = new Map<string, ONode>();
+    for (const o of sel) if (!selOccByNode.has(o.node.id)) selOccByNode.set(o.node.id, o);
     clearSelection();
+    // 本物の親数を先に並列取得（親エッジ解除 vs 実体削除の判定用）。
+    const parentCount = new Map<string, number>();
+    await Promise.all([...selOccByNode.entries()].map(async ([nodeId, occ]) => {
+      if (occ.parentId && occ.parentId !== ORPHAN_ID) parentCount.set(nodeId, (await fetchParents(ctx.gId, nodeId)).length);
+    }));
+    const blocked: string[] = [];
+    const delPromises: Promise<boolean>[] = [];
     for (const nodeId of selNodeIds) {
+      const occ = selOccByNode.get(nodeId)!;
+      const parentId = occ.parentId;
+      // 複数箇所 → この箇所だけ解除。
+      if (parentId && parentId !== ORPHAN_ID && (parentCount.get(nodeId) ?? 1) > 1) {
+        // Unlink only this occurrence's edge; entity survives elsewhere → drop this subtree, no promote.
+        const sibs = getSiblings(occ);
+        const idx = sibs.indexOf(occ); if (idx !== -1) sibs.splice(idx, 1);
+        unindexSubtree(occ);
+        const cc = ctx.childrenCache.get(parentId);
+        if (cc) { const ci = cc.findIndex(n => n.id === nodeId); if (ci >= 0) cc.splice(ci, 1); }
+        void apiUnlinkNode(ctx.gId, nodeId, parentId);
+        continue;
+      }
+      // 最後の1箇所 → 実体削除（関係テキストが紐づくならブロック）。
+      const relCount = lineCountCache.get(nodeId);
+      if (relCount != null && relCount > 0) { blocked.push(nodeId); continue; }
       for (const n of occsOf(nodeId)) {
         promoteChildren(n);
         const sibs = getSiblings(n);
@@ -2374,14 +2406,20 @@ export function createOutlinerView(ctx: GraphEditorContext, paneOpts?: OutlinerP
       }
       linkTargets.delete(nodeId);
       ctx.childrenCache.delete(nodeId);
-      const p = parentOf.get(nodeId);
-      const promoteTo = p && p !== ORPHAN_ID && !selNodeIds.has(p) ? p : undefined;
-      void apiDeleteNode(ctx.gId, nodeId, promoteTo);
+      const promoteTo = parentId && parentId !== ORPHAN_ID && !selNodeIds.has(parentId) ? parentId : undefined;
+      delPromises.push(apiDeleteNode(ctx.gId, nodeId, promoteTo).then(res => {
+        if (!res.ok && res.relationCount) lineCountCache.set(nodeId, res.relationCount);
+        return res.ok;
+      }));
     }
     ctx.saveChildrenCache?.();
     render();
     const target = targetKey ? byKey.get(targetKey) : undefined;
     if (target) focusRow(target);
+    if (blocked.length) showToast(`関係テキストが紐づくため${blocked.length}件は削除できませんでした`);
+    if (delPromises.length) void Promise.all(delPromises).then(oks => {
+      if (oks.some(ok => !ok)) { showToast('一部のノードは削除できませんでした'); void load(); }
+    });
   };
 
   // ── Reorder write coalescing (B) ──────────────────────────────────────
@@ -2660,10 +2698,9 @@ export function createOutlinerView(ctx: GraphEditorContext, paneOpts?: OutlinerP
     o.children = [];
   };
 
-  const doDelete = (onode: ONode, _visIdx: number, _vis: ONode[]) => {
+  const doDelete = async (onode: ONode, _visIdx: number, _vis: ONode[]) => {
     const nodeId = onode.node.id;
-    // 子は祖父母（このノードの親）へ昇格させる。親が無い/リンクなし配下なら昇格先なし。
-    const promoteTo = onode.parentId && onode.parentId !== ORPHAN_ID ? onode.parentId : undefined;
+    const parentId = onode.parentId;
     // Pick the focus target from the VISIBLE (DOM) order by occurrence key — capture the DOM
     // neighbour (row above, else below) of THIS occurrence while it's still in the list.
     const rowEl = rowMap.get(onode.key);
@@ -2673,7 +2710,36 @@ export function createOutlinerView(ctx: GraphEditorContext, paneOpts?: OutlinerP
       const di = rows.indexOf(rowEl);
       targetKey = (rows[di - 1] ?? rows[di + 1])?.dataset.occKey ?? null;
     }
-    // Delete is node-level → for every occurrence, promote its children up, then remove it.
+    const focusTarget = () => { const t = targetKey ? byKey.get(targetKey) : undefined; if (t) focusRow(t); };
+
+    // ── 複数箇所に配置されたノードは、この箇所（親エッジ）だけリンク解除し、実体と他の箇所は残す ──
+    // 削除するのは「最後の1箇所」のときだけ。判定は本物の親数（向き付き親）を正とする。
+    if (parentId && parentId !== ORPHAN_ID) {
+      const parents = await fetchParents(ctx.gId, nodeId);
+      if (parents.length > 1) {
+        // Unlink ONLY this occurrence's parent edge. The node (with its children) survives under its
+        // other parent(s), so remove this occurrence's whole subtree from the UI — do NOT promote.
+        const sibs = getSiblings(onode);
+        const si = sibs.indexOf(onode); if (si >= 0) sibs.splice(si, 1);
+        unindexSubtree(onode);
+        const cc = ctx.childrenCache.get(parentId);
+        if (cc) { const ci = cc.findIndex(n => n.id === nodeId); if (ci >= 0) cc.splice(ci, 1); }
+        ctx.saveChildrenCache?.();
+        render();
+        focusTarget();
+        void apiUnlinkNode(ctx.gId, nodeId, parentId);
+        return;
+      }
+    }
+
+    // ── 最後の1箇所 → 実体削除。関係テキストが紐づくノードは削除不可（可視ノードは件数がキャッシュ済）──
+    const relCount = lineCountCache.get(nodeId);
+    if (relCount != null && relCount > 0) {
+      showToast(`関係テキストが${relCount}件紐づくため削除できません（先に関係を外してください）`);
+      return;
+    }
+    // 子は祖父母（このノードの親）へ昇格させる。親が無い/リンクなし配下なら昇格先なし。
+    const promoteTo = parentId && parentId !== ORPHAN_ID ? parentId : undefined;
     for (const o of occsOf(nodeId)) {
       promoteChildren(o);
       const sibs = getSiblings(o);
@@ -2686,9 +2752,18 @@ export function createOutlinerView(ctx: GraphEditorContext, paneOpts?: OutlinerP
     ctx.childrenCache.delete(nodeId);
     ctx.saveChildrenCache?.();
     render();
-    const target = targetKey ? byKey.get(targetKey) : undefined;
-    if (target) focusRow(target);
-    void apiDeleteNode(ctx.gId, nodeId, promoteTo);
+    focusTarget();
+    const res = await apiDeleteNode(ctx.gId, nodeId, promoteTo);
+    if (!res.ok) {
+      // Backend guard (or other failure): restore the optimistically-removed rows.
+      if (res.relationCount && res.relationCount > 0) {
+        lineCountCache.set(nodeId, res.relationCount);
+        showToast(`関係テキストが${res.relationCount}件紐づくため削除できません（先に関係を外してください）`);
+      } else {
+        showToast('削除できませんでした');
+      }
+      void load();
+    }
   };
 
   const doMove = async (onode: ONode, direction: 'up' | 'down') => {

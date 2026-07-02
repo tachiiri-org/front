@@ -94,9 +94,19 @@ export async function apiUpdateNode(
 
 // ノード削除。promoteToId を渡すと、削除ノードの子をその親(=祖父母)へ昇格させてから消す
 // （子が「リンクなし」に落ちないように）。省略時は従来通り。
-export async function apiDeleteNode(graphId: string, nodeId: string, promoteToId?: string): Promise<void> {
+// 戻り値 ok=false は削除が拒否されたことを表す。relationCount>0 なら「関係テキストが紐づくため
+// 削除不可」（バックエンドの 409 ガード）。呼び出し側は楽観的に消した UI を戻す。
+export async function apiDeleteNode(
+  graphId: string, nodeId: string, promoteToId?: string,
+): Promise<{ ok: boolean; relationCount?: number }> {
   const q = promoteToId ? `?promoteTo=${encodeURIComponent(promoteToId)}` : '';
-  await apiFetch(`/api/v1/graph/${graphId}/node/${nodeId}${q}`, { method: 'DELETE' });
+  const r = await apiFetch(`/api/v1/graph/${graphId}/node/${nodeId}${q}`, { method: 'DELETE' });
+  if (r.ok) return { ok: true };
+  if (r.status === 409) {
+    const data = await r.json().catch(() => ({})) as { relationCount?: number };
+    return { ok: false, relationCount: data.relationCount };
+  }
+  return { ok: false };
 }
 
 export async function apiToggleLink(graphId: string, sourceId: string, targetId: string): Promise<boolean> {
