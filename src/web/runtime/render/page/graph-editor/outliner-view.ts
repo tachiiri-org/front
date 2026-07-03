@@ -493,9 +493,6 @@ export function createOutlinerView(ctx: GraphEditorContext, paneOpts?: OutlinerP
       m.style.background = 'transparent';
       m.style.border = `1.5px solid ${TEXT_DIM}`;
     }
-    // 展開中の行だけ静的な ▾ を表示（葉に ▸ は出さない＝子の有無を推測しない）。非インタラクティブ。
-    const tri = row.querySelector<HTMLElement>('[data-expand-triangle]');
-    if (tri) tri.textContent = onode.expanded ? '▾' : '';
   };
 
   const expandInDom = (onode: ONode) => {
@@ -712,11 +709,6 @@ export function createOutlinerView(ctx: GraphEditorContext, paneOpts?: OutlinerP
     if (onode.node.id === ORPHAN_ID) {
       const spc = document.createElement('span');
       spc.style.cssText = `flex-shrink:0;width:${(onode.depth - baseDepth) * 20 + 6}px;`;
-      const triBtn = document.createElement('button');
-      triBtn.dataset.expandTriangle = '1';
-      triBtn.textContent = '▸';
-      triBtn.style.cssText = `flex-shrink:0;background:transparent;border:none;color:${TEXT_MID};cursor:pointer;font-size:15px;padding:0 4px;opacity:0;pointer-events:none;line-height:1;`;
-      triBtn.addEventListener('click', (e) => { e.stopPropagation(); void toggleExpand(onode); });
       const bw = document.createElement('span');
       bw.style.cssText = `flex-shrink:0;display:flex;align-items:center;justify-content:center;width:18px;cursor:pointer;`;
       const mk = document.createElement('span');
@@ -728,7 +720,7 @@ export function createOutlinerView(ctx: GraphEditorContext, paneOpts?: OutlinerP
       lbl.style.cssText = `flex:1;font-size:14px;line-height:1.5;color:${TEXT_MID};cursor:pointer;padding:0 4px 0 0;`;
       lbl.addEventListener('click', () => void toggleExpand(onode));
       bw.addEventListener('click', (e) => { e.stopPropagation(); void toggleExpand(onode); });
-      row.append(spc, triBtn, bw, lbl);
+      row.append(spc, bw, lbl);
       requestAnimationFrame(() => updateExpandMarker(onode));
       return row;
     }
@@ -939,11 +931,7 @@ export function createOutlinerView(ctx: GraphEditorContext, paneOpts?: OutlinerP
       }
     });
 
-    // 展開インジケータ（非インタラクティブ）。展開/折畳みはキーボードのみ（Ctrl/Cmd+↓/↑）。
-    // updateExpandMarker が「展開中は ▾ / それ以外は空」を設定する（葉に ▸ は出さない）。
-    const triBtn = document.createElement('span');
-    triBtn.dataset.expandTriangle = '1';
-    triBtn.style.cssText = `flex-shrink:0;color:${TEXT_MID};font-size:15px;padding:0 4px;pointer-events:none;line-height:1;`;
+    // 展開/折畳みはキーボードのみ（Ctrl/Cmd+↓/↑）。三角などの展開マーカーは表示しない。
 
     // Long press (350ms) on row body → enable drag
     let pressTimer: ReturnType<typeof setTimeout> | null = null;
@@ -1167,7 +1155,6 @@ export function createOutlinerView(ctx: GraphEditorContext, paneOpts?: OutlinerP
       void navigator.clipboard.writeText(`[${onode.node.id}]${lbl}`).then(() => showToast('コピーしました'));
     });
 
-    row.insertBefore(triBtn, btnWrap);
     row.appendChild(ta);
     row.appendChild(copyIcon);
     updateExpandMarker(onode);
