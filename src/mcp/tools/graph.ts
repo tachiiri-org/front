@@ -65,6 +65,49 @@ function clampDepth(raw: unknown): number {
 const nodeLabel = (n: ApiNode): string => [n.en, n.ja].filter(Boolean).join(" / ");
 const nodeLine = (n: ApiNode): string => `[${n.id}] ${nodeLabel(n)}`;
 
+// A relation line as returned by GET /node/:id/lines. `body` is prose per language with node
+// references embedded as ⟦nodeId⟧; `participants` carries the id→label mapping to resolve them.
+type ApiParticipant = { id: string; en?: string | null; ja?: string | null };
+type ApiLine = { lineId: string; body: Record<string, string>; participants: ApiParticipant[] };
+
+async function getNodeLines(env: AuthorizeEnv, graphId: string, nodeId: string): Promise<ApiLine[]> {
+  const res = await graphFetch(env, graphId, `node/${encodeURIComponent(nodeId)}/lines`);
+  if (!res.ok) throw new Error(`get_node_lines_failed:${res.status}`);
+  const data = (await res.json()) as { lines?: ApiLine[] };
+  return data.lines ?? [];
+}
+
+const participantLabel = (p: ApiParticipant): string => [p.en, p.ja].filter(Boolean).join(" / ") || p.id;
+
+// Replace ⟦nodeId⟧ mentions in a relation body with the referenced node's label, so the prose is
+// human/AI-readable instead of raw UUIDs. Unknown ids are left as-is.
+function resolveMentions(body: string, byId: Map<string, ApiParticipant>): string {
+  return body.replace(/⟦([^⟧]+)⟧/g, (_m, id: string) => {
+    const p = byId.get(id);
+    return p ? `⟦${participantLabel(p)}⟧` : `⟦${id}⟧`;
+  });
+}
+
+// Format one relation line: its resolved prose (ja preferred, en fallback/extra) plus participants.
+function relationLineText(line: ApiLine): string {
+  const byId = new Map(line.participants.map((p) => [p.id, p]));
+  const langs = Object.keys(line.body);
+  const ordered = [...langs.filter((l) => l === "ja"), ...langs.filter((l) => l !== "ja")];
+  const bodies = ordered
+    .map((l) => resolveMentions(line.body[l] ?? "", byId).trim())
+    .filter((b) => b.length > 0);
+  const prose = bodies.length ? bodies.join("\n  ") : "(本文なし)";
+  const parts = line.participants.map((p) => `[${p.id}] ${participantLabel(p)}`).join(", ");
+  return `● ${prose}\n  関係ノード: ${parts || "(なし)"}`;
+}
+
+// A relation line matches `word` if the word appears in any participant label or in any body text.
+function lineMatchesWord(line: ApiLine, word: string): boolean {
+  const w = word.toLowerCase();
+  if (line.participants.some((p) => participantLabel(p).toLowerCase().includes(w))) return true;
+  return Object.values(line.body).some((b) => b.toLowerCase().includes(w));
+}
+
 // --- Tool definitions ---
 
 export const GRAPH_TOOLS = [
@@ -94,6 +137,20 @@ export const GRAPH_TOOLS = [
         node_id: { type: "string", description: "Starting node ID" },
         depth: { type: "number", description: "Hops to traverse (default 2, max 5)" },
         limit: { type: "number", description: "Max nodes to return (default 100, max 500). If truncated, reduce depth." },
+      },
+      required: ["graph_id", "node_id"],
+    },
+  },
+  {
+    name: "graph_read_relations",
+    description:
+      "Read the RELATION LINES (リレーション / relation text) a node participates in — the free-text prose in the relation panel, which graph_read_nodes_from does NOT return. Returns each line's body (with ⟦...⟧ node references resolved to labels) and its participant nodes. Use this to load a task/note attached to a node before working on it — e.g. when the user references '[<node-id>]修正', call this with that node_id and word='修正' to pull just the 修正 relation text. `word` (optional) filters to lines whose body or a participant label contains the word; omit it to get all of the node's relations.",
+    inputSchema: {
+      type: "object",
+      properties: {
+        graph_id: { type: "string", description: "Word graph ID (e.g. 'word-graph-1')" },
+        node_id: { type: "string", description: "Node whose relation lines to read" },
+        word: { type: "string", description: "Optional filter: only lines whose body or a participant label contains this word (e.g. '修正')" },
       },
       required: ["graph_id", "node_id"],
     },
@@ -260,6 +317,22 @@ export async function callGraphTool(
       const nodes = result.nodes ?? [];
       let text = nodes.map(nodeLine).join("\n") || "(no nodes)";
       if (result.truncated) text += `\n[truncated: ${result.count} nodes returned, more exist — reduce depth]`;
+      return { content: [{ type: "text", text }] };
+    }
+
+    if (name === "graph_read_relations") {
+      const nodeId = String(args.node_id);
+      const word = args.word != null && String(args.word).trim() !== "" ? String(args.word).trim() : undefined;
+      const all = await getNodeLines(env, graphId, nodeId);
+      const lines = word ? all.filter((l) => lineMatchesWord(l, word)) : all;
+      if (lines.length === 0) {
+        const suffix = word ? `（word='${word}' に一致する関係）` : "";
+        return { content: [{ type: "text", text: `ノード [${nodeId}] に関係テキストはありません${suffix}` }] };
+      }
+      const header = word
+        ? `ノード [${nodeId}] の関係のうち '${word}' を含むもの（${lines.length}件）:`
+        : `ノード [${nodeId}] の関係（${lines.length}件）:`;
+      const text = [header, ...lines.map(relationLineText)].join("\n\n");
       return { content: [{ type: "text", text }] };
     }
 
