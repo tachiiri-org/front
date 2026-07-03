@@ -1837,10 +1837,21 @@ export function createOutlinerView(ctx: GraphEditorContext, paneOpts?: OutlinerP
       }
     }
 
-    // ── 最後の1箇所 → 実体削除。関係テキストが紐づくノードはバックエンドが 409 で拒否するので、
-    // 楽観削除→失敗なら下で load() 復元＋トースト（フロントの件数事前チェックは廃止）。
-    // 子は祖父母（このノードの親）へ昇格させる。親が無い/リンクなし配下なら昇格先なし。
+    // ── 最後の1箇所 → 実体削除。関係テキストが紐づくノードはバックエンドが 409 で拒否する。
+    // ブロック時に要素/カーソルを保つため、**先に API を叩き、成功したときだけ**ローカルから消す
+    // （楽観削除→load() 復元だと一瞬消えて戻り、フォーカスも飛ぶため）。子は祖父母へ昇格。
     const promoteTo = parentId && parentId !== ORPHAN_ID ? parentId : undefined;
+    const res = await apiDeleteNode(ctx.gId, nodeId, promoteTo);
+    if (!res.ok) {
+      // Blocked (or failed): leave the node + caret exactly as they were, just toast.
+      if (res.relationCount && res.relationCount > 0) {
+        showToast(`関係テキストが${res.relationCount}件紐づくため削除できません（先に関係を外してください）`);
+      } else {
+        showToast('削除できませんでした');
+      }
+      return;
+    }
+    // Success → remove locally (promote children to the grandparent, matching the backend).
     for (const o of occsOf(nodeId)) {
       promoteChildren(o);
       const sibs = getSiblings(o);
@@ -1850,16 +1861,6 @@ export function createOutlinerView(ctx: GraphEditorContext, paneOpts?: OutlinerP
     }
     render();
     focusTarget();
-    const res = await apiDeleteNode(ctx.gId, nodeId, promoteTo);
-    if (!res.ok) {
-      // Backend guard (or other failure): restore the optimistically-removed rows.
-      if (res.relationCount && res.relationCount > 0) {
-        showToast(`関係テキストが${res.relationCount}件紐づくため削除できません（先に関係を外してください）`);
-      } else {
-        showToast('削除できませんでした');
-      }
-      void load();
-    }
   };
 
   const doMove = async (onode: ONode, direction: 'up' | 'down') => {
