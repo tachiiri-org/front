@@ -481,6 +481,20 @@ export function createOutlinerView(ctx: GraphEditorContext, paneOpts?: OutlinerP
     onode.childrenLoaded = true;
   };
 
+  // Expand every node in the pane (local — full data is already loaded). Skips the synthetic
+  // リンクなし inbox so it doesn't dump all orphans. Used to open the whole tree on initial load.
+  const expandAllNodes = () => {
+    const walk = (list: ONode[]) => {
+      for (const o of list) {
+        if (o.node.id === ORPHAN_ID) continue;
+        if (!o.childrenLoaded) void ensureChildren(o); // async signature, but body is synchronous (local)
+        if (o.children.length > 0) { o.expanded = true; walk(o.children); }
+      }
+    };
+    walk(roots);
+    render();
+  };
+
   const updateExpandMarker = (onode: ONode) => {
     const row = rowMap.get(onode.key);
     if (!row) return;
@@ -1535,7 +1549,7 @@ export function createOutlinerView(ctx: GraphEditorContext, paneOpts?: OutlinerP
   const idleRefetch = async () => {
     if (dirtyParents.size > 0 || saving || listEl.contains(document.activeElement)) { scheduleIdleRefetch(); return; }
     const expanded = new Set<string>(); for (const o of byKey.values()) if (o.expanded) expanded.add(o.node.id);
-    await load();
+    await load(false); // rebuild collapsed, then restore the user's own expansion below
     const reexpand = async (list: ONode[]): Promise<void> => {
       for (const o of list) {
         if (!expanded.has(o.node.id)) continue;
@@ -1655,15 +1669,49 @@ export function createOutlinerView(ctx: GraphEditorContext, paneOpts?: OutlinerP
     markDirty(targetParent.node.id);
   };
 
+  // Indent/dedent a whole multi-selection as SIBLINGS under one target (not a nested cascade).
+  // Selection is a visible-order range of same-parent siblings; `sel[0]` is the topmost.
   const doTabMulti = async (sel: ONode[], dedent: boolean) => {
+    sel = sel.filter(n => byKey.has(n.key));
+    if (sel.length === 0) return;
+    const first = sel[0];
     if (dedent) {
-      for (const n of sel) { if (byKey.has(n.key)) await doDedent(n); }
-    } else {
-      for (const n of [...sel].reverse()) {
-        if (!byKey.has(n.key)) continue;
-        const v = flatVisible(); const ii = v.indexOf(n);
-        if (ii > 0) await doIndent(n, v, ii);
+      // All selected nodes move OUT of their parent, into the grandparent right after the parent,
+      // preserving order — so [b,c,d] under P become siblings after P.
+      if (first.parentKey === null || first.parentId === null) return; // already top-level
+      const parent = byKey.get(first.parentKey);
+      if (!parent) return;
+      const group = sel.filter(n => n.parentKey === first.parentKey);
+      const grandSibs = getSiblings(parent);
+      const parentIdx = grandSibs.indexOf(parent);
+      const rootAt = parent.parentKey === null ? rootNodeList.indexOf(parent.node) : -1;
+      for (const n of group) { const i = parent.children.indexOf(n); if (i >= 0) parent.children.splice(i, 1); }
+      for (let k = 0; k < group.length; k++) {
+        const n = group[k];
+        n.parentId = parent.parentId; n.parentKey = parent.parentKey; fixDepths(n, parent.depth);
+        grandSibs.splice(parentIdx + 1 + k, 0, n);
+        if (parent.parentKey === null) rootNodeList.splice((rootAt < 0 ? rootNodeList.length : rootAt + 1 + k), 0, n.node);
       }
+      render(); focusRow(first);
+      markDirty(parent.node.id); markDirty(parent.parentId);
+    } else {
+      // All selected nodes become direct children of the sibling immediately before the first.
+      const sibs = getSiblings(first);
+      const firstIdx = sibs.indexOf(first);
+      if (firstIdx <= 0) return; // no previous sibling → can't indent
+      const target = sibs[firstIdx - 1];
+      if (!target.childrenLoaded) await ensureChildren(target);
+      const affected = new Set<string | null>([target.node.id]);
+      for (const n of sel) {
+        affected.add(n.parentId);
+        const s = getSiblings(n); const si = s.indexOf(n); if (si >= 0) s.splice(si, 1);
+        if (n.parentKey === null) { const ri = rootNodeList.indexOf(n.node); if (ri >= 0) rootNodeList.splice(ri, 1); }
+        n.parentId = target.node.id; n.parentKey = target.key; fixDepths(n, target.depth + 1);
+      }
+      target.children.push(...sel);
+      target.expanded = true;
+      render(); focusRow(first);
+      for (const pid of affected) markDirty(pid);
     }
   };
 
@@ -1936,7 +1984,9 @@ export function createOutlinerView(ctx: GraphEditorContext, paneOpts?: OutlinerP
     markDirty(onode.parentId);
   };
 
-  const load = async () => {
+  // expandAll defaults true — full-load opens the whole tree on initial load. Idle-refetch passes
+  // false and restores the user's own expansion afterwards.
+  const load = async (expandAll = true) => {
     await flushAutosave(); // persist any pending structural edits before rebuilding
     clearIndex();
     zoomStack.splice(0);
@@ -1977,6 +2027,7 @@ export function createOutlinerView(ctx: GraphEditorContext, paneOpts?: OutlinerP
       } else {
         applyRoots([], null);
       }
+      if (expandAll) expandAllNodes();
       return;
     }
     // Root pane: root's children + synthetic "リンクなし" (orphan inbox).
@@ -1984,6 +2035,7 @@ export function createOutlinerView(ctx: GraphEditorContext, paneOpts?: OutlinerP
     const top = childIdsOf(rootId).map(nodeOf);
     top.push({ id: ORPHAN_ID, ja: ORPHAN_LABEL });
     applyRoots(top, rootId);
+    if (expandAll) expandAllNodes();
   };
 
   // Ancestor NODE ids of a node visible in this pane (walk any occurrence's parentKey chain).
