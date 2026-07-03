@@ -82,6 +82,31 @@ export async function fetchChildren(graphId: string, nodeId: string, limit: numb
     .filter((n) => (seen.has(n.id) ? false : (seen.add(n.id), true)));
 }
 
+// Whole structural tree in one response (full-load editor): every member node with labels/colors,
+// plus per-parent ordered child ids. The client assembles a single-parent tree from `parents`.
+export async function fetchTree(graphId: string): Promise<{ nodes: ExplorerNode[]; parents: Record<string, string[]> }> {
+  const r = await apiFetch(`/api/v1/graph/${graphId}/tree`);
+  if (!r.ok) return { nodes: [], parents: {} };
+  const data = await r.json() as { nodes?: ExplorerNode[]; parents?: Record<string, string[]> };
+  return { nodes: data.nodes ?? [], parents: data.parents ?? {} };
+}
+
+// Declaratively persist structure: for each parent, its children are exactly `childIds` in order.
+// Backend reconciles edges/orientation/order idempotently. Returns true on success (204).
+export async function saveTree(
+  graphId: string,
+  parents: { parentId: string; childIds: string[] }[],
+  keepalive = false,
+): Promise<boolean> {
+  const r = await apiFetch(`/api/v1/graph/${graphId}/tree`, {
+    method: 'PUT',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ parents }),
+    keepalive,
+  });
+  return r.ok;
+}
+
 // A node's ORIENTED parents (the nodes marked as its parent via h_orientation). Used to render a
 // multi-parent node under each of its paths in a mirror/drill pane.
 export async function fetchParents(graphId: string, nodeId: string): Promise<ExplorerNode[]> {
