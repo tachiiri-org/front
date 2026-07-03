@@ -1,5 +1,5 @@
 import type { ExplorerNode, GraphEditorContext } from './types';
-import { BG, BORDER, TEXT_HIGH, TEXT_MID, TEXT_DIM, SELECT_STRONG, ORPHAN_ID, ORPHAN_LABEL, primaryLabel, fallbackLabel } from './constants';
+import { BG, BORDER, TEXT_HIGH, TEXT_MID, TEXT_DIM, SELECT_STRONG, ORPHAN_ID, ORPHAN_LABEL, primaryLabel, fallbackLabel, showToast } from './constants';
 import {
   fetchTree, saveTree, fetchBookmarks, fetchBookmarkedNodes, fetchAllNodes,
   apiCreateNode as _apiCreateNode, apiUpdateNode, apiDeleteNode, apiMoveBookmark,
@@ -63,22 +63,6 @@ export type OutlinerPaneOpts = {
    *  caret-by-word behaviour). */
   onReorderPane?: (direction: 'left' | 'right') => boolean;
 };
-
-function showToast(msg: string) {
-  const el = document.createElement('div');
-  el.textContent = msg;
-  el.style.cssText = [
-    'position:fixed', 'bottom:24px', 'left:50%', 'transform:translateX(-50%)',
-    'background:rgba(30,30,40,0.95)', 'color:#fff',
-    'border:1px solid rgba(255,255,255,0.15)',
-    'padding:6px 14px', 'border-radius:6px', 'font-size:12px',
-    'z-index:9999', 'white-space:nowrap', 'pointer-events:none',
-    'opacity:1', 'transition:opacity 0.4s ease',
-  ].join(';');
-  document.body.appendChild(el);
-  setTimeout(() => { el.style.opacity = '0'; }, 1400);
-  setTimeout(() => el.remove(), 1800);
-}
 
 export function createOutlinerView(ctx: GraphEditorContext, paneOpts?: OutlinerPaneOpts): {
   el: HTMLElement;

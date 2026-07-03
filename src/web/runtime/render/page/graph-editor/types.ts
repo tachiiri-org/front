@@ -94,4 +94,7 @@ export interface GraphEditorContext {
   // linked to the panel's current node) and DELETE the node. Used by node→relation drag-drop and
   // the Shift+Alt+→ shortcut. The caller removes the node from its own pane afterwards.
   moveNodeToRelation?: (node: ExplorerNode, targetNodeId: string | null) => Promise<void>;
+  // Set by multi-pane: open an additional relation panel to the right of the line dock, showing the
+  // given node's relations (Miller-column style). Triggered by right-clicking a node-link chip.
+  openRelationPanel?: (nodeId: string, label?: string) => void;
 }

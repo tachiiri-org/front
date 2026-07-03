@@ -70,13 +70,36 @@ export function createMultiPaneView(ctx: GraphEditorContext): {
   el.appendChild(nodeArea);
 
   // ── Line dock (常時表示・右余白を全部使う) ──────────────────────────────────
+  // A horizontal stack of relation panels. The primary panel (leftmost) follows the active node
+  // selection; right-clicking a node-link chip appends an extra panel to its right (Miller-column
+  // style, ②). Extra panels each carry their own close button.
   const lineDock = document.createElement('div');
-  lineDock.style.cssText = `flex:1 1 0;min-width:300px;display:flex;flex-direction:column;border-left:1px solid ${BORDER};overflow:hidden;`;
+  lineDock.style.cssText = `flex:1 1 0;min-width:300px;display:flex;flex-direction:row;border-left:1px solid ${BORDER};overflow-x:auto;overflow-y:hidden;`;
 
+  const primaryPanel = document.createElement('div');
+  primaryPanel.style.cssText = `flex:1 1 0;min-width:300px;display:flex;flex-direction:column;overflow:hidden;`;
   const lineView: PaneView = createLineView(ctx, { lang: ctx.state.lang, initialNodeId: null });
   lineView.el.style.flex = '1';
-  lineDock.appendChild(lineView.el);
+  primaryPanel.appendChild(lineView.el);
+  lineDock.appendChild(primaryPanel);
   el.appendChild(lineDock);
+
+  // ② Open an additional relation panel to the right showing `nodeId`'s relations. Independent of
+  // the primary dock (does not follow selection); closed via its own × button.
+  ctx.openRelationPanel = (nodeId, label) => {
+    const panel = document.createElement('div');
+    panel.style.cssText = `flex:1 1 0;min-width:300px;display:flex;flex-direction:column;border-left:1px solid ${BORDER};overflow:hidden;`;
+    let view: PaneView;
+    const close = () => { panel.remove(); view.unregister(); };
+    view = createLineView(ctx, { lang: ctx.state.lang, initialNodeId: nodeId, onClose: close });
+    view.el.style.flex = '1';
+    panel.appendChild(view.el);
+    lineDock.appendChild(panel);
+    // createLineView renders once from initialNodeId; setParent re-renders with the breadcrumb path
+    // so the header shows the clicked node's label.
+    void view.setParent(nodeId, undefined, label ? [{ id: nodeId, label }] : []);
+    requestAnimationFrame(() => { lineDock.scrollLeft = lineDock.scrollWidth; });
+  };
 
   const panes: PaneInstance[] = [];
   let fullscreenPaneId: string | null = null;

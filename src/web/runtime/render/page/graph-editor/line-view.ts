@@ -1,5 +1,5 @@
 import type { GraphEditorContext, PaneView, ExplorerNode, ExplorerLine, PaneViewPathEntry } from './types';
-import { BORDER, TEXT_HIGH, TEXT_MID, TEXT_DIM, SELECT_STRONG, ORPHAN_ID } from './constants';
+import { BORDER, TEXT_HIGH, TEXT_MID, TEXT_DIM, SELECT_STRONG, ORPHAN_ID, showToast } from './constants';
 import {
   fetchNodeLines, apiCreateRelation, apiSetLineBody, apiAddRay, apiRemoveRay, fetchAllNodes, apiCreateNode,
   fetchOrphanLines, apiDeleteLine, apiDeleteNode, apiReorderNodeRelations, apiLinkNode, apiOrient,
@@ -34,7 +34,7 @@ function splitTokens(body: string): Array<{ t: 'txt'; v: string } | { t: 'men'; 
 
 export function createLineView(
   ctx: GraphEditorContext,
-  opts: { lang: 'en' | 'ja'; initialNodeId?: string | null },
+  opts: { lang: 'en' | 'ja'; initialNodeId?: string | null; onClose?: () => void },
 ): PaneView {
   let lang = opts.lang;
   let currentNodeId: string | null = opts.initialNodeId ?? null;
@@ -144,23 +144,14 @@ export function createLineView(
     setTimeout(() => input.focus(), 0);
   };
 
-  // @から新規作成したノードは親が無く「リンクなし」になる。選んだ既存ノードの子として配置する
-  // （構造リンク＋親向き付け）。辺作成を await してから向き付けし、向き漏れ＝リンクなし化を防ぐ。
-  const placeUnderParent = async (childId: string, parentNode: ExplorerNode, createLabel?: string) => {
-    let parentId = parentNode.id;
-    if (createLabel) { const c = await apiCreateNode(ctx.gId, null, lang, createLabel); if (!c) return; parentId = c.id; }
+  // @から新規作成したノードは親が無く「リンクなし」になる。以前は親選択ポップオーバーを開いていたが、
+  // 既定でルートノード直下に紐づける（構造リンク＋親向き付け）。辺作成を await してから向き付けし、
+  // 向き漏れ＝リンクなし化を防ぐ。ルート未設定時は何もしない（従来通りリンクなしのまま）。
+  const linkToRoot = async (childId: string) => {
+    const parentId = ctx.rootNodeId;
     if (!parentId || parentId === childId) return;
     await apiLinkNode(ctx.gId, childId, parentId);
     await apiOrient(ctx.gId, childId, parentId);
-  };
-  // 新規ノードの親を既存ノードから検索して選ばせるポップオーバー。Escでスキップ（従来通りリンクなし）。
-  const openParentPicker = (childId: string, anchorEl: HTMLElement, afterPlace?: () => void) => {
-    openSearchPopover(
-      anchorEl,
-      (parentNode, createLabel) => { void placeUnderParent(childId, parentNode, createLabel).then(() => afterPlace?.()); },
-      undefined,
-      '親ノードを検索（Escでスキップ）…',
-    );
   };
 
   const setActive = (line: ExplorerLine) => {
@@ -202,14 +193,39 @@ export function createLineView(
   };
   const clearSelection = () => { selAnchor = null; selCursor = null; updateSelHighlight(); };
   // 上下カーソルで上下の行へフォーカス移動（ノードパネルと同じ挙動）。draft 行も含めて上下移動する。
-  // 行内は複数のテキスト片に分かれるので、セグメント単位ではなく「行」単位で移動する。
-  const focusAdjacentRow = (ta: HTMLTextAreaElement, dir: 'up' | 'down') => {
+  // 行内は複数のテキスト片に分かれるので、セグメント単位ではなく「行」単位で移動する。移動できたら true。
+  const focusAdjacentRow = (ta: HTMLTextAreaElement, dir: 'up' | 'down'): boolean => {
     const rows = Array.from(bodyEl.children) as HTMLElement[];
     const idx = rows.findIndex((r) => r.contains(ta));
-    if (idx === -1) return;
+    if (idx === -1) return false;
     const target = rows[idx + (dir === 'down' ? 1 : -1)];
     const nta = target?.querySelector('textarea') as HTMLTextAreaElement | null;
-    if (nta) { nta.focus(); const p = nta.value.length; nta.setSelectionRange(p, p); }
+    if (nta) { nta.focus(); const p = nta.value.length; nta.setSelectionRange(p, p); return true; }
+    return false;
+  };
+  // 行境界のキャレット送り（⑥）: 隣接行の先頭/末尾テキスト片へキャレットを着地させる。
+  // dir='up' → 上の行の最後のテキスト片の末尾、dir='down' → 下の行の先頭テキスト片の文頭。
+  const focusRowEdge = (ta: HTMLTextAreaElement, dir: 'up' | 'down'): boolean => {
+    const rows = Array.from(bodyEl.children) as HTMLElement[];
+    const idx = rows.findIndex((r) => r.contains(ta));
+    if (idx === -1) return false;
+    const target = rows[idx + (dir === 'down' ? 1 : -1)];
+    if (!target) return false;
+    const tas = target.querySelectorAll('textarea');
+    const nta = (dir === 'up' ? tas[tas.length - 1] : tas[0]) as HTMLTextAreaElement | undefined;
+    if (!nta) return false;
+    nta.focus();
+    const p = dir === 'up' ? nta.value.length : 0;
+    nta.setSelectionRange(p, p);
+    return true;
+  };
+  // 現在行の末尾テキスト片の末尾へキャレット（最下行で↓を押した時の「行末」着地）。
+  const focusRowEnd = (ta: HTMLTextAreaElement) => {
+    const row = (Array.from(bodyEl.children) as HTMLElement[]).find((r) => r.contains(ta));
+    const tas = row?.querySelectorAll('textarea');
+    const last = tas && tas.length ? (tas[tas.length - 1] as HTMLTextAreaElement) : ta;
+    last.focus();
+    last.setSelectionRange(last.value.length, last.value.length);
   };
   // Shift+↑↓: カーソル端を上下に動かして選択範囲を伸縮（フォーカスはアンカー行に残す）。
   const extendSelection = (dir: 'up' | 'down') => {
@@ -285,6 +301,23 @@ export function createLineView(
     row.append(spacer, bw, content);
     bw.addEventListener('mousedown', (e) => e.preventDefault());
     bw.addEventListener('click', () => { content.querySelector('textarea')?.focus(); });
+
+    // ③ コピーボタン: ノードの ❐ と同様に行の右端へ。`[lineId]ラベル解決済み本文` をコピー
+    // （⟦id⟧ はチップの表示ラベルへ解決）。AIエージェントとのやり取り用の参照文字列。
+    const relCopyText = () => Array.from(content.children).map((c) => {
+      const cel = c as HTMLElement;
+      if (cel.dataset.men) return cel.textContent ?? '';
+      return (c as HTMLTextAreaElement).value;
+    }).join('');
+    const copyBtn = document.createElement('button');
+    copyBtn.textContent = '❐';
+    copyBtn.title = '関係テキストの参照をコピー';
+    copyBtn.style.cssText = `flex-shrink:0;background:transparent;border:none;color:${TEXT_DIM};cursor:pointer;font-size:12px;padding:0 6px;line-height:1;`;
+    copyBtn.addEventListener('mousedown', (e) => e.preventDefault());
+    copyBtn.addEventListener('click', () => {
+      void navigator.clipboard.writeText(`[${line.lineId}]${relCopyText()}`).then(() => showToast('コピーしました'));
+    });
+    row.appendChild(copyBtn);
     // テキストの無い余白クリックでフォーカス。左ガター（先頭子要素より左＝padding 部）→ 先頭テキスト片の先頭、
     // それ以外（末尾より右の余白）→ 末尾テキスト片の末尾。末尾を固定幅で広げない代わりにここで受ける。
     content.addEventListener('mousedown', (e) => {
@@ -336,14 +369,20 @@ export function createLineView(
       const chip = document.createElement('span');
       chip.dataset.men = id;
       chip.contentEditable = 'false';
-      // 下線はテキストと同じ色・dashed。クリックで検索ポップオーバー（差し替え／削除）。× は廃止。
+      // 下線はテキストと同じ色・dashed。左クリックで検索ポップオーバー（差し替え／削除）、
+      // 右クリックで右にそのノードの関係パネルを開く（②）。× は廃止。
       chip.style.cssText = `display:inline-block;vertical-align:top;line-height:1.5;font-size:14px;color:${TEXT_HIGH};border-bottom:1px dashed currentColor;margin:0;user-select:none;cursor:pointer;`;
       const txt = document.createElement('span');
       txt.textContent = label ?? labelById.get(id) ?? id;
       chip.appendChild(txt);
       chip.addEventListener('mousedown', (e) => {
+        if (e.button !== 0) return; // 右クリックは contextmenu 側で関係パネルを開く。
         e.preventDefault();
         openSearchPopover(chip, (n, cl) => void replaceChip(chip, n, cl), () => removeChip(chip));
+      });
+      chip.addEventListener('contextmenu', (e) => {
+        e.preventDefault();
+        ctx.openRelationPanel?.(id, chip.textContent ?? undefined);
       });
       return chip;
     };
@@ -410,10 +449,12 @@ export function createLineView(
           return;
         }
         // ↑↓（修飾なし）: 上下の行へフォーカス移動。複数選択は解除。
+        // 最下行で↓ → 移動先が無いので、現在行の行末へキャレットを送る（⑥）。
         if ((e.key === 'ArrowUp' || e.key === 'ArrowDown') && !e.shiftKey && !e.ctrlKey && !e.metaKey && !e.altKey) {
           e.preventDefault();
           clearSelection();
-          focusAdjacentRow(ta, e.key === 'ArrowDown' ? 'down' : 'up');
+          const dir = e.key === 'ArrowDown' ? 'down' : 'up';
+          if (!focusAdjacentRow(ta, dir) && dir === 'down') focusRowEnd(ta);
           return;
         }
         // テキストを範囲選択して @ → 選択ワードを検索初期値にメニューを開き、選択範囲をチップに置換。
@@ -432,17 +473,20 @@ export function createLineView(
         }
         const atStart = ta.selectionStart === 0 && ta.selectionEnd === 0;
         const atEnd = ta.selectionStart === ta.value.length && ta.selectionEnd === ta.value.length;
-        // 連続caret: 端で←→を押すと隣のテキスト片へ（チップを跨ぐ）。
+        // 連続caret: 端で←→を押すと隣のテキスト片へ（チップを跨ぐ）。行内に隣が無ければ（＝文頭/文末）
+        // 上下の行のテキスト末尾/文頭へ送る（⑥）。
         if (e.key === 'ArrowLeft' && atStart) {
           const chip = ta.previousElementSibling as HTMLElement | null;
           const prevTa = chip?.previousElementSibling as HTMLTextAreaElement | null;
           if (chip?.dataset.men && prevTa) { e.preventDefault(); prevTa.focus(); prevTa.setSelectionRange(prevTa.value.length, prevTa.value.length); }
+          else if (!ta.previousElementSibling) { if (focusRowEdge(ta, 'up')) e.preventDefault(); }
           return;
         }
         if (e.key === 'ArrowRight' && atEnd) {
           const chip = ta.nextElementSibling as HTMLElement | null;
           const nextTa = chip?.nextElementSibling as HTMLTextAreaElement | null;
           if (chip?.dataset.men && nextTa) { e.preventDefault(); nextTa.focus(); nextTa.setSelectionRange(0, 0); }
+          else if (!ta.nextElementSibling) { if (focusRowEdge(ta, 'down')) e.preventDefault(); }
           return;
         }
         // Backspace（先頭）で直前チップ削除、Delete（末尾）で直後チップ削除。
@@ -520,8 +564,8 @@ export function createLineView(
           await apiAddRay(ctx.gId, line.lineId, nodeId);
           const ar = ctx.activeRelation;
           if (ar && ar.lineId === line.lineId) { ar.participants.add(nodeId); ctx.setActiveRelation(ar); }
-          // 新規作成ノードは親を持たない＝リンクなしになるので、続けて親を選べるようにする。
-          if (createLabel) openParentPicker(nodeId, chip, () => { newTa.focus(); newTa.setSelectionRange(0, 0); });
+          // 新規作成ノードは親を持たない＝リンクなしになるので、既定でルートノード直下に紐づける。
+          if (createLabel) await linkToRoot(nodeId);
         },
       };
       const seq = ++mentionSeq;
@@ -585,7 +629,7 @@ export function createLineView(
           const rrow = bodyEl.querySelector(`[data-line-id="${CSS.escape(rel.lineId)}"]`);
           const chip = rrow?.querySelector(`[data-men="${CSS.escape(mentionId)}"]`) as HTMLElement | null;
           ((chip?.nextElementSibling as HTMLTextAreaElement | null) ?? (rrow?.querySelector('textarea') as HTMLTextAreaElement | null))?.focus();
-          if (createLabel && chip) openParentPicker(mentionId, chip);
+          if (createLabel) await linkToRoot(mentionId);
         },
       };
       const seq = ++mentionSeq;
@@ -657,6 +701,15 @@ export function createLineView(
     langBtn.style.cssText = `background:transparent;border:1px solid ${BORDER};color:${TEXT_MID};cursor:pointer;font-size:10px;padding:1px 4px;border-radius:3px;flex-shrink:0;line-height:1.4;`;
     langBtn.addEventListener('click', () => { lang = lang === 'ja' ? 'en' : 'ja'; void render(); });
     ctrlRow.appendChild(langBtn);
+    // ② 右クリックで開いた追加パネルには閉じるボタンを付ける（固定 dock には付かない）。右端。
+    if (opts.onClose) {
+      const closeBtn = document.createElement('button');
+      closeBtn.textContent = '×';
+      closeBtn.title = 'この関係パネルを閉じる';
+      closeBtn.style.cssText = `background:transparent;border:none;color:${TEXT_DIM};cursor:pointer;font-size:14px;padding:0 2px;line-height:1;flex-shrink:0;`;
+      closeBtn.addEventListener('click', () => opts.onClose!());
+      ctrlRow.appendChild(closeBtn);
+    }
     head.appendChild(ctrlRow);
 
     // ── 2行目: パンくず（ルート › … › 現在ノード） ── アウトラインの bcEl と同じ見た目。
