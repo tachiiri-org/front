@@ -17,6 +17,11 @@ function labelOf(n: ExplorerNode, lang: 'en' | 'ja'): string {
   return primary || fallback || n.id;
 }
 
+// 本文にノードリンク(⟦id⟧チップ)が1つでも含まれるか。
+function hasChip(body: string): boolean {
+  return /⟦[^⟧]+⟧/.test(body);
+}
+
 // 本文を [テキスト, メンション, テキスト, …] に分解。
 function splitTokens(body: string): Array<{ t: 'txt'; v: string } | { t: 'men'; id: string }> {
   const out: Array<{ t: 'txt'; v: string } | { t: 'men'; id: string }> = [];
@@ -339,9 +344,25 @@ export function createLineView(
       return id ? `⟦${id}⟧` : (c as HTMLTextAreaElement).value;
     }).join('');
     let saveTimer: ReturnType<typeof setTimeout> | undefined;
+    let detachedSource = false; // ⑤: ソース参加を外したら二重に外さない。
     const save = (immediate = false) => {
       if (saveTimer) clearTimeout(saveTimer);
-      const doSave = () => { void apiSetLineBody(ctx.gId, line.lineId, lang, rebuild()); };
+      const doSave = () => {
+        const body = rebuild();
+        void apiSetLineBody(ctx.gId, line.lineId, lang, body);
+        // ⑤: 本文はあるがノードリンク(チップ)が1つも無い関係は、ソースノード配下に残さず「リンクなし」へ。
+        // ソース参加者を外す＝本文が残るのでバックエンドは行を保持し（orphan）、当該ノードでは出なくなる。
+        // 編集中に画面から消さない（DOMはそのまま）ため、再描画はしない。リンクなし表示や別ノードは対象外。
+        const src = currentNodeId;
+        if (!orphanMode && src && !detachedSource && body.trim() !== '' && !hasChip(body)
+            && line.participants.some((p) => p.id === src)) {
+          detachedSource = true;
+          line.participants = line.participants.filter((p) => p.id !== src);
+          void apiRemoveRay(ctx.gId, line.lineId, src);
+          const ar = ctx.activeRelation;
+          if (ar && ar.lineId === line.lineId) { ar.participants.delete(src); ctx.setActiveRelation(ar); }
+        }
+      };
       if (immediate) doSave(); else saveTimer = setTimeout(doSave, 400);
     };
 
@@ -652,7 +673,10 @@ export function createLineView(
         e.preventDefault();
         const body = ta.value.trim();
         ta.value = '';
-        await apiCreateRelation(ctx.gId, nodeId, lang, body);
+        const created = await apiCreateRelation(ctx.gId, nodeId, lang, body);
+        // ⑤: チップ無しの本文だけの関係はソースノードに紐づけず「リンクなし」へ集める。
+        // ソース参加を外す＝本文が残るのでバックエンドは orphan として保持し、当該ノードには出さない。
+        if (created && body !== '' && !hasChip(body)) await apiRemoveRay(ctx.gId, created.lineId, nodeId);
         await render();
         return;
       }
