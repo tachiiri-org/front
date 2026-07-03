@@ -614,21 +614,21 @@ export function createLineView(
   };
 
   // 新しい関係行を anchorRow の直後に「楽観的に」挿入する（全再描画しない＝画面が点滅しない・①）。
-  // 既定でソースノード自身の ⟦id⟧ チップを種にするので、テキストのみ化して当該ノードから消える（⑤）
-  // ことがなく、追加直後にキャレットは本文（チップの右）に入る。並び順はバックエンドへ保存する。
+  // 本文にノードリンク(チップ)が無ければ末尾にこのノードの ⟦id⟧ を付けて当該ノードに紐づける。
+  // 後で手動でその末尾チップを外せばチップ0になり ⑤ で「リンクなし」へ移る。並び順は保存する。
   const insertRelationAfter = async (anchorRow: HTMLElement, extraText = ''): Promise<void> => {
     const nid = currentNodeId;
     if (!nid) return;
-    const newBody = extraText ? `⟦${nid}⟧ ${extraText}` : `⟦${nid}⟧`;
+    const newBody = hasChip(extraText) ? extraText : `${extraText}⟦${nid}⟧`;
     const created = await apiCreateRelation(ctx.gId, nid, lang, newBody);
     if (!created) return;
     const subjLabel = currentPath?.[currentPath.length - 1]?.label ?? '';
     const subj: ExplorerNode = { id: nid, ...(lang === 'ja' ? { ja: subjLabel } : { en: subjLabel }) };
     const newRow = renderRelationRow({ lineId: created.lineId, body: { [lang]: newBody }, participants: [subj] });
     anchorRow.insertAdjacentElement('afterend', newRow);
-    const tas = newRow.querySelectorAll('textarea');
-    const last = tas[tas.length - 1] as HTMLTextAreaElement | undefined;
-    if (last) { last.focus(); last.setSelectionRange(last.value.length, last.value.length); }
+    // キャレットは末尾チップの手前＝先頭テキスト片の末尾へ。続けて本文を書ける。
+    const firstTa = newRow.querySelector('textarea') as HTMLTextAreaElement | null;
+    if (firstTa) { firstTa.focus(); firstTa.setSelectionRange(firstTa.value.length, firstTa.value.length); }
     await apiReorderNodeRelations(ctx.gId, nid, relationRows().map((r) => r.dataset.lineId!));
   };
 
@@ -640,20 +640,9 @@ export function createLineView(
     const bw = document.createElement('span'); bw.style.cssText = `flex-shrink:0;display:flex;align-items:center;justify-content:center;width:18px;height:21px;cursor:pointer;`;
     const sq = document.createElement('span'); sq.style.cssText = `width:7px;height:7px;border-radius:1px;box-sizing:border-box;background:transparent;border:1.5px solid ${TEXT_DIM};`;
     bw.appendChild(sq);
-    // 新しい関係はこのノードに紐づく。既定でノード自身のノードリンク（チップ）を先頭に表示しておく
-    // ので、テキストを入れた瞬間に消えるような体感にならない（作成時 ⟦id⟧ を種にする）。
-    const subjLabel = currentPath?.[currentPath.length - 1]?.label ?? '';
-    let subjEl: HTMLElement | null = null;
-    if (nodeId && subjLabel) {
-      subjEl = document.createElement('span');
-      subjEl.textContent = subjLabel;
-      subjEl.title = '新しい関係はこのノードに紐づきます';
-      subjEl.style.cssText = `flex-shrink:0;font-size:14px;line-height:1.5;color:${TEXT_HIGH};border-bottom:1px dashed currentColor;margin:0 4px 0 0;user-select:none;cursor:text;`;
-    }
     const ta = document.createElement('textarea');
     ta.rows = 1;
     ta.style.cssText = `flex:1;background:transparent;border:none;outline:none;resize:none;font-size:14px;font-family:inherit;line-height:1.5;padding:0 4px;overflow:hidden;min-width:0;color:${TEXT_DIM};`;
-    if (subjEl) subjEl.addEventListener('mousedown', (e) => { e.preventDefault(); ta.focus(); });
     const resize = () => { ta.style.height = 'auto'; ta.style.height = ta.scrollHeight + 'px'; };
     // ドラフト行でも @ メンションを使えるようにする。素の1行 textarea なのでチップは差し込めないため、
     // 候補を選んだ時点で「本文に ⟦id⟧ を埋めた関係」を作成して本物の関係行へ切り替える。新規作成なら
@@ -702,9 +691,10 @@ export function createLineView(
       if (e.key === 'Enter' && !e.shiftKey) {
         e.preventDefault();
         const text = ta.value.trim();
+        if (!text) return;
         ta.value = ''; resize();
-        // ドラフト直後へ楽観挿入（点滅しない）。既定でこのノードの ⟦id⟧ チップを種にするので、
-        // テキストのみ化して当該ノード配下から消える体感にならない。
+        // ドラフト直後へ楽観挿入（点滅しない）。本文にノードリンクが無ければ末尾に ⟦node⟧ を付けて
+        // 当該ノードに紐づける（後で手動で外せば ⑤ でリンクなしへ）。
         await insertRelationAfter(row, text);
         return;
       }
@@ -716,7 +706,7 @@ export function createLineView(
     });
     bw.addEventListener('mousedown', (e) => e.preventDefault());
     bw.addEventListener('click', () => ta.focus());
-    if (subjEl) row.append(spacer, bw, subjEl, ta); else row.append(spacer, bw, ta);
+    row.append(spacer, bw, ta);
     return row;
   };
 
