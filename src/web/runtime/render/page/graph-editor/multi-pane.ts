@@ -2,6 +2,7 @@ import type { GraphEditorContext, PaneView } from './types';
 import { BORDER, TEXT_HIGH, TEXT_MID, TEXT_DIM, SELECT_STRONG } from './constants';
 import { createOutlinerView } from './outliner-view';
 import { createLineView } from './line-view';
+import { fetchNodePath } from './api';
 
 type PaneConfig = {
   id: string;
@@ -95,9 +96,12 @@ export function createMultiPaneView(ctx: GraphEditorContext): {
     view.el.style.flex = '1';
     panel.appendChild(view.el);
     lineDock.appendChild(panel);
-    // createLineView renders once from initialNodeId; setParent re-renders with the breadcrumb path
-    // so the header shows the clicked node's label.
-    void view.setParent(nodeId, undefined, label ? [{ id: nodeId, label }] : []);
+    // createLineView renders once from initialNodeId; setParent re-renders with the full breadcrumb
+    // (ルート › … › node) so the header matches the node dock's breadcrumb, not just the bare name.
+    void (async () => {
+      const path = await fetchNodePath(ctx.gId, nodeId, label ?? '', ctx.rootNodeId, ctx.state.lang);
+      await view.setParent(nodeId, undefined, path);
+    })();
     requestAnimationFrame(() => { lineDock.scrollLeft = lineDock.scrollWidth; });
   };
 

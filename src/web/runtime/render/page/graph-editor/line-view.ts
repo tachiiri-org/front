@@ -486,10 +486,10 @@ export function createLineView(
           return;
         }
         // 既存リレーションで Enter は改行ではなく「新しいリレーションを追加」（Shift+Enterで改行）。
+        // この行の直後へ楽観挿入（全再描画しない＝点滅しない）。
         if (e.key === 'Enter' && !e.shiftKey) {
           e.preventDefault();
-          const nid = currentNodeId;
-          if (nid) void (async () => { const created = await apiCreateRelation(ctx.gId, nid, lang, ''); await render(); if (created) focusLine(created.lineId); })();
+          void insertRelationAfter(row);
           return;
         }
         const atStart = ta.selectionStart === 0 && ta.selectionEnd === 0;
@@ -613,6 +613,25 @@ export function createLineView(
     return row;
   };
 
+  // 新しい関係行を anchorRow の直後に「楽観的に」挿入する（全再描画しない＝画面が点滅しない・①）。
+  // 既定でソースノード自身の ⟦id⟧ チップを種にするので、テキストのみ化して当該ノードから消える（⑤）
+  // ことがなく、追加直後にキャレットは本文（チップの右）に入る。並び順はバックエンドへ保存する。
+  const insertRelationAfter = async (anchorRow: HTMLElement, extraText = ''): Promise<void> => {
+    const nid = currentNodeId;
+    if (!nid) return;
+    const newBody = extraText ? `⟦${nid}⟧ ${extraText}` : `⟦${nid}⟧`;
+    const created = await apiCreateRelation(ctx.gId, nid, lang, newBody);
+    if (!created) return;
+    const subjLabel = currentPath?.[currentPath.length - 1]?.label ?? '';
+    const subj: ExplorerNode = { id: nid, ...(lang === 'ja' ? { ja: subjLabel } : { en: subjLabel }) };
+    const newRow = renderRelationRow({ lineId: created.lineId, body: { [lang]: newBody }, participants: [subj] });
+    anchorRow.insertAdjacentElement('afterend', newRow);
+    const tas = newRow.querySelectorAll('textarea');
+    const last = tas[tas.length - 1] as HTMLTextAreaElement | undefined;
+    if (last) { last.focus(); last.setSelectionRange(last.value.length, last.value.length); }
+    await apiReorderNodeRelations(ctx.gId, nid, relationRows().map((r) => r.dataset.lineId!));
+  };
+
   // ノードパネルの draft 行と同じ構成（spacer+四角+入力）。テキストを書いて Enter で作成。
   const makeDraftRow = (nodeId: string): HTMLElement => {
     const row = document.createElement('div');
@@ -621,9 +640,20 @@ export function createLineView(
     const bw = document.createElement('span'); bw.style.cssText = `flex-shrink:0;display:flex;align-items:center;justify-content:center;width:18px;height:21px;cursor:pointer;`;
     const sq = document.createElement('span'); sq.style.cssText = `width:7px;height:7px;border-radius:1px;box-sizing:border-box;background:transparent;border:1.5px solid ${TEXT_DIM};`;
     bw.appendChild(sq);
+    // 新しい関係はこのノードに紐づく。既定でノード自身のノードリンク（チップ）を先頭に表示しておく
+    // ので、テキストを入れた瞬間に消えるような体感にならない（作成時 ⟦id⟧ を種にする）。
+    const subjLabel = currentPath?.[currentPath.length - 1]?.label ?? '';
+    let subjEl: HTMLElement | null = null;
+    if (nodeId && subjLabel) {
+      subjEl = document.createElement('span');
+      subjEl.textContent = subjLabel;
+      subjEl.title = '新しい関係はこのノードに紐づきます';
+      subjEl.style.cssText = `flex-shrink:0;font-size:14px;line-height:1.5;color:${TEXT_HIGH};border-bottom:1px dashed currentColor;margin:0 4px 0 0;user-select:none;cursor:text;`;
+    }
     const ta = document.createElement('textarea');
     ta.rows = 1;
     ta.style.cssText = `flex:1;background:transparent;border:none;outline:none;resize:none;font-size:14px;font-family:inherit;line-height:1.5;padding:0 4px;overflow:hidden;min-width:0;color:${TEXT_DIM};`;
+    if (subjEl) subjEl.addEventListener('mousedown', (e) => { e.preventDefault(); ta.focus(); });
     const resize = () => { ta.style.height = 'auto'; ta.style.height = ta.scrollHeight + 'px'; };
     // ドラフト行でも @ メンションを使えるようにする。素の1行 textarea なのでチップは差し込めないため、
     // 候補を選んだ時点で「本文に ⟦id⟧ を埋めた関係」を作成して本物の関係行へ切り替える。新規作成なら
@@ -671,13 +701,11 @@ export function createLineView(
       }
       if (e.key === 'Enter' && !e.shiftKey) {
         e.preventDefault();
-        const body = ta.value.trim();
-        ta.value = '';
-        const created = await apiCreateRelation(ctx.gId, nodeId, lang, body);
-        // ⑤: チップ無しの本文だけの関係はソースノードに紐づけず「リンクなし」へ集める。
-        // ソース参加を外す＝本文が残るのでバックエンドは orphan として保持し、当該ノードには出さない。
-        if (created && body !== '' && !hasChip(body)) await apiRemoveRay(ctx.gId, created.lineId, nodeId);
-        await render();
+        const text = ta.value.trim();
+        ta.value = ''; resize();
+        // ドラフト直後へ楽観挿入（点滅しない）。既定でこのノードの ⟦id⟧ チップを種にするので、
+        // テキストのみ化して当該ノード配下から消える体感にならない。
+        await insertRelationAfter(row, text);
         return;
       }
       // ↑↓（修飾なし）: 下の関係行 / 上の行へフォーカス移動。
@@ -688,7 +716,7 @@ export function createLineView(
     });
     bw.addEventListener('mousedown', (e) => e.preventDefault());
     bw.addEventListener('click', () => ta.focus());
-    row.append(spacer, bw, ta);
+    if (subjEl) row.append(spacer, bw, subjEl, ta); else row.append(spacer, bw, ta);
     return row;
   };
 
@@ -777,11 +805,6 @@ export function createLineView(
     bodyEl.appendChild(makeDraftRow(nodeId));
     for (const line of lines) bodyEl.appendChild(renderRelationRow(line));
     updateActiveHighlight();
-  };
-
-  const focusLine = (lineId: string) => {
-    const row = bodyEl.querySelector(`[data-line-id="${CSS.escape(lineId)}"]`);
-    (row?.querySelector('textarea') as HTMLTextAreaElement | null)?.focus();
   };
 
   // ── ノード → 関係への変換 ─────────────────────────────────────────────────────

@@ -271,6 +271,35 @@ export async function fetchNodeLines(graphId: string, nodeId: string): Promise<E
   return data.lines ?? [];
 }
 
+// ノードの（向き付けされた）親ノード一覧。DAG なので複数返り得る。
+export async function fetchNodeParents(graphId: string, nodeId: string): Promise<ExplorerNode[]> {
+  const r = await apiFetch(`/api/v1/graph/${graphId}/node/${nodeId}/parents`);
+  if (!r.ok) return [];
+  const data = await r.json() as { nodes: ExplorerNode[] };
+  return data.nodes ?? [];
+}
+
+// ルート→…→nodeId のパンくずパスを、親を辿って構築する（先頭の親を採用）。
+// 起点ノードのラベルは呼び出し側が渡す（チップの表示ラベル）。root は「ルート」表記に揃える。
+export async function fetchNodePath(
+  graphId: string, nodeId: string, label: string, rootNodeId: string | null, lang: 'en' | 'ja',
+): Promise<Array<{ id: string | null; label: string }>> {
+  const labelOf = (n: ExplorerNode) => (lang === 'ja' ? n.ja : n.en) || (lang === 'ja' ? n.en : n.ja) || n.id;
+  const chain: Array<{ id: string | null; label: string }> = [{ id: nodeId, label }];
+  const seen = new Set<string>([nodeId]);
+  let cur = nodeId;
+  for (let i = 0; i < 30; i++) {
+    const parents = await fetchNodeParents(graphId, cur);
+    const p = parents.find((x) => !seen.has(x.id));
+    if (!p || (rootNodeId && p.id === rootNodeId)) break; // root はプレフィックスで足す
+    seen.add(p.id);
+    chain.unshift({ id: p.id, label: labelOf(p) });
+    cur = p.id;
+  }
+  if (rootNodeId) chain.unshift({ id: rootNodeId, label: 'ルート' });
+  return chain;
+}
+
 // nodeId を主語（先頭参加者）にした関係 line を新規作成。
 export async function apiCreateRelation(
   graphId: string, nodeId: string, lang: 'en' | 'ja', body?: string,
