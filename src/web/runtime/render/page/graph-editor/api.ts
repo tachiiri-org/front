@@ -1,4 +1,4 @@
-import type { ExplorerNode, ExplorerLine } from './types';
+import type { ExplorerNode, ExplorerRelation } from './types';
 
 // ── Client-side request gate ──────────────────────────────────────────────
 // The graph runs on a single-threaded per-tenant Durable Object behind a 120-reads/60s rate
@@ -264,10 +264,10 @@ export async function apiMoveNode(
 // nodes (ordered; head = subject). See backend p_line_body / h_ray.
 
 // ノードが参加している関係 line 一覧（本文＋順序付き参加者）。ツリー枝は含まれない。
-export async function fetchNodeLines(graphId: string, nodeId: string): Promise<ExplorerLine[]> {
+export async function fetchNodeRelations(graphId: string, nodeId: string): Promise<ExplorerRelation[]> {
   const r = await apiFetch(`/api/v1/graph/${graphId}/node/${nodeId}/lines`);
   if (!r.ok) return [];
-  const data = await r.json() as { lines: ExplorerLine[] };
+  const data = await r.json() as { lines: ExplorerRelation[] };
   return data.lines ?? [];
 }
 
@@ -303,18 +303,18 @@ export async function fetchNodePath(
 // nodeId を主語（先頭参加者）にした関係 line を新規作成。
 export async function apiCreateRelation(
   graphId: string, nodeId: string, lang: 'en' | 'ja', body?: string,
-): Promise<ExplorerLine | null> {
+): Promise<ExplorerRelation | null> {
   const r = await apiFetch(`/api/v1/graph/${graphId}/node/${nodeId}/relation`, {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
     body: JSON.stringify({ lang, ...(body ? { body } : {}) }),
   });
   if (!r.ok) return null;
-  return r.json() as Promise<ExplorerLine>;
+  return r.json() as Promise<ExplorerRelation>;
 }
 
 // 関係 line の本文を言語ごとに設定（空文字でも行は残り、関係 line のマークは保持）。
-export async function apiSetLineBody(graphId: string, lineId: string, lang: 'en' | 'ja', body: string): Promise<void> {
+export async function apiSetRelationText(graphId: string, lineId: string, lang: 'en' | 'ja', body: string): Promise<void> {
   await apiFetch(`/api/v1/graph/${graphId}/line/${lineId}/body`, {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
@@ -360,14 +360,14 @@ export async function apiReorderNodeRelations(graphId: string, nodeId: string, o
 }
 
 // 参加ノードを1つも持たない関係（本文だけ＝リンクなし関係 / orphan）の一覧。
-export async function fetchOrphanLines(graphId: string): Promise<ExplorerLine[]> {
+export async function fetchOrphanRelations(graphId: string): Promise<ExplorerRelation[]> {
   const r = await apiFetch(`/api/v1/graph/${graphId}/orphan-lines`);
   if (!r.ok) return [];
-  const data = await r.json() as { lines: ExplorerLine[] };
+  const data = await r.json() as { lines: ExplorerRelation[] };
   return data.lines ?? [];
 }
 
 // 関係(line)を丸ごと削除（チップ削除とは別の、関係そのものの削除）。
-export async function apiDeleteLine(graphId: string, lineId: string): Promise<void> {
+export async function apiDeleteRelation(graphId: string, lineId: string): Promise<void> {
   await apiFetch(`/api/v1/graph/${graphId}/line/${lineId}`, { method: 'DELETE' });
 }

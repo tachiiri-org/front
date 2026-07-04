@@ -41,13 +41,13 @@ const childKey = (_parentKey: string, nodeId: string): string => nodeId;
 /** One breadcrumb hop: the node id and its display label, root-first. */
 export type PathEntry = { id: string | null; label: string };
 
-export type OutlinerPaneOpts = {
+export type NodePanelOpts = {
   /** Stable pane id (survives reload) — used to persist this pane's expansion state per-pane. */
-  paneId?: string;
+  nodePanelId?: string;
   /** If set, this pane shows children of this node (null = empty until setParent called) */
-  paneParentId?: string | null;
-  /** Breadcrumb path (root-first) to paneParentId, for panel-sourced panes */
-  panePath?: PathEntry[];
+  sourceNodeId?: string | null;
+  /** Breadcrumb path (root-first) to sourceNodeId, for panel-sourced nodePanels */
+  nodePanelPath?: PathEntry[];
   /** Per-pane display/edit language (overrides the global default for this pane) */
   lang?: 'en' | 'ja';
   /** Called when user focuses a node row (for inter-pane wiring) */
@@ -57,14 +57,14 @@ export type OutlinerPaneOpts = {
   /** Ctrl/Cmd+→/← on a focused node: move it to the adjacent pane (reparent under that
    *  pane's parent). Returns true if a move was initiated (caller then suppresses the
    *  default caret-by-word behaviour). */
-  onMoveNodeToPane?: (nodeId: string, direction: 'left' | 'right') => boolean;
+  onMoveNodeToNodePanel?: (nodeId: string, direction: 'left' | 'right') => boolean;
   /** Ctrl/Cmd+Shift+→/← while a node in this pane is focused: move THIS pane (column) one
    *  slot left/right. Returns true if the pane moved (caller then suppresses the default
    *  caret-by-word behaviour). */
-  onReorderPane?: (direction: 'left' | 'right') => boolean;
+  onReorderNodePanel?: (direction: 'left' | 'right') => boolean;
 };
 
-export function createOutlinerView(ctx: GraphEditorContext, paneOpts?: OutlinerPaneOpts): {
+export function createNodePanelView(ctx: GraphEditorContext, nodePanelOpts?: NodePanelOpts): {
   el: HTMLElement;
   load: () => Promise<void>;
   refresh: () => void;
@@ -73,7 +73,7 @@ export function createOutlinerView(ctx: GraphEditorContext, paneOpts?: OutlinerP
   getAncestorIds: (nodeId: string) => Set<string>;
   getNodePath: (nodeId: string) => PathEntry[];
   getSelectedId: () => string | null;
-  getPaneParentId: () => string | null;
+  getSourceNodeId: () => string | null;
   setLang: (l: 'en' | 'ja') => void;
   setSourceRoot: () => Promise<void>;
   beginKeyMove: (nodeId: string) => boolean;
@@ -108,9 +108,9 @@ export function createOutlinerView(ctx: GraphEditorContext, paneOpts?: OutlinerP
   draftSpacer.style.cssText = `flex-shrink:0;width:6px;`;
   const draftBtnWrap = document.createElement('span');
   draftBtnWrap.style.cssText = `flex-shrink:0;display:flex;align-items:center;justify-content:center;width:18px;`;
-  const draftMarker = document.createElement('span');
-  draftMarker.style.cssText = `width:7px;height:7px;border-radius:1px;box-sizing:border-box;pointer-events:none;background:transparent;border:1.5px solid ${TEXT_DIM};`;
-  draftBtnWrap.appendChild(draftMarker);
+  const draftNodeBox = document.createElement('span');
+  draftNodeBox.style.cssText = `width:7px;height:7px;border-radius:1px;box-sizing:border-box;pointer-events:none;background:transparent;border:1.5px solid ${TEXT_DIM};`;
+  draftBtnWrap.appendChild(draftNodeBox);
   const draftTa = document.createElement('textarea');
   draftTa.rows = 1;
   draftTa.style.cssText = `flex:1;background:transparent;border:none;outline:none;resize:none;font-size:14px;font-family:inherit;line-height:1.5;padding:0 4px 0 0;overflow:hidden;min-height:20px;color:${TEXT_DIM};`;
@@ -124,11 +124,11 @@ export function createOutlinerView(ctx: GraphEditorContext, paneOpts?: OutlinerP
       e.preventDefault();
       const label = draftTa.value.trim();
       draftTa.value = ''; draftResize(); draftTa.style.color = TEXT_DIM;
-      const parentId = paneParentSet ? paneParentId : (ctx.rootNodeId ?? null);
+      const parentId = sourceNodeSet ? sourceNodeId : (ctx.rootNodeId ?? null);
       if (!parentId) return;
       // Optimistic: insert temp node immediately (same pattern as doAddSibling).
       const tempId = `temp-${++ctx.tempNodeCounter}`;
-      const tempNode: ExplorerNode = { id: tempId, [paneLang]: label };
+      const tempNode: ExplorerNode = { id: tempId, [nodePanelLang]: label };
       const tempKey = rootKey(null, tempId);
       const o = make(tempNode, parentId, baseDepth, tempKey, null);
       o.childrenLoaded = true;
@@ -138,7 +138,7 @@ export function createOutlinerView(ctx: GraphEditorContext, paneOpts?: OutlinerP
       tempReady.set(tempId, new Promise<void>(res => { resolveTemp = res; }));
       render(); // hides draft row, shows temp node at top
       focusRow(o);
-      const nn = await apiCreateNode(ctx.gId, parentId, paneLang, label);
+      const nn = await apiCreateNode(ctx.gId, parentId, nodePanelLang, label);
       if (!nn) {
         resolveTemp(); tempReady.delete(tempId);
         roots.splice(roots.indexOf(o), 1); unindexOcc(o);
@@ -152,7 +152,7 @@ export function createOutlinerView(ctx: GraphEditorContext, paneOpts?: OutlinerP
       swapNodeId(o, tempId, nn.id, rootKey(null, nn.id));
       Object.assign(tempNode, nn); // copy labels/color (id already set to real by swapNodeId)
       resolveTemp(); tempReady.delete(tempId);
-      if (typedText.trim() && typedText.trim() !== label) void apiUpdateNode(ctx.gId, nn.id, paneLang, typedText.trim());
+      if (typedText.trim() && typedText.trim() !== label) void apiUpdateNode(ctx.gId, nn.id, nodePanelLang, typedText.trim());
       // Declare the new node's position (front) under its parent via autosave.
       markDirty(parentId);
     }
@@ -162,7 +162,7 @@ export function createOutlinerView(ctx: GraphEditorContext, paneOpts?: OutlinerP
 
   // Scrollable list
   const listEl = document.createElement('div');
-  listEl.dataset.outlinerList = '1';
+  listEl.dataset.nodePanelList = '1';
   listEl.style.cssText = `flex:1;overflow-y:auto;overflow-x:hidden;padding:4px 0;`;
   el.appendChild(listEl);
 
@@ -217,21 +217,21 @@ export function createOutlinerView(ctx: GraphEditorContext, paneOpts?: OutlinerP
   // the root's children collapsed (one /children call).
 
   // Per-pane language (display + edit). Falls back to the global default when unset.
-  let paneLang: 'en' | 'ja' = paneOpts?.lang ?? ctx.state.lang;
+  let nodePanelLang: 'en' | 'ja' = nodePanelOpts?.lang ?? ctx.state.lang;
 
   // Pane state
-  let paneParentSet = paneOpts?.paneParentId !== undefined;
-  let paneParentId: string | null = paneOpts?.paneParentId ?? null;
-  let paneSelectedId: string | null = null;
-  // Breadcrumb path (root-first, inclusive of paneParentId) for panel-sourced panes
-  let externalPath: PathEntry[] = paneOpts?.panePath ?? [];
+  let sourceNodeSet = nodePanelOpts?.sourceNodeId !== undefined;
+  let sourceNodeId: string | null = nodePanelOpts?.sourceNodeId ?? null;
+  let nodePanelSelectedId: string | null = null;
+  // Breadcrumb path (root-first, inclusive of sourceNodeId) for panel-sourced nodePanels
+  let externalPath: PathEntry[] = nodePanelOpts?.nodePanelPath ?? [];
 
   const labelOf = (node: ExplorerNode): string =>
-    primaryLabel(node, paneLang) ?? fallbackLabel(node, paneLang) ?? node.id.slice(0, 8);
+    primaryLabel(node, nodePanelLang) ?? fallbackLabel(node, nodePanelLang) ?? node.id.slice(0, 8);
 
   // Path (root-first, inclusive) to the node whose children form this pane's top-level rows.
   const selfPathPrefix = (): PathEntry[] => {
-    const base: PathEntry[] = paneParentSet
+    const base: PathEntry[] = sourceNodeSet
       ? [...externalPath]
       : (ctx.rootNodeId ? [{ id: ctx.rootNodeId, label: 'ルート' }] : []);
     for (const z of zoomStack) base.push({ id: z.node.id, label: labelOf(z.node) });
@@ -256,9 +256,9 @@ export function createOutlinerView(ctx: GraphEditorContext, paneOpts?: OutlinerP
     return [...selfPathPrefix(), ...chain];
   };
 
-  const setPaneSelected = (nodeId: string | null) => {
-    paneSelectedId = nodeId;
-    paneOpts?.onNodeSelect?.(nodeId);
+  const setNodePanelSelected = (nodeId: string | null) => {
+    nodePanelSelectedId = nodeId;
+    nodePanelOpts?.onNodeSelect?.(nodeId);
   };
 
   // Zoom stack: ONodes we've zoomed into (innermost last)
@@ -349,10 +349,10 @@ export function createOutlinerView(ctx: GraphEditorContext, paneOpts?: OutlinerP
     };
     for (const top of roots) appendSubtree(top);
     // Show draft row only when list is empty AND a valid parent is known
-    const draftParentId = paneParentSet ? paneParentId : (ctx.rootNodeId ?? null);
+    const draftParentId = sourceNodeSet ? sourceNodeId : (ctx.rootNodeId ?? null);
     draftEl.style.display = (roots.length === 0 && draftParentId !== null) ? 'flex' : 'none';
     updateSelectionHighlight();
-    if (paneOpts?.onContentWidthChange) scheduleWidthUpdate();
+    if (nodePanelOpts?.onContentWidthChange) scheduleWidthUpdate();
   };
 
   // Canvas-based text width measurement — called after render to auto-size the pane width
@@ -379,7 +379,7 @@ export function createOutlinerView(ctx: GraphEditorContext, paneOpts?: OutlinerP
       });
       // Group headers (breadcrumb path + controls) are part of the content too: size to fit the
       // crumbs' intrinsic width (scrollWidth, since the crumb box clips) plus the fixed controls.
-      listEl.querySelectorAll<HTMLElement>('[data-panel-header]').forEach(h => {
+      listEl.querySelectorAll<HTMLElement>('[data-node-panel-group]').forEach(h => {
         const crumbs = h.querySelector<HTMLElement>('[data-crumbs]');
         let w = 12; // horizontal padding
         for (const child of Array.from(h.children) as HTMLElement[]) {
@@ -387,10 +387,10 @@ export function createOutlinerView(ctx: GraphEditorContext, paneOpts?: OutlinerP
         }
         maxW = Math.max(maxW, w);
       });
-      if (maxW === 0) { paneOpts!.onContentWidthChange!(minW); return; }
-      // Start wide by default (matches the initial PANE_WIDTH baseline); shrink only when
+      if (maxW === 0) { nodePanelOpts!.onContentWidthChange!(minW); return; }
+      // Start wide by default (matches the initial NODE_PANEL_WIDTH baseline); shrink only when
       // every row's text is shorter than this, grow up to maxCap when text is long.
-      paneOpts!.onContentWidthChange!(Math.min(Math.max(minW, maxW), maxCap));
+      nodePanelOpts!.onContentWidthChange!(Math.min(Math.max(minW, maxW), maxCap));
       // Column width changed → textarea wrapping changed → re-measure heights
       requestAnimationFrame(() => {
         listEl.querySelectorAll<HTMLTextAreaElement>('textarea').forEach(ta => {
@@ -479,15 +479,15 @@ export function createOutlinerView(ctx: GraphEditorContext, paneOpts?: OutlinerP
     render();
   };
 
-  const updateExpandMarker = (onode: ONode) => {
+  const updateNodeBox = (onode: ONode) => {
     const row = rowMap.get(onode.key);
     if (!row) return;
-    const m = row.querySelector<HTMLElement>('[data-expand-marker]');
+    const m = row.querySelector<HTMLElement>('[data-node-box]');
     if (!m) return;
     // 四角はデフォルトは塗らない（輪郭のみ）。関係(line)が選択中ならその関係の参加ノードを塗り、
     // 関係が無いときは「選択中のノード」を塗る。
     const ar = ctx.activeRelation;
-    const blue = ar ? ar.participants.has(onode.node.id) : (onode.node.id === paneSelectedId);
+    const blue = ar ? ar.participants.has(onode.node.id) : (onode.node.id === nodePanelSelectedId);
     if (blue) {
       m.style.border = 'none';
       m.style.background = SELECT_STRONG;
@@ -499,7 +499,7 @@ export function createOutlinerView(ctx: GraphEditorContext, paneOpts?: OutlinerP
 
   const expandInDom = (onode: ONode) => {
     onode.expanded = true;
-    updateExpandMarker(onode);
+    updateNodeBox(onode);
     let anchor: HTMLElement | undefined = rowMap.get(onode.key);
     if (!anchor) return;
     let anchorEl: HTMLElement = anchor;
@@ -516,7 +516,7 @@ export function createOutlinerView(ctx: GraphEditorContext, paneOpts?: OutlinerP
 
   const collapseInDom = (onode: ONode) => {
     onode.expanded = false;
-    updateExpandMarker(onode);
+    updateNodeBox(onode);
     const removeSubtree = (list: ONode[]) => {
       for (const child of list) {
         rowMap.get(child.key)?.remove(); rowMap.delete(child.key);
@@ -536,11 +536,11 @@ export function createOutlinerView(ctx: GraphEditorContext, paneOpts?: OutlinerP
       await ensureChildren(onode);
       expandingSet.delete(onode.key);
     }
-    if (next && onode.children.length === 0) { updateExpandMarker(onode); focusRow(onode); return; }
+    if (next && onode.children.length === 0) { updateNodeBox(onode); focusRow(onode); return; }
     if (next) expandInDom(onode); else collapseInDom(onode);
     // expand/collapse mutate the DOM directly (no full render), so re-measure the pane
     // width here — otherwise collapsing long rows leaves the column stuck at its wide size.
-    if (paneOpts?.onContentWidthChange) scheduleWidthUpdate();
+    if (nodePanelOpts?.onContentWidthChange) scheduleWidthUpdate();
     focusRow(onode);
   };
 
@@ -567,7 +567,7 @@ export function createOutlinerView(ctx: GraphEditorContext, paneOpts?: OutlinerP
     };
 
     // Panel-sourced pane: prepend the (display-only) path inherited from the source pane.
-    const usesExternal = paneParentSet && externalPath.length > 0;
+    const usesExternal = sourceNodeSet && externalPath.length > 0;
     if (usesExternal) {
       externalPath.forEach((e, i) => {
         if (i > 0) appendSep();
@@ -660,7 +660,7 @@ export function createOutlinerView(ctx: GraphEditorContext, paneOpts?: OutlinerP
   let dragMultiKeys: string[] | null = null; // occurrence keys; non-null when dragging a multi-selection
   // Unique identity for this pane instance; lets the drop target distinguish a drag
   // that started in this same pane from one that started in another pane.
-  const paneToken = {};
+  const nodePanelToken = {};
 
   // Map from temp ID to promise that resolves once the real ID is assigned
   const tempReady = new Map<string, Promise<void>>();
@@ -689,7 +689,7 @@ export function createOutlinerView(ctx: GraphEditorContext, paneOpts?: OutlinerP
 
   // Drop target guard shared by dragover + drop: true when `onode` is one of the
   // dragged nodes, or (same-pane) sits inside a dragged node's subtree.
-  const dropBlockedBy = (onode: ONode, pd: NonNullable<typeof ctx.paneDrag>): boolean => {
+  const dropBlockedBy = (onode: ONode, pd: NonNullable<typeof ctx.nodePanelDrag>): boolean => {
     if (pd.nodeIds.includes(onode.node.id)) return true;
     for (const id of pd.nodeIds) {
       for (const o of occsOf(id)) if (isInSubtree(onode, o)) return true;
@@ -707,23 +707,23 @@ export function createOutlinerView(ctx: GraphEditorContext, paneOpts?: OutlinerP
     // Synthetic "リンクなし" group header: a static (non-renamable/movable) row that EXPANDS inline
     // to the orphan (parentless) nodes. The orphan nodes themselves are rendered by the normal
     // buildRow path, so they get the full node treatment (edit / drag-drop / shift+alt reorder /
-    // shortcuts). Layout mirrors a normal row ([spacer][triangle][marker][label]) so it aligns.
+    // shortcuts). Layout mirrors a normal row ([spacer][triangle][nodeBox][label]) so it aligns.
     if (onode.node.id === ORPHAN_ID) {
       const spc = document.createElement('span');
       spc.style.cssText = `flex-shrink:0;width:${(onode.depth - baseDepth) * 20 + 6}px;`;
       const bw = document.createElement('span');
       bw.style.cssText = `flex-shrink:0;display:flex;align-items:center;justify-content:center;width:18px;cursor:pointer;`;
-      const mk = document.createElement('span');
-      mk.dataset.expandMarker = '1';
-      mk.style.cssText = `width:7px;height:7px;border-radius:1px;box-sizing:border-box;background:transparent;border:1.5px solid ${TEXT_DIM};pointer-events:none;`;
-      bw.appendChild(mk);
+      const nodeBox = document.createElement('span');
+      nodeBox.dataset.nodeBox = '1';
+      nodeBox.style.cssText = `width:7px;height:7px;border-radius:1px;box-sizing:border-box;background:transparent;border:1.5px solid ${TEXT_DIM};pointer-events:none;`;
+      bw.appendChild(nodeBox);
       const lbl = document.createElement('span');
       lbl.textContent = ORPHAN_LABEL;
       lbl.style.cssText = `flex:1;font-size:14px;line-height:1.5;color:${TEXT_MID};cursor:pointer;padding:0 4px 0 0;`;
       lbl.addEventListener('click', () => void toggleExpand(onode));
       bw.addEventListener('click', (e) => { e.stopPropagation(); void toggleExpand(onode); });
       row.append(spc, bw, lbl);
-      requestAnimationFrame(() => updateExpandMarker(onode));
+      requestAnimationFrame(() => updateNodeBox(onode));
       return row;
     }
 
@@ -734,10 +734,10 @@ export function createOutlinerView(ctx: GraphEditorContext, paneOpts?: OutlinerP
     // Left square: click → property menu
     const btnWrap = document.createElement('span');
     btnWrap.style.cssText = `flex-shrink:0;display:flex;align-items:center;justify-content:center;width:18px;cursor:pointer;`;
-    const marker = document.createElement('span');
-    marker.dataset.expandMarker = '1';
-    marker.style.cssText = `width:7px;height:7px;border-radius:1px;box-sizing:border-box;pointer-events:none;`;
-    btnWrap.appendChild(marker);
+    const nodeBox = document.createElement('span');
+    nodeBox.dataset.nodeBox = '1';
+    nodeBox.style.cssText = `width:7px;height:7px;border-radius:1px;box-sizing:border-box;pointer-events:none;`;
+    btnWrap.appendChild(nodeBox);
     // 四角クリック = ズーム（Alt+→ と同じ）。旧来のノード紐付けメニューは出さない（リンクは「/」で可能）。
     btnWrap.addEventListener('click', (e) => { e.stopPropagation(); void doZoomIn(onode); });
     // 四角を右クリック = アクティブ関係への参加 link/unlink トグル（関係が未選択なら何もしない）。
@@ -747,7 +747,7 @@ export function createOutlinerView(ctx: GraphEditorContext, paneOpts?: OutlinerP
     });
     row.appendChild(btnWrap);
 
-    const label = primaryLabel(onode.node, paneLang) ?? fallbackLabel(onode.node, paneLang);
+    const label = primaryLabel(onode.node, nodePanelLang) ?? fallbackLabel(onode.node, nodePanelLang);
     const ta = document.createElement('textarea');
     ta.value = label;
     ta.style.cssText = `flex:1;background:transparent;border:none;outline:none;resize:none;font-size:14px;font-family:inherit;line-height:1.5;padding:0 4px 0 0;overflow:hidden;min-height:20px;color:${onode.node.color ?? TEXT_HIGH};`;
@@ -757,9 +757,9 @@ export function createOutlinerView(ctx: GraphEditorContext, paneOpts?: OutlinerP
     requestAnimationFrame(resize);
     ta.addEventListener('input', () => {
       resize();
-      if (paneOpts?.onContentWidthChange) scheduleWidthUpdate();
+      if (nodePanelOpts?.onContentWidthChange) scheduleWidthUpdate();
     });
-    ta.addEventListener('focus', () => setPaneSelected(onode.node.id));
+    ta.addEventListener('focus', () => setNodePanelSelected(onode.node.id));
 
     // Multi-line paste → one node per line: the first line merges into this row at the caret,
     // each remaining line becomes a sibling node below (in order). Single-line paste is left
@@ -786,19 +786,19 @@ export function createOutlinerView(ctx: GraphEditorContext, paneOpts?: OutlinerP
     });
 
     ta.addEventListener('blur', () => {
-      const old = primaryLabel(onode.node, paneLang) ?? fallbackLabel(onode.node, paneLang);
+      const old = primaryLabel(onode.node, nodePanelLang) ?? fallbackLabel(onode.node, nodePanelLang);
       const newVal = ta.value;
       if (newVal !== old) {
         // Rename acts on the NODE: onode.node is shared by every occurrence, so the data is
         // consistent at once; mirror the new label into the other occurrences' textareas too
         // so multi-membership twins update visibly without a full re-render.
-        if (paneLang === 'en') onode.node.en = newVal; else onode.node.ja = newVal;
+        if (nodePanelLang === 'en') onode.node.en = newVal; else onode.node.ja = newVal;
         for (const twin of occsOf(onode.node.id)) {
           if (twin === onode) continue;
           const twinTa = rowMap.get(twin.key)?.querySelector<HTMLTextAreaElement>('textarea');
           if (twinTa && twinTa.value !== newVal) twinTa.value = newVal;
         }
-        void apiUpdateNode(ctx.gId, onode.node.id, paneLang, newVal);
+        void apiUpdateNode(ctx.gId, onode.node.id, nodePanelLang, newVal);
       }
     });
 
@@ -821,8 +821,8 @@ export function createOutlinerView(ctx: GraphEditorContext, paneOpts?: OutlinerP
       if ((e.key === 'ArrowRight' || e.key === 'ArrowLeft') && (e.ctrlKey || e.metaKey) && !e.altKey) {
         const dir = e.key === 'ArrowRight' ? 'right' : 'left';
         const moved = e.shiftKey
-          ? paneOpts?.onReorderPane?.(dir)
-          : paneOpts?.onMoveNodeToPane?.(onode.node.id, dir);
+          ? nodePanelOpts?.onReorderNodePanel?.(dir)
+          : nodePanelOpts?.onMoveNodeToNodePanel?.(onode.node.id, dir);
         if (moved) { e.preventDefault(); return; }
       }
 
@@ -982,7 +982,7 @@ export function createOutlinerView(ctx: GraphEditorContext, paneOpts?: OutlinerP
       const sel = getSelectedONodes();
       // Drag tracks the specific OCCURRENCE(s): a multi-select drags exactly the selected
       // occurrence keys (so dragging one occurrence of a multi-membership node doesn't drag
-      // its twins). Cross-pane PaneDragState still carries node ids (its contract).
+      // its twins). Cross-pane NodePanelDragState still carries node ids (its contract).
       dragMultiKeys = (sel.length > 1 && sel.some(o => o.key === onode.key))
         ? sel.map(o => o.key) : null;
       // Populate the shared cross-pane drag state so a different pane can resolve the
@@ -990,8 +990,8 @@ export function createOutlinerView(ctx: GraphEditorContext, paneOpts?: OutlinerP
       const dragONodes: ONode[] = dragMultiKeys
         ? dragMultiKeys.map(k => byKey.get(k)).filter((o): o is ONode => !!o)
         : [onode];
-      ctx.paneDrag = {
-        sourceToken: paneToken,
+      ctx.nodePanelDrag = {
+        sourceToken: nodePanelToken,
         nodeIds: dragONodes.map(o => o.node.id),
         movers: dragONodes.map(o => ({ node: o.node, oldParentId: o.parentId })),
         detachFromSource: (nodes) => detachNodes(nodes),
@@ -1007,13 +1007,13 @@ export function createOutlinerView(ctx: GraphEditorContext, paneOpts?: OutlinerP
       dragKey = null;
       dragParentId = undefined;
       dragMultiKeys = null;
-      ctx.paneDrag = null;
-      // Clear indicators across ALL outliner panes (a cross-pane drag leaves them in the
+      ctx.nodePanelDrag = null;
+      // Clear indicators across ALL outliner nodePanels (a cross-pane drag leaves them in the
       // target pane). Scoped to outliner lists so column-view rows are untouched.
-      ctx.outer.querySelectorAll<HTMLElement>('[data-outliner-list] [data-node-id]:not(textarea)').forEach(r => {
+      ctx.outer.querySelectorAll<HTMLElement>('[data-node-panel-list] [data-node-id]:not(textarea)').forEach(r => {
         r.style.border = '2px solid transparent';
       });
-      ctx.outer.querySelectorAll<HTMLElement>('[data-outliner-list] [data-drop-line]').forEach(l => l.remove());
+      ctx.outer.querySelectorAll<HTMLElement>('[data-node-panel-list] [data-drop-line]').forEach(l => l.remove());
     });
     // Drop zones by cursor Y: top 30% → before (same level), middle 40% → child of this
     // node, bottom 30% → after (same level).
@@ -1042,7 +1042,7 @@ export function createOutlinerView(ctx: GraphEditorContext, paneOpts?: OutlinerP
       dropLine = line;
     };
     row.addEventListener('dragover', (e) => {
-      const pd = ctx.paneDrag;
+      const pd = ctx.nodePanelDrag;
       if (!pd || dropBlockedBy(onode, pd)) return;
       e.preventDefault();
       if (e.dataTransfer) e.dataTransfer.dropEffect = 'move';
@@ -1053,7 +1053,7 @@ export function createOutlinerView(ctx: GraphEditorContext, paneOpts?: OutlinerP
     const dropHandler = async (e: DragEvent) => {
       e.preventDefault();
       clearDropIndicator();
-      const pd = ctx.paneDrag;
+      const pd = ctx.nodePanelDrag;
       if (!pd || dropBlockedBy(onode, pd)) return;
 
       // Resolve the drop target: a sibling position next to `onode`, or `onode` itself
@@ -1082,7 +1082,7 @@ export function createOutlinerView(ctx: GraphEditorContext, paneOpts?: OutlinerP
         return zone === 'before' ? tIdx : tIdx + 1;
       };
 
-      if (pd.sourceToken === paneToken) {
+      if (pd.sourceToken === nodePanelToken) {
         // ── Same-pane reorder / reparent (movers live in this pane's tree) ──
         // Resolve the dragged OCCURRENCE(s) by key, then exclude the target occurrence and
         // anything inside its subtree.
@@ -1125,7 +1125,7 @@ export function createOutlinerView(ctx: GraphEditorContext, paneOpts?: OutlinerP
         for (const pid of affectedParents) markDirty(pid);
       } else {
         // ── Cross-pane move (movers came from another pane) ──
-        await moveAcrossPanes(pd, newParentId, newSibs, insertAtFor(), childDepth);
+        await moveAcrossNodePanels(pd, newParentId, newSibs, insertAtFor(), childDepth);
       }
     };
 
@@ -1137,13 +1137,13 @@ export function createOutlinerView(ctx: GraphEditorContext, paneOpts?: OutlinerP
     copyIcon.addEventListener('mousedown', (e) => e.preventDefault()); // don't steal caret/focus
     copyIcon.addEventListener('click', (e) => {
       e.stopPropagation();
-      const lbl = primaryLabel(onode.node, paneLang) ?? fallbackLabel(onode.node, paneLang) ?? '';
+      const lbl = primaryLabel(onode.node, nodePanelLang) ?? fallbackLabel(onode.node, nodePanelLang) ?? '';
       void navigator.clipboard.writeText(`[${onode.node.id}]${lbl}`).then(() => showToast('コピーしました'));
     });
 
     row.appendChild(ta);
     row.appendChild(copyIcon);
-    updateExpandMarker(onode);
+    updateNodeBox(onode);
     return row;
   };
 
@@ -1166,8 +1166,8 @@ export function createOutlinerView(ctx: GraphEditorContext, paneOpts?: OutlinerP
 
   // Insert nodes dragged from ANOTHER pane into this pane's tree at the given sibling
   // position, then reparent them in the graph. Source pane is updated via detachFromSource.
-  const moveAcrossPanes = async (
-    pd: NonNullable<typeof ctx.paneDrag>,
+  const moveAcrossNodePanels = async (
+    pd: NonNullable<typeof ctx.nodePanelDrag>,
     newParentId: string | null,
     newSibs: ONode[],
     insertAt: number,
@@ -1227,13 +1227,13 @@ export function createOutlinerView(ctx: GraphEditorContext, paneOpts?: OutlinerP
 
   // ── Keyboard-driven cross-pane node move (Ctrl/Cmd+→/←) ───────────────
   // Reuses the drag-and-drop cross-pane primitives: the source pane publishes the node into
-  // ctx.paneDrag (beginKeyMove), then the target pane consumes it (acceptKeyMove via
-  // moveAcrossPanes) so reparent / detach / persistence behave identically to a drag.
+  // ctx.nodePanelDrag (beginKeyMove), then the target pane consumes it (acceptKeyMove via
+  // moveAcrossNodePanels) so reparent / detach / persistence behave identically to a drag.
   const beginKeyMove = (nodeId: string): boolean => {
     const o = anyOccOf(nodeId);
     if (!o) return false;
-    ctx.paneDrag = {
-      sourceToken: paneToken,
+    ctx.nodePanelDrag = {
+      sourceToken: nodePanelToken,
       nodeIds: [o.node.id],
       movers: [{ node: o.node, oldParentId: o.parentId }],
       detachFromSource: (nodes) => detachNodes(nodes),
@@ -1245,22 +1245,22 @@ export function createOutlinerView(ctx: GraphEditorContext, paneOpts?: OutlinerP
   // The parent whose children this pane currently displays (null = no concrete parent,
   // e.g. a bookmarks-only root or an empty pane-sourced pane → cannot accept a move).
   const getEffectiveParentId = (): string | null =>
-    paneParentSet ? paneParentId : ctx.rootNodeId;
+    sourceNodeSet ? sourceNodeId : ctx.rootNodeId;
 
   // The current parent of a node living in this pane's tree (undefined if not present).
   const getNodeParentId = (nodeId: string): string | null | undefined =>
     anyOccOf(nodeId)?.parentId;
 
   const acceptKeyMove = async (): Promise<void> => {
-    const pd = ctx.paneDrag;
-    if (!pd || pd.sourceToken === paneToken) return;
+    const pd = ctx.nodePanelDrag;
+    if (!pd || pd.sourceToken === nodePanelToken) return;
     const targetParentId = getEffectiveParentId();
     if (targetParentId === null) return;
     // Same parent → nothing to reparent; skip to avoid a duplicate insertion that would
     // corrupt the sibling chain (callers also guard, this is defence-in-depth).
     if ((pd.movers[0]?.oldParentId ?? null) === targetParentId) return;
     const movedId = pd.nodeIds[0];
-    await moveAcrossPanes(pd, targetParentId, roots, roots.length, baseDepth);
+    await moveAcrossNodePanels(pd, targetParentId, roots, roots.length, baseDepth);
     const o = anyOccOf(movedId);
     if (o) focusRow(o);
   };
@@ -1269,8 +1269,8 @@ export function createOutlinerView(ctx: GraphEditorContext, paneOpts?: OutlinerP
   // last row (or onto an empty pane) appends the node(s) to this pane's root level.
   const isOverRow = (t: EventTarget | null) => !!(t as HTMLElement | null)?.closest?.('[data-node-id]');
   listEl.addEventListener('dragover', (e) => {
-    const pd = ctx.paneDrag;
-    if (!pd || pd.sourceToken === paneToken) return; // same-pane handled by rows
+    const pd = ctx.nodePanelDrag;
+    if (!pd || pd.sourceToken === nodePanelToken) return; // same-pane handled by rows
     if (isOverRow(e.target)) return;                 // a row handles its own zone
     e.preventDefault();
     if (e.dataTransfer) e.dataTransfer.dropEffect = 'move';
@@ -1280,13 +1280,13 @@ export function createOutlinerView(ctx: GraphEditorContext, paneOpts?: OutlinerP
     if (!listEl.contains(e.relatedTarget as Node | null)) listEl.style.boxShadow = '';
   });
   listEl.addEventListener('drop', (e) => {
-    const pd = ctx.paneDrag;
+    const pd = ctx.nodePanelDrag;
     listEl.style.boxShadow = '';
-    if (!pd || pd.sourceToken === paneToken) return;
+    if (!pd || pd.sourceToken === nodePanelToken) return;
     if (isOverRow(e.target)) return; // the row's own drop handler takes it
     e.preventDefault();
-    const targetParentId = paneParentSet ? paneParentId : null;
-    void moveAcrossPanes(pd, targetParentId, roots, roots.length, baseDepth);
+    const targetParentId = sourceNodeSet ? sourceNodeId : null;
+    void moveAcrossNodePanels(pd, targetParentId, roots, roots.length, baseDepth);
   });
 
 
@@ -1362,7 +1362,7 @@ export function createOutlinerView(ctx: GraphEditorContext, paneOpts?: OutlinerP
       if (wasRoot) { const ri = rootNodeList.indexOf(oldNode); if (ri >= 0) rootNodeList[ri] = node; }
 
       // Update textarea to show found node's label
-      ta.value = (primaryLabel(node, paneLang) ?? fallbackLabel(node, paneLang)) || '';
+      ta.value = (primaryLabel(node, nodePanelLang) ?? fallbackLabel(node, nodePanelLang)) || '';
 
       // Delete the placeholder node; the found node's placement under this parent is declared via
       // autosave (markDirty), which creates the structural edge + order.
@@ -1379,7 +1379,7 @@ export function createOutlinerView(ctx: GraphEditorContext, paneOpts?: OutlinerP
         const q = inp.value.trim();
         drop.innerHTML = ''; selIdx = 0; resultNodes = [];
         if (!q) return;
-        const lang = ctx.state.showFallback ? undefined : paneLang;
+        const lang = ctx.state.showFallback ? undefined : nodePanelLang;
         const { nodes } = await fetchAllNodes(ctx.gId, [], 0, lang, undefined, q, 20);
         // Exclude only the row being linked, its parent, and nodes already linked as
         // siblings (re-linking an existing sibling would toggle its edge off). Other
@@ -1391,7 +1391,7 @@ export function createOutlinerView(ctx: GraphEditorContext, paneOpts?: OutlinerP
         resultNodes = nodes.filter(n => !excl.has(n.id));
         for (let i = 0; i < resultNodes.length; i++) {
           const n = resultNodes[i];
-          const lbl = (primaryLabel(n, paneLang) ?? fallbackLabel(n, paneLang)) || n.id.slice(0, 8);
+          const lbl = (primaryLabel(n, nodePanelLang) ?? fallbackLabel(n, nodePanelLang)) || n.id.slice(0, 8);
           const item = document.createElement('div');
           item.textContent = lbl;
           item.style.cssText = `padding:5px 12px;cursor:pointer;font-size:14px;color:${TEXT_MID};white-space:nowrap;overflow:hidden;text-overflow:ellipsis;`;
@@ -1704,7 +1704,7 @@ export function createOutlinerView(ctx: GraphEditorContext, paneOpts?: OutlinerP
   const doAddSibling = async (onode: ONode, before = false, opts?: { text?: string }): Promise<ONode | null> => {
     const tempId = `temp-${++ctx.tempNodeCounter}`;
     const initialText = opts?.text ?? '';
-    const tempNode: ExplorerNode = initialText ? { id: tempId, [paneLang]: initialText } : { id: tempId };
+    const tempNode: ExplorerNode = initialText ? { id: tempId, [nodePanelLang]: initialText } : { id: tempId };
     const sibs = getSiblings(onode);
     const idx = sibs.indexOf(onode);
     // Capture previous sibling before splice (needed when inserting before the first node)
@@ -1742,7 +1742,7 @@ export function createOutlinerView(ctx: GraphEditorContext, paneOpts?: OutlinerP
 
     // For "before first node" (no prevSib), insertAfterId=undefined → backend appends, then reorder
     const insertAfterId = before ? prevSibNode?.node.id : onode.node.id;
-    const nn = await apiCreateNode(ctx.gId, onode.parentId, paneLang, initialText, insertAfterId);
+    const nn = await apiCreateNode(ctx.gId, onode.parentId, nodePanelLang, initialText, insertAfterId);
     if (!nn) {
       resolveTemp();
       tempReady.delete(tempId);
@@ -1763,7 +1763,7 @@ export function createOutlinerView(ctx: GraphEditorContext, paneOpts?: OutlinerP
     markDirty(onode.parentId);
 
     // Persist later edits, but skip when the label already matches what we created with (paste path).
-    if (typedText.trim() && typedText.trim() !== initialText.trim()) void apiUpdateNode(ctx.gId, nn.id, paneLang, typedText);
+    if (typedText.trim() && typedText.trim() !== initialText.trim()) void apiUpdateNode(ctx.gId, nn.id, nodePanelLang, typedText);
     return no;
   };
 
@@ -1986,12 +1986,12 @@ export function createOutlinerView(ctx: GraphEditorContext, paneOpts?: OutlinerP
     }
 
     // Bookmarks pane (no graph root, root-sourced): not part of the structural tree — fetch as before.
-    if (!ctx.rootNodeId && !paneParentSet) {
+    if (!ctx.rootNodeId && !sourceNodeSet) {
       if (ctx.state.bookmarks.size === 0) {
         const ids = await fetchBookmarks(ctx.gId);
         ctx.state.bookmarks = new Set(ids);
       }
-      const lang = ctx.state.showFallback ? undefined : paneLang;
+      const lang = ctx.state.showFallback ? undefined : nodePanelLang;
       const { nodes } = await fetchBookmarkedNodes(ctx.gId, [...ctx.state.bookmarks], lang);
       applyRoots(nodes, null);
       return;
@@ -2005,9 +2005,9 @@ export function createOutlinerView(ctx: GraphEditorContext, paneOpts?: OutlinerP
     for (const arr of Object.values(parents)) for (const id of arr) placed.add(id);
     orphanIds = nodes.map(n => n.id).filter(id => !placed.has(id) && id !== ctx.rootNodeId);
 
-    if (paneParentSet) {
-      if (paneParentId !== null) {
-        const pid = paneParentId;
+    if (sourceNodeSet) {
+      if (sourceNodeId !== null) {
+        const pid = sourceNodeId;
         applyRoots(childIdsOf(pid).filter(id => id !== pid).map(nodeOf), pid, new Set([pid]));
       } else {
         applyRoots([], null);
@@ -2039,10 +2039,10 @@ export function createOutlinerView(ctx: GraphEditorContext, paneOpts?: OutlinerP
   };
 
   const setParent = async (nodeId: string | null, excludeIds?: Set<string>, path?: PathEntry[]) => {
-    paneParentSet = true;
-    paneParentId = nodeId;
+    sourceNodeSet = true;
+    sourceNodeId = nodeId;
     externalPath = path ?? [];
-    paneSelectedId = null;
+    nodePanelSelectedId = null;
     clearIndex();
     zoomStack.splice(0);
     baseDepth = 0;
@@ -2058,21 +2058,21 @@ export function createOutlinerView(ctx: GraphEditorContext, paneOpts?: OutlinerP
     }
   };
 
-  const getSelectedId = () => paneSelectedId;
+  const getSelectedId = () => nodePanelSelectedId;
   // Current parent whose children form this pane's rows (null = root/none). Used by the
   // multi-pane "固定" toggle to snapshot the frozen view.
-  const getPaneParentId = () => (paneParentSet ? paneParentId : null);
+  const getSourceNodeId = () => (sourceNodeSet ? sourceNodeId : null);
   // Change this pane's language and re-render labels (breadcrumb + rows).
-  const setLang = (l: 'en' | 'ja') => { paneLang = l; updateBreadcrumb(); render(); };
+  const setLang = (l: 'en' | 'ja') => { nodePanelLang = l; updateBreadcrumb(); render(); };
 
   // Reset this pane back to the graph root (source = ルート). Clears any pane-parent state
-  // so load() takes the root branch — otherwise a stale paneParentId would keep showing the
+  // so load() takes the root branch — otherwise a stale sourceNodeId would keep showing the
   // previously-sourced node's children.
   const setSourceRoot = async () => {
-    paneParentSet = false;
-    paneParentId = null;
+    sourceNodeSet = false;
+    sourceNodeId = null;
     externalPath = [];
-    paneSelectedId = null;
+    nodePanelSelectedId = null;
     clearIndex();
     zoomStack.splice(0);
     baseDepth = 0;
@@ -2083,26 +2083,26 @@ export function createOutlinerView(ctx: GraphEditorContext, paneOpts?: OutlinerP
     if (!query) { await load(); return; }
     clearIndex(); zoomStack.splice(0); baseDepth = 0;
     updateBreadcrumb();
-    const lang = ctx.state.showFallback ? undefined : paneLang;
+    const lang = ctx.state.showFallback ? undefined : nodePanelLang;
     const { nodes } = await fetchAllNodes(ctx.gId, [], 0, lang, undefined, query, 50);
     applyRoots(nodes, null);
   };
 
   updateBreadcrumb(); // show "ルート" on initial render
 
-  // Redraw every square marker — registered so the line panel can refresh participation fills
+  // Redraw every square nodeBox — registered so the line panel can refresh participation fills
   // when the active relation (or its membership) changes.
-  const rerenderAllMarkers = () => { for (const o of byKey.values()) updateExpandMarker(o); };
-  ctx.relationRerender.add(rerenderAllMarkers);
+  const rerenderAllNodeBoxes = () => { for (const o of byKey.values()) updateNodeBox(o); };
+  ctx.relationRerender.add(rerenderAllNodeBoxes);
 
   const unregister = () => {
     void flushAutosave(true); // persist any pending structural edits (keepalive)
     if (idleTimer) clearTimeout(idleTimer);
-    ctx.relationRerender.delete(rerenderAllMarkers);
+    ctx.relationRerender.delete(rerenderAllNodeBoxes);
     window.removeEventListener('pagehide', onPageHide);
     window.removeEventListener('beforeunload', onBeforeUnload);
     window.removeEventListener('keydown', onSaveKey, true);
   };
 
-  return { el, load, refresh: render, search, setParent, getAncestorIds, getNodePath, getSelectedId, getPaneParentId, setLang, setSourceRoot, beginKeyMove, acceptKeyMove, getEffectiveParentId, getNodeParentId, unregister };
+  return { el, load, refresh: render, search, setParent, getAncestorIds, getNodePath, getSelectedId, getSourceNodeId, setLang, setSourceRoot, beginKeyMove, acceptKeyMove, getEffectiveParentId, getNodeParentId, unregister };
 }

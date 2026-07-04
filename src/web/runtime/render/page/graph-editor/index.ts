@@ -3,7 +3,7 @@ import type { ExplorerNode, ExplorerState, GraphEditorContext } from './types';
 import {
   BG, BORDER, TEXT_HIGH, TEXT_MID, SELECT_STRONG,
 } from './constants';
-import { createMultiPaneView } from './multi-pane';
+import { createPanelsView } from './panels-view';
 import { apiAddRay, apiRemoveRay } from './api';
 
 export function renderGraphEditor(
@@ -49,7 +49,7 @@ export function renderGraphEditor(
     gId, limit, rootNodeId, outer, state,
     colorPalette,
     tempNodeCounter: 0,
-    paneDrag: null,
+    nodePanelDrag: null,
     activeRelation: null,
     relationRerender,
     refreshRelations,
@@ -73,11 +73,11 @@ export function renderGraphEditor(
   } as unknown as GraphEditorContext;
 
   // ── Multi-pane view ───────────────────────────────────────────────
-  const multiPane = createMultiPaneView(ctx);
-  multiPane.el.style.display = 'flex';
-  outer.appendChild(multiPane.el);
+  const panels = createPanelsView(ctx);
+  panels.el.style.display = 'flex';
+  outer.appendChild(panels.el);
 
-  void multiPane.load();
+  void panels.load();
 
   return outer;
 }

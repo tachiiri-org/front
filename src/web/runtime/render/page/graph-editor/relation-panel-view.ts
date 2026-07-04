@@ -1,11 +1,11 @@
-import type { GraphEditorContext, PaneView, ExplorerNode, ExplorerLine, PaneViewPathEntry } from './types';
+import type { GraphEditorContext, PanelView, ExplorerNode, ExplorerRelation, PanelPathEntry } from './types';
 import { BORDER, TEXT_HIGH, TEXT_MID, TEXT_DIM, SELECT_STRONG, ORPHAN_ID, showToast } from './constants';
 import {
-  fetchNodeLines, apiCreateRelation, apiSetLineBody, apiAddRay, apiRemoveRay, fetchAllNodes, apiCreateNode,
-  fetchOrphanLines, apiDeleteLine, apiDeleteNode, apiReorderNodeRelations, apiLinkNode, apiOrient,
+  fetchNodeRelations, apiCreateRelation, apiSetRelationText, apiAddRay, apiRemoveRay, fetchAllNodes, apiCreateNode,
+  fetchOrphanRelations, apiDeleteRelation, apiDeleteNode, apiReorderNodeRelations, apiLinkNode, apiOrient,
 } from './api';
 
-// 関係 (line) パネル。関係 = テキストとノード参照(チップ)が交互に並ぶ1行（セグメント分割編集）。
+// 関係 (relation) パネル。関係 = テキストとノード参照(チップ)が交互に並ぶ1行（セグメント分割編集）。
 // - テキスト片は普通の <textarea>（IMEはその中で素直に効く・部分装飾の問題が起きない）。
 // - 「@」でノード検索→選ぶと、その場でテキストを割ってノード参照チップを差し込み、参加者リンク(j_ray)。
 // - 本文は p_line_body に「…⟦nodeId⟧…」の id 入りで保存。描画時に分割し、チップのラベルは id から解決。
@@ -18,7 +18,7 @@ function labelOf(n: ExplorerNode, lang: 'en' | 'ja'): string {
 }
 
 // 本文にノードリンク(⟦id⟧チップ)が1つでも含まれるか。
-function hasChip(body: string): boolean {
+function hasNodeLink(body: string): boolean {
   return /⟦[^⟧]+⟧/.test(body);
 }
 
@@ -37,20 +37,20 @@ function splitTokens(body: string): Array<{ t: 'txt'; v: string } | { t: 'men'; 
   return out;
 }
 
-export function createLineView(
+export function createRelationPanelView(
   ctx: GraphEditorContext,
   opts: { lang: 'en' | 'ja'; initialNodeId?: string | null; onClose?: () => void },
-): PaneView {
+): PanelView {
   let lang = opts.lang;
   let currentNodeId: string | null = opts.initialNodeId ?? null;
-  let currentPath: PaneViewPathEntry[] | null = null; // ヘッダのパンくず（ルート›…›現在ノード）。
+  let currentPath: PanelPathEntry[] | null = null; // ヘッダのパンくず（ルート›…›現在ノード）。
   let orphanMode = false; // true = 参加ノードを持たない「リンクなし関係」一覧を表示。
   let renderToken = 0;
   // 複数選択: アンカー(固定端)とカーソル(移動端)の関係 lineId。両者の間の行が選択範囲。
   // ノードパネルと同じ Shift+↑↓ で範囲を伸縮、Shift+Alt+↑↓ で選択ブロックを並び替え。
   let selAnchor: string | null = null;
   let selCursor: string | null = null;
-  const sqByLine = new Map<string, HTMLElement>();
+  const relationBoxByRelation = new Map<string, HTMLElement>();
   const canvas = document.createElement('canvas');
   const cctx = canvas.getContext('2d');
 
@@ -159,18 +159,18 @@ export function createLineView(
     await apiOrient(ctx.gId, childId, parentId);
   };
 
-  const setActive = (line: ExplorerLine) => {
+  const setActive = (relation: ExplorerRelation) => {
     const cur = ctx.activeRelation;
-    if (!cur || cur.lineId !== line.lineId) {
-      ctx.setActiveRelation({ lineId: line.lineId, participants: new Set(line.participants.map((p) => p.id)) });
+    if (!cur || cur.lineId !== relation.lineId) {
+      ctx.setActiveRelation({ lineId: relation.lineId, participants: new Set(relation.participants.map((p) => p.id)) });
     }
     updateActiveHighlight();
   };
   const updateActiveHighlight = () => {
     const activeId = ctx.activeRelation?.lineId ?? null;
-    for (const [lid, sq] of sqByLine) {
-      if (lid === activeId) { sq.style.border = 'none'; sq.style.background = SELECT_STRONG; }
-      else { sq.style.background = 'transparent'; sq.style.border = `1.5px solid ${TEXT_DIM}`; }
+    for (const [lid, relationBox] of relationBoxByRelation) {
+      if (lid === activeId) { relationBox.style.border = 'none'; relationBox.style.background = SELECT_STRONG; }
+      else { relationBox.style.background = 'transparent'; relationBox.style.border = `1.5px solid ${TEXT_DIM}`; }
     }
   };
 
@@ -179,7 +179,7 @@ export function createLineView(
   const relationRows = (): HTMLElement[] =>
     Array.from(bodyEl.querySelectorAll<HTMLElement>('[data-line-id]'));
   // アンカー〜カーソル間の連続する lineId 群。未選択なら空。
-  const selectedLineIds = (): string[] => {
+  const selectedRelationIds = (): string[] => {
     if (!selAnchor) return [];
     const ids = relationRows().map((r) => r.dataset.lineId!);
     const ai = ids.indexOf(selAnchor);
@@ -190,7 +190,7 @@ export function createLineView(
   };
   // 複数選択中(2件以上)のみ行背景を塗る。1件はフォーカス＋四角ハイライトで足りる。
   const updateSelHighlight = () => {
-    const sel = selectedLineIds();
+    const sel = selectedRelationIds();
     const set = new Set(sel.length > 1 ? sel : []);
     for (const row of relationRows()) {
       row.style.backgroundColor = set.has(row.dataset.lineId!) ? 'rgba(99,102,241,0.12)' : '';
@@ -247,7 +247,7 @@ export function createLineView(
     if (orphanMode || !currentNodeId) return; // 並び順はノード別。orphan/未選択時は不可。
     const rows = relationRows();
     const ids = rows.map((r) => r.dataset.lineId!);
-    const sel = selectedLineIds();
+    const sel = selectedRelationIds();
     if (!sel.length) return;
     const idxs = sel.map((id) => ids.indexOf(id)).filter((i) => i >= 0).sort((a, b) => a - b);
     const first = idxs[0], last = idxs[idxs.length - 1];
@@ -264,40 +264,40 @@ export function createLineView(
 
   // 関係(行)の楽観削除。全体を render() し直すと点滅＆フォーカスが飛ぶので、対象の行だけ
   // DOM から外し、隣の行へフォーカスを送ってそのまま編集を続けられるようにする。
-  const deleteLinesOptimistic = (lineIds: string[]) => {
-    if (!lineIds.length) return;
+  const deleteRelationsOptimistic = (relationIds: string[]) => {
+    if (!relationIds.length) return;
     const rows = relationRows();
-    const targetSet = new Set(lineIds);
+    const targetSet = new Set(relationIds);
     const idxs = rows.map((r, i) => (targetSet.has(r.dataset.lineId!) ? i : -1)).filter((i) => i >= 0);
     const firstIdx = idxs.length ? Math.min(...idxs) : 0;
     const remaining = rows.filter((r) => !targetSet.has(r.dataset.lineId!));
     const focusTarget = remaining[Math.min(firstIdx, remaining.length - 1)] ?? null;
-    for (const id of lineIds) {
+    for (const id of relationIds) {
       rows.find((r) => r.dataset.lineId === id)?.remove();
-      sqByLine.delete(id);
+      relationBoxByRelation.delete(id);
       if (ctx.activeRelation?.lineId === id) ctx.setActiveRelation(null);
-      void apiDeleteLine(ctx.gId, id);
+      void apiDeleteRelation(ctx.gId, id);
     }
     clearSelection();
     (focusTarget?.querySelector('textarea') as HTMLTextAreaElement | null)?.focus();
   };
-  const deleteLineOptimistic = (lineId: string) => deleteLinesOptimistic([lineId]);
+  const deleteRelationOptimistic = (lineId: string) => deleteRelationsOptimistic([lineId]);
 
   // ── 関係 1 件 = セグメント分割行 ─────────────────────────────────────────────
-  const renderRelationRow = (line: ExplorerLine): HTMLElement => {
-    const labelById = new Map(line.participants.map((p) => [p.id, labelOf(p, lang)] as const));
+  const renderRelationRow = (relation: ExplorerRelation): HTMLElement => {
+    const labelById = new Map(relation.participants.map((p) => [p.id, labelOf(p, lang)] as const));
 
     const row = document.createElement('div');
-    row.dataset.lineId = line.lineId;
+    row.dataset.lineId = relation.lineId;
     row.style.cssText = `display:flex;align-items:flex-start;padding:2px 0;`;
     const spacer = document.createElement('span');
     spacer.style.cssText = `flex-shrink:0;width:6px;`;
     const bw = document.createElement('span');
     bw.style.cssText = `flex-shrink:0;display:flex;align-items:center;justify-content:center;width:18px;height:21px;cursor:pointer;`;
-    const sq = document.createElement('span');
-    sq.style.cssText = `width:7px;height:7px;border-radius:1px;box-sizing:border-box;background:transparent;border:1.5px solid ${TEXT_DIM};`;
-    bw.appendChild(sq);
-    sqByLine.set(line.lineId, sq);
+    const relationBox = document.createElement('span');
+    relationBox.style.cssText = `width:7px;height:7px;border-radius:1px;box-sizing:border-box;background:transparent;border:1.5px solid ${TEXT_DIM};`;
+    bw.appendChild(relationBox);
+    relationBoxByRelation.set(relation.lineId, relationBox);
     // セグメント/チップを並べるインライン領域。
     const content = document.createElement('div');
     // padding-left:8px = 全行一律の先頭インデント（クリック可能なガター）。先頭の空テキスト片は
@@ -311,7 +311,7 @@ export function createLineView(
     // （⟦id⟧ はチップの表示ラベルへ解決）。AIエージェントとのやり取り用の参照文字列。
     const relCopyText = () => Array.from(content.children).map((c) => {
       const cel = c as HTMLElement;
-      if (cel.dataset.men) return cel.textContent ?? '';
+      if (cel.dataset.nodeLink) return cel.textContent ?? '';
       return (c as HTMLTextAreaElement).value;
     }).join('');
     const copyBtn = document.createElement('button');
@@ -320,7 +320,7 @@ export function createLineView(
     copyBtn.style.cssText = `flex-shrink:0;background:transparent;border:none;color:${TEXT_DIM};cursor:pointer;font-size:12px;padding:0 6px;line-height:1;`;
     copyBtn.addEventListener('mousedown', (e) => e.preventDefault());
     copyBtn.addEventListener('click', () => {
-      void navigator.clipboard.writeText(`[${line.lineId}]${relCopyText()}`).then(() => showToast('コピーしました'));
+      void navigator.clipboard.writeText(`[${relation.lineId}]${relCopyText()}`).then(() => showToast('コピーしました'));
     });
     row.appendChild(copyBtn);
     // テキストの無い余白クリックでフォーカス。左ガター（先頭子要素より左＝padding 部）→ 先頭テキスト片の先頭、
@@ -340,7 +340,7 @@ export function createLineView(
     });
 
     const rebuild = (): string => Array.from(content.children).map((c) => {
-      const id = (c as HTMLElement).dataset.men;
+      const id = (c as HTMLElement).dataset.nodeLink;
       return id ? `⟦${id}⟧` : (c as HTMLTextAreaElement).value;
     }).join('');
     let saveTimer: ReturnType<typeof setTimeout> | undefined;
@@ -349,18 +349,18 @@ export function createLineView(
       if (saveTimer) clearTimeout(saveTimer);
       const doSave = () => {
         const body = rebuild();
-        void apiSetLineBody(ctx.gId, line.lineId, lang, body);
+        void apiSetRelationText(ctx.gId, relation.lineId, lang, body);
         // ⑤: 本文はあるがノードリンク(チップ)が1つも無い関係は、ソースノード配下に残さず「リンクなし」へ。
         // ソース参加者を外す＝本文が残るのでバックエンドは行を保持し（orphan）、当該ノードでは出なくなる。
         // 編集中に画面から消さない（DOMはそのまま）ため、再描画はしない。リンクなし表示や別ノードは対象外。
         const src = currentNodeId;
-        if (!orphanMode && src && !detachedSource && body.trim() !== '' && !hasChip(body)
-            && line.participants.some((p) => p.id === src)) {
+        if (!orphanMode && src && !detachedSource && body.trim() !== '' && !hasNodeLink(body)
+            && relation.participants.some((p) => p.id === src)) {
           detachedSource = true;
-          line.participants = line.participants.filter((p) => p.id !== src);
-          void apiRemoveRay(ctx.gId, line.lineId, src);
+          relation.participants = relation.participants.filter((p) => p.id !== src);
+          void apiRemoveRay(ctx.gId, relation.lineId, src);
           const ar = ctx.activeRelation;
-          if (ar && ar.lineId === line.lineId) { ar.participants.delete(src); ctx.setActiveRelation(ar); }
+          if (ar && ar.lineId === relation.lineId) { ar.participants.delete(src); ctx.setActiveRelation(ar); }
         }
       };
       if (immediate) doSave(); else saveTimer = setTimeout(doSave, 400);
@@ -386,43 +386,43 @@ export function createLineView(
       ta.style.height = `${ta.scrollHeight}px`;
     };
 
-    const mkChip = (id: string, label?: string): HTMLElement => {
-      const chip = document.createElement('span');
-      chip.dataset.men = id;
-      chip.contentEditable = 'false';
+    const mkNodeLink = (id: string, label?: string): HTMLElement => {
+      const nodeLink = document.createElement('span');
+      nodeLink.dataset.nodeLink = id;
+      nodeLink.contentEditable = 'false';
       // 下線はテキストと同じ色・dashed。左クリックで検索ポップオーバー（差し替え／削除）、
       // 右クリックで右にそのノードの関係パネルを開く（②）。× は廃止。
-      chip.style.cssText = `display:inline-block;vertical-align:top;line-height:1.5;font-size:14px;color:${TEXT_HIGH};border-bottom:1px dashed currentColor;margin:0;user-select:none;cursor:pointer;`;
+      nodeLink.style.cssText = `display:inline-block;vertical-align:top;line-height:1.5;font-size:14px;color:${TEXT_HIGH};border-bottom:1px dashed currentColor;margin:0;user-select:none;cursor:pointer;`;
       const txt = document.createElement('span');
       txt.textContent = label ?? labelById.get(id) ?? id;
-      chip.appendChild(txt);
-      chip.addEventListener('mousedown', (e) => {
+      nodeLink.appendChild(txt);
+      nodeLink.addEventListener('mousedown', (e) => {
         if (e.button !== 0) return; // 右クリックは contextmenu 側で関係パネルを開く。
         e.preventDefault();
-        openSearchPopover(chip, (n, cl) => void replaceChip(chip, n, cl), () => removeChip(chip));
+        openSearchPopover(nodeLink, (n, cl) => void replaceNodeLink(nodeLink, n, cl), () => removeNodeLink(nodeLink));
       });
-      chip.addEventListener('contextmenu', (e) => {
+      nodeLink.addEventListener('contextmenu', (e) => {
         e.preventDefault();
-        ctx.openRelationPanel?.(id, chip.textContent ?? undefined);
+        ctx.openRelationPanel?.(id, nodeLink.textContent ?? undefined);
       });
-      return chip;
+      return nodeLink;
     };
 
     // チップのリンク先ノードを差し替える（ray も付け替え）。
-    const replaceChip = async (chip: HTMLElement, n: ExplorerNode, createLabel?: string) => {
-      const oldId = chip.dataset.men!;
+    const replaceNodeLink = async (nodeLink: HTMLElement, n: ExplorerNode, createLabel?: string) => {
+      const oldId = nodeLink.dataset.nodeLink!;
       let newId = n.id;
       if (createLabel) { const c = await apiCreateNode(ctx.gId, null, lang, createLabel); if (!c) return; newId = c.id; }
       if (newId === oldId) return;
       const label = createLabel ?? labelOf(n, lang);
-      chip.dataset.men = newId;
-      (chip.firstChild as HTMLElement).textContent = label;
+      nodeLink.dataset.nodeLink = newId;
+      (nodeLink.firstChild as HTMLElement).textContent = label;
       save(true);
-      await apiAddRay(ctx.gId, line.lineId, newId);
+      await apiAddRay(ctx.gId, relation.lineId, newId);
       const ar = ctx.activeRelation;
-      const usesOld = Array.from(content.children).some((c) => (c as HTMLElement).dataset.men === oldId);
-      if (!usesOld) await apiRemoveRay(ctx.gId, line.lineId, oldId);
-      if (ar && ar.lineId === line.lineId) {
+      const usesOld = Array.from(content.children).some((c) => (c as HTMLElement).dataset.nodeLink === oldId);
+      if (!usesOld) await apiRemoveRay(ctx.gId, relation.lineId, oldId);
+      if (ar && ar.lineId === relation.lineId) {
         ar.participants.add(newId);
         if (!usesOld) ar.participants.delete(oldId);
         ctx.setActiveRelation(ar);
@@ -437,8 +437,8 @@ export function createLineView(
       // focus/blur で autosize を呼び直し、先頭の空テキスト片を フォーカス時=8px / 非フォーカス時=0px に。
       // フォーカスした行を選択アンカーにし、複数選択はリセット（Shift+↑↓ でここから伸ばす）。
       ta.addEventListener('focus', () => {
-        setActive(line);
-        selAnchor = line.lineId; selCursor = null; updateSelHighlight();
+        setActive(relation);
+        selAnchor = relation.lineId; selCursor = null; updateSelHighlight();
         autosize(ta);
       });
       ta.addEventListener('input', () => { autosize(ta); void handleMention(ta); save(); });
@@ -458,8 +458,8 @@ export function createLineView(
         // Ctrl/Cmd+Shift+Backspace で関係(行)そのものを削除。複数選択中は選択行すべて。
         if (e.key === 'Backspace' && (e.ctrlKey || e.metaKey) && e.shiftKey) {
           e.preventDefault();
-          const sel = selectedLineIds();
-          deleteLinesOptimistic(sel.length > 1 ? sel : [line.lineId]);
+          const sel = selectedRelationIds();
+          deleteRelationsOptimistic(sel.length > 1 ? sel : [relation.lineId]);
           return;
         }
         // Shift+Alt+↑↓: 選択(または現在行)を並び替え。Shift+↑↓: 選択範囲を伸縮。
@@ -497,47 +497,47 @@ export function createLineView(
         // 連続caret: 端で←→を押すと隣のテキスト片へ（チップを跨ぐ）。行内に隣が無ければ（＝文頭/文末）
         // 上下の行のテキスト末尾/文頭へ送る（⑥）。
         if (e.key === 'ArrowLeft' && atStart) {
-          const chip = ta.previousElementSibling as HTMLElement | null;
-          const prevTa = chip?.previousElementSibling as HTMLTextAreaElement | null;
-          if (chip?.dataset.men && prevTa) { e.preventDefault(); prevTa.focus(); prevTa.setSelectionRange(prevTa.value.length, prevTa.value.length); }
+          const nodeLink = ta.previousElementSibling as HTMLElement | null;
+          const prevTa = nodeLink?.previousElementSibling as HTMLTextAreaElement | null;
+          if (nodeLink?.dataset.nodeLink && prevTa) { e.preventDefault(); prevTa.focus(); prevTa.setSelectionRange(prevTa.value.length, prevTa.value.length); }
           else if (!ta.previousElementSibling) { if (focusRowEdge(ta, 'up')) e.preventDefault(); }
           return;
         }
         if (e.key === 'ArrowRight' && atEnd) {
-          const chip = ta.nextElementSibling as HTMLElement | null;
-          const nextTa = chip?.nextElementSibling as HTMLTextAreaElement | null;
-          if (chip?.dataset.men && nextTa) { e.preventDefault(); nextTa.focus(); nextTa.setSelectionRange(0, 0); }
+          const nodeLink = ta.nextElementSibling as HTMLElement | null;
+          const nextTa = nodeLink?.nextElementSibling as HTMLTextAreaElement | null;
+          if (nodeLink?.dataset.nodeLink && nextTa) { e.preventDefault(); nextTa.focus(); nextTa.setSelectionRange(0, 0); }
           else if (!ta.nextElementSibling) { if (focusRowEdge(ta, 'down')) e.preventDefault(); }
           return;
         }
         // Backspace（先頭）で直前チップ削除、Delete（末尾）で直後チップ削除。
         if (e.key === 'Backspace' && atStart) {
           const prev = ta.previousElementSibling as HTMLElement | null;
-          if (prev?.dataset.men) { e.preventDefault(); removeChip(prev); return; }
+          if (prev?.dataset.nodeLink) { e.preventDefault(); removeNodeLink(prev); return; }
           // 先頭の空ガター片にいて、関係全体が空（チップも本文も無い）なら、関係そのものを削除。
           // 全行が先頭に空ガター片を持つので、テキストのみの行を巻き込んで消さないよう全体の空を確認する。
           const allEmpty = Array.from(content.children).every(
-            (c) => !(c as HTMLElement).dataset.men && (c as HTMLTextAreaElement).value === '',
+            (c) => !(c as HTMLElement).dataset.nodeLink && (c as HTMLTextAreaElement).value === '',
           );
           if (!prev && allEmpty) {
             e.preventDefault();
-            deleteLineOptimistic(line.lineId);
+            deleteRelationOptimistic(relation.lineId);
             return;
           }
         }
         if (e.key === 'Delete' && atEnd) {
           const next = ta.nextElementSibling as HTMLElement | null;
-          if (next?.dataset.men) { e.preventDefault(); removeChip(next); }
+          if (next?.dataset.nodeLink) { e.preventDefault(); removeNodeLink(next); }
         }
       });
       setTimeout(() => autosize(ta), 0);
       return ta;
     };
 
-    const removeChip = (chip: HTMLElement) => {
-      const id = chip.dataset.men!;
-      const prev = chip.previousElementSibling as HTMLTextAreaElement | null;
-      const next = chip.nextElementSibling as HTMLTextAreaElement | null;
+    const removeNodeLink = (nodeLink: HTMLElement) => {
+      const id = nodeLink.dataset.nodeLink!;
+      const prev = nodeLink.previousElementSibling as HTMLTextAreaElement | null;
+      const next = nodeLink.nextElementSibling as HTMLTextAreaElement | null;
       // 前後のテキスト片を結合してチップを除去。
       if (prev && next) {
         const caret = prev.value.length;
@@ -547,14 +547,14 @@ export function createLineView(
         prev.focus();
         prev.setSelectionRange(caret, caret);
       }
-      chip.remove();
+      nodeLink.remove();
       save(true);
       // 同じ id のチップが他に無ければ参加も解除。
-      const stillUsed = Array.from(content.children).some((c) => (c as HTMLElement).dataset.men === id);
+      const stillUsed = Array.from(content.children).some((c) => (c as HTMLElement).dataset.nodeLink === id);
       if (!stillUsed) {
-        void apiRemoveRay(ctx.gId, line.lineId, id);
+        void apiRemoveRay(ctx.gId, relation.lineId, id);
         const ar = ctx.activeRelation;
-        if (ar && ar.lineId === line.lineId) { ar.participants.delete(id); ctx.setActiveRelation(ar); }
+        if (ar && ar.lineId === relation.lineId) { ar.participants.delete(id); ctx.setActiveRelation(ar); }
       }
     };
 
@@ -574,17 +574,17 @@ export function createLineView(
           const label = createLabel ?? labelOf(n, lang);
           ta.value = leftStr;
           autosize(ta);
-          const chip = mkChip(nodeId, label);
+          const nodeLink = mkNodeLink(nodeId, label);
           const newTa = mkTextarea(rightStr);
-          content.insertBefore(chip, ta.nextSibling);
-          content.insertBefore(newTa, chip.nextSibling);
+          content.insertBefore(nodeLink, ta.nextSibling);
+          content.insertBefore(newTa, nodeLink.nextSibling);
           closeMenu();
           newTa.focus();
           newTa.setSelectionRange(0, 0);
           save(true);
-          await apiAddRay(ctx.gId, line.lineId, nodeId);
+          await apiAddRay(ctx.gId, relation.lineId, nodeId);
           const ar = ctx.activeRelation;
-          if (ar && ar.lineId === line.lineId) { ar.participants.add(nodeId); ctx.setActiveRelation(ar); }
+          if (ar && ar.lineId === relation.lineId) { ar.participants.add(nodeId); ctx.setActiveRelation(ar); }
           // 新規作成ノードは親を持たない＝リンクなしになるので、既定でルートノード直下に紐づける。
           if (createLabel) await linkToRoot(nodeId);
         },
@@ -605,10 +605,10 @@ export function createLineView(
     };
 
     // 初期トークンを並べる（必ずテキスト片で始まり/終わる）。
-    const body = line.body[lang] ?? line.body[lang === 'ja' ? 'en' : 'ja'] ?? '';
+    const body = relation.body[lang] ?? relation.body[lang === 'ja' ? 'en' : 'ja'] ?? '';
     for (const tok of splitTokens(body)) {
       if (tok.t === 'txt') content.appendChild(mkTextarea(tok.v));
-      else content.appendChild(mkChip(tok.id));
+      else content.appendChild(mkNodeLink(tok.id));
     }
     return row;
   };
@@ -619,7 +619,7 @@ export function createLineView(
   const insertRelationAfter = async (anchorRow: HTMLElement, extraText = ''): Promise<void> => {
     const nid = currentNodeId;
     if (!nid) return;
-    const newBody = hasChip(extraText) ? extraText : `${extraText}⟦${nid}⟧`;
+    const newBody = hasNodeLink(extraText) ? extraText : `${extraText}⟦${nid}⟧`;
     const created = await apiCreateRelation(ctx.gId, nid, lang, newBody);
     if (!created) return;
     const subjLabel = currentPath?.[currentPath.length - 1]?.label ?? '';
@@ -638,8 +638,8 @@ export function createLineView(
     row.style.cssText = `display:flex;align-items:flex-start;padding:2px 0;`;
     const spacer = document.createElement('span'); spacer.style.cssText = `flex-shrink:0;width:6px;`;
     const bw = document.createElement('span'); bw.style.cssText = `flex-shrink:0;display:flex;align-items:center;justify-content:center;width:18px;height:21px;cursor:pointer;`;
-    const sq = document.createElement('span'); sq.style.cssText = `width:7px;height:7px;border-radius:1px;box-sizing:border-box;background:transparent;border:1.5px solid ${TEXT_DIM};`;
-    bw.appendChild(sq);
+    const relationBox = document.createElement('span'); relationBox.style.cssText = `width:7px;height:7px;border-radius:1px;box-sizing:border-box;background:transparent;border:1.5px solid ${TEXT_DIM};`;
+    bw.appendChild(relationBox);
     const ta = document.createElement('textarea');
     ta.rows = 1;
     ta.style.cssText = `flex:1;background:transparent;border:none;outline:none;resize:none;font-size:14px;font-family:inherit;line-height:1.5;padding:0 4px;overflow:hidden;min-width:0;color:${TEXT_DIM};`;
@@ -667,8 +667,8 @@ export function createLineView(
           if (!rel) return;
           await apiAddRay(ctx.gId, rel.lineId, mentionId);
           const rrow = bodyEl.querySelector(`[data-line-id="${CSS.escape(rel.lineId)}"]`);
-          const chip = rrow?.querySelector(`[data-men="${CSS.escape(mentionId)}"]`) as HTMLElement | null;
-          ((chip?.nextElementSibling as HTMLTextAreaElement | null) ?? (rrow?.querySelector('textarea') as HTMLTextAreaElement | null))?.focus();
+          const nodeLink = rrow?.querySelector(`[data-node-link="${CSS.escape(mentionId)}"]`) as HTMLElement | null;
+          ((nodeLink?.nextElementSibling as HTMLTextAreaElement | null) ?? (rrow?.querySelector('textarea') as HTMLTextAreaElement | null))?.focus();
           if (createLabel) await linkToRoot(mentionId);
         },
       };
@@ -715,7 +715,7 @@ export function createLineView(
     const token = ++renderToken;
     head.innerHTML = '';
     bodyEl.innerHTML = '';
-    sqByLine.clear();
+    relationBoxByRelation.clear();
     selAnchor = null; selCursor = null; // 行を作り直すので複数選択はリセット。
 
     // ── 1行目: 操作（リンクなし + ⟳ + 言語切替） ── ノードペインヘッダと同じ 28px+下線。
@@ -780,20 +780,20 @@ export function createLineView(
     head.appendChild(bcRow);
 
     if (orphanMode) {
-      const lines = await fetchOrphanLines(ctx.gId);
+      const relations = await fetchOrphanRelations(ctx.gId);
       if (token !== renderToken) return;
-      for (const line of lines) bodyEl.appendChild(renderRelationRow(line));
+      for (const relation of relations) bodyEl.appendChild(renderRelationRow(relation));
       updateActiveHighlight();
       return;
     }
 
     if (!currentNodeId) { updateActiveHighlight(); return; }
     const nodeId = currentNodeId;
-    const lines = await fetchNodeLines(ctx.gId, nodeId);
+    const relations = await fetchNodeRelations(ctx.gId, nodeId);
     if (token !== renderToken) return;
     // 追加用ドラフト行は常に先頭。
     bodyEl.appendChild(makeDraftRow(nodeId));
-    for (const line of lines) bodyEl.appendChild(renderRelationRow(line));
+    for (const relation of relations) bodyEl.appendChild(renderRelationRow(relation));
     updateActiveHighlight();
   };
 
@@ -806,12 +806,12 @@ export function createLineView(
     if (y && y !== node.id) {
       const created = await apiCreateRelation(ctx.gId, y, lang, '');
       if (!created) return false;
-      await apiSetLineBody(ctx.gId, created.lineId, lang, `${xLabel}⟦${y}⟧`);
+      await apiSetRelationText(ctx.gId, created.lineId, lang, `${xLabel}⟦${y}⟧`);
       await apiDeleteNode(ctx.gId, node.id);
       return true;
     }
     const created = await apiCreateRelation(ctx.gId, node.id, lang, '');
-    if (created) await apiSetLineBody(ctx.gId, created.lineId, lang, `⟦${node.id}⟧`);
+    if (created) await apiSetRelationText(ctx.gId, created.lineId, lang, `⟦${node.id}⟧`);
     return false;
   };
   // Shift+Alt+→ ショートカット用フック（ノードパネルから呼ぶ）。focus でドックが X 自身に切り替わる
@@ -825,7 +825,7 @@ export function createLineView(
 
   // ── ノードパネルからのドロップ ───────────────────────────────────────────────
   el.addEventListener('dragover', (e) => {
-    if (!ctx.paneDrag) return;          // ノードパネル発のノードドラッグのみ受ける
+    if (!ctx.nodePanelDrag) return;          // ノードパネル発のノードドラッグのみ受ける
     e.preventDefault();
     if (e.dataTransfer) e.dataTransfer.dropEffect = 'copy';
     bodyEl.style.boxShadow = `inset 0 0 0 2px ${SELECT_STRONG}`;
@@ -834,10 +834,10 @@ export function createLineView(
     if (!el.contains(e.relatedTarget as Node | null)) bodyEl.style.boxShadow = '';
   });
   el.addEventListener('drop', (e) => {
-    if (!ctx.paneDrag) return;
+    if (!ctx.nodePanelDrag) return;
     e.preventDefault();
     bodyEl.style.boxShadow = '';
-    const pd = ctx.paneDrag;
+    const pd = ctx.nodePanelDrag;
     const movers = [...pd.movers];
     // ドロップ先 = いま開いているノード Y（ドラッグは focus を変えないので currentNodeId が Y のまま）。
     const y = currentNodeId && currentNodeId !== ORPHAN_ID ? currentNodeId : null;
@@ -855,7 +855,7 @@ export function createLineView(
   const refresh = () => { void render(); };
   ctx.refreshRelations.add(refresh);
 
-  const noPath: PaneViewPathEntry[] = [];
+  const noPath: PanelPathEntry[] = [];
   return {
     el,
     load: () => render(),
@@ -869,7 +869,7 @@ export function createLineView(
     getAncestorIds: () => new Set<string>(),
     getNodePath: () => noPath,
     getSelectedId: () => currentNodeId,
-    getPaneParentId: () => currentNodeId,
+    getSourceNodeId: () => currentNodeId,
     setLang: (l) => { lang = l; void render(); },
     setSourceRoot: async () => { currentNodeId = null; currentPath = null; await render(); },
     beginKeyMove: () => false,
