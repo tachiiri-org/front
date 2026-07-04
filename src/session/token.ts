@@ -12,6 +12,7 @@ type InternalTokenClaims = {
   iat: number;
   jti: string;
   tenant_id?: string;
+  org_id?: string;
   subject_id?: string;
   scope?: string[] | string;
   scopes?: string[] | string;
@@ -120,7 +121,7 @@ async function resolveSecret(value: SecretValue | undefined): Promise<string | u
 
 export async function issueInternalToken(
   env: { INTERNAL_AUTH_SIGNING_KEY?: SecretValue; INTERNAL_AUTH_TOKEN_ISSUER?: string },
-  input: { audience: string; tenantId?: string; subjectId?: string; actorType?: InternalTokenClaims['actor_type']; roles?: string[]; scopes?: string[] },
+  input: { audience: string; tenantId?: string; orgId?: string; subjectId?: string; actorType?: InternalTokenClaims['actor_type']; roles?: string[]; scopes?: string[] },
 ): Promise<string> {
   const signingKey = await resolveSecret(env.INTERNAL_AUTH_SIGNING_KEY);
   if (!signingKey) {
@@ -129,10 +130,18 @@ export async function issueInternalToken(
 
   const key = await importSigningKey(signingKey);
   const now = Math.floor(Date.now() / 1000);
+  // 実行者 (actor): a browser-path call that carries a user subject but declares no
+  // machine actorType is the user acting (人が実行者). Explicit program/ai callers
+  // (admin/ops, MCP) are honored as-is. front acting on its own behalf (no subject)
+  // stays a program under the synthetic "front-local" id until it has a real program
+  // account. NOTE: the subject here still comes from the unsigned identity cookie;
+  // making it trustworthy is Step 2 (signed identity / gap 9).
+  const actorType = input.actorType ?? (input.subjectId ? "human" : "program");
+  const actorId = actorType === "human" && input.subjectId ? input.subjectId : "front-local";
   const payload: InternalTokenClaims = {
     claims_set_version: 1,
-    actor_id: "front-local",
-    actor_type: input.actorType ?? "program",
+    actor_id: actorId,
+    actor_type: actorType,
     ...(input.roles ? { roles: input.roles } : {}),
     ...(input.scopes ? { scopes: input.scopes } : {}),
     iss: env.INTERNAL_AUTH_TOKEN_ISSUER ?? "front",
@@ -141,6 +150,7 @@ export async function issueInternalToken(
     iat: now,
     jti: crypto.randomUUID(),
     ...(input.tenantId ? { tenant_id: input.tenantId } : {}),
+    ...(input.orgId ? { org_id: input.orgId } : {}),
     ...(input.subjectId ? { subject_id: input.subjectId } : {}),
   };
 

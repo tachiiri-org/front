@@ -92,7 +92,7 @@ describe("authorize helpers", () => {
 
     const payload = JSON.parse(fromBase64Url(payloadPart!)) as Record<string, unknown>;
     expect(payload.aud).toBe("authorize");
-    expect(payload.actor_type).toBe("service");
+    expect(payload.actor_type).toBe("program");
 
     const valid = await crypto.subtle.verify(
       { name: "ECDSA", hash: "SHA-256" },
