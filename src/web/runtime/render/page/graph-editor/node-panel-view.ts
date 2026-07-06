@@ -95,6 +95,33 @@ export function createNodePanelView(ctx: GraphEditorContext, nodePanelOpts?: Nod
   el.appendChild(dirtyBadge);
   const setDirtyIndicator = (dirty: boolean) => { dirtyBadge.style.display = dirty ? 'block' : 'none'; };
 
+  // Search row — the very top of the node display. Per the graph's design principle
+  // (ナビゲーションテキストは使わず、パーツだけで分かる) it carries NO helper/placeholder text; the
+  // magnifier glyph is the affordance. Row layout mirrors a node row ([box slot][text]) so its
+  // height lines up with the outline. Typing filters the pane to matching nodes (server search);
+  // clearing (empty / Esc) restores the tree.
+  let searchActive = false;
+  const searchRow = document.createElement('div');
+  searchRow.style.cssText = `display:flex;flex-shrink:0;align-items:center;padding:2px 8px 2px 6px;border-bottom:1px solid ${BORDER};`;
+  const searchIconWrap = document.createElement('span');
+  searchIconWrap.style.cssText = `flex-shrink:0;display:flex;align-items:center;justify-content:center;width:18px;color:${TEXT_DIM};font-size:12px;`;
+  searchIconWrap.textContent = '🔍';
+  const searchInput = document.createElement('input');
+  searchInput.type = 'text';
+  searchInput.style.cssText = `flex:1;background:transparent;border:none;outline:none;font-size:14px;font-family:inherit;line-height:1.5;color:${TEXT_HIGH};padding:0 4px;min-height:20px;`;
+  let searchTimer: ReturnType<typeof setTimeout> | null = null;
+  const runSearch = (q: string) => { searchActive = q.trim().length > 0; void search(q.trim()); };
+  searchInput.addEventListener('input', () => {
+    if (searchTimer) clearTimeout(searchTimer);
+    searchTimer = setTimeout(() => runSearch(searchInput.value), 200);
+  });
+  searchInput.addEventListener('keydown', (e) => {
+    if (e.key === 'Escape') { e.preventDefault(); searchInput.value = ''; if (searchTimer) clearTimeout(searchTimer); runSearch(''); searchInput.blur(); }
+    else if (e.key === 'Enter') { e.preventDefault(); if (searchTimer) clearTimeout(searchTimer); runSearch(searchInput.value); }
+  });
+  searchRow.append(searchIconWrap, searchInput);
+  el.appendChild(searchRow);
+
   // Breadcrumb bar (path). The separate parent-grouping panel header (見出し＋区切り線) is removed
   // elsewhere (showHeaders=false); only this path bar shows above the tree.
   const bcEl = document.createElement('div');
@@ -108,8 +135,12 @@ export function createNodePanelView(ctx: GraphEditorContext, nodePanelOpts?: Nod
   draftSpacer.style.cssText = `flex-shrink:0;width:6px;`;
   const draftBtnWrap = document.createElement('span');
   draftBtnWrap.style.cssText = `flex-shrink:0;display:flex;align-items:center;justify-content:center;width:18px;`;
+  // Empty-state affordance: a ＋ glyph (a "part", not navigation text) signals "type here to add the
+  // first node". Only shown while the pane is empty (the draft row is hidden once real roots exist),
+  // so it never sits next to normal □ node boxes.
   const draftNodeBox = document.createElement('span');
-  draftNodeBox.style.cssText = `width:7px;height:7px;border-radius:1px;box-sizing:border-box;pointer-events:none;background:transparent;border:1.5px solid ${TEXT_DIM};`;
+  draftNodeBox.textContent = '＋';
+  draftNodeBox.style.cssText = `display:flex;align-items:center;justify-content:center;font-size:13px;line-height:1;color:${TEXT_DIM};pointer-events:none;`;
   draftBtnWrap.appendChild(draftNodeBox);
   const draftTa = document.createElement('textarea');
   draftTa.rows = 1;
@@ -128,6 +159,7 @@ export function createNodePanelView(ctx: GraphEditorContext, nodePanelOpts?: Nod
       if (!parentId) return;
       // Optimistic: insert temp node immediately (same pattern as doAddSibling).
       const tempId = `temp-${++ctx.tempNodeCounter}`;
+      ctx.registerTempId(tempId); // let other panes await this node's real id before writing it
       const tempNode: ExplorerNode = { id: tempId, [nodePanelLang]: label };
       const tempKey = rootKey(null, tempId);
       const o = make(tempNode, parentId, baseDepth, tempKey, null);
@@ -141,6 +173,7 @@ export function createNodePanelView(ctx: GraphEditorContext, nodePanelOpts?: Nod
       const nn = await apiCreateNode(ctx.gId, parentId, nodePanelLang, label);
       if (!nn) {
         resolveTemp(); tempReady.delete(tempId);
+        ctx.resolveTempId(tempId, tempId); // abandon: unblock any waiter (node was never created)
         roots.splice(roots.indexOf(o), 1); unindexOcc(o);
         const rli = rootNodeList.indexOf(tempNode); if (rli >= 0) rootNodeList.splice(rli, 1);
         rowMap.get(tempKey)?.remove(); rowMap.delete(tempKey);
@@ -152,6 +185,10 @@ export function createNodePanelView(ctx: GraphEditorContext, nodePanelOpts?: Nod
       swapNodeId(o, tempId, nn.id, rootKey(null, nn.id));
       Object.assign(tempNode, nn); // copy labels/color (id already set to real by swapNodeId)
       resolveTemp(); tempReady.delete(tempId);
+      ctx.resolveTempId(tempId, nn.id); // real id is known — un-stick any pane waiting on the temp
+      // If this new node is the selected subject, re-emit with the real id so the relation dock swaps
+      // its subject off the temp (otherwise it would keep writing ⟦temp⟧ chips).
+      if (nodePanelSelectedId === tempId) setNodePanelSelected(nn.id);
       if (typedText.trim() && typedText.trim() !== label) void apiUpdateNode(ctx.gId, nn.id, nodePanelLang, typedText.trim());
       // Declare the new node's position (front) under its parent via autosave.
       markDirty(parentId);
@@ -348,9 +385,12 @@ export function createNodePanelView(ctx: GraphEditorContext, nodePanelOpts?: Nod
       if (o.expanded) for (const c of o.children) appendSubtree(c);
     };
     for (const top of roots) appendSubtree(top);
-    // Show draft row only when list is empty AND a valid parent is known
+    // Show draft row when there are no REAL root children AND a valid parent is known. The synthetic
+    // "リンクなし" (orphan inbox) row is always present in the root pane, so counting raw roots would
+    // hide the draft even on an empty graph — leaving no way to type the first node. Exclude it.
     const draftParentId = sourceNodeSet ? sourceNodeId : (ctx.rootNodeId ?? null);
-    draftEl.style.display = (roots.length === 0 && draftParentId !== null) ? 'flex' : 'none';
+    const realRootCount = roots.reduce((n, o) => n + (o.node.id === ORPHAN_ID ? 0 : 1), 0);
+    draftEl.style.display = (realRootCount === 0 && draftParentId !== null && !searchActive) ? 'flex' : 'none';
     updateSelectionHighlight();
     if (nodePanelOpts?.onContentWidthChange) scheduleWidthUpdate();
   };
@@ -1703,6 +1743,7 @@ export function createNodePanelView(ctx: GraphEditorContext, nodePanelOpts?: Nod
 
   const doAddSibling = async (onode: ONode, before = false, opts?: { text?: string }): Promise<ONode | null> => {
     const tempId = `temp-${++ctx.tempNodeCounter}`;
+    ctx.registerTempId(tempId); // let other panes await this node's real id before writing it
     const initialText = opts?.text ?? '';
     const tempNode: ExplorerNode = initialText ? { id: tempId, [nodePanelLang]: initialText } : { id: tempId };
     const sibs = getSiblings(onode);
@@ -1746,6 +1787,7 @@ export function createNodePanelView(ctx: GraphEditorContext, nodePanelOpts?: Nod
     if (!nn) {
       resolveTemp();
       tempReady.delete(tempId);
+      ctx.resolveTempId(tempId, tempId); // abandon: unblock any waiter (node was never created)
       newRow.remove(); rowMap.delete(no.key);
       cleanupTemp();
       focusRow(onode);
@@ -1758,6 +1800,10 @@ export function createNodePanelView(ctx: GraphEditorContext, nodePanelOpts?: Nod
     Object.assign(tempNode, nn); // copy labels/color (id already real via swapNodeId)
     resolveTemp();
     tempReady.delete(tempId);
+    ctx.resolveTempId(tempId, nn.id); // real id is known — un-stick any pane waiting on the temp
+    // If this new node is the selected subject, re-emit with the real id so the relation dock swaps
+    // its subject off the temp (otherwise it would keep writing ⟦temp⟧ chips).
+    if (nodePanelSelectedId === tempId) setNodePanelSelected(nn.id);
 
     // The created node's position among its siblings is declared via autosave.
     markDirty(onode.parentId);

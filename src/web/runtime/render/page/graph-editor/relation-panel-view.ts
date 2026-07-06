@@ -413,6 +413,7 @@ export function createRelationPanelView(
       const oldId = nodeLink.dataset.nodeLink!;
       let newId = n.id;
       if (createLabel) { const c = await apiCreateNode(ctx.gId, null, lang, createLabel); if (!c) return; newId = c.id; }
+      newId = await ctx.awaitRealId(newId); // never persist a temp id
       if (newId === oldId) return;
       const label = createLabel ?? labelOf(n, lang);
       nodeLink.dataset.nodeLink = newId;
@@ -571,6 +572,8 @@ export function createRelationPanelView(
             if (!created) { closeMenu(); return; }
             nodeId = created.id;
           }
+          // Never persist a temp id (e.g. linking to a node still mid-create in another pane).
+          nodeId = await ctx.awaitRealId(nodeId);
           const label = createLabel ?? labelOf(n, lang);
           ta.value = leftStr;
           autosize(ta);
@@ -617,7 +620,10 @@ export function createRelationPanelView(
   // 本文にノードリンク(チップ)が無ければ末尾にこのノードの ⟦id⟧ を付けて当該ノードに紐づける。
   // 後で手動でその末尾チップを外せばチップ0になり ⑤ で「リンクなし」へ移る。並び順は保存する。
   const insertRelationAfter = async (anchorRow: HTMLElement, extraText = ''): Promise<void> => {
-    const nid = currentNodeId;
+    if (!currentNodeId) return;
+    // The subject may still be a freshly-created node whose real id hasn't landed — never persist a
+    // ⟦temp-N⟧ chip / temp participant (it can never resolve to a real node). Wait for the real id.
+    const nid = await ctx.awaitRealId(currentNodeId);
     if (!nid) return;
     const newBody = hasNodeLink(extraText) ? extraText : `${extraText}⟦${nid}⟧`;
     const created = await apiCreateRelation(ctx.gId, nid, lang, newBody);

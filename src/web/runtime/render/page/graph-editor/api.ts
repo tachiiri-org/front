@@ -16,17 +16,37 @@ const acquire = (): Promise<void> =>
     : new Promise<void>((resolve) => waiters.push(() => { active++; resolve(); }));
 const release = () => { active--; waiters.shift()?.(); };
 
+// ── Session-expiry handling ────────────────────────────────────────────────
+// A 401 means the login expired (identity cookies gone) while the tab stayed open. A silent hard
+// redirect to /login would discard the user's unsaved edits without warning — and until the redirect
+// lands, every queued write keeps failing. Instead we flip an "expired" latch once: the first 401
+// fires a handler (the editor shows a login notice), and every later request short-circuits with a
+// synthetic 401 so we neither hit the network nor spam retries. The handler owns the UX (banner +
+// link to /login); this module just detects and announces the condition.
+let sessionExpired = false;
+let onExpire: (() => void) | null = null;
+export function onSessionExpired(cb: () => void): void { onExpire = cb; }
+export function isSessionExpired(): boolean { return sessionExpired; }
+function markExpired(): void {
+  if (sessionExpired) return;
+  sessionExpired = true;
+  try { onExpire?.(); } catch { /* handler must never break the fetch path */ }
+}
+
 export async function apiFetch(input: string, init?: RequestInit): Promise<Response> {
+  // Once the session is known-expired, stop issuing requests — return a synthetic 401 so callers
+  // take their not-ok path without touching the network or re-triggering the notice.
+  if (sessionExpired) return new Response(null, { status: 401 });
   // keepalive requests fire during page unload (reorder flush) — never queue/delay them.
   if (init?.keepalive) {
     const r = await fetch(input, init);
-    if (r.status === 401) { window.location.href = '/login'; }
+    if (r.status === 401) { markExpired(); }
     return r;
   }
   await acquire();
   try {
     const r = await fetch(input, init);
-    if (r.status === 401) { window.location.href = '/login'; }
+    if (r.status === 401) { markExpired(); }
     return r;
   } finally {
     release();

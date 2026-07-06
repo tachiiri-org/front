@@ -72,6 +72,16 @@ export interface GraphEditorContext {
   // m_color palette: id → code
   colorPalette: Map<string, string>;
   tempNodeCounter: number;
+  // ── temp-id → real-id reconciliation (shared across panes) ──
+  // A node created optimistically gets a `temp-N` id (N from tempNodeCounter, globally unique) until
+  // its create round-trips. Other panes — the relation dock especially — must NEVER write a temp id
+  // to the backend (it would persist a `⟦temp-N⟧` chip / temp participant that can never resolve), so
+  // they await the real id here. The node pane registers a temp on optimistic insert and resolves it
+  // on swap. `awaitRealId` passes real ids straight through and never hangs on an unknown id.
+  tempRealId: Map<string, string>;
+  registerTempId: (tempId: string) => void;
+  resolveTempId: (tempId: string, realId: string) => void;
+  awaitRealId: (id: string) => Promise<string>;
   // ── Cross-pane (multi-pane outliner) DnD shared state ──
   // Set by the source pane on dragstart, read by the target pane on drop; null when idle.
   nodePanelDrag: NodePanelDragState | null;

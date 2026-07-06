@@ -540,6 +540,14 @@ export const handleApiRequest = async (request: Request, env: Env): Promise<Resp
       tenantId: cookies.get('identity_group_id') ?? undefined,
       subjectId: cookies.get('identity_user_id') ?? undefined,
     };
+    // The graph API is per-tenant/per-subject. If the session expired while the tab stayed open,
+    // the identity cookies are gone; forwarding a tenant-less request makes the backend no-op on an
+    // empty tenant and the write silently vanishes. Return 401 so the client surfaces a login notice
+    // instead of losing the operation. (Page loads are already auth-gated, so an authenticated user
+    // always carries both cookies here.)
+    if (!tenantContext.tenantId || !tenantContext.subjectId) {
+      return Response.json({ error: 'unauthenticated' }, { status: 401 });
+    }
     try {
       const res = await authorizeFetch(env, { path: backendPath, method: request.method, body, tenantContext });
       if (env.LOG_LEVEL === 'debug') console.log(`[graph-proxy] ${request.method} ${backendPath} → ${res.status}`);
