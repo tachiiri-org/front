@@ -104,8 +104,10 @@ export function createNodePanelView(ctx: GraphEditorContext, nodePanelOpts?: Nod
   const searchRow = document.createElement('div');
   searchRow.style.cssText = `display:flex;flex-shrink:0;align-items:center;padding:2px 8px 2px 6px;border-bottom:1px solid ${BORDER};`;
   const searchIconWrap = document.createElement('span');
-  searchIconWrap.style.cssText = `flex-shrink:0;display:flex;align-items:center;justify-content:center;width:18px;color:${TEXT_DIM};font-size:12px;`;
-  searchIconWrap.textContent = '🔍';
+  searchIconWrap.style.cssText = `flex-shrink:0;display:flex;align-items:center;justify-content:center;width:18px;color:${TEXT_DIM};`;
+  // Inline SVG magnifier (a reliable "part"): color-emoji fonts are absent in many environments, so
+  // 🔍 would render as tofu. stroke=currentColor inherits the dim color above.
+  searchIconWrap.innerHTML = '<svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="11" cy="11" r="7"></circle><line x1="20" y1="20" x2="16.65" y2="16.65"></line></svg>';
   const searchInput = document.createElement('input');
   searchInput.type = 'text';
   searchInput.style.cssText = `flex:1;background:transparent;border:none;outline:none;font-size:14px;font-family:inherit;line-height:1.5;color:${TEXT_HIGH};padding:0 4px;min-height:20px;`;
