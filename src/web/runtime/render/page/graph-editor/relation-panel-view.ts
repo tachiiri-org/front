@@ -666,16 +666,21 @@ export function createRelationPanelView(
         onPick: async (n, createLabel) => {
           let mentionId = n.id;
           if (createLabel) { const c = await apiCreateNode(ctx.gId, null, lang, createLabel); if (!c) { closeMenu(); return; } mentionId = c.id; }
+          mentionId = await ctx.awaitRealId(mentionId);   // never persist a temp id
+          const subjId = await ctx.awaitRealId(nodeId);   // subject may itself be a freshly-created node
           closeMenu();
           ta.value = ''; ta.style.color = TEXT_DIM;
-          const rel = await apiCreateRelation(ctx.gId, nodeId, lang, `${leftStr}⟦${mentionId}⟧${rightStr}`);
-          await render();
+          const rel = await apiCreateRelation(ctx.gId, subjId, lang, `${leftStr}⟦${mentionId}⟧${rightStr}`);
           if (!rel) return;
+          // Attach the mentioned node as a participant (and root-link a newly-created one) BEFORE
+          // re-rendering: render() re-fetches the relation, and the chip's label is resolved from the
+          // participant list. Rendering first showed the raw id (UUID) until a reload re-fetched it.
           await apiAddRay(ctx.gId, rel.lineId, mentionId);
+          if (createLabel) await linkToRoot(mentionId);
+          await render();
           const rrow = bodyEl.querySelector(`[data-line-id="${CSS.escape(rel.lineId)}"]`);
           const nodeLink = rrow?.querySelector(`[data-node-link="${CSS.escape(mentionId)}"]`) as HTMLElement | null;
           ((nodeLink?.nextElementSibling as HTMLTextAreaElement | null) ?? (rrow?.querySelector('textarea') as HTMLTextAreaElement | null))?.focus();
-          if (createLabel) await linkToRoot(mentionId);
         },
       };
       const seq = ++mentionSeq;
