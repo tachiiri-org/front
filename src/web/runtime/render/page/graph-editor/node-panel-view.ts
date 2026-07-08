@@ -586,6 +586,37 @@ export function createNodePanelView(ctx: GraphEditorContext, nodePanelOpts?: Nod
     focusRow(onode);
   };
 
+  // Rename the current (breadcrumb-tail) node in place. Replaces the label span with an input;
+  // Enter/blur commits, Esc cancels. Writes the pane's display language only (same as row editing).
+  const startBreadcrumbRename = (on: ONode, seg: HTMLElement) => {
+    const current = labelOf(on.node);
+    const input = document.createElement('input');
+    input.type = 'text';
+    input.value = current;
+    input.style.cssText = `font-size:12px;font-family:inherit;color:${TEXT_HIGH};background:transparent;border:1px solid ${BORDER};border-radius:3px;padding:0 4px;max-width:180px;min-width:60px;outline:none;`;
+    let done = false;
+    const commit = async (save: boolean) => {
+      if (done) return; done = true;
+      const val = input.value.trim();
+      if (save && val && val !== current) {
+        on.node[nodePanelLang] = val;                       // reflect locally (breadcrumb + rows)
+        const tn = treeNodes.get(on.node.id); if (tn) tn[nodePanelLang] = val;
+        updateBreadcrumb();
+        render();
+        await apiUpdateNode(ctx.gId, on.node.id, nodePanelLang, val);
+      } else {
+        updateBreadcrumb();                                 // cancel / no-op: restore the label span
+      }
+    };
+    input.addEventListener('keydown', (e) => {
+      if (e.key === 'Enter') { e.preventDefault(); void commit(true); }
+      else if (e.key === 'Escape') { e.preventDefault(); void commit(false); }
+    });
+    input.addEventListener('blur', () => void commit(true));
+    seg.replaceWith(input);
+    input.focus(); input.select();
+  };
+
   // ── Breadcrumb ───────────────────────────────────────────────────────
   const updateBreadcrumb = () => {
     bcEl.style.display = '';
@@ -630,13 +661,26 @@ export function createNodePanelView(ctx: GraphEditorContext, nodePanelOpts?: Nod
 
     zoomStack.forEach((on, i) => {
       appendSep();
-      const btn = document.createElement('button');
       const lbl = labelOf(on.node);
-      btn.textContent = lbl;
-      btn.title = lbl;
-      btn.style.cssText = btnStyle(i === zoomStack.length - 1);
-      if (i < zoomStack.length - 1) btn.addEventListener('click', () => void doZoomTo(i + 1));
-      bcEl.appendChild(btn);
+      const isTail = i === zoomStack.length - 1;
+      if (isTail) {
+        // Tail = the current (zoomed) node. Click to rename it in place: turn the label into an
+        // input and commit via the existing apiUpdateNode (no new API). Intermediate segments stay
+        // clickable zoom targets; only the current node is editable.
+        const seg = document.createElement('span');
+        seg.textContent = lbl;
+        seg.title = 'クリックで名前を編集';
+        seg.style.cssText = `color:${TEXT_HIGH};cursor:text;font-size:12px;padding:0 2px;white-space:nowrap;max-width:180px;overflow:hidden;text-overflow:ellipsis;`;
+        seg.addEventListener('click', () => startBreadcrumbRename(on, seg));
+        bcEl.appendChild(seg);
+      } else {
+        const btn = document.createElement('button');
+        btn.textContent = lbl;
+        btn.title = lbl;
+        btn.style.cssText = btnStyle(false);
+        btn.addEventListener('click', () => void doZoomTo(i + 1));
+        bcEl.appendChild(btn);
+      }
     });
 
     // Copy-path button — copies the current breadcrumb path as a "/"-joined string.
@@ -1573,7 +1617,10 @@ export function createNodePanelView(ctx: GraphEditorContext, nodePanelOpts?: Nod
   const IDLE_REFETCH_MS = 60_000;
   let idleTimer: ReturnType<typeof setTimeout> | null = null;
   const idleRefetch = async () => {
-    if (dirtyParents.size > 0 || saving || listEl.contains(document.activeElement)) { scheduleIdleRefetch(); return; }
+    // Never refetch while a search is active: load(false) rebuilds the full tree and would discard
+    // the search results (search() shows fetchAllNodes matches, not the tree), silently snapping the
+    // pane back to all nodes. Reschedule so refetch resumes once the search is cleared.
+    if (searchActive || dirtyParents.size > 0 || saving || listEl.contains(document.activeElement)) { scheduleIdleRefetch(); return; }
     const expanded = new Set<string>(); for (const o of byKey.values()) if (o.expanded) expanded.add(o.node.id);
     await load(false); // rebuild collapsed, then restore the user's own expansion below
     const reexpand = async (list: ONode[]): Promise<void> => {

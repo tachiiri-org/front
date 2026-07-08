@@ -51,6 +51,11 @@ export function createRelationPanelView(
   let selAnchor: string | null = null;
   let selCursor: string | null = null;
   const relationBoxByRelation = new Map<string, HTMLElement>();
+  // 検索: 最上部の検索行のクエリでいま表示中の関係行を絞る（クライアント側フィルタ・再取得はしない）。
+  // 対象1ノードの関係一覧（高々数十件）なので取得済みを filter するだけで足り、サーバ検索は不要。
+  let filterQuery = '';
+  let currentRelations: ExplorerRelation[] = [];
+  let currentDraftNodeId: string | null = null; // 追加ドラフト行の対象ノード（orphan 表示中は null）。
   const canvas = document.createElement('canvas');
   const cctx = canvas.getContext('2d');
 
@@ -721,6 +726,31 @@ export function createRelationPanelView(
     return row;
   };
 
+  // 関係が検索クエリに一致するか。本文（⟦id⟧チップは参加者ラベルに解決）＋参加者ラベルを対象に部分一致。
+  const relationMatchesQuery = (r: ExplorerRelation, q: string): boolean => {
+    if (!q) return true;
+    const byId = new Map(r.participants.map((p) => [p.id, p]));
+    const body = r.body[lang] || r.body.ja || r.body.en || '';
+    const text =
+      splitTokens(body).map((tok) => (tok.t === 'txt' ? tok.v : labelOf(byId.get(tok.id) ?? { id: tok.id }, lang))).join('') +
+      ' ' + r.participants.map((p) => labelOf(p, lang)).join(' ');
+    return text.toLowerCase().includes(q);
+  };
+
+  // 本体（関係行）だけを描画。検索クエリ変更時は再取得せずこれだけ呼ぶ（head は作り直さない＝入力が保持される）。
+  const renderBody = (): void => {
+    bodyEl.innerHTML = '';
+    relationBoxByRelation.clear();
+    selAnchor = null; selCursor = null; // 行を作り直すので複数選択はリセット。
+    const q = filterQuery.trim().toLowerCase();
+    if (!orphanMode && currentDraftNodeId && !q) bodyEl.appendChild(makeDraftRow(currentDraftNodeId)); // 検索中は追加ドラフト行を隠す
+    for (const relation of currentRelations) {
+      if (!relationMatchesQuery(relation, q)) continue;
+      bodyEl.appendChild(renderRelationRow(relation));
+    }
+    updateActiveHighlight();
+  };
+
   // ── 列全体の描画 ─────────────────────────────────────────────────────────────
   const render = async (): Promise<void> => {
     const token = ++renderToken;
@@ -728,6 +758,30 @@ export function createRelationPanelView(
     bodyEl.innerHTML = '';
     relationBoxByRelation.clear();
     selAnchor = null; selCursor = null; // 行を作り直すので複数選択はリセット。
+    filterQuery = ''; // ノード切替/再読込では検索状態をリセット（新しい関係一覧を全件表示）。
+
+    // ── 0行目: 検索（ノードパネルの検索行と同形・最上部・プレースホルダ文言なし＝虫眼鏡のみ） ──
+    const searchRow = document.createElement('div');
+    searchRow.style.cssText = `display:flex;align-items:center;gap:4px;height:28px;box-sizing:border-box;padding:0 6px;border-bottom:1px solid ${BORDER};`;
+    const searchIconWrap = document.createElement('span');
+    searchIconWrap.style.cssText = `flex-shrink:0;display:flex;align-items:center;justify-content:center;width:18px;color:${TEXT_DIM};`;
+    // Inline SVG magnifier（ノードパネルと同じ）: color-emoji 非搭載環境で🔍が豆腐化するのを避ける。
+    searchIconWrap.innerHTML = '<svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="11" cy="11" r="7"></circle><line x1="20" y1="20" x2="16.65" y2="16.65"></line></svg>';
+    const searchInput = document.createElement('input');
+    searchInput.type = 'text';
+    searchInput.style.cssText = `flex:1;background:transparent;border:none;outline:none;font-size:13px;font-family:inherit;line-height:1.5;color:${TEXT_HIGH};padding:0 4px;min-height:20px;`;
+    let searchTimer: ReturnType<typeof setTimeout> | null = null;
+    const applyFilter = (v: string) => { filterQuery = v; renderBody(); };
+    searchInput.addEventListener('input', () => {
+      if (searchTimer) clearTimeout(searchTimer);
+      searchTimer = setTimeout(() => applyFilter(searchInput.value), 200);
+    });
+    searchInput.addEventListener('keydown', (e) => {
+      if (e.key === 'Escape') { e.preventDefault(); searchInput.value = ''; if (searchTimer) clearTimeout(searchTimer); applyFilter(''); searchInput.blur(); }
+      else if (e.key === 'Enter') { e.preventDefault(); if (searchTimer) clearTimeout(searchTimer); applyFilter(searchInput.value); }
+    });
+    searchRow.append(searchIconWrap, searchInput);
+    head.appendChild(searchRow);
 
     // ── 1行目: 操作（リンクなし + ⟳ + 言語切替） ── ノードペインヘッダと同じ 28px+下線。
     // 並び: 左=リンクなし、右寄せで ⟳・JA/EN（ノードパネルと同様に言語切替を右端へ）。
@@ -793,19 +847,17 @@ export function createRelationPanelView(
     if (orphanMode) {
       const relations = await fetchOrphanRelations(ctx.gId);
       if (token !== renderToken) return;
-      for (const relation of relations) bodyEl.appendChild(renderRelationRow(relation));
-      updateActiveHighlight();
+      currentRelations = relations; currentDraftNodeId = null;
+      renderBody();
       return;
     }
 
-    if (!currentNodeId) { updateActiveHighlight(); return; }
+    if (!currentNodeId) { currentRelations = []; currentDraftNodeId = null; renderBody(); return; }
     const nodeId = currentNodeId;
     const relations = await fetchNodeRelations(ctx.gId, nodeId);
     if (token !== renderToken) return;
-    // 追加用ドラフト行は常に先頭。
-    bodyEl.appendChild(makeDraftRow(nodeId));
-    for (const relation of relations) bodyEl.appendChild(renderRelationRow(relation));
-    updateActiveHighlight();
+    currentRelations = relations; currentDraftNodeId = nodeId; // 追加ドラフト行はこのノード宛て
+    renderBody();
   };
 
   // ── ノード → 関係への変換 ─────────────────────────────────────────────────────
