@@ -298,13 +298,14 @@ export async function resolveOrgUser(
   env: AuthorizeEnv,
   orgId: string,
   identityUserId: string,
-  email: string,
 ): Promise<OrgUser | null> {
   try {
+    // org_user_id is deterministically derived from (orgId, identityUserId) — no email is sent or
+    // used for identification.
     const res = await authorizeFetch(env, {
       path: "/api/v1/identify/org-user",
       method: "POST",
-      body: JSON.stringify({ orgId, identityUserId, email }),
+      body: JSON.stringify({ orgId, identityUserId }),
     });
     if (!res.ok) return null;
     return (await res.json()) as OrgUser;

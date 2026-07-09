@@ -246,12 +246,13 @@ export async function handleAutoSelectOrg(request: Request, env: AuthorizeEnv): 
     (githubSession.status === 'fulfilled' ? githubSession.value?.email : null) ??
     (googleSession.status === 'fulfilled' ? googleSession.value?.email : null);
 
+  // org_user_id is derived from (groupId, userId) alone — set it regardless of email presence.
+  const orgUser = await resolveOrgUser(env, groupId, userId);
+  if (orgUser) {
+    headers.append('Set-Cookie', `org_user_id=${encodeURIComponent(orgUser.orgUserId)}; Path=/; Max-Age=${60 * 60 * 24}${isSecure ? '; Secure' : ''}; SameSite=Lax; HttpOnly`);
+  }
   if (email) {
-    const orgUser = await resolveOrgUser(env, groupId, userId, email);
-    if (orgUser) {
-      headers.append('Set-Cookie', `org_user_id=${encodeURIComponent(orgUser.orgUserId)}; Path=/; Max-Age=${60 * 60 * 24}${isSecure ? '; Secure' : ''}; SameSite=Lax; HttpOnly`);
-    }
-    // Ensure email is registered in group DB so magic link lookup works
+    // Register email → identity_user_id in group DB so magic link recovery works (P2 email lives here only).
     await registerGroupMember(env, groupId, email, userId).catch(() => null);
   }
   if (magicEmail || magicGroupId) {
@@ -291,12 +292,13 @@ export async function handleSelectOrg(request: Request, env: AuthorizeEnv): Prom
       (githubSession.status === 'fulfilled' ? githubSession.value?.email : null) ??
       (googleSession.status === 'fulfilled' ? googleSession.value?.email : null);
 
+    // org_user_id is derived from (orgId, identityUserId) alone — set it regardless of email presence.
+    const orgUser = await resolveOrgUser(env, orgId, identityUserId);
+    if (orgUser) {
+      headers.append('Set-Cookie', `org_user_id=${encodeURIComponent(orgUser.orgUserId)}; Path=/; Max-Age=${60 * 60 * 24}${isSecure ? '; Secure' : ''}; SameSite=Lax; HttpOnly`);
+    }
     if (email) {
-      const orgUser = await resolveOrgUser(env, orgId, identityUserId, email);
-      if (orgUser) {
-        headers.append('Set-Cookie', `org_user_id=${encodeURIComponent(orgUser.orgUserId)}; Path=/; Max-Age=${60 * 60 * 24}${isSecure ? '; Secure' : ''}; SameSite=Lax; HttpOnly`);
-      }
-      // Ensure email is registered in group DB so magic link lookup works
+      // Register email → identity_user_id in group DB so magic link recovery works (P2 email lives here only).
       await registerGroupMember(env, orgId, email, identityUserId).catch(() => null);
     }
     if (magicEmail) {
