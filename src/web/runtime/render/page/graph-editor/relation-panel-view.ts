@@ -354,13 +354,10 @@ export function createRelationPanelView(
     let groupSel: { startTa: HTMLTextAreaElement; startOff: number; focusTa: HTMLTextAreaElement } | null = null;
     let crossing = false; // プログラム的な focus 移動中は clearGroupSel を抑止
     const segChildren = () => Array.from(content.children) as HTMLElement[];
-    // 選択の見た目は textarea のネイティブ選択と同じ OS ハイライト色（文字は潰れない）。chip は span、
-    // textarea は自身に色を当てる。
-    const paintEl = (el: HTMLElement, on: boolean) => {
-      el.style.background = on ? 'Highlight' : '';
-      const span = el.dataset.nodeLink ? (el.firstElementChild as HTMLElement | null) : el;
-      if (span) span.style.color = on ? 'HighlightText' : TEXT_HIGH;
-    };
+    // 選択の見た目。OS システム色(Highlight/HighlightText)は環境により白飛びするので使わず、読める青の
+    // 半透明背景にする（暗背景でも文字が潰れないよう文字色は据え置き）。
+    const SEL_BG = 'rgba(70,120,235,0.5)';
+    const paintEl = (el: HTMLElement, on: boolean) => { el.style.background = on ? SEL_BG : ''; };
     const clearGroupSel = () => {
       if (!groupSel) return;
       for (const c of segChildren()) paintEl(c, false);
