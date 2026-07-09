@@ -79,10 +79,9 @@ service = "backend-dev"
 
 [env.dev.vars]
 LOG_LEVEL = "debug"
-FRONT_TO_BACKEND_TOKEN = "b109b22738647033f1ef4ad11426c8a8a05aae7c3ec3da9f88e0ad4dbd768781"
-# IDENTITY_ENCRYPTION_KEY は worker secret（wrangler secret put --env dev）で注入する。
-# stage/prod と同じく平文 var には置かない（dev だけ平文だった P2/秘密漏えいの是正）。
-BUILD_SCREENS_TOKEN = "86c8bb6b73acd1df8017b08b1efdcec84a04da0e62f6591eee081ae91e8cd146"
+# 秘密は平文 var に置かず worker secret（wrangler secret put --env dev）で注入する。
+# dev だけ平文だった FRONT_TO_BACKEND_TOKEN / IDENTITY_ENCRYPTION_KEY / BUILD_SCREENS_TOKEN を
+# stage/prod と同様に worker secret 化した（秘密漏えいの是正）。以下 vars は公開値のみ。
 GITHUB_OAUTH_CLIENT_ID = "Ov23litfbD8WRrXkM4iR"
 GOOGLE_OAUTH_CLIENT_ID = "804252639051-hdkilk1189bomeiv9opnsu0h2basdtr8.apps.googleusercontent.com"
 MICROSOFT_OAUTH_CLIENT_ID = "0398ec75-5040-4d01-8508-7aa813f2857c"
