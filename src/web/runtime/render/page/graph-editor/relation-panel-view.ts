@@ -357,7 +357,10 @@ export function createRelationPanelView(
     // 選択の見た目。OS システム色(Highlight/HighlightText)は環境により白飛びするので使わず、読める青の
     // 半透明背景にする（暗背景でも文字が潰れないよう文字色は据え置き）。
     const SEL_BG = 'rgba(70,120,235,0.5)';
-    const paintEl = (el: HTMLElement, on: boolean) => { el.style.background = on ? SEL_BG : ''; };
+    // 非選択に戻すときは '' ではなく 'transparent'。textarea は cssText で background:transparent を
+    // 明示しており、'' にすると背景指定ごと消えてブラウザ既定の白背景になり、薄いグレー文字が白地で
+    // 読めなくなる（＝「白いハイライト」に見える）。'transparent' で元のダーク配色に戻す。
+    const paintEl = (el: HTMLElement, on: boolean) => { el.style.background = on ? SEL_BG : 'transparent'; };
     const clearGroupSel = () => {
       if (!groupSel) return;
       for (const c of segChildren()) paintEl(c, false);
