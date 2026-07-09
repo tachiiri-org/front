@@ -443,6 +443,7 @@ export function createRelationPanelView(
       nodeLink.appendChild(txt);
       nodeLink.addEventListener('mousedown', (e) => {
         if (e.button !== 0) return; // 右クリックは contextmenu 側で関係パネルを開く。
+        clearGroupSel(); // チップクリックは focus を奪わない＝blur が来ないので、ここで選択を解除
         e.preventDefault();
         openSearchPopover(nodeLink, (n, cl) => void replaceNodeLink(nodeLink, n, cl), () => removeNodeLink(nodeLink));
       });
@@ -488,6 +489,8 @@ export function createRelationPanelView(
         if (!crossing) clearGroupSel(); // またぎ中のプログラム focus では選択を保つ
         autosize(ta);
       });
+      // 同じ ta 内をクリックしてキャレットを置き直す時は focus が再発火しないので、mousedown で解除。
+      ta.addEventListener('mousedown', () => { if (!crossing) clearGroupSel(); });
       ta.addEventListener('input', () => { clearGroupSel(); autosize(ta); void handleMention(ta); save(); });
       // 他の場所を選んで textarea からフォーカスが外れたら、@ドロップダウンは閉じる。
       // （項目は mousedown+preventDefault でフォーカスを奪わないので、項目選択では blur しない。
