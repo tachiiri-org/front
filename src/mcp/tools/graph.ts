@@ -62,8 +62,64 @@ function clampDepth(raw: unknown): number {
   return Math.min(Math.max(Number.isFinite(n) ? n : 2, 0), 5);
 }
 
+// Depth for graph_read_children: how many levels of children to expand. Default 3, max 6.
+function clampChildDepth(raw: unknown): number {
+  const n = typeof raw === "number" ? Math.floor(raw) : 3;
+  return Math.min(Math.max(Number.isFinite(n) ? n : 3, 1), 6);
+}
+
 const nodeLabel = (n: ApiNode): string => [n.en, n.ja].filter(Boolean).join(" / ");
 const nodeLine = (n: ApiNode): string => `[${n.id}] ${nodeLabel(n)}`;
+
+// Direct oriented children of a node (same set the editor's node panel shows), ordered by the
+// h_node_line chain. Textless structural edges only — relation lines are excluded.
+async function getChildren(env: AuthorizeEnv, graphId: string, nodeId: string, limit?: number): Promise<ApiNode[]> {
+  const qs = limit != null ? `?limit=${encodeURIComponent(String(limit))}` : "";
+  const res = await graphFetch(env, graphId, `node/${encodeURIComponent(nodeId)}/children${qs}`);
+  if (!res.ok) throw new Error(`get_children_failed:${res.status}`);
+  const data = (await res.json()) as { nodes?: ApiNode[] };
+  return data.nodes ?? [];
+}
+
+// Recursively read a node's children into an indented tree. Cycle handling is PATH-based: a node is
+// only stopped when it reappears among its OWN ancestors on the current path (a true cycle) — the
+// same node legitimately appearing under different parents (multi-membership) is kept, because
+// identity here is the path from the start node, not the bare node id. Depth-capped and node-capped.
+async function readChildrenTree(
+  env: AuthorizeEnv,
+  graphId: string,
+  startId: string,
+  maxDepth: number,
+  limit: number,
+): Promise<{ lines: string[]; count: number; truncated: boolean }> {
+  const out: string[] = [];
+  const state = { count: 0, truncated: false };
+  const walk = async (id: string, depth: number, ancestors: Set<string>): Promise<void> => {
+    if (state.truncated || depth >= maxDepth) return;
+    let kids: ApiNode[];
+    try {
+      kids = await getChildren(env, graphId, id);
+    } catch {
+      return;
+    }
+    for (const k of kids) {
+      if (state.count >= limit) {
+        state.truncated = true;
+        return;
+      }
+      const cyc = ancestors.has(k.id);
+      out.push(`${"  ".repeat(depth)}- ${nodeLine(k)}${cyc ? " ⟳(循環: 祖先に既出のため展開省略)" : ""}`);
+      state.count += 1;
+      if (!cyc) {
+        const next = new Set(ancestors);
+        next.add(k.id);
+        await walk(k.id, depth + 1, next);
+      }
+    }
+  };
+  await walk(startId, 0, new Set([startId]));
+  return { lines: out, count: state.count, truncated: state.truncated };
+}
 
 // A relation line as returned by GET /node/:id/lines. `body` is prose per language with node
 // references embedded as ⟦nodeId⟧; `participants` carries the id→label mapping to resolve them.
@@ -137,6 +193,21 @@ export const GRAPH_TOOLS = [
         node_id: { type: "string", description: "Starting node ID" },
         depth: { type: "number", description: "Hops to traverse (default 2, max 5)" },
         limit: { type: "number", description: "Max nodes to return (default 100, max 500). If truncated, reduce depth." },
+      },
+      required: ["graph_id", "node_id"],
+    },
+  },
+  {
+    name: "graph_read_children",
+    description:
+      "Read the DIRECTED CHILDREN (子ノード / group) of a node, recursively, as an indented tree. This is the hierarchy/grouping structure — e.g. reading 「曜日」returns 月・火・水… — and is the RIGHT tool for understanding how concepts are grouped under a node (unlike graph_read_nodes_from, which walks undirected neighbors and ignores direction). Any node can be a child of multiple parents (multi-membership); such a node legitimately appears under each of its parents. Cycles are handled by path (a node is only stopped when it reappears among its own ancestors on the current path), so `曜日/月` and `月/曜日` are distinct paths, not a loop.",
+    inputSchema: {
+      type: "object",
+      properties: {
+        graph_id: { type: "string", description: "Word graph ID (e.g. 'word-graph-1')" },
+        node_id: { type: "string", description: "Node whose children (group) to read" },
+        depth: { type: "number", description: "Levels of children to expand (default 3, max 6)" },
+        limit: { type: "number", description: "Max nodes to emit (default 200, max 1000). Truncates when exceeded." },
       },
       required: ["graph_id", "node_id"],
     },
@@ -317,6 +388,20 @@ export async function callGraphTool(
       const nodes = result.nodes ?? [];
       let text = nodes.map(nodeLine).join("\n") || "(no nodes)";
       if (result.truncated) text += `\n[truncated: ${result.count} nodes returned, more exist — reduce depth]`;
+      return { content: [{ type: "text", text }] };
+    }
+
+    if (name === "graph_read_children") {
+      const nodeId = String(args.node_id);
+      const maxDepth = clampChildDepth(args.depth);
+      const rawLimit = typeof args.limit === "number" ? Math.floor(args.limit) : 200;
+      const limit = Math.min(Math.max(Number.isFinite(rawLimit) ? rawLimit : 200, 1), 1000);
+      const { lines, count, truncated } = await readChildrenTree(env, graphId, nodeId, maxDepth, limit);
+      if (count === 0) {
+        return { content: [{ type: "text", text: `ノード [${nodeId}] に子ノードはありません` }] };
+      }
+      let text = `ノード [${nodeId}] の子（${count}件, 深さ${maxDepth}まで）:\n${lines.join("\n")}`;
+      if (truncated) text += `\n[truncated: ${count} nodes emitted, more exist — reduce depth or raise limit]`;
       return { content: [{ type: "text", text }] };
     }
 
