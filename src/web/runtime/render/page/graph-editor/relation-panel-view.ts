@@ -348,19 +348,36 @@ export function createRelationPanelView(
     // ta 内では native の青い選択のまま。右端で Shift+→ すると「隣のチップだけ」を選択状態にして、
     // その先の ta 先頭へキャレットを移す（native 選択はフォーカス中の ta 内だけに保たれるので、行全体が
     // まとめて選択されて白飛びする問題が起きない）。@ で anchor〜現在キャレットを親チップに畳む。
-    let groupSel: { anchorTa: HTMLTextAreaElement; anchorOff: number; chips: HTMLElement[] } | null = null;
+    let groupSel: { anchorTa: HTMLTextAreaElement; anchorOff: number; chips: HTMLElement[]; focusTa: HTMLTextAreaElement } | null = null;
     let crossing = false; // プログラム的な focus 移動中は clearGroupSel を抑止
     const segChildren = () => Array.from(content.children) as HTMLElement[];
-    // 選択チップの見た目は textarea のネイティブ選択と同じ OS ハイライト色にする（文字は潰れない）。
-    const highlightChip = (chip: HTMLElement, on: boolean) => {
-      chip.style.background = on ? 'Highlight' : '';
-      const span = chip.firstElementChild as HTMLElement | null;
+    // 選択の見た目は textarea のネイティブ選択と同じ OS ハイライト色（文字は潰れない）。chip は span、
+    // textarea は自身に色を当てる。
+    const paintEl = (el: HTMLElement, on: boolean) => {
+      el.style.background = on ? 'Highlight' : '';
+      const span = el.dataset.nodeLink ? (el.firstElementChild as HTMLElement | null) : el;
       if (span) span.style.color = on ? 'HighlightText' : TEXT_HIGH;
     };
     const clearGroupSel = () => {
       if (!groupSel) return;
-      for (const c of groupSel.chips) highlightChip(c, false);
+      for (const c of segChildren()) paintEl(c, false);
       groupSel = null;
+    };
+    // 選択範囲を塗り直す。フォーカス中の ta（＝focusTa）はネイティブの青選択が見えるので塗らない。
+    // 通り過ぎた（またいだ）チップ・中間 ta・先頭が丸ごと選択された anchor ta を OS ハイライト色で塗り、
+    // 行全体が繋がって見えるようにする（フォーカス移動で native 選択が消える問題の補完）。
+    const paintGroupSel = () => {
+      if (!groupSel) return;
+      const kids = segChildren();
+      const aIdx = kids.indexOf(groupSel.anchorTa);
+      const fIdx = kids.indexOf(groupSel.focusTa);
+      const chipSet = new Set(groupSel.chips);
+      for (let i = 0; i < kids.length; i++) {
+        const el = kids[i];
+        if (el.dataset.nodeLink) { paintEl(el, chipSet.has(el)); continue; }
+        const whole = (i === aIdx && groupSel.anchorOff === 0) || (i > aIdx && i < fIdx);
+        paintEl(el, whole);
+      }
     };
 
     const rebuild = (): string => Array.from(content.children).map((c) => {
@@ -500,7 +517,7 @@ export function createRelationPanelView(
           else extendSelection(e.key === 'ArrowDown' ? 'down' : 'up');
           return;
         }
-        // Shift+→: ta 右端に達したら「隣のチップだけ」を選択して、その先の ta 先頭へキャレットを移す。
+        // Shift+→: ta 右端に達したら「隣のチップ」を選択に含めて、その先の ta 先頭へキャレットを移す。
         // ta 内の途中なら native の青い選択をそのまま伸ばす（return して既定動作に委ねる）。
         if (e.key === 'ArrowRight' && e.shiftKey && !e.altKey && !e.ctrlKey && !e.metaKey) {
           if (ta.selectionEnd !== ta.value.length) return; // まだ ta 内で伸びる → native
@@ -508,28 +525,30 @@ export function createRelationPanelView(
           const nextTa = chip?.nextElementSibling as HTMLTextAreaElement | null;
           if (!chip?.dataset.nodeLink || !nextTa) return; // 隣が [chip][ta] でなければ何もしない
           e.preventDefault();
-          if (!groupSel) groupSel = { anchorTa: ta, anchorOff: ta.selectionStart, chips: [] };
+          if (!groupSel) groupSel = { anchorTa: ta, anchorOff: ta.selectionStart, chips: [], focusTa: ta };
           groupSel.chips.push(chip);
-          highlightChip(chip, true);
+          groupSel.focusTa = nextTa;
           crossing = true; nextTa.focus(); nextTa.setSelectionRange(0, 0); crossing = false;
+          paintGroupSel();
           return;
         }
-        // Shift+←: ta 左端で、直前のチップが選択中の末尾なら選択解除して前の ta 末尾へキャレットを戻す。
+        // Shift+←: ta 左端（選択なし）で、直前のチップが選択末尾なら1つ戻して前の ta を丸ごと選択に。
         if (e.key === 'ArrowLeft' && e.shiftKey && !e.altKey && !e.ctrlKey && !e.metaKey) {
-          if (!groupSel || ta.selectionStart !== 0) return; // native の縮小に委ねる
+          if (!groupSel || ta.selectionStart !== 0 || ta.selectionEnd !== 0) return; // native の縮小に委ねる
           const prevChip = ta.previousElementSibling as HTMLElement | null;
           if (!prevChip?.dataset.nodeLink || groupSel.chips[groupSel.chips.length - 1] !== prevChip) return;
           e.preventDefault();
           groupSel.chips.pop();
-          highlightChip(prevChip, false);
           const prevTa = prevChip.previousElementSibling as HTMLTextAreaElement | null;
           if (prevTa) {
+            groupSel.focusTa = prevTa;
             crossing = true; prevTa.focus();
             if (groupSel.chips.length === 0 && prevTa === groupSel.anchorTa) {
-              prevTa.setSelectionRange(groupSel.anchorOff, prevTa.value.length); // 元の native 選択に戻す
+              prevTa.setSelectionRange(groupSel.anchorOff, prevTa.value.length); // 元の native 選択へ復帰
               clearGroupSel();
             } else {
-              prevTa.setSelectionRange(prevTa.value.length, prevTa.value.length);
+              prevTa.setSelectionRange(0, prevTa.value.length); // 丸ごと native 選択（さらに Shift+← で縮む）
+              paintGroupSel();
             }
             crossing = false;
           }
