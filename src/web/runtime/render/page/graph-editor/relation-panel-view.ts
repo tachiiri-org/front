@@ -348,7 +348,10 @@ export function createRelationPanelView(
     // ta 内では native の青い選択のまま。右端で Shift+→ すると「隣のチップだけ」を選択状態にして、
     // その先の ta 先頭へキャレットを移す（native 選択はフォーカス中の ta 内だけに保たれるので、行全体が
     // まとめて選択されて白飛びする問題が起きない）。@ で anchor〜現在キャレットを親チップに畳む。
-    let groupSel: { anchorTa: HTMLTextAreaElement; anchorOff: number; chips: HTMLElement[]; focusTa: HTMLTextAreaElement } | null = null;
+    // startTa/startOff = 選択を開始した固定アンカー位置。focusTa = 現在フォーカス中の ta。方向は DOM 順で
+    // start と focus の前後により決まる（右向き=start が左／左向き=start が右）。Shift+←→ が ta の端に達し
+    // たら隣のチップを選択に含めて先の ta へフォーカスを移す。左右どちらからでも開始できる。
+    let groupSel: { startTa: HTMLTextAreaElement; startOff: number; focusTa: HTMLTextAreaElement } | null = null;
     let crossing = false; // プログラム的な focus 移動中は clearGroupSel を抑止
     const segChildren = () => Array.from(content.children) as HTMLElement[];
     // 選択の見た目は textarea のネイティブ選択と同じ OS ハイライト色（文字は潰れない）。chip は span、
@@ -363,20 +366,24 @@ export function createRelationPanelView(
       for (const c of segChildren()) paintEl(c, false);
       groupSel = null;
     };
-    // 選択範囲を塗り直す。フォーカス中の ta（＝focusTa）はネイティブの青選択が見えるので塗らない。
-    // 通り過ぎた（またいだ）チップ・中間 ta・先頭が丸ごと選択された anchor ta を OS ハイライト色で塗り、
-    // 行全体が繋がって見えるようにする（フォーカス移動で native 選択が消える問題の補完）。
+    // 選択範囲を塗り直す。フォーカス中の ta は native の青選択が見えるので塗らず、またいだチップ・中間 ta・
+    // 丸ごと選択された start ta を OS ハイライト色で塗って範囲全体を繋げて見せる（focus 移動で前 ta の
+    // native 選択が消える問題の補完）。
     const paintGroupSel = () => {
       if (!groupSel) return;
       const kids = segChildren();
-      const aIdx = kids.indexOf(groupSel.anchorTa);
+      const sIdx = kids.indexOf(groupSel.startTa);
       const fIdx = kids.indexOf(groupSel.focusTa);
-      const chipSet = new Set(groupSel.chips);
+      if (sIdx < 0 || fIdx < 0) return;
+      const lo = Math.min(sIdx, fIdx), hi = Math.max(sIdx, fIdx);
+      // start ta の選択済み部分が丸ごとなら塗る（右向き=左境界で off===0／左向き=右境界で off===末尾）。
+      const startWhole = sIdx < fIdx ? groupSel.startOff === 0 : groupSel.startOff === groupSel.startTa.value.length;
       for (let i = 0; i < kids.length; i++) {
         const el = kids[i];
-        if (el.dataset.nodeLink) { paintEl(el, chipSet.has(el)); continue; }
-        const whole = (i === aIdx && groupSel.anchorOff === 0) || (i > aIdx && i < fIdx);
-        paintEl(el, whole);
+        if (el.dataset.nodeLink) { paintEl(el, i > lo && i < hi); continue; }
+        if (i === fIdx) paintEl(el, false);
+        else if (i === sIdx) paintEl(el, startWhole);
+        else paintEl(el, i > lo && i < hi);
       }
     };
 
@@ -517,41 +524,34 @@ export function createRelationPanelView(
           else extendSelection(e.key === 'ArrowDown' ? 'down' : 'up');
           return;
         }
-        // Shift+→: ta 右端に達したら「隣のチップ」を選択に含めて、その先の ta 先頭へキャレットを移す。
-        // ta 内の途中なら native の青い選択をそのまま伸ばす（return して既定動作に委ねる）。
+        // Shift+→: 右向きに伸ばす（左向き選択中なら縮める）。ta 右端に達したら隣のチップを選択に含め、
+        // その先の ta 先頭へフォーカスを移す。ta 内で伸縮の余地があれば native に委ねる。
         if (e.key === 'ArrowRight' && e.shiftKey && !e.altKey && !e.ctrlKey && !e.metaKey) {
-          if (ta.selectionEnd !== ta.value.length) return; // まだ ta 内で伸びる → native
+          if (ta.selectionDirection === 'backward' && ta.selectionStart !== ta.selectionEnd) return; // 左向き選択を native で縮める
+          if (ta.selectionEnd !== ta.value.length) return; // ta 内でまだ右へ伸びる → native
           const chip = ta.nextElementSibling as HTMLElement | null;
           const nextTa = chip?.nextElementSibling as HTMLTextAreaElement | null;
-          if (!chip?.dataset.nodeLink || !nextTa) return; // 隣が [chip][ta] でなければ何もしない
+          if (!chip?.dataset.nodeLink || !nextTa) return;
           e.preventDefault();
-          if (!groupSel) groupSel = { anchorTa: ta, anchorOff: ta.selectionStart, chips: [], focusTa: ta };
-          groupSel.chips.push(chip);
+          if (!groupSel) groupSel = { startTa: ta, startOff: ta.selectionStart, focusTa: ta };
           groupSel.focusTa = nextTa;
           crossing = true; nextTa.focus(); nextTa.setSelectionRange(0, 0); crossing = false;
-          paintGroupSel();
+          if (groupSel.focusTa === groupSel.startTa) clearGroupSel(); else paintGroupSel();
           return;
         }
-        // Shift+←: ta 左端（選択なし）で、直前のチップが選択末尾なら1つ戻して前の ta を丸ごと選択に。
+        // Shift+←: 左向きに伸ばす（右向き選択中なら縮める）。ta 左端に達したら直前のチップを選択に含め、
+        // その手前の ta 末尾へフォーカスを移す。
         if (e.key === 'ArrowLeft' && e.shiftKey && !e.altKey && !e.ctrlKey && !e.metaKey) {
-          if (!groupSel || ta.selectionStart !== 0 || ta.selectionEnd !== 0) return; // native の縮小に委ねる
-          const prevChip = ta.previousElementSibling as HTMLElement | null;
-          if (!prevChip?.dataset.nodeLink || groupSel.chips[groupSel.chips.length - 1] !== prevChip) return;
+          if (ta.selectionDirection === 'forward' && ta.selectionStart !== ta.selectionEnd) return; // 右向き選択を native で縮める
+          if (ta.selectionStart !== 0) return; // ta 内でまだ左へ伸びる → native
+          const chip = ta.previousElementSibling as HTMLElement | null;
+          const prevTa = chip?.previousElementSibling as HTMLTextAreaElement | null;
+          if (!chip?.dataset.nodeLink || !prevTa) return;
           e.preventDefault();
-          groupSel.chips.pop();
-          const prevTa = prevChip.previousElementSibling as HTMLTextAreaElement | null;
-          if (prevTa) {
-            groupSel.focusTa = prevTa;
-            crossing = true; prevTa.focus();
-            if (groupSel.chips.length === 0 && prevTa === groupSel.anchorTa) {
-              prevTa.setSelectionRange(groupSel.anchorOff, prevTa.value.length); // 元の native 選択へ復帰
-              clearGroupSel();
-            } else {
-              prevTa.setSelectionRange(0, prevTa.value.length); // 丸ごと native 選択（さらに Shift+← で縮む）
-              paintGroupSel();
-            }
-            crossing = false;
-          }
+          if (!groupSel) groupSel = { startTa: ta, startOff: ta.selectionEnd, focusTa: ta };
+          groupSel.focusTa = prevTa;
+          crossing = true; prevTa.focus(); prevTa.setSelectionRange(prevTa.value.length, prevTa.value.length); crossing = false;
+          if (groupSel.focusTa === groupSel.startTa) clearGroupSel(); else paintGroupSel();
           return;
         }
         // ↑↓（修飾なし）: 上下の行へフォーカス移動。複数選択は解除。
@@ -563,13 +563,12 @@ export function createRelationPanelView(
           if (!focusAdjacentRow(ta, dir) && dir === 'down') focusRowEnd(ta);
           return;
         }
-        // チップまたぎ選択中に @ → anchor 〜 現在キャレットを親チップ1つに畳む（グループ化）。
-        if (e.key === '@' && groupSel && groupSel.chips.length > 0) {
+        // チップまたぎ選択中に @ → start 〜 現在キャレットを親チップ1つに畳む（グループ化）。
+        if (e.key === '@' && groupSel && groupSel.focusTa !== groupSel.startTa) {
           e.preventDefault();
           const snap = {
-            anchorTa: groupSel.anchorTa, anchorOff: groupSel.anchorOff,
-            focusTa: ta, focusOff: ta.selectionEnd,
-            chipIds: [...new Set(groupSel.chips.map((c) => c.dataset.nodeLink!))],
+            startTa: groupSel.startTa, startOff: groupSel.startOff,
+            focusTa: ta, focusStart: ta.selectionStart, focusEnd: ta.selectionEnd,
           };
           openSearchPopover(ta, (nn, cl) => void collapseToParent(snap, nn, cl), undefined, '親ノードを検索 / 新規作成…');
           return;
@@ -658,7 +657,7 @@ export function createRelationPanelView(
     // ノードを親の子に登録する（加算・多重所属＝既存の親からは外さない）。snap は @ を押した時点の
     // セグメント範囲スナップショット（以降 content を作り直すので index を確定させておく）。
     const collapseToParent = async (
-      snap: { anchorTa: HTMLTextAreaElement; anchorOff: number; focusTa: HTMLTextAreaElement; focusOff: number; chipIds: string[] },
+      snap: { startTa: HTMLTextAreaElement; startOff: number; focusTa: HTMLTextAreaElement; focusStart: number; focusEnd: number },
       n: ExplorerNode, createLabel?: string,
     ) => {
       let parentId = n.id;
@@ -668,19 +667,26 @@ export function createRelationPanelView(
       labelById.set(parentId, label); // so the rebuilt parent chip shows its label, not the raw id
 
       const kids = segChildren();
-      const aIdx = kids.indexOf(snap.anchorTa);
+      const sIdx = kids.indexOf(snap.startTa);
       const fIdx = kids.indexOf(snap.focusTa);
-      if (aIdx < 0 || fIdx < 0 || aIdx > fIdx) { clearGroupSel(); return; } // 構造が変わっていたら中止
+      if (sIdx < 0 || fIdx < 0 || sIdx === fIdx) { clearGroupSel(); return; } // 構造が変わっていたら中止
       const tokenStr = (el: HTMLElement): string =>
         el.dataset.nodeLink ? `⟦${el.dataset.nodeLink}⟧` : (el as HTMLTextAreaElement).value;
-      // 範囲外トークンはそのまま。境界の anchor ta は左側 [0..anchorOff]、focus ta は右側 [focusOff..] を残す。
-      // 選択に跨がれた中間のチップ/テキストは畳んで親チップ1つに置換。
+      // 左右の境界を DOM 順で決める。右向き(start が左)=start[0..startOff] を左に残し focus[focusEnd..] を
+      // 右に残す。左向き(focus が左)=focus[0..focusStart] を左、start[startOff..] を右に残す。中間は畳む。
+      const rightward = sIdx < fIdx;
+      const lo = Math.min(sIdx, fIdx), hi = Math.max(sIdx, fIdx);
+      const leftTa = rightward ? snap.startTa : snap.focusTa;
+      const leftOff = rightward ? snap.startOff : snap.focusStart;
+      const rightTa = rightward ? snap.focusTa : snap.startTa;
+      const rightOff = rightward ? snap.focusEnd : snap.startOff;
       let left = '';
-      for (let i = 0; i < aIdx; i++) left += tokenStr(kids[i]);
-      left += snap.anchorTa.value.slice(0, snap.anchorOff);
-      let right = snap.focusTa.value.slice(snap.focusOff);
-      for (let i = fIdx + 1; i < kids.length; i++) right += tokenStr(kids[i]);
-      const memberIds = snap.chipIds.filter((id) => id !== parentId);
+      for (let i = 0; i < lo; i++) left += tokenStr(kids[i]);
+      left += leftTa.value.slice(0, leftOff);
+      let right = rightTa.value.slice(rightOff);
+      for (let i = hi + 1; i < kids.length; i++) right += tokenStr(kids[i]);
+      const memberIds = [...new Set(kids.slice(lo + 1, hi)
+        .filter((c) => c.dataset.nodeLink).map((c) => c.dataset.nodeLink!))].filter((id) => id !== parentId);
 
       const newBody = `${left}⟦${parentId}⟧${right}`;
       clearGroupSel();
