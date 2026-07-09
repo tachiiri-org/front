@@ -121,16 +121,7 @@ export function createNodePanelView(ctx: GraphEditorContext, nodePanelOpts?: Nod
     if (e.key === 'Escape') { e.preventDefault(); searchInput.value = ''; if (searchTimer) clearTimeout(searchTimer); runSearch(''); searchInput.blur(); }
     else if (e.key === 'Enter') { e.preventDefault(); if (searchTimer) clearTimeout(searchTimer); runSearch(searchInput.value); }
   });
-  // グループ化ボタン — 複数選択（ctrl/⌘+クリック等）があるときだけ現れる。押すと親ピッカーを開き、
-  // 選択ノードを選択/新規作成した親の子にする（多重所属：既存の親からは外さない）。
-  const groupBtn = document.createElement('button');
-  groupBtn.type = 'button';
-  groupBtn.textContent = 'グループ化';
-  groupBtn.title = '選択したノードを親ノードの子にする（Ctrl/⌘+G）';
-  groupBtn.style.cssText = `display:none;flex-shrink:0;align-items:center;background:rgba(99,102,241,0.18);border:1px solid ${BORDER};border-radius:4px;color:${TEXT_HIGH};font-size:12px;font-family:inherit;padding:2px 8px;cursor:pointer;`;
-  groupBtn.addEventListener('mousedown', (e) => e.preventDefault()); // keep row focus/selection
-  groupBtn.addEventListener('click', (e) => { e.stopPropagation(); doGroup(groupBtn); });
-  searchRow.append(searchIconWrap, searchInput, groupBtn);
+  searchRow.append(searchIconWrap, searchInput);
   el.appendChild(searchRow);
 
   // Breadcrumb bar (path). The separate parent-grouping panel header (見出し＋区切り線) is removed
@@ -314,8 +305,8 @@ export function createNodePanelView(ctx: GraphEditorContext, nodePanelOpts?: Nod
 
   // Multi-select state: anchor (fixed end) and cur (moving end). Keyed by OCCURRENCE key so
   // selecting one occurrence of a multi-membership node doesn't also select its twins.
-  let selAnchorKey: string | null = null;           // range anchor (keyboard shift / shift+click)
-  const selectedKeys = new Set<string>();           // canonical multi-selection (occurrence keys)
+  let selAnchorKey: string | null = null;
+  let selCurKey: string | null = null;
 
   // Create an ONode for a node occurrence. `key` is the occurrence key (rootKey/childKey);
   // `parentKey` is the parent occurrence's key (null at the pane top). `parentId` stays the
@@ -456,35 +447,30 @@ export function createNodePanelView(ctx: GraphEditorContext, nodePanelOpts?: Nod
     rowMap.get(onode.key)?.querySelector<HTMLTextAreaElement>('textarea')?.focus();
   };
 
-  // Multi-selection is occurrence-keyed (selectedKeys): ctrl/⌘+click toggles a key, shift+click /
-  // shift+↑↓ set a contiguous range from the anchor. Only the specific clicked occurrence is
-  // selected, even for a multi-membership node.
+  // Selection is occurrence-keyed: anchor/cur are occurrence keys, so only the specific
+  // dragged/clicked occurrence is selected even for a multi-membership node.
   const getSelectedONodes = (): ONode[] => {
-    if (selectedKeys.size === 0) return [];
-    return flatVisible().filter(n => selectedKeys.has(n.key));
+    if (!selAnchorKey) return [];
+    const vis = flatVisible();
+    const ai = vis.findIndex(n => n.key === selAnchorKey);
+    if (ai === -1) return [];
+    if (!selCurKey || selCurKey === selAnchorKey) return [vis[ai]].filter(Boolean);
+    const ci = vis.findIndex(n => n.key === selCurKey);
+    if (ci === -1) return [vis[ai]].filter(Boolean);
+    return vis.slice(Math.min(ai, ci), Math.max(ai, ci) + 1);
   };
 
-  const isMultiSelect = () => selectedKeys.size > 1;
+  const isMultiSelect = () => getSelectedONodes().length > 1;
 
   const updateSelectionHighlight = () => {
+    const sel = getSelectedONodes();
+    const keys = sel.length > 1 ? new Set(sel.map(n => n.key)) : new Set<string>();
     rowMap.forEach((row, key) => {
-      row.style.backgroundColor = selectedKeys.has(key) ? 'rgba(99,102,241,0.12)' : '';
+      row.style.backgroundColor = keys.has(key) ? 'rgba(99,102,241,0.12)' : '';
     });
-    groupBtn.style.display = selectedKeys.size >= 1 ? 'flex' : 'none';
   };
 
-  const clearSelection = () => { selectedKeys.clear(); selAnchorKey = null; updateSelectionHighlight(); };
-
-  // Set selectedKeys to the visible range between two occurrence keys (inclusive).
-  const setRangeSelection = (anchorKey: string, focusKey: string) => {
-    const vis = flatVisible();
-    const ai = vis.findIndex(n => n.key === anchorKey);
-    const fi = vis.findIndex(n => n.key === focusKey);
-    if (ai === -1 || fi === -1) return;
-    selectedKeys.clear();
-    for (let i = Math.min(ai, fi); i <= Math.max(ai, fi); i++) selectedKeys.add(vis[i].key);
-    updateSelectionHighlight();
-  };
+  const clearSelection = () => { selAnchorKey = null; selCurKey = null; updateSelectionHighlight(); };
 
   const lastDescRow = (onode: ONode): HTMLElement | undefined => {
     if (onode.expanded && onode.children.length > 0)
@@ -861,28 +847,6 @@ export function createNodePanelView(ctx: GraphEditorContext, nodePanelOpts?: Nod
     });
     ta.addEventListener('focus', () => setNodePanelSelected(onode.node.id));
 
-    // Mouse multi-select: ctrl/⌘+click toggles this occurrence, shift+click ranges from the anchor.
-    // preventDefault stops the caret/text-selection so the click is a pure selection gesture; we
-    // still focus the row so keyboard shortcuts (Ctrl/⌘+G) act on it. A plain click clears any
-    // multi-selection (single-focus interaction).
-    ta.addEventListener('mousedown', (e) => {
-      if (e.shiftKey && !e.altKey) {
-        e.preventDefault();
-        if (!selAnchorKey) selAnchorKey = onode.key;
-        setRangeSelection(selAnchorKey, onode.key);
-        focusRow(onode);
-      } else if ((e.ctrlKey || e.metaKey) && !e.altKey) {
-        e.preventDefault();
-        if (selectedKeys.has(onode.key)) selectedKeys.delete(onode.key);
-        else selectedKeys.add(onode.key);
-        selAnchorKey = onode.key;
-        updateSelectionHighlight();
-        focusRow(onode);
-      } else if (selectedKeys.size > 0) {
-        clearSelection();
-      }
-    });
-
     // Multi-line paste → one node per line: the first line merges into this row at the caret,
     // each remaining line becomes a sibling node below (in order). Single-line paste is left
     // to the browser's default handling.
@@ -964,7 +928,7 @@ export function createNodePanelView(ctx: GraphEditorContext, nodePanelOpts?: Nod
         if (tIdx <= 0) return;
         if (!selAnchorKey) selAnchorKey = onode.key;
         const prevKey = tAs[tIdx - 1].closest<HTMLElement>('[data-occ-key]')?.dataset.occKey;
-        if (prevKey) setRangeSelection(selAnchorKey, prevKey);
+        if (prevKey) { selCurKey = prevKey; updateSelectionHighlight(); }
         tAs[tIdx - 1].focus();
         return;
       }
@@ -975,7 +939,7 @@ export function createNodePanelView(ctx: GraphEditorContext, nodePanelOpts?: Nod
         if (tIdx >= tAs.length - 1) return;
         if (!selAnchorKey) selAnchorKey = onode.key;
         const nextKey = tAs[tIdx + 1].closest<HTMLElement>('[data-occ-key]')?.dataset.occKey;
-        if (nextKey) setRangeSelection(selAnchorKey, nextKey);
+        if (nextKey) { selCurKey = nextKey; updateSelectionHighlight(); }
         tAs[tIdx + 1].focus();
         return;
       }
@@ -1000,13 +964,6 @@ export function createNodePanelView(ctx: GraphEditorContext, nodePanelOpts?: Nod
         const node = onode.node;
         const parent = onode.parentId; // 紐づけ先＝親（focus でドックは X 自身に切り替わっているため）
         void (async () => { await ctx.moveNodeToRelation?.(node, parent); detachNodes([node]); })();
-        return;
-      }
-
-      // Ctrl/⌘+G: group the current selection under a chosen/created parent.
-      if ((e.key === 'g' || e.key === 'G') && (e.ctrlKey || e.metaKey) && !e.altKey && !e.shiftKey && selectedKeys.size >= 1) {
-        e.preventDefault();
-        doGroup(rowMap.get(onode.key) ?? ta);
         return;
       }
 
@@ -1537,122 +1494,6 @@ export function createNodePanelView(ctx: GraphEditorContext, nodePanelOpts?: Nod
       if (e.key === 'ArrowDown') { e.preventDefault(); selIdx = Math.min(selIdx + 1, resultNodes.length - 1); highlight(); return; }
       if (e.key === 'ArrowUp') { e.preventDefault(); selIdx = Math.max(selIdx - 1, 0); highlight(); return; }
       if (e.key === 'Enter' && resultNodes[selIdx]) { e.preventDefault(); doLink(resultNodes[selIdx]); }
-    });
-  };
-
-  // ── Grouping ──────────────────────────────────────────────────────────
-  // Make the current multi-selection the children of a chosen/created parent node. Multi-membership:
-  // the selected nodes are ADDED under the target, never removed from their existing parents. A brand
-  // new target node is placed under this pane's source (root → child-of-root, drilled → child of the
-  // drilled node), so `曜日` created from the root pane appears at root with 月/火/水 under it.
-  const openGroupPicker = (
-    anchor: HTMLElement,
-    onPick: (target: { id: string; label: string }) => void | Promise<void>,
-  ) => {
-    document.querySelector('[data-group-picker]')?.remove();
-    const rect = anchor.getBoundingClientRect();
-    const menu = document.createElement('div');
-    menu.dataset.groupPicker = '1';
-    menu.style.cssText = `position:fixed;left:${Math.round(rect.left)}px;top:${Math.round(rect.bottom + 2)}px;z-index:9999;min-width:260px;max-width:380px;background:hsl(240,14%,9%);border:1px solid ${BORDER};border-radius:6px;box-shadow:0 6px 24px rgba(0,0,0,0.4);`;
-    const inp = document.createElement('input');
-    inp.type = 'text';
-    inp.placeholder = '親ノードを検索 / 新規作成…';
-    inp.style.cssText = `width:100%;box-sizing:border-box;background:transparent;border:none;border-bottom:1px solid ${BORDER};outline:none;color:${TEXT_HIGH};font-size:14px;font-family:inherit;padding:8px 10px;`;
-    const list = document.createElement('div');
-    list.style.cssText = `max-height:240px;overflow-y:auto;`;
-    menu.append(inp, list);
-    document.body.appendChild(menu);
-    inp.focus();
-
-    let items: { label: string; act: () => void }[] = [];
-    let selIdx = 0;
-    let timer: ReturnType<typeof setTimeout> | null = null;
-    const close = () => { menu.remove(); document.removeEventListener('pointerdown', onDoc, true); };
-    const onDoc = (e: PointerEvent) => { if (!menu.contains(e.target as Node)) close(); };
-    document.addEventListener('pointerdown', onDoc, true);
-    const pick = async (target: { id: string; label: string }) => { close(); await onPick(target); };
-    const highlight = () => {
-      [...list.children].forEach((el2, i) => {
-        (el2 as HTMLElement).style.background = i === selIdx ? 'rgba(99,102,241,0.14)' : 'transparent';
-        (el2 as HTMLElement).style.color = i === selIdx ? TEXT_HIGH : TEXT_MID;
-      });
-    };
-    const renderList = (nodes: ExplorerNode[], q: string) => {
-      list.innerHTML = ''; items = []; selIdx = 0;
-      // Exclude the selected nodes themselves as candidate parents (a node can't be its own parent).
-      const exclude = new Set(getSelectedONodes().map(o => o.node.id));
-      for (const n of nodes) {
-        if (exclude.has(n.id)) continue;
-        const lbl = (primaryLabel(n, nodePanelLang) ?? fallbackLabel(n, nodePanelLang)) || n.id.slice(0, 8);
-        items.push({ label: lbl, act: () => void pick({ id: n.id, label: lbl }) });
-      }
-      const exact = nodes.some(n => (primaryLabel(n, nodePanelLang) ?? fallbackLabel(n, nodePanelLang)) === q);
-      if (q && !exact) items.push({ label: `＋「${q}」を新規作成`, act: () => void pick({ id: '', label: q }) });
-      for (let i = 0; i < items.length; i++) {
-        const it = items[i];
-        const row2 = document.createElement('div');
-        row2.textContent = it.label;
-        row2.style.cssText = `padding:6px 12px;cursor:pointer;font-size:14px;color:${TEXT_MID};white-space:nowrap;overflow:hidden;text-overflow:ellipsis;`;
-        row2.addEventListener('mouseenter', () => { selIdx = i; highlight(); });
-        row2.addEventListener('click', it.act);
-        list.appendChild(row2);
-      }
-      highlight();
-    };
-    inp.addEventListener('input', () => {
-      if (timer) clearTimeout(timer);
-      timer = setTimeout(async () => {
-        const q = inp.value.trim();
-        const lang = ctx.state.showFallback ? undefined : nodePanelLang;
-        const { nodes } = q ? await fetchAllNodes(ctx.gId, [], 0, lang, undefined, q, 20) : { nodes: [] as ExplorerNode[] };
-        renderList(nodes, q);
-      }, 200);
-    });
-    inp.addEventListener('keydown', (e) => {
-      if (e.key === 'Escape') { e.preventDefault(); close(); return; }
-      if (e.key === 'ArrowDown') { e.preventDefault(); selIdx = Math.min(selIdx + 1, items.length - 1); highlight(); return; }
-      if (e.key === 'ArrowUp') { e.preventDefault(); selIdx = Math.max(selIdx - 1, 0); highlight(); return; }
-      if (e.key === 'Enter') { e.preventDefault(); items[selIdx]?.act(); return; }
-    });
-  };
-
-  const doGroup = (anchor: HTMLElement) => {
-    const sel = getSelectedONodes();
-    if (sel.length === 0) return;
-    const selIds = [...new Set(sel.map(o => o.node.id))];
-    openGroupPicker(anchor, async (target) => {
-      // Grouping is a deliberate action, so persist declaratively (PUT /tree) and reload the pane —
-      // this keeps the local full-load model (treeParents / ONode tree) consistent without fragile
-      // in-place surgery on a possibly-offscreen target subtree.
-      await flushAutosave(); // clear any pending structural edits so the reload below can't clobber them
-      let parentId: string;
-      let parentLabel: string;
-      const batch: { parentId: string; childIds: string[] }[] = [];
-      if (target.id) {
-        parentId = target.id;
-        parentLabel = target.label;
-      } else {
-        const created = await apiCreateNode(ctx.gId, null, nodePanelLang, target.label);
-        if (!created) { showToast('ノードの作成に失敗しました'); return; }
-        parentId = created.id;
-        parentLabel = target.label;
-        treeNodes.set(created.id, created);
-        const placement = getEffectiveParentId(); // where the new group node itself lives
-        if (placement) {
-          const base = (treeParents[placement] ?? []).filter(id => id !== created.id);
-          batch.push({ parentId: placement, childIds: [...base, created.id] });
-        }
-      }
-      // Append the selection as children of the target, keeping its existing children (multi-belong).
-      const curKids = (treeParents[parentId] ?? []).filter(id => id !== parentId);
-      const merged = [...curKids];
-      for (const id of selIds) if (id !== parentId && !merged.includes(id)) merged.push(id);
-      batch.push({ parentId, childIds: merged });
-      clearSelection();
-      const ok = await saveTree(ctx.gId, batch);
-      if (!ok) { showToast('グループ化の保存に失敗しました'); return; }
-      await load(false); // rebuild from the server so the new structure shows (target row + drill)
-      showToast(`${selIds.length}件を「${parentLabel}」の子にしました`);
     });
   };
 
@@ -2224,10 +2065,9 @@ export function createNodePanelView(ctx: GraphEditorContext, nodePanelOpts?: Nod
   };
 
   // expandAll defaults false — each pane shows only its source's DIRECT children (a flat list); go
-  // deeper by drilling into another pane (or Ctrl/⌘+↓ to expand a single node). This is what makes
-  // multi-membership display correctly: a node under several parents simply appears in each parent's
-  // pane, instead of the single-parent dedup that a full in-pane tree needs. Idle-refetch also passes
-  // false and restores whatever the user had manually expanded.
+  // deeper by drilling into another pane (or Ctrl/⌘+↓ to expand a single node). Grouping / bulk
+  // hierarchy building lives in the relation panel, not here. Idle-refetch also passes false and
+  // restores whatever the user had manually expanded.
   const load = async (expandAll = false) => {
     await flushAutosave(); // persist any pending structural edits before rebuilding
     clearIndex();

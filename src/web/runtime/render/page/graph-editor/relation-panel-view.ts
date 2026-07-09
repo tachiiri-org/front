@@ -344,6 +344,28 @@ export function createRelationPanelView(
       }
     });
 
+    // ── セグメント跨ぎ範囲選択 ───────────────────────────────────────────────
+    // native の textarea 選択が片端に達したら、隣接する chip/テキスト片をセグメント単位で選択に含める
+    // （起点 ta 内だけ文字単位、それ以降はセグメント丸ごと）。@ でこの範囲を親チップに畳む。フォーカスは
+    // 起点 ta に残したまま矢印を preventDefault で受け、範囲内セグメントに背景を塗るだけの軽量実装。
+    let segSel: { anchorSeg: number; anchorOff: number; focusSeg: number; dir: 'r' | 'l' } | null = null;
+    const segChildren = () => Array.from(content.children) as HTMLElement[];
+    const clearSegSel = () => {
+      if (!segSel) return;
+      for (const c of segChildren()) c.style.background = '';
+      segSel = null;
+    };
+    const paintSegSel = () => {
+      if (!segSel) return;
+      const kids = segChildren();
+      const lo = Math.min(segSel.anchorSeg, segSel.focusSeg);
+      const hi = Math.max(segSel.anchorSeg, segSel.focusSeg);
+      for (let i = 0; i < kids.length; i++) {
+        // 起点 ta はネイティブ選択が見えるので塗らない。それ以外の範囲内セグメントを塗る。
+        kids[i].style.background = i >= lo && i <= hi && i !== segSel.anchorSeg ? 'rgba(99,102,241,0.28)' : '';
+      }
+    };
+
     const rebuild = (): string => Array.from(content.children).map((c) => {
       const id = (c as HTMLElement).dataset.nodeLink;
       return id ? `⟦${id}⟧` : (c as HTMLTextAreaElement).value;
@@ -445,13 +467,14 @@ export function createRelationPanelView(
       ta.addEventListener('focus', () => {
         setActive(relation);
         selAnchor = relation.lineId; selCursor = null; updateSelHighlight();
+        clearSegSel();
         autosize(ta);
       });
-      ta.addEventListener('input', () => { autosize(ta); void handleMention(ta); save(); });
+      ta.addEventListener('input', () => { clearSegSel(); autosize(ta); void handleMention(ta); save(); });
       // 他の場所を選んで textarea からフォーカスが外れたら、@ドロップダウンは閉じる。
       // （項目は mousedown+preventDefault でフォーカスを奪わないので、項目選択では blur しない。
       //   確定時は onPick が先に closeMenu→mention=null するため、ガードで二重閉じも防ぐ。）
-      ta.addEventListener('blur', () => { save(true); autosize(ta); if (mention?.anchor === ta) closeMenu(); });
+      ta.addEventListener('blur', () => { save(true); autosize(ta); if (mention?.anchor === ta) closeMenu(); clearSegSel(); });
       ta.addEventListener('keydown', (e) => {
         // @ メニューが開いている間は ↑↓/Enter で候補選択。
         if (menuOpen) {
@@ -459,6 +482,11 @@ export function createRelationPanelView(
           if (e.key === 'ArrowUp') { e.preventDefault(); navMove(-1); return; }
           if (e.key === 'Enter') { e.preventDefault(); navPick(); return; }
           if (e.key === 'Escape') { closeMenu(); return; }
+        }
+        // セグメント選択中に、選択操作(Shift+←→)・@・Shift 以外のキーが来たら選択解除（キー処理は続行）。
+        if (segSel && e.key !== '@' && e.key !== 'Shift'
+            && !((e.key === 'ArrowLeft' || e.key === 'ArrowRight') && e.shiftKey && !e.altKey && !e.ctrlKey && !e.metaKey)) {
+          clearSegSel();
         }
         if (e.key === 'Escape') { closeMenu(); clearSelection(); return; }
         // Ctrl/Cmd+Shift+Backspace で関係(行)そのものを削除。複数選択中は選択行すべて。
@@ -475,6 +503,31 @@ export function createRelationPanelView(
           else extendSelection(e.key === 'ArrowDown' ? 'down' : 'up');
           return;
         }
+        // Shift+←→: native 選択が片端に達したらセグメント跨ぎ選択に入り、chip/テキスト片をセグメント
+        // 単位でまとめて選択（フォーカスは起点 ta に残す）。@ で親チップに畳む。
+        if ((e.key === 'ArrowRight' || e.key === 'ArrowLeft') && e.shiftKey && !e.altKey && !e.ctrlKey && !e.metaKey) {
+          const kids = segChildren();
+          const myIdx = kids.indexOf(ta);
+          if (e.key === 'ArrowRight') {
+            if (!segSel) {
+              if (ta.selectionEnd !== ta.value.length) return; // native がまだ右へ伸びる余地あり
+              segSel = { anchorSeg: myIdx, anchorOff: ta.selectionStart, focusSeg: myIdx, dir: 'r' };
+            }
+            e.preventDefault();
+            if (segSel.dir === 'r') { if (segSel.focusSeg < kids.length - 1) segSel.focusSeg += 1; }
+            else { segSel.focusSeg += 1; if (segSel.focusSeg >= segSel.anchorSeg) { clearSegSel(); return; } }
+          } else {
+            if (!segSel) {
+              if (ta.selectionStart !== 0) return; // native がまだ左へ伸びる余地あり
+              segSel = { anchorSeg: myIdx, anchorOff: ta.selectionEnd, focusSeg: myIdx, dir: 'l' };
+            }
+            e.preventDefault();
+            if (segSel.dir === 'l') { if (segSel.focusSeg > 0) segSel.focusSeg -= 1; }
+            else { segSel.focusSeg -= 1; if (segSel.focusSeg <= segSel.anchorSeg) { clearSegSel(); return; } }
+          }
+          paintSegSel();
+          return;
+        }
         // ↑↓（修飾なし）: 上下の行へフォーカス移動。複数選択は解除。
         // 最下行で↓ → 移動先が無いので、現在行の行末へキャレットを送る（⑥）。
         if ((e.key === 'ArrowUp' || e.key === 'ArrowDown') && !e.shiftKey && !e.ctrlKey && !e.metaKey && !e.altKey) {
@@ -483,6 +536,18 @@ export function createRelationPanelView(
           const dir = e.key === 'ArrowDown' ? 'down' : 'up';
           if (!focusAdjacentRow(ta, dir) && dir === 'down') focusRowEnd(ta);
           return;
+        }
+        // セグメント跨ぎ選択に chip が含まれていれば、@ で選択範囲を親チップ1つに畳む（グループ化）。
+        if (e.key === '@' && segSel) {
+          const kids = segChildren();
+          const lo = Math.min(segSel.anchorSeg, segSel.focusSeg);
+          const hi = Math.max(segSel.anchorSeg, segSel.focusSeg);
+          if (kids.slice(lo, hi + 1).some((c) => c.dataset.nodeLink)) {
+            e.preventDefault();
+            const snap = { lo, hi, anchorSeg: segSel.anchorSeg, anchorOff: segSel.anchorOff, dir: segSel.dir };
+            openSearchPopover(ta, (nn, cl) => void collapseToParent(snap, nn, cl), undefined, '親ノードを検索 / 新規作成…');
+            return;
+          }
         }
         // テキストを範囲選択して @ → 選択ワードを検索初期値にメニューを開き、選択範囲をチップに置換。
         if (e.key === '@' && ta.selectionStart !== ta.selectionEnd) {
@@ -562,6 +627,68 @@ export function createRelationPanelView(
         const ar = ctx.activeRelation;
         if (ar && ar.lineId === relation.lineId) { ar.participants.delete(id); ctx.setActiveRelation(ar); }
       }
+    };
+
+    // 範囲選択+@ のグループ化: 選択範囲（テキスト＋複数チップ）を親チップ1つに畳み、範囲内のリンク
+    // ノードを親の子に登録する（加算・多重所属＝既存の親からは外さない）。snap は @ を押した時点の
+    // セグメント範囲スナップショット（以降 content を作り直すので index を確定させておく）。
+    const collapseToParent = async (
+      snap: { lo: number; hi: number; anchorSeg: number; anchorOff: number; dir: 'r' | 'l' },
+      n: ExplorerNode, createLabel?: string,
+    ) => {
+      let parentId = n.id;
+      if (createLabel) { const c = await apiCreateNode(ctx.gId, null, lang, createLabel); if (!c) return; parentId = c.id; }
+      parentId = await ctx.awaitRealId(parentId); // never persist a temp id
+      const label = createLabel ?? labelOf(n, lang);
+      labelById.set(parentId, label); // so the rebuilt parent chip shows its label, not the raw id
+
+      const kids = segChildren();
+      const { lo, hi, anchorSeg, anchorOff, dir } = snap;
+      const tokenStr = (el: HTMLElement): string =>
+        el.dataset.nodeLink ? `⟦${el.dataset.nodeLink}⟧` : (el as HTMLTextAreaElement).value;
+      // 範囲外トークンはそのまま、境界の起点 ta だけ残す側のテキストを部分採用。反対端は丸ごと畳む。
+      let left = '';
+      for (let i = 0; i < lo; i++) left += tokenStr(kids[i]);
+      let right = '';
+      for (let i = hi + 1; i < kids.length; i++) right += tokenStr(kids[i]);
+      const originVal = (kids[anchorSeg] as HTMLTextAreaElement).value;
+      if (dir === 'r') left += originVal.slice(0, anchorOff);       // 起点=lo、左側を残す
+      else right = originVal.slice(anchorOff) + right;              // 起点=hi、右側を残す
+      const memberIds = [...new Set(kids.slice(lo, hi + 1)
+        .filter((c) => c.dataset.nodeLink).map((c) => c.dataset.nodeLink!))].filter((id) => id !== parentId);
+
+      const newBody = `${left}⟦${parentId}⟧${right}`;
+      clearSegSel();
+      content.innerHTML = '';
+      for (const tok of splitTokens(newBody)) {
+        content.appendChild(tok.t === 'txt' ? mkTextarea(tok.v) : mkNodeLink(tok.id));
+      }
+      for (const c of segChildren()) if (c.tagName === 'TEXTAREA') autosize(c as HTMLTextAreaElement);
+      const parentChip = segChildren().find((c) => c.dataset.nodeLink === parentId);
+      const afterTa = parentChip?.nextElementSibling as HTMLTextAreaElement | null;
+      if (afterTa) { afterTa.focus(); afterTa.setSelectionRange(0, 0); }
+      save(true);
+
+      // 参加者(ray): 親を追加、body に残らないメンバーは外す。
+      await apiAddRay(ctx.gId, relation.lineId, parentId);
+      const ar = ctx.activeRelation;
+      if (ar && ar.lineId === relation.lineId) ar.participants.add(parentId);
+      const bodyNow = rebuild();
+      for (const mid of memberIds) {
+        if (!bodyNow.includes(`⟦${mid}⟧`)) {
+          await apiRemoveRay(ctx.gId, relation.lineId, mid);
+          if (ar && ar.lineId === relation.lineId) ar.participants.delete(mid);
+        }
+      }
+      if (ar && ar.lineId === relation.lineId) ctx.setActiveRelation(ar);
+
+      // グループ登録: メンバーを親の子にする（加算・向き付け）。新規親はルート直下へ。
+      for (const mid of memberIds) {
+        await apiLinkNode(ctx.gId, mid, parentId);
+        await apiOrient(ctx.gId, mid, parentId);
+      }
+      if (createLabel) await linkToRoot(parentId);
+      showToast(`${memberIds.length}件を「${label}」の子にまとめました`);
     };
 
     // メニューを開いて、選んだら ta を leftStr / チップ / rightStr に割って参照を差し込む共通処理。
