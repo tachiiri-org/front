@@ -1,5 +1,6 @@
 import type { AuthorizeEnv } from "../session";
 import { verifyInternalToken } from "../session/token";
+import { mcpResource } from "./oauth";
 import { TOOLS, callTool } from "./tools/authorize";
 import { GRAPH_TOOLS, callGraphTool } from "./tools/graph";
 
@@ -24,6 +25,14 @@ export async function handleMcp(request: Request, env: AuthorizeEnv): Promise<Re
     if (!claims) {
       return Response.json(
         { jsonrpc: "2.0", id: null, error: { code: -32001, message: "Unauthorized: invalid or expired token" } },
+        { status: 401 },
+      );
+    }
+    // RFC 8707: reject tokens whose aud is not this MCP server (a token minted for a
+    // different resource must not be usable here).
+    if (claims.aud !== mcpResource(request, env)) {
+      return Response.json(
+        { jsonrpc: "2.0", id: null, error: { code: -32001, message: "Unauthorized: token audience mismatch" } },
         { status: 401 },
       );
     }

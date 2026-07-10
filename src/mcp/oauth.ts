@@ -15,6 +15,7 @@ type McpOAuthParams = {
   code_challenge_method: string;
   state: string;
   scope: string;
+  resource: string;
 };
 
 type DbClient = {
@@ -52,6 +53,11 @@ function isSecure(request: Request): boolean {
 
 function origin(request: Request, env: AuthorizeEnv): string {
   return env.FRONTEND_ORIGIN ?? new URL(request.url).origin;
+}
+
+// RFC 8707 resource identifier for this MCP server: the canonical /mcp URL.
+export function mcpResource(request: Request, env: AuthorizeEnv): string {
+  return `${origin(request, env)}/mcp`;
 }
 
 async function lookupClient(db: D1Database, clientId: string): Promise<DbClient | null> {
@@ -157,6 +163,14 @@ export async function handleMcpAuthorize(request: Request, env: AuthorizeEnv): P
   const codeChallengeMethod = url.searchParams.get("code_challenge_method") ?? "S256";
   const state = url.searchParams.get("state") ?? "";
   const scope = url.searchParams.get("scope") ?? "graph:read graph:write";
+  // RFC 8707: the resource the client wants a token for. We only serve one resource
+  // (this MCP server), so reject a mismatched request and default to it when omitted.
+  const serverResource = mcpResource(request, env);
+  const requestedResource = url.searchParams.get("resource");
+  if (requestedResource && requestedResource !== serverResource) {
+    return new Response("Unsupported resource", { status: 400 });
+  }
+  const resource = serverResource;
 
   if (!redirectUri || !codeChallenge || !state) {
     return new Response("Missing required parameters", { status: 400 });
@@ -173,7 +187,7 @@ export async function handleMcpAuthorize(request: Request, env: AuthorizeEnv): P
     return new Response("Invalid redirect_uri", { status: 400 });
   }
 
-  const params: McpOAuthParams = { client_id: clientId, redirect_uri: redirectUri, code_challenge: codeChallenge, code_challenge_method: codeChallengeMethod, state, scope };
+  const params: McpOAuthParams = { client_id: clientId, redirect_uri: redirectUri, code_challenge: codeChallenge, code_challenge_method: codeChallengeMethod, state, scope, resource };
   const paramsCookie = serializeCookie(MCP_OAUTH_PARAMS_COOKIE, btoa(JSON.stringify(params)), {
     maxAge: CODE_TTL,
     path: "/",
@@ -308,9 +322,9 @@ export async function handleMcpApprove(request: Request, env: AuthorizeEnv): Pro
 
   await env.IDENTITY_DB.prepare(`
     INSERT INTO t_oauth_authorization_code
-      (code, client_id, user_id, group_id, scopes, code_challenge, code_challenge_method, redirect_uri, expires_at)
-    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
-  `).bind(code, params.client_id, userId, groupId, params.scope, params.code_challenge, params.code_challenge_method, params.redirect_uri, expiresAt).run();
+      (code, client_id, user_id, group_id, scopes, code_challenge, code_challenge_method, redirect_uri, expires_at, resource)
+    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+  `).bind(code, params.client_id, userId, groupId, params.scope, params.code_challenge, params.code_challenge_method, params.redirect_uri, expiresAt, params.resource).run();
 
   const headers = new Headers();
   headers.append("Set-Cookie", clearCookie(MCP_OAUTH_PARAMS_COOKIE, request));
@@ -357,9 +371,9 @@ export async function handleMcpCreateOrg(request: Request, env: AuthorizeEnv): P
 
   await env.IDENTITY_DB.prepare(`
     INSERT INTO t_oauth_authorization_code
-      (code, client_id, user_id, group_id, scopes, code_challenge, code_challenge_method, redirect_uri, expires_at)
-    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
-  `).bind(code, params.client_id, userId, org.id, params.scope, params.code_challenge, params.code_challenge_method, params.redirect_uri, expiresAt).run();
+      (code, client_id, user_id, group_id, scopes, code_challenge, code_challenge_method, redirect_uri, expires_at, resource)
+    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+  `).bind(code, params.client_id, userId, org.id, params.scope, params.code_challenge, params.code_challenge_method, params.redirect_uri, expiresAt, params.resource).run();
 
   const headers = new Headers();
   headers.append("Set-Cookie", clearCookie(MCP_OAUTH_PARAMS_COOKIE, request));
@@ -415,7 +429,7 @@ async function resolveEffectiveScopes(
 // token endpoint response. Only the SHA-256 hash of the refresh token is stored.
 async function issueTokenResponse(
   env: AuthorizeEnv,
-  input: { clientId: string; userId: string; groupId: string; scopes: string[]; provider?: string },
+  input: { clientId: string; userId: string; groupId: string; scopes: string[]; provider?: string; resource: string },
 ): Promise<Response> {
   const accessToken = await issueMcpToken(env, {
     groupId: input.groupId,
@@ -423,15 +437,16 @@ async function issueTokenResponse(
     scopes: input.scopes,
     clientId: input.clientId,
     provider: input.provider,
+    audience: input.resource,
   });
   const refreshToken = toBase64Url(crypto.getRandomValues(new Uint8Array(32)));
   const now = Math.floor(Date.now() / 1000);
   await env.IDENTITY_DB!.prepare(
-    `INSERT INTO t_oauth_refresh_token (token_hash, client_id, user_id, group_id, scopes, provider, expires_at, used)
-     VALUES (?, ?, ?, ?, ?, ?, ?, 0)`
+    `INSERT INTO t_oauth_refresh_token (token_hash, client_id, user_id, group_id, scopes, provider, expires_at, used, resource)
+     VALUES (?, ?, ?, ?, ?, ?, ?, 0, ?)`
   ).bind(
     await sha256Hex(refreshToken), input.clientId, input.userId, input.groupId,
-    input.scopes.join(" "), input.provider ?? null, now + REFRESH_TTL,
+    input.scopes.join(" "), input.provider ?? null, now + REFRESH_TTL, input.resource,
   ).run();
   return Response.json({
     access_token: accessToken,
@@ -467,18 +482,18 @@ export async function handleMcpToken(request: Request, env: AuthorizeEnv): Promi
     if (!client) return Response.json({ error: "invalid_client" }, { status: 400 });
     const tokenHash = await sha256Hex(refreshToken);
     const rt = await env.IDENTITY_DB.prepare(`
-      SELECT token_hash, client_id, user_id, group_id, scopes, provider, expires_at, used
+      SELECT token_hash, client_id, user_id, group_id, scopes, provider, expires_at, used, resource
       FROM t_oauth_refresh_token WHERE token_hash = ?
     `).bind(tokenHash).first<{
       token_hash: string; client_id: string; user_id: string; group_id: string;
-      scopes: string; provider: string | null; expires_at: number; used: number;
+      scopes: string; provider: string | null; expires_at: number; used: number; resource: string | null;
     }>();
     if (!rt || rt.client_id !== clientId) return Response.json({ error: "invalid_grant" }, { status: 400 });
     if (rt.used) return Response.json({ error: "invalid_grant", error_description: "Refresh token already used" }, { status: 400 });
     if (rt.expires_at < Math.floor(Date.now() / 1000)) return Response.json({ error: "invalid_grant", error_description: "Refresh token expired" }, { status: 400 });
     await env.IDENTITY_DB.prepare("UPDATE t_oauth_refresh_token SET used = 1 WHERE token_hash = ?").bind(tokenHash).run();
     const { scopes, provider } = await resolveEffectiveScopes(env, clientId, rt.group_id, rt.scopes.split(" ").filter(Boolean));
-    return issueTokenResponse(env, { clientId, userId: rt.user_id, groupId: rt.group_id, scopes, provider });
+    return issueTokenResponse(env, { clientId, userId: rt.user_id, groupId: rt.group_id, scopes, provider, resource: rt.resource ?? mcpResource(request, env) });
   }
 
   // grant_type=authorization_code
@@ -493,12 +508,12 @@ export async function handleMcpToken(request: Request, env: AuthorizeEnv): Promi
   if (!client) return Response.json({ error: "invalid_client" }, { status: 400 });
 
   const row = await env.IDENTITY_DB.prepare(`
-    SELECT code, client_id, user_id, group_id, scopes, code_challenge, code_challenge_method, redirect_uri, expires_at, used
+    SELECT code, client_id, user_id, group_id, scopes, code_challenge, code_challenge_method, redirect_uri, expires_at, used, resource
     FROM t_oauth_authorization_code WHERE code = ?
   `).bind(code).first<{
     code: string; client_id: string; user_id: string; group_id: string; scopes: string;
     code_challenge: string; code_challenge_method: string; redirect_uri: string;
-    expires_at: number; used: number;
+    expires_at: number; used: number; resource: string | null;
   }>();
 
   if (!row) return Response.json({ error: "invalid_grant" }, { status: 400 });
@@ -516,5 +531,5 @@ export async function handleMcpToken(request: Request, env: AuthorizeEnv): Promi
   await env.IDENTITY_DB.prepare("UPDATE t_oauth_authorization_code SET used = 1 WHERE code = ?").bind(code).run();
 
   const { scopes, provider } = await resolveEffectiveScopes(env, clientId, row.group_id, row.scopes.split(" ").filter(Boolean));
-  return issueTokenResponse(env, { clientId, userId: row.user_id, groupId: row.group_id, scopes, provider });
+  return issueTokenResponse(env, { clientId, userId: row.user_id, groupId: row.group_id, scopes, provider, resource: row.resource ?? mcpResource(request, env) });
 }
