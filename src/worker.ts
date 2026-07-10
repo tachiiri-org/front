@@ -378,6 +378,18 @@ async function fetchInner(request: Request, env: Env): Promise<Response> {
       headers.append('Set-Cookie', `login_intent=; Path=/; Max-Age=0; SameSite=Lax`);
       return new Response(null, { status: 302, headers });
     }
+    // Provider-agnostic logout: clears the identity session (which outlives provider
+    // cookies) plus any residual provider sessions. Used by the nav when only an
+    // identity session remains.
+    if (pathname === '/oauth/logout' && request.method === 'GET') {
+      const headers = new Headers({ Location: '/' });
+      for (const c of [...clearGitHubSessionCookies(request), ...clearGitHubConnectSessionCookies(request), ...clearGoogleSessionCookies(request), ...clearMicrosoftSessionCookies(request), ...clearOidcSessionCookies(request)]) {
+        headers.append('Set-Cookie', c);
+      }
+      for (const c of identityClearCookies()) headers.append('Set-Cookie', c);
+      headers.append('Set-Cookie', `login_intent=; Path=/; Max-Age=0; SameSite=Lax`);
+      return new Response(null, { status: 302, headers });
+    }
 
     if (pathname === '/.well-known/oauth-authorization-server') {
       return handleOAuthMetadata(request, env);

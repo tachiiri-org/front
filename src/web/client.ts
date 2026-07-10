@@ -164,34 +164,51 @@ const renderNav = async (screenId: string): Promise<void> => {
   } catch { /* ignore */ }
 
   try {
+    let authStatus: AuthStatus | null = null;
     if (authResult.status === 'fulfilled' && authResult.value.ok) {
-      const authStatus = (await authResult.value.json()) as AuthStatus;
-      if (authStatus.github.authenticated || authStatus.google.authenticated || authStatus.microsoft?.authenticated || authStatus.oidc?.authenticated) {
+      authStatus = (await authResult.value.json()) as AuthStatus;
+    }
+    // The identity session (signed __Host-identity) is the source of truth for "logged in":
+    // identity-status refreshes its TTL on every call, so it outlives the provider session
+    // cookies. Drive the logged-in nav off it (or a live provider), so the Logout affordance
+    // never disappears while a session exists.
+    const providerAuthed = Boolean(
+      authStatus &&
+        (authStatus.github.authenticated || authStatus.google.authenticated || authStatus.microsoft?.authenticated || authStatus.oidc?.authenticated),
+    );
+    if (providerAuthed || hasIdentitySession) {
+      const displayName = authStatus?.github.login
+        ? `@${authStatus.github.login}`
+        : (authStatus?.google.email ?? authStatus?.microsoft?.email ?? authStatus?.oidc?.email ?? '');
+      if (displayName) {
         const userEl = document.createElement('span');
-        userEl.textContent = authStatus.github.login
-          ? `@${authStatus.github.login}`
-          : (authStatus.google.email ?? authStatus.microsoft?.email ?? authStatus.oidc?.email ?? '');
+        userEl.textContent = displayName;
         Object.assign(userEl.style, { color: '#9ca3af', fontSize: '12px' });
         nav.appendChild(userEl);
+      }
 
-        const settingsLink = document.createElement('a');
-        settingsLink.textContent = '設定';
-        settingsLink.href = '/settings';
-        Object.assign(settingsLink.style, { color: '#6b7280', fontSize: '12px', textDecoration: 'none' });
-        nav.appendChild(settingsLink);
+      const settingsLink = document.createElement('a');
+      settingsLink.textContent = '設定';
+      settingsLink.href = '/settings';
+      Object.assign(settingsLink.style, { color: '#6b7280', fontSize: '12px', textDecoration: 'none' });
+      nav.appendChild(settingsLink);
 
-        const logoutLink = document.createElement('a');
-        logoutLink.textContent = 'Logout';
-        logoutLink.href = authStatus.github.authenticated
-          ? '/oauth/github/logout'
-          : authStatus.microsoft?.authenticated
-          ? '/oauth/microsoft/logout'
-          : authStatus.oidc?.authenticated
-          ? '/oauth/oidc/logout'
-          : '/oauth/google/logout';
-        Object.assign(logoutLink.style, { color: '#6b7280', fontSize: '12px', textDecoration: 'none' });
-        nav.appendChild(logoutLink);
-      } else if (!hasIdentitySession) {
+      const logoutLink = document.createElement('a');
+      logoutLink.textContent = 'Logout';
+      // Provider-specific logout when a provider session is live; otherwise a generic logout
+      // that clears the identity session (and any residual provider cookies).
+      logoutLink.href = authStatus?.github.authenticated
+        ? '/oauth/github/logout'
+        : authStatus?.microsoft?.authenticated
+        ? '/oauth/microsoft/logout'
+        : authStatus?.oidc?.authenticated
+        ? '/oauth/oidc/logout'
+        : authStatus?.google.authenticated
+        ? '/oauth/google/logout'
+        : '/oauth/logout';
+      Object.assign(logoutLink.style, { color: '#6b7280', fontSize: '12px', textDecoration: 'none' });
+      nav.appendChild(logoutLink);
+    } else {
         const loginSelect = document.createElement('select');
         loginSelect.style.cssText =
           'background:#1f2937;color:#d1d5db;border:1px solid #374151;padding:2px 8px;font-size:12px;font-family:monospace;border-radius:4px;cursor:pointer;height:24px;';
@@ -212,7 +229,6 @@ const renderNav = async (screenId: string): Promise<void> => {
         });
         nav.appendChild(loginSelect);
       }
-    }
   } catch { /* ignore */ }
 };
 
