@@ -338,9 +338,11 @@ export async function handleOrgMembers(request: Request, env: AuthorizeEnv): Pro
   if (!url.pathname.startsWith('/api/v1/auth/members')) return null;
 
   const cookies = parseCookies(request);
-  const orgId = cookies.get('identity_org_id');
+  // Members are the users of the selected group; the tenant is the group. The org is
+  // derived from the group inside authorizeFetch — it is not needed to list members.
+  const groupId = cookies.get('identity_group_id');
   const orgUserId = cookies.get('org_user_id');
-  if (!orgId) {
+  if (!groupId) {
     return json({ error: 'not_authenticated' }, { status: 401 });
   }
 
@@ -351,7 +353,7 @@ export async function handleOrgMembers(request: Request, env: AuthorizeEnv): Pro
     path: backendPath,
     method: request.method,
     body: bodyText,
-    tenantContext: { tenantId: orgId, subjectId: orgUserId ?? undefined },
+    tenantContext: { tenantId: groupId, subjectId: orgUserId ?? undefined },
   });
 
   const text = await res.text();

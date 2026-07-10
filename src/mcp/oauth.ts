@@ -449,7 +449,7 @@ export async function handleMcpToken(request: Request, env: AuthorizeEnv): Promi
   }
 
   const accessToken = await issueMcpToken(env, {
-    orgId: row.group_id,
+    groupId: row.group_id,
     userId: row.user_id,
     scopes: effectiveScopes,
     clientId: row.client_id,

@@ -1,5 +1,13 @@
 const encoder = new TextEncoder();
 
+/**
+ * The single platform-managed default organization (see backend identity-migration
+ * 0031). Every group currently belongs to it; org is derived from the group, never
+ * selected by the user. When org-plan customers exist, resolve the real org for the
+ * group (j_tenancy) instead of using this constant.
+ */
+export const DEFAULT_ORGANIZATION_ID = "00000000-0000-4000-8000-000000000001";
+
 type SecretValue = string | { get(): Promise<string> };
 
 type InternalTokenClaims = {
@@ -86,7 +94,7 @@ export async function verifyInternalToken(
 
 export async function issueMcpToken(
   env: { INTERNAL_AUTH_SIGNING_KEY?: SecretValue; INTERNAL_AUTH_TOKEN_ISSUER?: string },
-  input: { orgId: string; userId: string; scopes: string[]; clientId: string; provider?: string },
+  input: { groupId: string; userId: string; scopes: string[]; clientId: string; provider?: string },
 ): Promise<string> {
   const signingKey = await resolveSecret(env.INTERNAL_AUTH_SIGNING_KEY);
   if (!signingKey) throw new Error("missing_internal_auth_signing_key");
@@ -101,7 +109,9 @@ export async function issueMcpToken(
     exp: now + 7776000,
     iat: now,
     jti: crypto.randomUUID(),
-    tenant_id: input.orgId,
+    // tenant = the selected group; org is derived from it (default org for now).
+    tenant_id: input.groupId,
+    org_id: DEFAULT_ORGANIZATION_ID,
     subject_id: input.userId,
     scopes: input.scopes,
     ...(input.provider ? { provider: input.provider } : {}),

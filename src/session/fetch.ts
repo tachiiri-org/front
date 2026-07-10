@@ -1,5 +1,5 @@
 import type { AuthorizeEnv } from "./index";
-import { issueInternalToken } from "./token";
+import { issueInternalToken, DEFAULT_ORGANIZATION_ID } from "./token";
 
 async function resolveSecret(
   value: string | { get(): Promise<string> } | undefined,
@@ -25,7 +25,7 @@ export async function authorizeFetch(
     body?: string;
     headers?: HeadersInit;
     audience?: string;
-    tenantContext?: { tenantId?: string; subjectId?: string };
+    tenantContext?: { tenantId?: string; subjectId?: string; orgId?: string };
     actorType?: 'human' | 'program' | 'ai';
     roles?: string[];
     scopes?: string[];
@@ -48,12 +48,22 @@ export async function authorizeFetch(
 
   const headers = sanitizeHeaders(input.headers);
   headers.set("x-internal-token", internalToken);
+  const tenantId = input.tenantContext?.tenantId;
+  const subjectId = input.tenantContext?.subjectId;
+  // org is derived from the group, not selected. A group-scoped operation performed by a
+  // real subject (user/agent) is attributed to that group's org — currently the single
+  // default org. Bootstrap/build calls (no subject) stay provider-anchored, so we only
+  // attach org_id when both a group and a subject are present.
+  // TODO(multi-org): resolve the real org for the group (j_tenancy) and pass
+  // tenantContext.orgId explicitly once org-plan customers can own separate orgs.
+  const orgId = input.tenantContext?.orgId ?? (tenantId && subjectId ? DEFAULT_ORGANIZATION_ID : undefined);
   headers.set(
     "authorization",
     `Bearer ${await issueInternalToken(env, {
       audience,
-      tenantId: input.tenantContext?.tenantId,
-      subjectId: input.tenantContext?.subjectId,
+      tenantId,
+      orgId,
+      subjectId,
       actorType: input.actorType,
       roles: input.roles,
       scopes: input.scopes,
