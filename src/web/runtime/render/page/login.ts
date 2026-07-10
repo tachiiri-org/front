@@ -92,6 +92,19 @@ function wire(
     }
   }
 
+  // Preserve returnTo through the OAuth round-trip. The baked static HTML ships the
+  // /oauth/*/start hrefs without a returnTo (it isn't known at build time), so append it
+  // here from the current URL; otherwise the login callback loses it and lands on the root
+  // instead of the originally requested page (e.g. /graph-editor).
+  const returnTo = new URLSearchParams(window.location.search).get('returnTo') ?? '';
+  if (returnTo.startsWith('/')) {
+    const q = `?returnTo=${encodeURIComponent(returnTo)}`;
+    panelLoginEl.querySelectorAll<HTMLAnchorElement>('a[href]').forEach((a) => {
+      const base = a.getAttribute('href') ?? '';
+      if (/^\/oauth\/[^/]+\/start$/.test(base)) a.setAttribute('href', base + q);
+    });
+  }
+
   const setTab = (tab: 'login' | 'new-group'): void => {
     Object.assign(tabLoginEl.style, tab === 'login' ? tabActiveStyle : tabInactiveStyle);
     Object.assign(tabNewGroupEl.style, tab === 'new-group' ? tabActiveStyle : tabInactiveStyle);
