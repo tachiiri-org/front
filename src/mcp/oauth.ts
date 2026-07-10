@@ -75,6 +75,46 @@ async function lookupClient(db: D1Database, clientId: string): Promise<DbClient 
   `).bind(clientId).first<DbClient>();
 }
 
+// Provision (idempotently) a client record and its redirect URIs. Used by explicit
+// Dynamic Client Registration and by implicit registration at the authorize endpoint.
+// Clients are public (token_endpoint_auth_method=none) and PKCE-protected, and DCR is
+// open, so provisioning an as-yet-unseen client_id adds no privilege.
+async function provisionClient(
+  db: D1Database,
+  env: AuthorizeEnv,
+  clientId: string,
+  clientName: string,
+  redirectUris: string[],
+): Promise<void> {
+  const hmacKey = await resolveSecret(env.IDENTITY_HMAC_KEY);
+  if (!hmacKey) throw new Error("missing_hmac_key");
+  const aiHash = await hmacHex(hmacKey, "ai");
+  await db.batch([
+    db.prepare("INSERT OR IGNORE INTO m_client (id) VALUES (?)").bind(clientId),
+    db.prepare("INSERT OR IGNORE INTO p_client_name (client_id, value) VALUES (?, ?)").bind(clientId, clientName),
+    db.prepare("INSERT OR IGNORE INTO p_client_actor (client_id, value, value_hash) VALUES (?, ?, ?)").bind(clientId, "ai", aiHash),
+  ]);
+  if (redirectUris.length > 0) {
+    await db.batch(
+      redirectUris.map(uri =>
+        db.prepare("INSERT OR IGNORE INTO m_redirect (id, value) VALUES (?, ?)").bind(crypto.randomUUID(), uri)
+      )
+    );
+    const placeholders = redirectUris.map(() => "?").join(", ");
+    const uriRows = await db.prepare(
+      `SELECT id, value FROM m_redirect WHERE value IN (${placeholders})`
+    ).bind(...redirectUris).all<{ id: string; value: string }>();
+    const uriIdMap = new Map(uriRows.results.map(r => [r.value, r.id]));
+    await db.batch(
+      redirectUris
+        .filter(uri => uriIdMap.has(uri))
+        .map(uri =>
+          db.prepare("INSERT OR IGNORE INTO j_callback (client_id, redirect_id) VALUES (?, ?)").bind(clientId, uriIdMap.get(uri))
+        )
+    );
+  }
+}
+
 // GET /.well-known/oauth-authorization-server
 export function handleOAuthMetadata(request: Request, env: AuthorizeEnv): Response {
   const base = origin(request, env);
@@ -108,38 +148,10 @@ export async function handleMcpRegister(request: Request, env: AuthorizeEnv): Pr
   const clientName = body.client_name ?? "Unknown Client";
   const redirectUris = body.redirect_uris ?? [];
 
-  const hmacKey = await resolveSecret(env.IDENTITY_HMAC_KEY);
-  if (!hmacKey) return Response.json({ error: "server_error" }, { status: 500 });
-  const aiHash = await hmacHex(hmacKey, "ai");
-
-  // Client name and actor type are 1:1 properties of the client (p_client_name /
-  // p_client_actor); the actor type is "ai" for MCP-registered clients.
-  await db.batch([
-    db.prepare("INSERT INTO m_client (id) VALUES (?)").bind(clientId),
-    db.prepare("INSERT INTO p_client_name (client_id, value) VALUES (?, ?)").bind(clientId, clientName),
-    db.prepare("INSERT INTO p_client_actor (client_id, value, value_hash) VALUES (?, ?, ?)").bind(clientId, "ai", aiHash),
-  ]);
-
-  if (redirectUris.length > 0) {
-    await db.batch(
-      redirectUris.map(uri =>
-        db.prepare("INSERT OR IGNORE INTO m_redirect (id, value) VALUES (?, ?)").bind(crypto.randomUUID(), uri)
-      )
-    );
-
-    const placeholders = redirectUris.map(() => "?").join(", ");
-    const uriRows = await db.prepare(
-      `SELECT id, value FROM m_redirect WHERE value IN (${placeholders})`
-    ).bind(...redirectUris).all<{ id: string; value: string }>();
-
-    const uriIdMap = new Map(uriRows.results.map(r => [r.value, r.id]));
-    await db.batch(
-      redirectUris
-        .filter(uri => uriIdMap.has(uri))
-        .map(uri =>
-          db.prepare("INSERT OR IGNORE INTO j_callback (client_id, redirect_id) VALUES (?, ?)").bind(clientId, uriIdMap.get(uri))
-        )
-    );
+  try {
+    await provisionClient(db, env, clientId, clientName, redirectUris);
+  } catch {
+    return Response.json({ error: "server_error" }, { status: 500 });
   }
 
   return Response.json({
@@ -179,7 +191,15 @@ export async function handleMcpAuthorize(request: Request, env: AuthorizeEnv): P
     return new Response("Only S256 code_challenge_method is supported", { status: 400 });
   }
 
-  const client = await lookupClient(env.IDENTITY_DB, clientId);
+  let client = await lookupClient(env.IDENTITY_DB, clientId);
+  if (!client && clientId && redirectUri) {
+    // Implicit registration: a public PKCE client presenting an as-yet-unseen client_id
+    // (e.g. one it cached from a prior session) is provisioned on the fly with the
+    // redirect_uri it presents, then the flow continues. Lets such clients recover
+    // without a separate registration round-trip.
+    await provisionClient(env.IDENTITY_DB, env, clientId, "MCP Client", [redirectUri]);
+    client = await lookupClient(env.IDENTITY_DB, clientId);
+  }
   if (!client) return new Response("Unknown client_id", { status: 400 });
 
   const allowedUris: string[] = JSON.parse(client.redirect_uris);
