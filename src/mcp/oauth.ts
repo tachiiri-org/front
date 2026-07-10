@@ -463,13 +463,12 @@ export async function handleMcpToken(request: Request, env: AuthorizeEnv): Promi
   const clientId = params.get("client_id");
   if (!clientId) return Response.json({ error: "invalid_request" }, { status: 400 });
 
-  const client = await lookupClient(env.IDENTITY_DB, clientId);
-  if (!client) return Response.json({ error: "invalid_client" }, { status: 400 });
-
   // grant_type=refresh_token — rotate the refresh token and mint a new access token.
   if (grantType === "refresh_token") {
     const refreshToken = params.get("refresh_token");
     if (!refreshToken) return Response.json({ error: "invalid_request" }, { status: 400 });
+    const client = await lookupClient(env.IDENTITY_DB, clientId);
+    if (!client) return Response.json({ error: "invalid_client" }, { status: 400 });
     const tokenHash = await sha256Hex(refreshToken);
     const rt = await env.IDENTITY_DB.prepare(`
       SELECT token_hash, client_id, user_id, group_id, scopes, provider, expires_at, used
@@ -493,6 +492,9 @@ export async function handleMcpToken(request: Request, env: AuthorizeEnv): Promi
   if (grantType !== "authorization_code" || !code || !codeVerifier || !redirectUri) {
     return Response.json({ error: "unsupported_grant_type" }, { status: 400 });
   }
+
+  const client = await lookupClient(env.IDENTITY_DB, clientId);
+  if (!client) return Response.json({ error: "invalid_client" }, { status: 400 });
 
   const row = await env.IDENTITY_DB.prepare(`
     SELECT code, client_id, user_id, group_id, scopes, code_challenge, code_challenge_method, redirect_uri, expires_at, used
