@@ -228,9 +228,15 @@ export function createPanelsView(ctx: GraphEditorContext): {
       }
     }
   };
-  // Chip left-click → select this node (drives the 「選択中」node panel's children). Does not touch the
-  // relation panel. No path fetch needed since the relation panel isn't updated.
-  ctx.selectNode = (nodeId) => { setSelectedNode(nodeId, new Set(), [], false); };
+  // Chip left-click → select this node (drives the 「選択中」node panel's children). Fetches the node's
+  // path so that panel's breadcrumb reads ルート › … › {node} (not just ルート). updateRelation=false
+  // keeps the relation panel you're reading from re-rendering.
+  ctx.selectNode = (nodeId, label) => {
+    void (async () => {
+      const path = await fetchNodePath(ctx.gId, nodeId, label ?? '', ctx.rootNodeId, ctx.state.lang);
+      setSelectedNode(nodeId, new Set(), path, false);
+    })();
+  };
 
   // ── Inter-pane wiring ──────────────────────────────────────────────
   // Selection changes are debounced: navigating (arrow keys, expanding — each focuses a row) fires
