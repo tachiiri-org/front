@@ -407,7 +407,7 @@ export function createPanelsView(ctx: GraphEditorContext): {
     addBtn.textContent = '＋';
     addBtn.title = '列を追加';
     addBtn.style.cssText = `background:transparent;border:none;color:${TEXT_DIM};cursor:pointer;font-size:13px;padding:0 2px;line-height:1;flex-shrink:0;`;
-    addBtn.addEventListener('click', (e) => { e.stopPropagation(); addNodePanel(); });
+    addBtn.addEventListener('click', (e) => { e.stopPropagation(); addNodePanel(config.id); });
     nodePanelHeader.appendChild(addBtn);
 
     // Close button
@@ -549,16 +549,24 @@ export function createPanelsView(ctx: GraphEditorContext): {
 
 
   // ── Pane add / remove ────────────────────────────────────────────
-  // Add a new independent node panel to the right. Triggered from each pane nodePanelHeader's "+" button.
-  const addNodePanel = () => {
-    // New pane inherits the language of the rightmost pane (or the global default).
-    const inheritLang = nodePanels.length > 0 ? nodePanels[nodePanels.length - 1].config.lang : ctx.state.lang;
+  // Add a new node panel. Triggered from each pane nodePanelHeader's "+" button, which passes its own
+  // id as `sourceId`: the new panel is sourced from (drills into) the panel it was added from, and is
+  // inserted right after it. Called with null → an independent root panel appended at the end.
+  const addNodePanel = (sourceId: string | null = null) => {
+    const srcIdx = sourceId ? nodePanels.findIndex(p => p.config.id === sourceId) : -1;
+    const inheritLang = srcIdx >= 0 ? nodePanels[srcIdx].config.lang
+      : (nodePanels.length > 0 ? nodePanels[nodePanels.length - 1].config.lang : ctx.state.lang);
     const config = newNodePanelConfig(`パネル ${nodePanels.length + 1}`, inheritLang);
-    // Default = independent (source = root/null). Linking to another pane is opt-in via the
-    // source menu.
+    config.sourcePanelId = srcIdx >= 0 ? sourceId : null;
     const inst = createNodePanel(config);
-    nodePanels.push(inst);
-    nodeArea.appendChild(inst.containerEl);
+    if (srcIdx >= 0) {
+      const srcEl = nodePanels[srcIdx].containerEl;
+      nodePanels.splice(srcIdx + 1, 0, inst);
+      srcEl.parentElement?.insertBefore(inst.containerEl, srcEl.nextSibling);
+    } else {
+      nodePanels.push(inst);
+      nodeArea.appendChild(inst.containerEl);
+    }
     saveAll();
     updateAllSrcBtns();
     void inst.view.load();
