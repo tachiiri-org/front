@@ -361,6 +361,8 @@ export function createRelationPanelView(
     // 明示しており、'' にすると背景指定ごと消えてブラウザ既定の白背景になり、薄いグレー文字が白地で
     // 読めなくなる（＝「白いハイライト」に見える）。'transparent' で元のダーク配色に戻す。
     const paintEl = (el: HTMLElement, on: boolean) => { el.style.background = on ? SEL_BG : 'transparent'; };
+    // 文字列のピクセル幅（autosize と同じ近似フォントで測る）。起点 textarea の部分選択を塗るのに使う。
+    const textWidth = (s: string) => { if (!s || !cctx) return 0; cctx.font = '14px sans-serif'; return cctx.measureText(s).width; };
     const clearGroupSel = () => {
       if (!groupSel) return;
       for (const c of segChildren()) paintEl(c, false);
@@ -376,14 +378,22 @@ export function createRelationPanelView(
       const fIdx = kids.indexOf(groupSel.focusTa);
       if (sIdx < 0 || fIdx < 0) return;
       const lo = Math.min(sIdx, fIdx), hi = Math.max(sIdx, fIdx);
-      // start ta の選択済み部分が丸ごとなら塗る（右向き=左境界で off===0／左向き=右境界で off===末尾）。
-      const startWhole = sIdx < fIdx ? groupSel.startOff === 0 : groupSel.startOff === groupSel.startTa.value.length;
       for (let i = 0; i < kids.length; i++) {
         const el = kids[i];
         if (el.dataset.nodeLink) { paintEl(el, i > lo && i < hi); continue; }
-        if (i === fIdx) paintEl(el, false);
-        else if (i === sIdx) paintEl(el, startWhole);
-        else paintEl(el, i > lo && i < hi);
+        if (i === fIdx) { paintEl(el, false); continue; }         // フォーカス ta は native 選択が見える
+        if (i !== sIdx) { paintEl(el, i > lo && i < hi); continue; } // 中間 ta は丸ごと／範囲外は消す
+        // start ta は「選択された部分」だけ塗る（右向き=[startOff..末尾]／左向き=[0..startOff]）。丸ごとなら
+        // 単色、部分なら文字幅を測ってグラデーションで部分ハイライト（focus 移動で native 選択が消える補完）。
+        const val = groupSel.startTa.value;
+        const from = sIdx < fIdx ? groupSel.startOff : 0;
+        const to = sIdx < fIdx ? val.length : groupSel.startOff;
+        if (from <= 0 && to >= val.length) paintEl(el, true);
+        else if (from >= to) paintEl(el, false);
+        else {
+          const lpx = textWidth(val.slice(0, from)), rpx = textWidth(val.slice(0, to));
+          el.style.background = `linear-gradient(to right, transparent ${lpx}px, ${SEL_BG} ${lpx}px, ${SEL_BG} ${rpx}px, transparent ${rpx}px)`;
+        }
       }
     };
 
