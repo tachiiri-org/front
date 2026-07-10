@@ -61,10 +61,9 @@ async function lookupClient(db: D1Database, clientId: string): Promise<DbClient 
       cn.value AS name,
       COALESCE(json_group_array(r.value) FILTER (WHERE r.value IS NOT NULL), '[]') AS redirect_uris
     FROM m_client c
-    LEFT JOIN j_client_name jcn ON jcn.client_id = c.id
-    LEFT JOIN m_client_name cn ON cn.id = jcn.name_id
-    LEFT JOIN j_client_redirect jcr ON jcr.client_id = c.id
-    LEFT JOIN m_redirect r ON r.id = jcr.redirect_uri_id
+    LEFT JOIN p_client_name cn ON cn.client_id = c.id
+    LEFT JOIN j_callback jc ON jc.client_id = c.id
+    LEFT JOIN m_redirect r ON r.id = jc.redirect_id
     WHERE c.id = ?
     GROUP BY c.id
   `).bind(clientId).first<DbClient>();
@@ -101,21 +100,18 @@ export async function handleMcpRegister(request: Request, env: AuthorizeEnv): Pr
 
   const clientId = crypto.randomUUID();
   const clientName = body.client_name ?? "Unknown Client";
-  const nameId = crypto.randomUUID();
   const redirectUris = body.redirect_uris ?? [];
 
   const hmacKey = await resolveSecret(env.IDENTITY_HMAC_KEY);
   if (!hmacKey) return Response.json({ error: "server_error" }, { status: 500 });
   const aiHash = await hmacHex(hmacKey, "ai");
-  const actorRow = await db.prepare("SELECT id FROM m_actor WHERE value_hash = ?")
-    .bind(aiHash).first<{ id: string }>();
-  if (!actorRow) return Response.json({ error: "server_error" }, { status: 500 });
 
+  // Client name and actor type are 1:1 properties of the client (p_client_name /
+  // p_client_actor); the actor type is "ai" for MCP-registered clients.
   await db.batch([
     db.prepare("INSERT INTO m_client (id) VALUES (?)").bind(clientId),
-    db.prepare("INSERT INTO m_client_name (id, value) VALUES (?, ?)").bind(nameId, clientName),
-    db.prepare("INSERT INTO j_client_name (client_id, name_id) VALUES (?, ?)").bind(clientId, nameId),
-    db.prepare("INSERT INTO j_client_actor (client_id, actor_id) VALUES (?, ?)").bind(clientId, actorRow.id),
+    db.prepare("INSERT INTO p_client_name (client_id, value) VALUES (?, ?)").bind(clientId, clientName),
+    db.prepare("INSERT INTO p_client_actor (client_id, value, value_hash) VALUES (?, ?, ?)").bind(clientId, "ai", aiHash),
   ]);
 
   if (redirectUris.length > 0) {
@@ -135,7 +131,7 @@ export async function handleMcpRegister(request: Request, env: AuthorizeEnv): Pr
       redirectUris
         .filter(uri => uriIdMap.has(uri))
         .map(uri =>
-          db.prepare("INSERT OR IGNORE INTO j_client_redirect (client_id, redirect_uri_id) VALUES (?, ?)").bind(clientId, uriIdMap.get(uri))
+          db.prepare("INSERT OR IGNORE INTO j_callback (client_id, redirect_id) VALUES (?, ?)").bind(clientId, uriIdMap.get(uri))
         )
     );
   }
