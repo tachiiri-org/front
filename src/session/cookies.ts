@@ -42,9 +42,9 @@ export function serializeCookie(
     attributes.push("HttpOnly");
   }
 
-  if (options.secure !== false) {
-    attributes.push("Secure");
-  }
+  // Always Secure: this app is served only over HTTPS (no local http development), and
+  // Secure is required for the __Host- cookie prefix. The `secure` option is ignored.
+  attributes.push("Secure");
 
   attributes.push(`SameSite=${options.sameSite ?? "Lax"}`);
 

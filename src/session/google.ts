@@ -1,5 +1,6 @@
 import { exchangeGoogleOAuthCode, serializeGoogleSessionCookie, findOrCreateUserByGoogle, linkGoogleToUser } from "../identify";
 import { clearCookie, parseCookies, serializeCookie } from "./cookies";
+import { readIdentity, identitySetCookies } from "./identity";
 import type { AuthorizeEnv } from "./index";
 
 type GoogleOAuthEnv = AuthorizeEnv;
@@ -101,7 +102,7 @@ export async function handleGoogleLoginCallback(context: RouteContext): Promise<
 
   const cookies2 = parseCookies(context.request);
   const linkMode = cookies2.get(IDENTITY_LINK_MODE_COOKIE);
-  const existingUserId = linkMode ? cookies2.get(IDENTITY_USER_ID_COOKIE) : null;
+  const existingUserId = linkMode ? (await readIdentity(context.env, context.request))?.userId ?? null : null;
 
   try {
     headers.append("Set-Cookie", await serializeGoogleSessionCookie(googleSession, context.env, context.request));
@@ -110,15 +111,9 @@ export async function handleGoogleLoginCallback(context: RouteContext): Promise<
       headers.append("Set-Cookie", `${IDENTITY_LINK_MODE_COOKIE}=; Path=/; Max-Age=0`);
     } else {
       const userId = await findOrCreateUserByGoogle(context.env, googleSession.sub);
-      headers.append(
-        "Set-Cookie",
-        serializeCookie(IDENTITY_USER_ID_COOKIE, userId, {
-          maxAge: 60 * 60 * 24,
-          path: "/",
-          secure: isSecureRequest(context.request),
-          httpOnly: true,
-        }),
-      );
+      for (const c of await identitySetCookies(context.env, { userId })) {
+        headers.append("Set-Cookie", c);
+      }
     }
   } catch {
     // identity lookup failure is non-fatal; org-select page will handle the missing state

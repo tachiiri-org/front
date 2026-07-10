@@ -3,7 +3,8 @@ import type { AuthorizeEnv } from "../session";
 import { parseCookies, serializeCookie, clearCookie } from "../session/cookies";
 import { issueMcpToken } from "../session/token";
 import { authorizeFetch } from "../session/fetch";
-import { IDENTITY_USER_ID_COOKIE, MCP_OAUTH_PARAMS_COOKIE } from "../session/github";
+import { MCP_OAUTH_PARAMS_COOKIE } from "../session/github";
+import { readIdentity, identityClearCookies } from "../session/identity";
 import { createOrganization } from "../identify";
 
 const CODE_TTL = 60 * 10; // 10 minutes
@@ -250,7 +251,7 @@ export async function handleMcpAuthorize(request: Request, env: AuthorizeEnv): P
 // GET /oauth/mcp/select-org
 export async function handleMcpSelectOrg(request: Request, env: AuthorizeEnv): Promise<Response> {
   const cookies = parseCookies(request);
-  const userId = cookies.get(IDENTITY_USER_ID_COOKIE);
+  const userId = (await readIdentity(env, request))?.userId;
   const paramsRaw = cookies.get(MCP_OAUTH_PARAMS_COOKIE);
   if (!userId || !paramsRaw) {
     return new Response("Session expired. Please restart the authorization flow.", { status: 400 });
@@ -320,7 +321,7 @@ export async function handleMcpApprove(request: Request, env: AuthorizeEnv): Pro
   if (!env.IDENTITY_DB) return new Response("IDENTITY_DB not configured", { status: 503 });
 
   const cookies = parseCookies(request);
-  const userId = cookies.get(IDENTITY_USER_ID_COOKIE);
+  const userId = (await readIdentity(env, request))?.userId;
   const paramsRaw = cookies.get(MCP_OAUTH_PARAMS_COOKIE);
   if (!userId || !paramsRaw) {
     return new Response("Session expired.", { status: 400 });
@@ -348,7 +349,7 @@ export async function handleMcpApprove(request: Request, env: AuthorizeEnv): Pro
 
   const headers = new Headers();
   headers.append("Set-Cookie", clearCookie(MCP_OAUTH_PARAMS_COOKIE, request));
-  headers.append("Set-Cookie", clearCookie(IDENTITY_USER_ID_COOKIE, request));
+  for (const c of identityClearCookies()) headers.append("Set-Cookie", c);
 
   const redirectUrl = new URL(params.redirect_uri);
   redirectUrl.searchParams.set("code", code);
@@ -362,7 +363,7 @@ export async function handleMcpCreateOrg(request: Request, env: AuthorizeEnv): P
   if (!env.IDENTITY_DB) return new Response("IDENTITY_DB not configured", { status: 503 });
 
   const cookies = parseCookies(request);
-  const userId = cookies.get(IDENTITY_USER_ID_COOKIE);
+  const userId = (await readIdentity(env, request))?.userId;
   const paramsRaw = cookies.get(MCP_OAUTH_PARAMS_COOKIE);
   if (!userId || !paramsRaw) {
     return new Response("Session expired. Please restart the authorization flow.", { status: 400 });
@@ -397,7 +398,7 @@ export async function handleMcpCreateOrg(request: Request, env: AuthorizeEnv): P
 
   const headers = new Headers();
   headers.append("Set-Cookie", clearCookie(MCP_OAUTH_PARAMS_COOKIE, request));
-  headers.append("Set-Cookie", clearCookie(IDENTITY_USER_ID_COOKIE, request));
+  for (const c of identityClearCookies()) headers.append("Set-Cookie", c);
 
   const redirectUrl = new URL(params.redirect_uri);
   redirectUrl.searchParams.set("code", code);

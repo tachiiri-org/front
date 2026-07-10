@@ -2,6 +2,7 @@ import type { SpecDocument } from '../shared/spec-document';
 import type { UiShellSettings } from '../shared/ui-shell-settings';
 import { readGitHubSession, readGitHubConnectSession, readGoogleSession, readMicrosoftSession, readOidcSession, listUserOrganizations, createOrganization, resolveOrgUser, getDefaultGroup, verifyMagicLinkToken, createBareUser, findMemberByEmail, registerGroupMember, fetchGroupInfo } from '../identify';
 import { parseCookies, serializeCookie } from '../session/cookies';
+import { readIdentity, identitySetCookies } from '../session/identity';
 import { authorizeFetch } from '../session/fetch';
 import { OIDC_ORG_ID_COOKIE } from '../session/oidc';
 import type { AuthorizeEnv } from '../session';
@@ -192,26 +193,25 @@ export async function handleIdentityStatus(
     return null;
   }
 
-  const url = new URL(request.url);
-  const cookies = parseCookies(request);
-  const userId = cookies.get('identity_user_id') ?? null;
+  const identity = await readIdentity(env, request);
+  const userId = identity?.userId ?? null;
 
-  if (!userId) {
+  if (!identity || !userId) {
     return json({ user_id: null, organizations: [] }, { status: 200 });
   }
 
-  const isSecure = url.protocol === 'https:';
-  const refreshCookie = `identity_user_id=${encodeURIComponent(userId)}; Path=/; Max-Age=${60 * 60 * 24}${isSecure ? '; Secure' : ''}; SameSite=Lax; HttpOnly`;
+  // Refresh the signed identity (and its group hint) TTL.
+  const refreshCookies = await identitySetCookies(env, identity);
+  const withRefresh = (res: Response): Response => {
+    for (const c of refreshCookies) res.headers.append('Set-Cookie', c);
+    return res;
+  };
 
   try {
     const organizations = await listUserOrganizations(env, userId);
-    const res = json({ user_id: userId, organizations }, { status: 200 });
-    res.headers.append('Set-Cookie', refreshCookie);
-    return res;
+    return withRefresh(json({ user_id: userId, organizations }, { status: 200 }));
   } catch {
-    const res = json({ user_id: userId, organizations: [] }, { status: 200 });
-    res.headers.append('Set-Cookie', refreshCookie);
-    return res;
+    return withRefresh(json({ user_id: userId, organizations: [] }, { status: 200 }));
   }
 }
 
@@ -222,7 +222,7 @@ export async function handleAutoSelectOrg(request: Request, env: AuthorizeEnv): 
   }
 
   const cookies = parseCookies(request);
-  const userId = cookies.get('identity_user_id');
+  const userId = (await readIdentity(env, request))?.userId;
   if (!userId) {
     return json({ error: 'not_authenticated' }, { status: 401 });
   }
@@ -233,9 +233,7 @@ export async function handleAutoSelectOrg(request: Request, env: AuthorizeEnv): 
     return json({ group_id: null }, { status: 404 });
   }
 
-  const isSecure = url.protocol === 'https:';
   const headers = new Headers({ 'Content-Type': 'application/json; charset=utf-8' });
-  headers.append('Set-Cookie', `identity_group_id=${encodeURIComponent(groupId)}; Path=/; Max-Age=${60 * 60 * 24}${isSecure ? '; Secure' : ''}; SameSite=Lax`);
 
   const magicEmail = cookies.get('magic_email') ? decodeURIComponent(cookies.get('magic_email')!) : null;
   const [githubSession, googleSession] = await Promise.allSettled([
@@ -246,10 +244,11 @@ export async function handleAutoSelectOrg(request: Request, env: AuthorizeEnv): 
     (githubSession.status === 'fulfilled' ? githubSession.value?.email : null) ??
     (googleSession.status === 'fulfilled' ? googleSession.value?.email : null);
 
-  // org_user_id is derived from (groupId, userId) alone — set it regardless of email presence.
+  // org_user_id is derived from (groupId, userId) alone. Update the signed identity with
+  // the selected group and derived org-user id (plus the JS-readable group hint).
   const orgUser = await resolveOrgUser(env, groupId, userId);
-  if (orgUser) {
-    headers.append('Set-Cookie', `org_user_id=${encodeURIComponent(orgUser.orgUserId)}; Path=/; Max-Age=${60 * 60 * 24}${isSecure ? '; Secure' : ''}; SameSite=Lax; HttpOnly`);
+  for (const c of await identitySetCookies(env, { userId, groupId, orgUserId: orgUser?.orgUserId })) {
+    headers.append('Set-Cookie', c);
   }
   if (email) {
     // Register email → identity_user_id in group DB so magic link recovery works (P2 email lives here only).
@@ -276,11 +275,9 @@ export async function handleSelectOrg(request: Request, env: AuthorizeEnv): Prom
 
   const returnTo = url.searchParams.get('returnTo') ?? '';
   const cookies = parseCookies(request);
-  const identityUserId = cookies.get('identity_user_id');
-  const isSecure = url.protocol === 'https:';
+  const identityUserId = (await readIdentity(env, request))?.userId;
   const headers = new Headers();
   headers.set('Location', returnTo.startsWith('/') ? returnTo : '/');
-  headers.append('Set-Cookie', `identity_group_id=${encodeURIComponent(orgId)}; Path=/; Max-Age=${60 * 60 * 24}${isSecure ? '; Secure' : ''}; SameSite=Lax`);
 
   if (identityUserId) {
     const magicEmail = cookies.get('magic_email') ? decodeURIComponent(cookies.get('magic_email')!) : null;
@@ -292,10 +289,11 @@ export async function handleSelectOrg(request: Request, env: AuthorizeEnv): Prom
       (githubSession.status === 'fulfilled' ? githubSession.value?.email : null) ??
       (googleSession.status === 'fulfilled' ? googleSession.value?.email : null);
 
-    // org_user_id is derived from (orgId, identityUserId) alone — set it regardless of email presence.
+    // org_user_id is derived from (orgId, identityUserId) alone. Update the signed identity
+    // with the selected group and derived org-user id (plus the JS-readable group hint).
     const orgUser = await resolveOrgUser(env, orgId, identityUserId);
-    if (orgUser) {
-      headers.append('Set-Cookie', `org_user_id=${encodeURIComponent(orgUser.orgUserId)}; Path=/; Max-Age=${60 * 60 * 24}${isSecure ? '; Secure' : ''}; SameSite=Lax; HttpOnly`);
+    for (const c of await identitySetCookies(env, { userId: identityUserId, groupId: orgId, orgUserId: orgUser?.orgUserId })) {
+      headers.append('Set-Cookie', c);
     }
     if (email) {
       // Register email → identity_user_id in group DB so magic link recovery works (P2 email lives here only).
@@ -318,8 +316,7 @@ export async function handleOrgCreate(
     return null;
   }
 
-  const cookies = parseCookies(request);
-  const userId = cookies.get('identity_user_id');
+  const userId = (await readIdentity(env, request))?.userId;
   if (!userId) {
     return json({ error: 'not_authenticated' }, { status: 401 });
   }
@@ -337,11 +334,11 @@ export async function handleOrgMembers(request: Request, env: AuthorizeEnv): Pro
   const url = new URL(request.url);
   if (!url.pathname.startsWith('/api/v1/auth/members')) return null;
 
-  const cookies = parseCookies(request);
-  // Members are the users of the selected group; the tenant is the group. The org is
-  // derived from the group inside authorizeFetch — it is not needed to list members.
-  const groupId = cookies.get('identity_group_id');
-  const orgUserId = cookies.get('org_user_id');
+  // Members are the users of the selected group; the tenant is the group. Trust only the
+  // signed identity for the group and org-user — never the JS-readable hint cookie.
+  const identity = await readIdentity(env, request);
+  const groupId = identity?.groupId;
+  const orgUserId = identity?.orgUserId;
   if (!groupId) {
     return json({ error: 'not_authenticated' }, { status: 401 });
   }
@@ -423,7 +420,6 @@ export async function handleMagicLinkVerify(
 
   const isSecure = url.protocol === 'https:';
   const shortCookieOpts = `Path=/; Max-Age=600; SameSite=Lax; HttpOnly${isSecure ? '; Secure' : ''}`;
-  const longCookieOpts = `Path=/; Max-Age=${60 * 60 * 24}; SameSite=Lax${isSecure ? '; Secure' : ''}`;
   const headers = new Headers();
 
   try {
@@ -433,7 +429,7 @@ export async function handleMagicLinkVerify(
       const org = await createOrganization(env, userId, result.group_name);
       await registerGroupMember(env, org.id, result.email, userId);
 
-      headers.append('Set-Cookie', `identity_user_id=${encodeURIComponent(userId)}; ${longCookieOpts}; HttpOnly`);
+      for (const c of await identitySetCookies(env, { userId })) headers.append('Set-Cookie', c);
       headers.append('Set-Cookie', `magic_email=${encodeURIComponent(result.email)}; ${shortCookieOpts}`);
       headers.append('Set-Cookie', `magic_group_id=${encodeURIComponent(org.id)}; ${shortCookieOpts}`);
       headers.append('Set-Cookie', `login_intent=; Path=/; Max-Age=0`);
@@ -448,7 +444,7 @@ export async function handleMagicLinkVerify(
         return new Response(null, { status: 302, headers: { Location: '/login?error=not_a_member' } });
       }
 
-      headers.append('Set-Cookie', `identity_user_id=${encodeURIComponent(userId)}; ${longCookieOpts}; HttpOnly`);
+      for (const c of await identitySetCookies(env, { userId })) headers.append('Set-Cookie', c);
       headers.append('Set-Cookie', `magic_email=${encodeURIComponent(result.email)}; ${shortCookieOpts}`);
       headers.append('Set-Cookie', `magic_group_id=${encodeURIComponent(result.group_id)}; ${shortCookieOpts}`);
       headers.set('Location', '/group-select');

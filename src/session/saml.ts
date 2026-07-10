@@ -1,4 +1,5 @@
 import { clearCookie, parseCookies, serializeCookie } from './cookies';
+import { identitySetCookies } from './identity';
 import { authorizeFetch } from './fetch';
 import type { AuthorizeEnv } from './index';
 
@@ -132,12 +133,9 @@ export async function handleSamlAcs(ctx: RouteContext): Promise<Response | null>
 
   const headers = new Headers({ Location: dest });
   headers.append('Set-Cookie', clearCookie(SAML_RELAY_STATE_COOKIE, ctx.request));
-  headers.append('Set-Cookie', serializeCookie(IDENTITY_USER_ID_COOKIE, userId, {
-    maxAge: 60 * 60 * 24,
-    path: '/',
-    secure: isSecureRequest(ctx.request),
-    httpOnly: true,
-  }));
+  for (const c of await identitySetCookies(ctx.env, { userId })) {
+    headers.append('Set-Cookie', c);
+  }
   return new Response(null, { status: 302, headers });
 }
 

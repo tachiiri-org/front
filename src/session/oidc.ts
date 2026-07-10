@@ -1,5 +1,6 @@
 import { exchangeOidcOAuthCode, serializeOidcSessionCookie, findOrCreateUserByOidc } from "../identify";
 import { clearCookie, parseCookies, serializeCookie } from "./cookies";
+import { identitySetCookies } from "./identity";
 import type { AuthorizeEnv } from "./index";
 import { authorizeFetch } from "./fetch";
 import { MCP_OAUTH_PARAMS_COOKIE } from "./google";
@@ -116,12 +117,9 @@ export async function handleOidcLoginCallback(context: RouteContext): Promise<Re
     headers.append("Set-Cookie", await serializeOidcSessionCookie(oidcSession, context.env, context.request));
 
     const userId = await findOrCreateUserByOidc(context.env, oidcId, oidcSession.sub);
-    headers.append("Set-Cookie", serializeCookie(IDENTITY_USER_ID_COOKIE, userId, {
-      maxAge: 60 * 60 * 24,
-      path: "/",
-      secure: isSecureRequest(context.request),
-      httpOnly: true,
-    }));
+    for (const c of await identitySetCookies(context.env, { userId })) {
+      headers.append("Set-Cookie", c);
+    }
   } catch {
     // identity lookup failure is non-fatal; org-select page will handle missing state
   }

@@ -26,7 +26,7 @@ import {
   handleComponentSchemaPut,
 } from './component-schemas';
 import { authorizeFetch, type AuthorizeEnv } from '../session';
-import { parseCookies } from '../session/cookies';
+import { readIdentity } from '../session/identity';
 import { readGitHubConnectSession } from '../identify';
 
 
@@ -338,15 +338,15 @@ export const handleApiRequest = async (request: Request, env: Env): Promise<Resp
   const expectedToken = await resolveSecretValue(env.BUILD_SCREENS_TOKEN);
   const isBuildRequest = buildToken && expectedToken && buildToken === expectedToken;
 
-  const cookies = parseCookies(request);
+  const identity = await readIdentity(env, request);
   const tenantContext = isBuildRequest
     ? {
-        tenantId: request.headers.get('x-org-id') ?? env.DEFAULT_ORG_ID ?? cookies.get('identity_group_id') ?? undefined,
+        tenantId: request.headers.get('x-org-id') ?? env.DEFAULT_ORG_ID ?? identity?.groupId,
         subjectId: undefined,
       }
     : {
-        tenantId: cookies.get('identity_group_id') ?? undefined,
-        subjectId: cookies.get('identity_user_id') ?? undefined,
+        tenantId: identity?.groupId,
+        subjectId: identity?.userId,
       };
   const screenNames = createScreenNameBackend(env, tenantContext);
 
@@ -459,10 +459,10 @@ export const handleApiRequest = async (request: Request, env: Env): Promise<Resp
 
   // Storage Explorer: D1 proxy
   if (url.pathname === '/api/v1/viewer/d1/databases' && request.method === 'GET') {
-    const cookies = parseCookies(request);
+    const identity = await readIdentity(env, request);
     const tenantContext = {
-      tenantId: cookies.get('identity_group_id') ?? undefined,
-      subjectId: cookies.get('identity_user_id') ?? undefined,
+      tenantId: identity?.groupId,
+      subjectId: identity?.userId,
     };
     return authorizeFetch(env, { path: '/api/v1/d1/v4/databases', method: 'GET', tenantContext });
   }
@@ -471,10 +471,10 @@ export const handleApiRequest = async (request: Request, env: Env): Promise<Resp
   if (d1QueryMatch && request.method === 'POST') {
     const dbId = decodeURIComponent(d1QueryMatch[1]);
     const body = await request.text();
-    const cookies = parseCookies(request);
+    const identity = await readIdentity(env, request);
     const tenantContext = {
-      tenantId: cookies.get('identity_group_id') ?? undefined,
-      subjectId: cookies.get('identity_user_id') ?? undefined,
+      tenantId: identity?.groupId,
+      subjectId: identity?.userId,
     };
     return authorizeFetch(env, {
       path: `/api/v1/d1/v4/databases/${dbId}/query`,
@@ -486,10 +486,10 @@ export const handleApiRequest = async (request: Request, env: Env): Promise<Resp
 
   // Storage Explorer: R2 proxy
   if (url.pathname === '/api/v1/viewer/r2/buckets' && request.method === 'GET') {
-    const cookies = parseCookies(request);
+    const identity = await readIdentity(env, request);
     const tenantContext = {
-      tenantId: cookies.get('identity_group_id') ?? undefined,
-      subjectId: cookies.get('identity_user_id') ?? undefined,
+      tenantId: identity?.groupId,
+      subjectId: identity?.userId,
     };
     return authorizeFetch(env, {
       path: '/api/v1/cloudflare-r2-adapter/control/r2_bucket_list',
@@ -501,10 +501,10 @@ export const handleApiRequest = async (request: Request, env: Env): Promise<Resp
 
   if (url.pathname === '/api/v1/viewer/r2/files' && request.method === 'POST') {
     const body = await request.text();
-    const cookies = parseCookies(request);
+    const identity = await readIdentity(env, request);
     const tenantContext = {
-      tenantId: cookies.get('identity_group_id') ?? undefined,
-      subjectId: cookies.get('identity_user_id') ?? undefined,
+      tenantId: identity?.groupId,
+      subjectId: identity?.userId,
     };
     return authorizeFetch(env, {
       path: '/api/v1/cloudflare-r2-adapter/s3/r2_file_list',
@@ -516,10 +516,10 @@ export const handleApiRequest = async (request: Request, env: Env): Promise<Resp
 
   if (url.pathname === '/api/v1/viewer/r2/file' && request.method === 'POST') {
     const body = await request.text();
-    const cookies = parseCookies(request);
+    const identity = await readIdentity(env, request);
     const tenantContext = {
-      tenantId: cookies.get('identity_group_id') ?? undefined,
-      subjectId: cookies.get('identity_user_id') ?? undefined,
+      tenantId: identity?.groupId,
+      subjectId: identity?.userId,
     };
     return authorizeFetch(env, {
       path: '/api/v1/cloudflare-r2-adapter/s3/r2_file_get',
@@ -535,10 +535,10 @@ export const handleApiRequest = async (request: Request, env: Env): Promise<Resp
     const suffix = graphApiMatch[1] ?? '/';
     const backendPath = `/api/v1/graph${suffix}${url.search}`;
     const body = request.method !== 'GET' && request.method !== 'HEAD' ? await request.text() : undefined;
-    const cookies = parseCookies(request);
+    const identity = await readIdentity(env, request);
     const tenantContext = {
-      tenantId: cookies.get('identity_group_id') ?? undefined,
-      subjectId: cookies.get('identity_user_id') ?? undefined,
+      tenantId: identity?.groupId,
+      subjectId: identity?.userId,
     };
     // The graph API is per-tenant/per-subject. If the session expired while the tab stayed open,
     // the identity cookies are gone; forwarding a tenant-less request makes the backend no-op on an

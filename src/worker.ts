@@ -8,6 +8,7 @@ import {
 import { handleGoogleLoginStart, handleGoogleLoginCallback } from './session/google';
 import { handleMicrosoftLoginStart, handleMicrosoftLoginCallback } from './session/microsoft';
 import type { AuthorizeEnv } from './session';
+import { readIdentity, identityClearCookies } from './session/identity';
 import { handleApiRequest as handleDataApiRequest, handleGitHubAuthStatus, handleAuthStatus, handleIdentityStatus, handleOrgCreate, handleSelectOrg, handleOrgMembers, handleAutoSelectOrg, handleMagicLinkRequest, handleMagicLinkVerify, handleMemberCheck, handleGroupLoginPage, handleOrgSlugLogin, handleOrgGroupsApi, handleOrgGroupSelectPage } from './routes/data';
 import { handleApiRequest as handleLayoutApiRequest } from './routes/layout';
 import { handleMcp } from './mcp/handler';
@@ -52,13 +53,12 @@ type AssetsEnv = {
 
 type Env = AssetsEnv & AuthorizeEnv;
 
-const getNavCookies = (request: Request): { userId: string | null; orgId: string | null } => {
-  const header = request.headers.get('Cookie') ?? '';
-  const get = (name: string): string | null => {
-    const m = header.match(new RegExp('(?:^|;\\s*)' + name + '=([^;]*)'));
-    return m ? decodeURIComponent(m[1]) : null;
-  };
-  return { userId: get('identity_user_id'), orgId: get('identity_group_id') };
+const getNavCookies = async (
+  request: Request,
+  env: AuthorizeEnv,
+): Promise<{ userId: string | null; orgId: string | null }> => {
+  const identity = await readIdentity(env, request);
+  return { userId: identity?.userId ?? null, orgId: identity?.groupId ?? null };
 };
 
 const isPublicPath = (pathname: string): boolean =>
@@ -93,8 +93,8 @@ const isNavigationRequest = (request: Request): boolean => {
 //   visitor (ビジター) : logged in, no group context (non-member)
 //   member  (メンバー) : logged in and in a group
 // Only "present / absent" of the cookies is shown, never their values (no XSS).
-const renderPublicStancePage = (request: Request): Response => {
-  const { userId, orgId } = getNavCookies(request);
+const renderPublicStancePage = async (request: Request, env: AuthorizeEnv): Promise<Response> => {
+  const { userId, orgId } = await getNavCookies(request, env);
   const [stanceJa, stanceEn, desc] = !userId
     ? ['ゲスト', 'guest', '未ログイン。認証なしでこの公開ページに到達できています（認証ゲートの外側）。']
     : !orgId
@@ -276,9 +276,8 @@ async function fetchInner(request: Request, env: Env): Promise<Response> {
       for (const c of [...clearGitHubSessionCookies(request), ...clearGitHubConnectSessionCookies(request), ...clearGoogleSessionCookies(request), ...clearMicrosoftSessionCookies(request), ...clearOidcSessionCookies(request)]) {
         headers.append('Set-Cookie', c);
       }
-      for (const name of ['identity_user_id', 'identity_group_id', 'org_user_id', 'login_intent']) {
-        headers.append('Set-Cookie', `${name}=; Path=/; Max-Age=0; SameSite=Lax`);
-      }
+      for (const c of identityClearCookies()) headers.append('Set-Cookie', c);
+      headers.append('Set-Cookie', `login_intent=; Path=/; Max-Age=0; SameSite=Lax`);
       return new Response(null, { status: 204, headers });
     }
     if (pathname === '/api/v1/auth/github/logout' && request.method === 'POST') {
@@ -306,25 +305,22 @@ async function fetchInner(request: Request, env: Env): Promise<Response> {
       for (const c of [...clearGitHubSessionCookies(request), ...clearGitHubConnectSessionCookies(request)]) {
         headers.append('Set-Cookie', c);
       }
-      for (const name of ['identity_user_id', 'identity_group_id', 'org_user_id', 'login_intent']) {
-        headers.append('Set-Cookie', `${name}=; Path=/; Max-Age=0; SameSite=Lax`);
-      }
+      for (const c of identityClearCookies()) headers.append('Set-Cookie', c);
+      headers.append('Set-Cookie', `login_intent=; Path=/; Max-Age=0; SameSite=Lax`);
       return new Response(null, { status: 302, headers });
     }
     if (pathname === '/oauth/google/logout' && request.method === 'GET') {
       const headers = new Headers({ Location: '/' });
       for (const c of clearGoogleSessionCookies(request)) headers.append('Set-Cookie', c);
-      for (const name of ['identity_user_id', 'identity_group_id', 'org_user_id', 'login_intent']) {
-        headers.append('Set-Cookie', `${name}=; Path=/; Max-Age=0; SameSite=Lax`);
-      }
+      for (const c of identityClearCookies()) headers.append('Set-Cookie', c);
+      headers.append('Set-Cookie', `login_intent=; Path=/; Max-Age=0; SameSite=Lax`);
       return new Response(null, { status: 302, headers });
     }
     if (pathname === '/oauth/microsoft/logout' && request.method === 'GET') {
       const headers = new Headers({ Location: '/' });
       for (const c of clearMicrosoftSessionCookies(request)) headers.append('Set-Cookie', c);
-      for (const name of ['identity_user_id', 'identity_group_id', 'org_user_id', 'login_intent']) {
-        headers.append('Set-Cookie', `${name}=; Path=/; Max-Age=0; SameSite=Lax`);
-      }
+      for (const c of identityClearCookies()) headers.append('Set-Cookie', c);
+      headers.append('Set-Cookie', `login_intent=; Path=/; Max-Age=0; SameSite=Lax`);
       return new Response(null, { status: 302, headers });
     }
     // GitHub login (read:user scope — identity only)
@@ -378,9 +374,8 @@ async function fetchInner(request: Request, env: Env): Promise<Response> {
     if (pathname === '/oauth/oidc/logout' && request.method === 'GET') {
       const headers = new Headers({ Location: '/' });
       for (const c of clearOidcSessionCookies(request)) headers.append('Set-Cookie', c);
-      for (const name of ['identity_user_id', 'identity_group_id', 'org_user_id', 'login_intent']) {
-        headers.append('Set-Cookie', `${name}=; Path=/; Max-Age=0; SameSite=Lax`);
-      }
+      for (const c of identityClearCookies()) headers.append('Set-Cookie', c);
+      headers.append('Set-Cookie', `login_intent=; Path=/; Max-Age=0; SameSite=Lax`);
       return new Response(null, { status: 302, headers });
     }
 
@@ -432,12 +427,12 @@ async function fetchInner(request: Request, env: Env): Promise<Response> {
 
     // Public stance test page — served before the auth gate (no login required).
     if (pathname === '/public' && request.method === 'GET') {
-      return renderPublicStancePage(request);
+      return renderPublicStancePage(request, env);
     }
 
     // Auth gate: check session before serving any HTML
     if (isNavigationRequest(request) && !isPublicPath(pathname)) {
-      const { userId, orgId } = getNavCookies(request);
+      const { userId, orgId } = await getNavCookies(request, env);
       if (!userId) {
         const returnTo = encodeURIComponent(pathname);
         return Response.redirect(new URL(`/login?returnTo=${returnTo}`, request.url).href, 302);
