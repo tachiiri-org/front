@@ -9,7 +9,7 @@ function isSecureRequest(request: Request): boolean {
   return new URL(request.url).protocol === 'https:';
 }
 const IDENTITY_USER_ID_COOKIE = 'identity_user_id';
-const SAML_RELAY_STATE_COOKIE = 'saml_relay_state';
+const SAML_RELAY_STATE_COOKIE = '__Host-saml_relay_state';
 
 type RouteContext = { request: Request; env: AuthorizeEnv };
 

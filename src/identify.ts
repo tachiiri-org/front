@@ -36,10 +36,10 @@ export type IdentifyMicrosoftSession = {
   sub: string;
 };
 
-const GITHUB_SESSION_COOKIE = "github_session";
-const GITHUB_CONNECT_SESSION_COOKIE = "github_connect_session";
-const GOOGLE_SESSION_COOKIE = "google_session";
-const MICROSOFT_SESSION_COOKIE = "microsoft_session";
+const GITHUB_SESSION_COOKIE = "__Host-github_session";
+const GITHUB_CONNECT_SESSION_COOKIE = "__Host-github_connect_session";
+const GOOGLE_SESSION_COOKIE = "__Host-google_session";
+const MICROSOFT_SESSION_COOKIE = "__Host-microsoft_session";
 const SESSION_TTL = 60 * 60 * 24 * 7;
 
 // ---- GitHub login ----
@@ -514,7 +514,7 @@ export type IdentifyOidcSession = {
   name: string | null;
 };
 
-const OIDC_SESSION_COOKIE = "oidc_session";
+const OIDC_SESSION_COOKIE = "__Host-oidc_session";
 
 export async function exchangeOidcOAuthCode(
   env: AuthorizeEnv,

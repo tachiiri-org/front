@@ -229,13 +229,13 @@ export async function handleGitHubOAuthCallback(context: RouteContext): Promise<
   return handleGitHubLoginCallback(context);
 }
 
-const LOGIN_STATE_COOKIE_NAME = "github_login_oauth_state";
-const LOGIN_RETURN_TO_COOKIE = "github_login_return_to";
-const CONNECT_STATE_COOKIE_NAME = "github_connect_oauth_state";
-const CONNECT_RETURN_TO_COOKIE = "github_connect_return_to";
+const LOGIN_STATE_COOKIE_NAME = "__Host-github_login_oauth_state";
+const LOGIN_RETURN_TO_COOKIE = "__Host-github_login_return_to";
+const CONNECT_STATE_COOKIE_NAME = "__Host-github_connect_oauth_state";
+const CONNECT_RETURN_TO_COOKIE = "__Host-github_connect_return_to";
 export const IDENTITY_USER_ID_COOKIE = "identity_user_id";
 export const IDENTITY_LINK_MODE_COOKIE = "identity_link_mode";
-export const MCP_OAUTH_PARAMS_COOKIE = "mcp_oauth_params";
+export const MCP_OAUTH_PARAMS_COOKIE = "__Host-mcp_oauth_params";
 /** @deprecated Use LOGIN_STATE_COOKIE_NAME or CONNECT_STATE_COOKIE_NAME */
 const STATE_COOKIE_NAME = LOGIN_STATE_COOKIE_NAME;
 const STATE_TTL_SECONDS = 60 * 10;

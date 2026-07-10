@@ -138,9 +138,9 @@ export function clearMicrosoftSessionCookies(request: Request): string[] {
   return [clearCookie(MICROSOFT_SESSION_COOKIE, request)];
 }
 
-export const MICROSOFT_SESSION_COOKIE = "microsoft_session";
-const LOGIN_STATE_COOKIE_NAME = "microsoft_login_oauth_state";
-const LOGIN_RETURN_TO_COOKIE = "microsoft_login_return_to";
+export const MICROSOFT_SESSION_COOKIE = "__Host-microsoft_session";
+const LOGIN_STATE_COOKIE_NAME = "__Host-microsoft_login_oauth_state";
+const LOGIN_RETURN_TO_COOKIE = "__Host-microsoft_login_return_to";
 const IDENTITY_USER_ID_COOKIE = "identity_user_id";
 const IDENTITY_LINK_MODE_COOKIE = "identity_link_mode";
 const STATE_TTL_SECONDS = 60 * 10;

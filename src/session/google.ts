@@ -133,9 +133,9 @@ export async function handleGoogleLoginCallback(context: RouteContext): Promise<
   return new Response(null, { status: 302, headers });
 }
 
-const LOGIN_STATE_COOKIE_NAME = "google_login_oauth_state";
-const LOGIN_RETURN_TO_COOKIE = "google_login_return_to";
+const LOGIN_STATE_COOKIE_NAME = "__Host-google_login_oauth_state";
+const LOGIN_RETURN_TO_COOKIE = "__Host-google_login_return_to";
 const IDENTITY_USER_ID_COOKIE = "identity_user_id";
 const IDENTITY_LINK_MODE_COOKIE = "identity_link_mode";
-export const MCP_OAUTH_PARAMS_COOKIE = "mcp_oauth_params";
+export const MCP_OAUTH_PARAMS_COOKIE = "__Host-mcp_oauth_params";
 const STATE_TTL_SECONDS = 60 * 10;
