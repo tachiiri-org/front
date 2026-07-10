@@ -39,7 +39,7 @@ function splitTokens(body: string): Array<{ t: 'txt'; v: string } | { t: 'men'; 
 
 export function createRelationPanelView(
   ctx: GraphEditorContext,
-  opts: { lang: 'en' | 'ja'; initialNodeId?: string | null; onClose?: () => void },
+  opts: { lang: 'en' | 'ja'; initialNodeId?: string | null; onClose?: () => void; leadingHeadEl?: HTMLElement },
 ): PanelView {
   let lang = opts.lang;
   let currentNodeId: string | null = opts.initialNodeId ?? null;
@@ -454,15 +454,17 @@ export function createRelationPanelView(
       const txt = document.createElement('span');
       txt.textContent = label ?? labelById.get(id) ?? id;
       nodeLink.appendChild(txt);
+      // 左クリック = このノードを選択（＝表示切替: 関係パネルはこのノードの関係、選択中ソースの
+      // ノードパネルはこのノードの子を出す）。右クリック = ノード検索メニュー（差し替え／削除）。
       nodeLink.addEventListener('mousedown', (e) => {
-        if (e.button !== 0) return; // 右クリックは contextmenu 側で関係パネルを開く。
+        if (e.button !== 0) return;
         clearGroupSel(); // チップクリックは focus を奪わない＝blur が来ないので、ここで選択を解除
         e.preventDefault();
-        openSearchPopover(nodeLink, (n, cl) => void replaceNodeLink(nodeLink, n, cl), () => removeNodeLink(nodeLink));
+        ctx.selectNode?.(id, nodeLink.textContent ?? undefined);
       });
       nodeLink.addEventListener('contextmenu', (e) => {
         e.preventDefault();
-        ctx.openRelationPanel?.(id, nodeLink.textContent ?? undefined);
+        openSearchPopover(nodeLink, (n, cl) => void replaceNodeLink(nodeLink, n, cl), () => removeNodeLink(nodeLink));
       });
       return nodeLink;
     };
@@ -952,6 +954,9 @@ export function createRelationPanelView(
       else if (e.key === 'Enter') { e.preventDefault(); if (searchTimer) clearTimeout(searchTimer); applyFilter(searchInput.value); }
     });
     searchRow.append(searchIconWrap, searchInput);
+    // 並び替え用グリップ（panels-view から渡される）を最上部行の左端に。head は render 毎に作り直される
+    // ので、同じ要素をここで毎回先頭へ差し込む（リスナは要素に付いているので保持される）。
+    if (opts.leadingHeadEl) searchRow.insertBefore(opts.leadingHeadEl, searchRow.firstChild);
     head.appendChild(searchRow);
 
     // ── 1行目: 操作（リンクなし + ⟳ + 言語切替） ── ノードペインヘッダと同じ 28px+下線。
@@ -1092,6 +1097,7 @@ export function createRelationPanelView(
   const noPath: PanelPathEntry[] = [];
   return {
     el,
+    head,
     load: () => render(),
     refresh: () => { void render(); },
     search: async () => { /* top-bar 検索は関係列には作用しない */ },

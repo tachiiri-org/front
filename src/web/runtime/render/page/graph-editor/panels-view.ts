@@ -1,4 +1,4 @@
-import type { GraphEditorContext, PanelView } from './types';
+import type { GraphEditorContext, PanelView, PanelPathEntry } from './types';
 import { BORDER, TEXT_HIGH, TEXT_MID, TEXT_DIM, SELECT_STRONG } from './constants';
 import { createNodePanelView } from './node-panel-view';
 import { createRelationPanelView } from './relation-panel-view';
@@ -65,75 +65,126 @@ export function createPanelsView(ctx: GraphEditorContext): {
   search: (q: string) => Promise<void>;
   setAllLang: (lang: 'en' | 'ja') => void;
 } {
-  // Outer wrapper: a horizontally-scrolling node area on the left + one persistent line (relation)
-  // dock pinned to the right. Node panels (複数) drill the hierarchy; the line dock always shows
-  // the edges of the active node.
+  // 選択中ノードをソースにする特別値。このソースのノードパネルは「最後にクリックされたノード」の子を出す。
+  const SELECTION_SRC = '__selection__';
+
+  // Outer wrapper: ONE horizontally-scrolling flex row holding all panels (node + relation) in order,
+  // so they can be freely interleaved / reordered (例: ノード-リレーション-ノード)。Node panels take a
+  // fixed width; relation panels flex-grow to fill the remaining space wherever they sit.
   const el = document.createElement('div');
-  el.style.cssText = `display:flex;flex-direction:row;flex:1;overflow:hidden;`;
+  el.style.cssText = `display:flex;flex-direction:row;flex:1;overflow-x:auto;overflow-y:hidden;min-width:0;`;
 
-  // Node panels take only their own width on the left (shrinkable + horizontally scrollable when
-  // they overflow); the line dock fills ALL remaining space to the right (右余白全体).
-  const nodeArea = document.createElement('div');
-  nodeArea.style.cssText = `display:flex;flex-direction:row;flex:0 1 auto;overflow-x:auto;overflow-y:hidden;min-width:0;`;
-  el.appendChild(nodeArea);
+  type RelationPanelInstance = { id: string; view: PanelView; containerEl: HTMLElement; primary: boolean };
+  const nodePanels: NodePanelInstance[] = [];
+  const relationPanels: RelationPanelInstance[] = [];
+  let fullscreenNodePanelId: string | null = null;
+  let draggingPanelId: string | null = null;
+  let relPanelSeq = 0;
 
-  // ── Line dock (常時表示・右余白を全部使う) ──────────────────────────────────
-  // A horizontal stack of relation panels. The primary panel (leftmost) follows the active node
-  // selection; right-clicking a node-link chip appends an extra panel to its right (Miller-column
-  // style, ②). Extra panels each carry their own close button.
-  const relationDock = document.createElement('div');
-  relationDock.style.cssText = `flex:1 1 0;min-width:300px;display:flex;flex-direction:row;border-left:1px solid ${BORDER};overflow-x:auto;overflow-y:hidden;`;
+  // ── Reorder (grip drag-and-drop, node ⇄ relation unified) ──────────────────
+  const allContainers = () => [...nodePanels.map(p => p.containerEl), ...relationPanels.map(p => p.containerEl)];
+  const clearDropIndicators = () => { for (const c of allContainers()) c.style.boxShadow = ''; };
+  const containerOf = (panelId: string): HTMLElement | undefined =>
+    nodePanels.find(p => p.config.id === panelId)?.containerEl ?? relationPanels.find(p => p.id === panelId)?.containerEl;
 
-  const primaryPanel = document.createElement('div');
-  primaryPanel.style.cssText = `flex:1 1 0;min-width:300px;display:flex;flex-direction:column;overflow:hidden;`;
-  const relationView: PanelView = createRelationPanelView(ctx, { lang: ctx.state.lang, initialNodeId: null });
-  relationView.el.style.flex = '1';
-  primaryPanel.appendChild(relationView.el);
-  relationDock.appendChild(primaryPanel);
-  el.appendChild(relationDock);
+  // Move the dragged panel's container next to the target in the single flex row, then resync the
+  // nodePanels array order from the DOM (so node adjacency / save stay consistent). Order is not
+  // persisted across reload (relation panels aren't saved) — it's a within-session arrangement.
+  const reorderPanel = (draggedId: string, targetId: string, before: boolean) => {
+    if (draggedId === targetId) return;
+    const dragged = containerOf(draggedId), target = containerOf(targetId);
+    if (!dragged || !target) return;
+    el.insertBefore(dragged, before ? target : target.nextSibling);
+    const domOrder = [...el.children];
+    nodePanels.sort((a, b) => domOrder.indexOf(a.containerEl) - domOrder.indexOf(b.containerEl));
+    saveAll();
+    updateAllSrcBtns();
+  };
 
-  // ② Open an additional relation panel to the right showing `nodeId`'s relations. Independent of
-  // the primary dock (does not follow selection); closed via its own × button.
-  ctx.openRelationPanel = (nodeId, label) => {
-    const panel = document.createElement('div');
-    panel.style.cssText = `flex:1 1 0;min-width:300px;display:flex;flex-direction:column;border-left:1px solid ${BORDER};overflow:hidden;`;
-    let view: PanelView;
-    const close = () => { panel.remove(); view.unregister(); };
-    view = createRelationPanelView(ctx, { lang: ctx.state.lang, initialNodeId: nodeId, onClose: close });
+  // A reorder grip (⠿). Dragging it starts a panel reorder. (For relation panels the grip is passed
+  // into the view and re-inserted each render, since the relation head is rebuilt on render.)
+  const makeGrip = (panelId: string): HTMLElement => {
+    const grip = document.createElement('span');
+    grip.textContent = '⠿';
+    grip.title = 'ドラッグでパネルを並び替え';
+    grip.draggable = true;
+    grip.style.cssText = `flex-shrink:0;cursor:grab;color:${TEXT_DIM};font-size:13px;user-select:none;padding:0 2px;`;
+    grip.addEventListener('dragstart', (e) => {
+      draggingPanelId = panelId;
+      e.dataTransfer?.setData('text/plain', panelId);
+      if (e.dataTransfer) e.dataTransfer.effectAllowed = 'move';
+    });
+    grip.addEventListener('dragend', () => { draggingPanelId = null; clearDropIndicators(); });
+    return grip;
+  };
+  // Make a panel container a drop target for a reorder drag. Guarded on draggingPanelId, so it never
+  // reacts to node-body DnD (which uses ctx.nodePanelDrag). Uses the container (stable across the
+  // relation head's re-renders) rather than the header.
+  const addDropZone = (panelId: string, containerEl: HTMLElement) => {
+    containerEl.addEventListener('dragover', (e) => {
+      if (!draggingPanelId || draggingPanelId === panelId) return;
+      e.preventDefault();
+      if (e.dataTransfer) e.dataTransfer.dropEffect = 'move';
+      const rect = containerEl.getBoundingClientRect();
+      const before = (e.clientX - rect.left) < rect.width / 2;
+      clearDropIndicators();
+      containerEl.style.boxShadow = before ? 'inset 2px 0 0 0 #4a9eff' : 'inset -2px 0 0 0 #4a9eff';
+    });
+    containerEl.addEventListener('dragleave', (e) => {
+      if (!containerEl.contains(e.relatedTarget as Node | null)) containerEl.style.boxShadow = '';
+    });
+    containerEl.addEventListener('drop', (e) => {
+      if (!draggingPanelId || draggingPanelId === panelId) return;
+      e.preventDefault();
+      const rect = containerEl.getBoundingClientRect();
+      reorderPanel(draggingPanelId, panelId, (e.clientX - rect.left) < rect.width / 2);
+      draggingPanelId = null;
+      clearDropIndicators();
+    });
+  };
+
+  // Wrap a relation PanelView (whose head already hosts a reorder grip via leadingHeadEl) in a
+  // reorderable container. `primary` panels have no close button; extras get a × close.
+  const createRelationPanel = (id: string, view: PanelView, primary: boolean): RelationPanelInstance => {
+    const containerEl = document.createElement('div');
+    containerEl.dataset.panelId = id;
+    containerEl.style.cssText = `flex:1 1 0;min-width:300px;display:flex;flex-direction:column;border-left:1px solid ${BORDER};overflow:hidden;position:relative;`;
     view.el.style.flex = '1';
-    panel.appendChild(view.el);
-    relationDock.appendChild(panel);
-    // createRelationPanelView renders once from initialNodeId; setParent re-renders with the full breadcrumb
-    // (ルート › … › node) so the nodePanelHeader matches the node dock's breadcrumb, not just the bare name.
+    containerEl.appendChild(view.el);
+    const inst: RelationPanelInstance = { id, view, containerEl, primary };
+    addDropZone(id, containerEl);
+    if (!primary) {
+      const closeBtn = document.createElement('button');
+      closeBtn.textContent = '×';
+      closeBtn.style.cssText = `position:absolute;top:2px;right:4px;z-index:3;background:transparent;border:none;color:${TEXT_DIM};cursor:pointer;font-size:13px;line-height:1;`;
+      closeBtn.addEventListener('click', () => {
+        const i = relationPanels.indexOf(inst);
+        if (i >= 0) relationPanels.splice(i, 1);
+        view.unregister();
+        containerEl.remove();
+      });
+      containerEl.appendChild(closeBtn);
+    }
+    return inst;
+  };
+
+  // The primary relation panel (always present, follows the global selection). Its grip lives in the
+  // relation head (re-inserted each render by the view).
+  const relationView: PanelView = createRelationPanelView(ctx, { lang: ctx.state.lang, initialNodeId: null, leadingHeadEl: makeGrip('rel-primary') });
+
+  // ② Open an additional relation panel showing `nodeId`'s relations (independent; closable). Kept
+  // for programmatic use; the chip right-click no longer triggers it.
+  ctx.openRelationPanel = (nodeId, label) => {
+    const id = `rel-x-${++relPanelSeq}`;
+    const view = createRelationPanelView(ctx, { lang: ctx.state.lang, initialNodeId: nodeId, leadingHeadEl: makeGrip(id) });
+    const inst = createRelationPanel(id, view, false);
+    relationPanels.push(inst);
+    el.appendChild(inst.containerEl);
     void (async () => {
       const path = await fetchNodePath(ctx.gId, nodeId, label ?? '', ctx.rootNodeId, ctx.state.lang);
       await view.setParent(nodeId, undefined, path);
     })();
-    requestAnimationFrame(() => { relationDock.scrollLeft = relationDock.scrollWidth; });
-  };
-
-  const nodePanels: NodePanelInstance[] = [];
-  let fullscreenNodePanelId: string | null = null;
-  let draggingNodePanelId: string | null = null;
-
-  // Clear the pane-reorder drop indicator (blue vertical line) from every pane.
-  const clearNodePanelDropIndicators = () => {
-    for (const p of nodePanels) p.containerEl.style.boxShadow = '';
-  };
-
-  // Reorder nodePanels via nodePanelHeader drag-and-drop. `before` = drop on the left half of the target.
-  const reorderNodePanel = (draggedId: string, targetId: string, before: boolean) => {
-    if (draggedId === targetId) return;
-    const from = nodePanels.findIndex(p => p.config.id === draggedId);
-    if (from === -1) return;
-    const [moved] = nodePanels.splice(from, 1);
-    let to = nodePanels.findIndex(p => p.config.id === targetId);
-    if (to === -1) { nodePanels.splice(from, 0, moved); return; }
-    if (!before) to += 1;
-    nodePanels.splice(to, 0, moved);
-    for (const p of nodePanels) nodeArea.appendChild(p.containerEl);
-    saveAll();
-    updateAllSrcBtns();
+    requestAnimationFrame(() => { el.scrollLeft = el.scrollWidth; });
   };
 
   const applyFullscreenLayout = () => {
@@ -153,6 +204,33 @@ export function createPanelsView(ctx: GraphEditorContext): {
       }
       p.updateFsBtn();
     }
+    // In fullscreen, hide relation panels too (only the one node panel is shown).
+    for (const rp of relationPanels) rp.containerEl.style.display = isFs ? 'none' : '';
+  };
+
+  // ── Global selection (最後にクリックされたノード) ──────────────────────────
+  // Selecting drives (a) the relation panel(s) → the node's relations and (b) any node panel sourced
+  // from 「選択中」(SELECTION_SRC) → the node's children. Set by node-row focus and by left-clicking a
+  // relation node-link chip.
+  let selectedNodeId: string | null = null;
+  const setSelectedNode = (nodeId: string | null, ancestorIds: Set<string> = new Set(), path: PanelPathEntry[] = []) => {
+    selectedNodeId = nodeId;
+    if (nodeId !== null) {
+      ctx.setActiveRelation(null);
+      void relationView.setParent(nodeId, ancestorIds, path);
+    }
+    for (const p of nodePanels) {
+      if (p.config.sourcePanelId === SELECTION_SRC && !p.config.pinned) {
+        void p.view.setParent(nodeId, ancestorIds, path);
+      }
+    }
+  };
+  // Chip left-click → select this node (fetch its path for the breadcrumb).
+  ctx.selectNode = (nodeId, label) => {
+    void (async () => {
+      const path = await fetchNodePath(ctx.gId, nodeId, label ?? '', ctx.rootNodeId, ctx.state.lang);
+      setSelectedNode(nodeId, new Set(), path);
+    })();
   };
 
   // ── Inter-pane wiring ──────────────────────────────────────────────
@@ -182,13 +260,8 @@ export function createPanelsView(ctx: GraphEditorContext): {
         void p.view.setParent(selectedNodeId, ancestorIds, path);
       }
     }
-    // The persistent line dock always reflects the most recently selected node (across all nodePanels).
-    // Selecting a different node clears the active relation, so squares fall back to marking the
-    // selected node (and setActiveRelation(null) also triggers a marker redraw for that).
-    if (selectedNodeId !== null) {
-      ctx.setActiveRelation(null);
-      void relationView.setParent(selectedNodeId, ancestorIds, path);
-    }
+    // Focusing a node row also sets the global selection → relation panel(s) + 「選択中」node panels.
+    if (selectedNodeId !== null) setSelectedNode(selectedNodeId, ancestorIds, path);
   };
 
   // Move a node from `nodePanelId` to the adjacent pane (Ctrl/Cmd+→/←). Reuses the cross-pane
@@ -231,9 +304,12 @@ export function createPanelsView(ctx: GraphEditorContext): {
     // capture it and restore focus afterwards — otherwise repeated Ctrl+Shift+←/→ stops
     // firing because the key events no longer land on a node's textarea.
     const active = document.activeElement as HTMLElement | null;
-    // Swap positions in the array, then re-insert every container in the new order.
+    // Swap positions in the array, then move just the dragged container past the target (jumping any
+    // relation panel that may sit between them in the unified row).
+    const moved = nodePanels[idx].containerEl;
+    const target = nodePanels[targetIdx].containerEl;
     [nodePanels[idx], nodePanels[targetIdx]] = [nodePanels[targetIdx], nodePanels[idx]];
-    for (const p of nodePanels) nodeArea.appendChild(p.containerEl);
+    el.insertBefore(moved, direction === 'right' ? target.nextSibling : target);
     saveAll();
     updateAllSrcBtns();
     if (active && typeof active.focus === 'function') active.focus();
@@ -259,43 +335,9 @@ export function createPanelsView(ctx: GraphEditorContext): {
       font-size:11px;color:${TEXT_MID};
     `;
 
-    // Drag handle — drag onto another pane's nodePanelHeader to reorder nodePanels
-    const grip = document.createElement('span');
-    grip.textContent = '⠿';
-    grip.title = 'ドラッグでパネルを並び替え';
-    grip.draggable = true;
-    grip.style.cssText = `flex-shrink:0;cursor:grab;color:${TEXT_DIM};font-size:13px;user-select:none;padding:0 2px;`;
-    grip.addEventListener('dragstart', (e) => {
-      draggingNodePanelId = config.id;
-      e.dataTransfer?.setData('text/plain', config.id);
-      if (e.dataTransfer) e.dataTransfer.effectAllowed = 'move';
-    });
-    grip.addEventListener('dragend', () => { draggingNodePanelId = null; clearNodePanelDropIndicators(); });
-    nodePanelHeader.appendChild(grip);
-
-    // Header is the drop zone (body has its own node drag-and-drop; guard on draggingNodePanelId).
-    // Show a blue vertical line on the side the dragged pane will be inserted (left/right half),
-    // matching the node-reorder insertion indicator.
-    nodePanelHeader.addEventListener('dragover', (e) => {
-      if (!draggingNodePanelId || draggingNodePanelId === config.id) return;
-      e.preventDefault();
-      if (e.dataTransfer) e.dataTransfer.dropEffect = 'move';
-      const rect = containerEl.getBoundingClientRect();
-      const before = (e.clientX - rect.left) < rect.width / 2;
-      clearNodePanelDropIndicators();
-      containerEl.style.boxShadow = before ? 'inset 2px 0 0 0 #4a9eff' : 'inset -2px 0 0 0 #4a9eff';
-    });
-    nodePanelHeader.addEventListener('dragleave', (e) => {
-      if (!containerEl.contains(e.relatedTarget as Node | null)) containerEl.style.boxShadow = '';
-    });
-    nodePanelHeader.addEventListener('drop', (e) => {
-      if (!draggingNodePanelId || draggingNodePanelId === config.id) return;
-      e.preventDefault();
-      const rect = containerEl.getBoundingClientRect();
-      reorderNodePanel(draggingNodePanelId, config.id, (e.clientX - rect.left) < rect.width / 2);
-      draggingNodePanelId = null;
-      clearNodePanelDropIndicators();
-    });
+    // Drag handle (⠿) at the header's left + drop zone on the container — reorder among ALL panels.
+    nodePanelHeader.appendChild(makeGrip(config.id));
+    addDropZone(config.id, containerEl);
 
     // Label (editable) — user-select:text overrides any parent user-select:none
     const labelEl = document.createElement('span');
@@ -333,6 +375,7 @@ export function createPanelsView(ctx: GraphEditorContext): {
     const srcPanelBtn = document.createElement('button');
     srcPanelBtn.style.cssText = `background:transparent;border:1px solid ${BORDER};color:${TEXT_MID};cursor:pointer;font-size:10px;padding:1px 5px;border-radius:3px;flex-shrink:0;`;
     const updateSrcBtn = () => {
+      if (config.sourcePanelId === SELECTION_SRC) { srcPanelBtn.textContent = '選択中'; return; }
       const src = nodePanels.find(p => p.config.id === config.sourcePanelId);
       srcPanelBtn.textContent = src ? src.config.label : 'ルート';
     };
@@ -520,6 +563,9 @@ export function createPanelsView(ctx: GraphEditorContext): {
         if (value === null) {
           // Reset pane to root (clears any stale pane-parent so root children show)
           void inst?.view.setSourceRoot();
+        } else if (value === SELECTION_SRC) {
+          // Follow the global selection: show the currently-selected node's children now.
+          void inst?.view.setParent(selectedNodeId, undefined, []);
         } else {
           const srcInst = nodePanels.find(p => p.config.id === value);
           const selId = srcInst ? (srcInst.view.getSelectedId() ?? null) : null;
@@ -531,6 +577,7 @@ export function createPanelsView(ctx: GraphEditorContext): {
     };
 
     addItem('ルート', null);
+    addItem('選択中', SELECTION_SRC);
     for (const p of nodePanels) {
       if (p.config.id !== nodePanelId) addItem(p.config.label, p.config.id);
     }
@@ -565,7 +612,7 @@ export function createPanelsView(ctx: GraphEditorContext): {
       srcEl.parentElement?.insertBefore(inst.containerEl, srcEl.nextSibling);
     } else {
       nodePanels.push(inst);
-      nodeArea.appendChild(inst.containerEl);
+      el.appendChild(inst.containerEl);
     }
     saveAll();
     updateAllSrcBtns();
@@ -604,22 +651,35 @@ export function createPanelsView(ctx: GraphEditorContext): {
   };
 
   // ── Init ─────────────────────────────────────────────────────────
+  // Default layout = 3 panels: ノード(ルート) / リレーション / ノード(選択中の子). The primary relation
+  // panel is always inserted right after the FIRST node panel; node panel configs persist (order among
+  // themselves) but the mixed order with the relation panel is not persisted (resets to this on reload).
+  const defaultConfigs = (): NodePanelConfig[] => [
+    { ...newNodePanelConfig('パネル 1', ctx.state.lang), sourcePanelId: null },
+    { ...newNodePanelConfig('パネル 2', ctx.state.lang), sourcePanelId: SELECTION_SRC },
+  ];
   const init = () => {
-    nodeArea.innerHTML = '';
+    el.innerHTML = '';
     nodePanels.length = 0;
+    relationPanels.length = 0;
 
     const saved = loadNodePanels(ctx.gId, ctx.state.lang);
-    const configs: NodePanelConfig[] = saved?.length
-      ? saved
-      : [newNodePanelConfig('パネル 1', ctx.state.lang)];
+    // A lone default root panel (the pre-redesign default) upgrades to the new 3-panel default.
+    const trivial = !!saved && saved.length === 1 && (saved[0].sourcePanelId == null);
+    const configs: NodePanelConfig[] = (saved?.length && !trivial) ? saved : defaultConfigs();
 
-    for (const cfg of configs) {
+    const relInst = createRelationPanel('rel-primary', relationView, true);
+    relationPanels.push(relInst);
+
+    configs.forEach((cfg, i) => {
       const inst = createNodePanel(cfg);
       nodePanels.push(inst);
-      nodeArea.appendChild(inst.containerEl);
-    }
+      el.appendChild(inst.containerEl);
+      // Insert the primary relation panel right after the first node panel.
+      if (i === 0) el.appendChild(relInst.containerEl);
+    });
+    if (configs.length === 0) el.appendChild(relInst.containerEl);
 
-    // After all nodePanels are created, update source buttons
     updateAllSrcBtns();
   };
 

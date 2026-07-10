@@ -32,6 +32,9 @@ export type PanelPathEntry = { id: string | null; label: string };
 // implement them as inert no-ops.
 export interface PanelView {
   el: HTMLElement;
+  // The panel's 28px operation header row (used by panels-view to insert a reorder grip). Node and
+  // relation views both expose it so the multi-pane container can make either kind reorderable.
+  head?: HTMLElement;
   load: () => Promise<void>;
   refresh: () => void;
   search: (query: string) => Promise<void>;
@@ -107,4 +110,8 @@ export interface GraphEditorContext {
   // Set by multi-pane: open an additional relation panel to the right of the line dock, showing the
   // given node's relations (Miller-column style). Triggered by right-clicking a node-link chip.
   openRelationPanel?: (nodeId: string, label?: string) => void;
+  // Set by multi-pane: make `nodeId` the globally-selected node (last-clicked). Selecting drives the
+  // relation panel (its relations) and any node panel sourced from 「選択中」(its children). Called
+  // by left-clicking a relation node-link chip and on node-row focus.
+  selectNode?: (nodeId: string, label?: string) => void;
 }
