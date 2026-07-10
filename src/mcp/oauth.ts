@@ -79,7 +79,7 @@ export function handleOAuthMetadata(request: Request, env: AuthorizeEnv): Respon
     token_endpoint: `${base}/oauth/mcp/token`,
     registration_endpoint: `${base}/oauth/mcp/register`,
     response_types_supported: ["code"],
-    grant_types_supported: ["authorization_code"],
+    grant_types_supported: ["authorization_code", "refresh_token"],
     code_challenge_methods_supported: ["S256"],
     token_endpoint_auth_methods_supported: ["none"],
     scopes_supported: ["graph:read", "graph:write"],
@@ -376,6 +376,76 @@ export async function handleMcpCreateOrg(request: Request, env: AuthorizeEnv): P
   return new Response(null, { status: 302, headers });
 }
 
+const ACCESS_TTL = 300;                 // access token: 5 minutes (short-lived)
+const REFRESH_TTL = 60 * 60 * 24 * 90;  // refresh token: 90 days
+
+async function sha256Hex(input: string): Promise<string> {
+  const buf = await crypto.subtle.digest("SHA-256", new TextEncoder().encode(input));
+  return Array.from(new Uint8Array(buf)).map(b => b.toString(16).padStart(2, "0")).join("");
+}
+
+// Resolve the scopes actually granted to this client's agent (intersect requested with the
+// agent's allowed scopes) and its provider. Best-effort: falls back to the requested scopes.
+async function resolveEffectiveScopes(
+  env: AuthorizeEnv,
+  clientId: string,
+  groupId: string,
+  requestedScopes: string[],
+): Promise<{ scopes: string[]; provider?: string }> {
+  let scopes = requestedScopes;
+  let provider: string | undefined;
+  try {
+    const agentRes = await authorizeFetch(env, {
+      path: "/api/v1/agent/by-client-id?client_id=" + encodeURIComponent(clientId),
+      method: "GET",
+      actorType: "program",
+      tenantContext: { tenantId: groupId },
+    });
+    if (agentRes.ok) {
+      const agentData = await agentRes.json() as { provider?: string; scopes?: string[] };
+      if (agentData.provider) provider = agentData.provider;
+      if (Array.isArray(agentData.scopes)) {
+        const allowed = new Set(agentData.scopes);
+        scopes = requestedScopes.filter(s => allowed.has(s));
+      }
+    }
+  } catch {
+    // best-effort: fall back to requestedScopes with no provider
+  }
+  return { scopes, provider };
+}
+
+// Issue a short-lived access token + a fresh rotating refresh token, and build the
+// token endpoint response. Only the SHA-256 hash of the refresh token is stored.
+async function issueTokenResponse(
+  env: AuthorizeEnv,
+  input: { clientId: string; userId: string; groupId: string; scopes: string[]; provider?: string },
+): Promise<Response> {
+  const accessToken = await issueMcpToken(env, {
+    groupId: input.groupId,
+    userId: input.userId,
+    scopes: input.scopes,
+    clientId: input.clientId,
+    provider: input.provider,
+  });
+  const refreshToken = toBase64Url(crypto.getRandomValues(new Uint8Array(32)));
+  const now = Math.floor(Date.now() / 1000);
+  await env.IDENTITY_DB!.prepare(
+    `INSERT INTO t_oauth_refresh_token (token_hash, client_id, user_id, group_id, scopes, provider, expires_at, used)
+     VALUES (?, ?, ?, ?, ?, ?, ?, 0)`
+  ).bind(
+    await sha256Hex(refreshToken), input.clientId, input.userId, input.groupId,
+    input.scopes.join(" "), input.provider ?? null, now + REFRESH_TTL,
+  ).run();
+  return Response.json({
+    access_token: accessToken,
+    token_type: "bearer",
+    expires_in: ACCESS_TTL,
+    refresh_token: refreshToken,
+    scope: input.scopes.join(" "),
+  });
+}
+
 // POST /oauth/mcp/token
 export async function handleMcpToken(request: Request, env: AuthorizeEnv): Promise<Response> {
   if (!env.IDENTITY_DB) return Response.json({ error: "server_error" }, { status: 500 });
@@ -390,17 +460,39 @@ export async function handleMcpToken(request: Request, env: AuthorizeEnv): Promi
   }
 
   const grantType = params.get("grant_type");
-  const code = params.get("code");
-  const codeVerifier = params.get("code_verifier");
-  const redirectUri = params.get("redirect_uri");
   const clientId = params.get("client_id");
-
-  if (grantType !== "authorization_code" || !code || !codeVerifier || !redirectUri || !clientId) {
-    return Response.json({ error: "invalid_request" }, { status: 400 });
-  }
+  if (!clientId) return Response.json({ error: "invalid_request" }, { status: 400 });
 
   const client = await lookupClient(env.IDENTITY_DB, clientId);
   if (!client) return Response.json({ error: "invalid_client" }, { status: 400 });
+
+  // grant_type=refresh_token — rotate the refresh token and mint a new access token.
+  if (grantType === "refresh_token") {
+    const refreshToken = params.get("refresh_token");
+    if (!refreshToken) return Response.json({ error: "invalid_request" }, { status: 400 });
+    const tokenHash = await sha256Hex(refreshToken);
+    const rt = await env.IDENTITY_DB.prepare(`
+      SELECT token_hash, client_id, user_id, group_id, scopes, provider, expires_at, used
+      FROM t_oauth_refresh_token WHERE token_hash = ?
+    `).bind(tokenHash).first<{
+      token_hash: string; client_id: string; user_id: string; group_id: string;
+      scopes: string; provider: string | null; expires_at: number; used: number;
+    }>();
+    if (!rt || rt.client_id !== clientId) return Response.json({ error: "invalid_grant" }, { status: 400 });
+    if (rt.used) return Response.json({ error: "invalid_grant", error_description: "Refresh token already used" }, { status: 400 });
+    if (rt.expires_at < Math.floor(Date.now() / 1000)) return Response.json({ error: "invalid_grant", error_description: "Refresh token expired" }, { status: 400 });
+    await env.IDENTITY_DB.prepare("UPDATE t_oauth_refresh_token SET used = 1 WHERE token_hash = ?").bind(tokenHash).run();
+    const { scopes, provider } = await resolveEffectiveScopes(env, clientId, rt.group_id, rt.scopes.split(" ").filter(Boolean));
+    return issueTokenResponse(env, { clientId, userId: rt.user_id, groupId: rt.group_id, scopes, provider });
+  }
+
+  // grant_type=authorization_code
+  const code = params.get("code");
+  const codeVerifier = params.get("code_verifier");
+  const redirectUri = params.get("redirect_uri");
+  if (grantType !== "authorization_code" || !code || !codeVerifier || !redirectUri) {
+    return Response.json({ error: "unsupported_grant_type" }, { status: 400 });
+  }
 
   const row = await env.IDENTITY_DB.prepare(`
     SELECT code, client_id, user_id, group_id, scopes, code_challenge, code_challenge_method, redirect_uri, expires_at, used
@@ -425,41 +517,6 @@ export async function handleMcpToken(request: Request, env: AuthorizeEnv): Promi
 
   await env.IDENTITY_DB.prepare("UPDATE t_oauth_authorization_code SET used = 1 WHERE code = ?").bind(code).run();
 
-  const requestedScopes = row.scopes.split(" ").filter(Boolean);
-  let effectiveScopes = requestedScopes;
-  let provider: string | undefined;
-
-  try {
-    const agentRes = await authorizeFetch(env, {
-      path: "/api/v1/agent/by-client-id?client_id=" + encodeURIComponent(row.client_id),
-      method: "GET",
-      actorType: "program",
-      tenantContext: { tenantId: row.group_id },
-    });
-    if (agentRes.ok) {
-      const agentData = await agentRes.json() as { provider?: string; scopes?: string[] };
-      if (agentData.provider) provider = agentData.provider;
-      if (Array.isArray(agentData.scopes)) {
-        const agentScopeSet = new Set(agentData.scopes);
-        effectiveScopes = requestedScopes.filter(s => agentScopeSet.has(s));
-      }
-    }
-  } catch {
-    // best-effort: fall back to requestedScopes with no provider
-  }
-
-  const accessToken = await issueMcpToken(env, {
-    groupId: row.group_id,
-    userId: row.user_id,
-    scopes: effectiveScopes,
-    clientId: row.client_id,
-    provider,
-  });
-
-  return Response.json({
-    access_token: accessToken,
-    token_type: "bearer",
-    expires_in: 7776000,
-    scope: effectiveScopes.join(" "),
-  });
+  const { scopes, provider } = await resolveEffectiveScopes(env, clientId, row.group_id, row.scopes.split(" ").filter(Boolean));
+  return issueTokenResponse(env, { clientId, userId: row.user_id, groupId: row.group_id, scopes, provider });
 }

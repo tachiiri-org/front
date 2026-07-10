@@ -113,7 +113,8 @@ export async function issueMcpToken(
     actor_type: "ai",
     iss: env.INTERNAL_AUTH_TOKEN_ISSUER ?? "front",
     aud: "backend",
-    exp: now + 7776000,
+    // Short-lived access token; clients refresh via grant_type=refresh_token.
+    exp: now + 300,
     iat: now,
     jti: crypto.randomUUID(),
     // tenant = the selected group; org is derived from it (default org for now).
