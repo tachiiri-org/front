@@ -8,7 +8,9 @@ type ToolResult = {
 // --- API helpers ---
 
 function tenantCtx(env: AuthorizeEnv) {
-  return env.actor?.tenant ? { tenantId: env.actor.tenant } : undefined;
+  // Carry the MCP token's subject (the authorizing user) alongside the tenant so the
+  // backend attributes the operation to that user (責任者) rather than to front.
+  return env.actor?.tenant ? { tenantId: env.actor.tenant, subjectId: env.actor.userId } : undefined;
 }
 
 async function graphFetch(
@@ -23,6 +25,8 @@ async function graphFetch(
     method,
     body: body !== undefined ? JSON.stringify(body) : undefined,
     tenantContext: tenantCtx(env),
+    // Propagate the MCP token's scopes so the backend can enforce graph:read/write.
+    scopes: env.actor?.scopes,
   });
 }
 
