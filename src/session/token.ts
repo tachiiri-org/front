@@ -8,6 +8,13 @@ const encoder = new TextEncoder();
  */
 export const DEFAULT_ORGANIZATION_ID = "00000000-0000-4000-8000-000000000001";
 
+/**
+ * The front system-internal program account (see backend identity-migration 0032).
+ * When front acts on its own behalf (no user subject) it is this real program account,
+ * not a synthetic id — every operation is performed by a real account.
+ */
+export const FRONT_SYSTEM_ACCOUNT_ID = "00000000-0000-4000-8000-000000000002";
+
 type SecretValue = string | { get(): Promise<string> };
 
 type InternalTokenClaims = {
@@ -142,12 +149,12 @@ export async function issueInternalToken(
   const now = Math.floor(Date.now() / 1000);
   // 実行者 (actor): a browser-path call that carries a user subject but declares no
   // machine actorType is the user acting (人が実行者). Explicit program/ai callers
-  // (admin/ops, MCP) are honored as-is. front acting on its own behalf (no subject)
-  // stays a program under the synthetic "front-local" id until it has a real program
-  // account. NOTE: the subject here still comes from the unsigned identity cookie;
-  // making it trustworthy is Step 2 (signed identity / gap 9).
+  // (admin/ops, MCP) are honored as-is. front acting on its own behalf (no subject) is
+  // the front system-internal program account (a real m_account record, not a synthetic
+  // id). NOTE: the subject here still comes from the unsigned identity cookie; making it
+  // trustworthy is Step 2 (signed identity / gap 9).
   const actorType = input.actorType ?? (input.subjectId ? "human" : "program");
-  const actorId = actorType === "human" && input.subjectId ? input.subjectId : "front-local";
+  const actorId = actorType === "human" && input.subjectId ? input.subjectId : FRONT_SYSTEM_ACCOUNT_ID;
   const payload: InternalTokenClaims = {
     claims_set_version: 1,
     actor_id: actorId,
