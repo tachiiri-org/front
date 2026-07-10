@@ -213,9 +213,12 @@ export function createPanelsView(ctx: GraphEditorContext): {
   // from 「選択中」(SELECTION_SRC) → the node's children. Set by node-row focus and by left-clicking a
   // relation node-link chip.
   let selectedNodeId: string | null = null;
-  const setSelectedNode = (nodeId: string | null, ancestorIds: Set<string> = new Set(), path: PanelPathEntry[] = []) => {
+  // `updateRelation` = also switch the relation panel to this node's relations. True for node-row
+  // selection; FALSE for a relation chip left-click — clicking a chip only drills the 「選択中」node
+  // panel to the chip's children and must NOT re-render (=flash) the relation panel you're reading.
+  const setSelectedNode = (nodeId: string | null, ancestorIds: Set<string> = new Set(), path: PanelPathEntry[] = [], updateRelation = true) => {
     selectedNodeId = nodeId;
-    if (nodeId !== null) {
+    if (nodeId !== null && updateRelation) {
       ctx.setActiveRelation(null);
       void relationView.setParent(nodeId, ancestorIds, path);
     }
@@ -225,13 +228,9 @@ export function createPanelsView(ctx: GraphEditorContext): {
       }
     }
   };
-  // Chip left-click → select this node (fetch its path for the breadcrumb).
-  ctx.selectNode = (nodeId, label) => {
-    void (async () => {
-      const path = await fetchNodePath(ctx.gId, nodeId, label ?? '', ctx.rootNodeId, ctx.state.lang);
-      setSelectedNode(nodeId, new Set(), path);
-    })();
-  };
+  // Chip left-click → select this node (drives the 「選択中」node panel's children). Does not touch the
+  // relation panel. No path fetch needed since the relation panel isn't updated.
+  ctx.selectNode = (nodeId) => { setSelectedNode(nodeId, new Set(), [], false); };
 
   // ── Inter-pane wiring ──────────────────────────────────────────────
   // Selection changes are debounced: navigating (arrow keys, expanding — each focuses a row) fires
