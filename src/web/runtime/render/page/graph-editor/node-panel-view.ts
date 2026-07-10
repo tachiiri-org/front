@@ -2192,10 +2192,23 @@ export function createNodePanelView(ctx: GraphEditorContext, nodePanelOpts?: Nod
   const rerenderAllNodeBoxes = () => { for (const o of byKey.values()) updateNodeBox(o); };
   ctx.relationRerender.add(rerenderAllNodeBoxes);
 
+  // Apply a rename made elsewhere (e.g. the relation panel breadcrumb) to this pane's model
+  // so the row label updates in place, without a full refetch.
+  const applyExternalRename = (id: string, l: 'en' | 'ja', label: string) => {
+    const tn = treeNodes.get(id);
+    if (tn) tn[l] = label;
+    const walk = (list: ONode[]) => { for (const o of list) { if (o.node.id === id) o.node[l] = label; walk(o.children); } };
+    walk(roots);
+    render();
+    updateBreadcrumb();
+  };
+  ctx.nodeRenamed.add(applyExternalRename);
+
   const unregister = () => {
     void flushAutosave(true); // persist any pending structural edits (keepalive)
     if (idleTimer) clearTimeout(idleTimer);
     ctx.relationRerender.delete(rerenderAllNodeBoxes);
+    ctx.nodeRenamed.delete(applyExternalRename);
     window.removeEventListener('pagehide', onPageHide);
     window.removeEventListener('beforeunload', onBeforeUnload);
     window.removeEventListener('keydown', onSaveKey, true);

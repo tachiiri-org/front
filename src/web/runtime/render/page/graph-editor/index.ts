@@ -45,6 +45,7 @@ export function renderGraphEditor(
   const colorPalette = new Map<string, string>();
   const relationRerender = new Set<() => void>();
   const refreshRelations = new Set<() => void>();
+  const nodeRenamed = new Set<(id: string, lang: 'en' | 'ja', label: string) => void>();
   // temp-id → real-id registry (see GraphEditorContext). `tempPending` holds the promise a waiter
   // gets while a create is still in flight; resolved (and cleared) the moment the real id lands.
   const tempRealId = new Map<string, string>();
@@ -77,6 +78,7 @@ export function renderGraphEditor(
     activeRelation: null,
     relationRerender,
     refreshRelations,
+    nodeRenamed,
     setActiveRelation: (r: { lineId: string; participants: Set<string> } | null) => {
       ctx.activeRelation = r;
       relationRerender.forEach((f) => f());

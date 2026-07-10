@@ -2,7 +2,7 @@ import type { GraphEditorContext, PanelView, ExplorerNode, ExplorerRelation, Pan
 import { BORDER, TEXT_HIGH, TEXT_MID, TEXT_DIM, SELECT_STRONG, ORPHAN_ID, showToast } from './constants';
 import {
   fetchNodeRelations, apiCreateRelation, apiSetRelationText, apiAddRay, apiRemoveRay, fetchAllNodes, apiCreateNode,
-  fetchOrphanRelations, apiDeleteRelation, apiDeleteNode, apiReorderNodeRelations, apiLinkNode, apiOrient,
+  fetchOrphanRelations, apiDeleteRelation, apiDeleteNode, apiReorderNodeRelations, apiLinkNode, apiOrient, apiUpdateNode,
 } from './api';
 
 // 関係 (relation) パネル。関係 = テキストとノード参照(チップ)が交互に並ぶ1行（セグメント分割編集）。
@@ -924,6 +924,36 @@ export function createRelationPanelView(
     updateActiveHighlight();
   };
 
+  // パンくず末尾（表示中のノード）をクリックでインライン改名。ラベル span を input に差し替え、
+  // Enter/blur で確定・Esc で取消。確定は既存の apiUpdateNode（新APIなし）で、ノードパネルにも反映を通知。
+  const startBreadcrumbRename = (entry: PanelPathEntry, seg: HTMLElement): void => {
+    const nodeId = entry.id;
+    if (!nodeId || nodeId.startsWith('temp-')) return;
+    const current = entry.label;
+    const input = document.createElement('input');
+    input.type = 'text';
+    input.value = current;
+    input.style.cssText = `font-size:12px;font-family:inherit;color:${TEXT_HIGH};background:transparent;border:1px solid ${BORDER};border-radius:3px;padding:0 4px;max-width:180px;min-width:60px;outline:none;`;
+    let done = false;
+    const commit = async (save: boolean): Promise<void> => {
+      if (done) return; done = true;
+      const val = input.value.trim();
+      if (save && val && val !== current) {
+        entry.label = val;                                   // reflect in the path model
+        await apiUpdateNode(ctx.gId, nodeId, lang, val);
+        ctx.nodeRenamed.forEach((f) => f(nodeId, lang, val)); // sync node panes' labels
+      }
+      void render();                                          // rebuild header (restores the label span)
+    };
+    input.addEventListener('keydown', (e) => {
+      if (e.key === 'Enter') { e.preventDefault(); void commit(true); }
+      else if (e.key === 'Escape') { e.preventDefault(); void commit(false); }
+    });
+    input.addEventListener('blur', () => void commit(true));
+    seg.replaceWith(input);
+    input.focus(); input.select();
+  };
+
   // ── 列全体の描画 ─────────────────────────────────────────────────────────────
   const render = async (): Promise<void> => {
     const token = ++renderToken;
@@ -1009,9 +1039,16 @@ export function createRelationPanelView(
           sep.textContent = ' › '; sep.style.color = TEXT_DIM;
           title.appendChild(sep);
         }
+        const isTail = i === currentPath!.length - 1;
         const seg = document.createElement('span');
         seg.textContent = e.label || '(無題)';
-        seg.style.color = i === currentPath!.length - 1 ? TEXT_HIGH : TEXT_MID;
+        seg.style.color = isTail ? TEXT_HIGH : TEXT_MID;
+        // 末尾＝表示中のノード。クリックでその場改名（中間セグメントはナビゲーション用途がないので非対象）。
+        if (isTail && e.id && !e.id.startsWith('temp-')) {
+          seg.style.cursor = 'text';
+          seg.title = 'クリックで名前を編集';
+          seg.addEventListener('click', () => startBreadcrumbRename(e, seg));
+        }
         title.appendChild(seg);
       });
     } else {

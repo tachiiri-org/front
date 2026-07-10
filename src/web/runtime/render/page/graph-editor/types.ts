@@ -103,6 +103,9 @@ export interface GraphEditorContext {
   // Line panel(s) register a refresh here; called after a square right-click changes membership so
   // the relation rows re-fetch fresh participants (keeps the active set authoritative on re-focus).
   refreshRelations: Set<() => void>;
+  // Node pane(s) register here to apply a rename made elsewhere (e.g. from the relation panel's
+  // breadcrumb) to their local model so the label updates without a full refetch.
+  nodeRenamed: Set<(id: string, lang: 'en' | 'ja', label: string) => void>;
   // Set by the line panel: convert a node into a relation (its label becomes the relation body,
   // linked to the panel's current node) and DELETE the node. Used by node→relation drag-drop and
   // the Shift+Alt+→ shortcut. The caller removes the node from its own pane afterwards.
