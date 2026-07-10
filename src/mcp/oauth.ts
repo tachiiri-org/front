@@ -1,4 +1,3 @@
-import type { D1Database } from "@cloudflare/workers-types";
 import type { AuthorizeEnv } from "../session";
 import { parseCookies, serializeCookie, clearCookie } from "../session/cookies";
 import { issueMcpToken } from "../session/token";
@@ -19,10 +18,10 @@ type McpOAuthParams = {
   resource: string;
 };
 
-type DbClient = {
+type OAuthClient = {
   id: string;
   name: string | null;
-  redirect_uris: string; // JSON array string from json_group_array
+  redirect_uris: string[];
 };
 
 function toBase64Url(data: Uint8Array): string {
@@ -31,21 +30,11 @@ function toBase64Url(data: Uint8Array): string {
   return btoa(binary).replace(/\+/g, "-").replace(/\//g, "_").replace(/=+$/u, "");
 }
 
-function hexToBytes(hex: string): Uint8Array<ArrayBuffer> {
-  const bytes = new Uint8Array(new ArrayBuffer(hex.length / 2));
-  for (let i = 0; i < hex.length; i += 2) bytes[i / 2] = parseInt(hex.slice(i, i + 2), 16);
-  return bytes;
-}
-
-async function hmacHex(keyHex: string, value: string): Promise<string> {
-  const key = await crypto.subtle.importKey("raw", hexToBytes(keyHex), { name: "HMAC", hash: "SHA-256" }, false, ["sign"]);
-  const sig = await crypto.subtle.sign("HMAC", key, new TextEncoder().encode(value));
-  return Array.from(new Uint8Array(sig)).map(b => b.toString(16).padStart(2, "0")).join("");
-}
-
-async function resolveSecret(value: string | { get(): Promise<string> } | undefined): Promise<string | undefined> {
-  if (value && typeof value !== "string") return value.get();
-  return value;
+// The identity DB lives behind the backend; the front worker holds no binding to it.
+// Every OAuth persistence primitive is a backend call over the internal (authorizeFetch)
+// channel. These identity routes are public (auth "none").
+function oauthDbFetch(env: AuthorizeEnv, method: string, path: string, body?: unknown): Promise<Response> {
+  return authorizeFetch(env, { path, method, body: body === undefined ? undefined : JSON.stringify(body) });
 }
 
 function isSecure(request: Request): boolean {
@@ -61,59 +50,49 @@ export function mcpResource(request: Request, env: AuthorizeEnv): string {
   return `${origin(request, env)}/mcp`;
 }
 
-async function lookupClient(db: D1Database, clientId: string): Promise<DbClient | null> {
-  return db.prepare(`
-    SELECT
-      c.id,
-      cn.value AS name,
-      COALESCE(json_group_array(r.value) FILTER (WHERE r.value IS NOT NULL), '[]') AS redirect_uris
-    FROM m_client c
-    LEFT JOIN p_client_name cn ON cn.client_id = c.id
-    LEFT JOIN j_callback jc ON jc.client_id = c.id
-    LEFT JOIN m_redirect r ON r.id = jc.redirect_id
-    WHERE c.id = ?
-    GROUP BY c.id
-  `).bind(clientId).first<DbClient>();
+async function lookupClient(env: AuthorizeEnv, clientId: string): Promise<OAuthClient | null> {
+  const res = await oauthDbFetch(env, "GET", `/api/v1/identity/oauth/clients/${encodeURIComponent(clientId)}`);
+  if (!res.ok) return null;
+  return res.json() as Promise<OAuthClient>;
 }
 
 // Provision (idempotently) a client record and its redirect URIs. Used by explicit
 // Dynamic Client Registration and by implicit registration at the authorize endpoint.
 // Clients are public (token_endpoint_auth_method=none) and PKCE-protected, and DCR is
-// open, so provisioning an as-yet-unseen client_id adds no privilege.
+// open, so provisioning an as-yet-unseen client_id adds no privilege. Persisted by backend.
 async function provisionClient(
-  db: D1Database,
   env: AuthorizeEnv,
   clientId: string,
   clientName: string,
   redirectUris: string[],
 ): Promise<void> {
-  const hmacKey = await resolveSecret(env.IDENTITY_HMAC_KEY);
-  if (!hmacKey) throw new Error("missing_hmac_key");
-  const aiHash = await hmacHex(hmacKey, "ai");
-  await db.batch([
-    db.prepare("INSERT OR IGNORE INTO m_client (id) VALUES (?)").bind(clientId),
-    db.prepare("INSERT OR IGNORE INTO p_client_name (client_id, value) VALUES (?, ?)").bind(clientId, clientName),
-    db.prepare("INSERT OR IGNORE INTO p_client_actor (client_id, value, value_hash) VALUES (?, ?, ?)").bind(clientId, "ai", aiHash),
-  ]);
-  if (redirectUris.length > 0) {
-    await db.batch(
-      redirectUris.map(uri =>
-        db.prepare("INSERT OR IGNORE INTO m_redirect (id, value) VALUES (?, ?)").bind(crypto.randomUUID(), uri)
-      )
-    );
-    const placeholders = redirectUris.map(() => "?").join(", ");
-    const uriRows = await db.prepare(
-      `SELECT id, value FROM m_redirect WHERE value IN (${placeholders})`
-    ).bind(...redirectUris).all<{ id: string; value: string }>();
-    const uriIdMap = new Map(uriRows.results.map(r => [r.value, r.id]));
-    await db.batch(
-      redirectUris
-        .filter(uri => uriIdMap.has(uri))
-        .map(uri =>
-          db.prepare("INSERT OR IGNORE INTO j_callback (client_id, redirect_id) VALUES (?, ?)").bind(clientId, uriIdMap.get(uri))
-        )
-    );
-  }
+  const res = await oauthDbFetch(env, "POST", "/api/v1/identity/oauth/clients", {
+    client_id: clientId,
+    client_name: clientName,
+    redirect_uris: redirectUris,
+  });
+  if (!res.ok) throw new Error("provision_failed");
+}
+
+// Mint + persist an authorization code (backend owns the code value and TTL). Returns the
+// code on success, or null if persistence failed.
+async function createAuthCode(
+  env: AuthorizeEnv,
+  input: { userId: string; groupId: string; params: McpOAuthParams },
+): Promise<string | null> {
+  const res = await oauthDbFetch(env, "POST", "/api/v1/identity/oauth/authorization-codes", {
+    client_id: input.params.client_id,
+    user_id: input.userId,
+    group_id: input.groupId,
+    scopes: input.params.scope,
+    code_challenge: input.params.code_challenge,
+    code_challenge_method: input.params.code_challenge_method,
+    redirect_uri: input.params.redirect_uri,
+    resource: input.params.resource,
+  });
+  if (!res.ok) return null;
+  const { code } = await res.json() as { code: string };
+  return code;
 }
 
 // GET /.well-known/oauth-authorization-server
@@ -134,9 +113,6 @@ export function handleOAuthMetadata(request: Request, env: AuthorizeEnv): Respon
 
 // POST /oauth/mcp/register  (RFC 7591 Dynamic Client Registration)
 export async function handleMcpRegister(request: Request, env: AuthorizeEnv): Promise<Response> {
-  if (!env.IDENTITY_DB) return Response.json({ error: "server_error" }, { status: 500 });
-  const db = env.IDENTITY_DB;
-
   const body = await request.json() as {
     client_name?: string;
     redirect_uris?: string[];
@@ -150,7 +126,7 @@ export async function handleMcpRegister(request: Request, env: AuthorizeEnv): Pr
   const redirectUris = body.redirect_uris ?? [];
 
   try {
-    await provisionClient(db, env, clientId, clientName, redirectUris);
+    await provisionClient(env, clientId, clientName, redirectUris);
   } catch {
     return Response.json({ error: "server_error" }, { status: 500 });
   }
@@ -167,8 +143,6 @@ export async function handleMcpRegister(request: Request, env: AuthorizeEnv): Pr
 
 // GET /oauth/mcp/authorize
 export async function handleMcpAuthorize(request: Request, env: AuthorizeEnv): Promise<Response> {
-  if (!env.IDENTITY_DB) return new Response("IDENTITY_DB not configured", { status: 503 });
-
   const url = new URL(request.url);
   const clientId = url.searchParams.get("client_id") ?? "";
   const redirectUri = url.searchParams.get("redirect_uri") ?? "";
@@ -192,18 +166,18 @@ export async function handleMcpAuthorize(request: Request, env: AuthorizeEnv): P
     return new Response("Only S256 code_challenge_method is supported", { status: 400 });
   }
 
-  let client = await lookupClient(env.IDENTITY_DB, clientId);
+  let client = await lookupClient(env, clientId);
   if (!client && clientId && redirectUri) {
     // Implicit registration: a public PKCE client presenting an as-yet-unseen client_id
     // (e.g. one it cached from a prior session) is provisioned on the fly with the
     // redirect_uri it presents, then the flow continues. Lets such clients recover
     // without a separate registration round-trip.
-    await provisionClient(env.IDENTITY_DB, env, clientId, "MCP Client", [redirectUri]);
-    client = await lookupClient(env.IDENTITY_DB, clientId);
+    await provisionClient(env, clientId, "MCP Client", [redirectUri]);
+    client = await lookupClient(env, clientId);
   }
   if (!client) return new Response("Unknown client_id", { status: 400 });
 
-  const allowedUris: string[] = JSON.parse(client.redirect_uris);
+  const allowedUris: string[] = client.redirect_uris;
   if (allowedUris.length > 0 && !allowedUris.includes(redirectUri)) {
     return new Response("Invalid redirect_uri", { status: 400 });
   }
@@ -318,8 +292,6 @@ export async function handleMcpSelectOrg(request: Request, env: AuthorizeEnv): P
 
 // POST /oauth/mcp/approve
 export async function handleMcpApprove(request: Request, env: AuthorizeEnv): Promise<Response> {
-  if (!env.IDENTITY_DB) return new Response("IDENTITY_DB not configured", { status: 503 });
-
   const cookies = parseCookies(request);
   const userId = (await readIdentity(env, request))?.userId;
   const paramsRaw = cookies.get(MCP_OAUTH_PARAMS_COOKIE);
@@ -338,14 +310,8 @@ export async function handleMcpApprove(request: Request, env: AuthorizeEnv): Pro
   const groupId = formData.get("group_id") as string | null;
   if (!groupId) return new Response("group_id required", { status: 400 });
 
-  const code = crypto.randomUUID();
-  const expiresAt = Math.floor(Date.now() / 1000) + CODE_TTL;
-
-  await env.IDENTITY_DB.prepare(`
-    INSERT INTO t_oauth_authorization_code
-      (code, client_id, user_id, group_id, scopes, code_challenge, code_challenge_method, redirect_uri, expires_at, resource)
-    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
-  `).bind(code, params.client_id, userId, groupId, params.scope, params.code_challenge, params.code_challenge_method, params.redirect_uri, expiresAt, params.resource).run();
+  const code = await createAuthCode(env, { userId, groupId, params });
+  if (!code) return new Response("Failed to persist authorization code", { status: 502 });
 
   const headers = new Headers();
   headers.append("Set-Cookie", clearCookie(MCP_OAUTH_PARAMS_COOKIE, request));
@@ -360,8 +326,6 @@ export async function handleMcpApprove(request: Request, env: AuthorizeEnv): Pro
 
 // POST /oauth/mcp/create-org
 export async function handleMcpCreateOrg(request: Request, env: AuthorizeEnv): Promise<Response> {
-  if (!env.IDENTITY_DB) return new Response("IDENTITY_DB not configured", { status: 503 });
-
   const cookies = parseCookies(request);
   const userId = (await readIdentity(env, request))?.userId;
   const paramsRaw = cookies.get(MCP_OAUTH_PARAMS_COOKIE);
@@ -387,14 +351,8 @@ export async function handleMcpCreateOrg(request: Request, env: AuthorizeEnv): P
     return new Response(`Failed to create organization: ${String(e)}`, { status: 500 });
   }
 
-  const code = crypto.randomUUID();
-  const expiresAt = Math.floor(Date.now() / 1000) + CODE_TTL;
-
-  await env.IDENTITY_DB.prepare(`
-    INSERT INTO t_oauth_authorization_code
-      (code, client_id, user_id, group_id, scopes, code_challenge, code_challenge_method, redirect_uri, expires_at, resource)
-    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
-  `).bind(code, params.client_id, userId, org.id, params.scope, params.code_challenge, params.code_challenge_method, params.redirect_uri, expiresAt, params.resource).run();
+  const code = await createAuthCode(env, { userId, groupId: org.id, params });
+  if (!code) return new Response("Failed to persist authorization code", { status: 502 });
 
   const headers = new Headers();
   headers.append("Set-Cookie", clearCookie(MCP_OAUTH_PARAMS_COOKIE, request));
@@ -462,13 +420,17 @@ async function issueTokenResponse(
   });
   const refreshToken = toBase64Url(crypto.getRandomValues(new Uint8Array(32)));
   const now = Math.floor(Date.now() / 1000);
-  await env.IDENTITY_DB!.prepare(
-    `INSERT INTO t_oauth_refresh_token (token_hash, client_id, user_id, group_id, scopes, provider, expires_at, used, resource)
-     VALUES (?, ?, ?, ?, ?, ?, ?, 0, ?)`
-  ).bind(
-    await sha256Hex(refreshToken), input.clientId, input.userId, input.groupId,
-    input.scopes.join(" "), input.provider ?? null, now + REFRESH_TTL, input.resource,
-  ).run();
+  const stored = await oauthDbFetch(env, "POST", "/api/v1/identity/oauth/refresh-tokens", {
+    token_hash: await sha256Hex(refreshToken),
+    client_id: input.clientId,
+    user_id: input.userId,
+    group_id: input.groupId,
+    scopes: input.scopes.join(" "),
+    provider: input.provider ?? null,
+    expires_at: now + REFRESH_TTL,
+    resource: input.resource,
+  });
+  if (!stored.ok) return Response.json({ error: "server_error" }, { status: 502 });
   return Response.json({
     access_token: accessToken,
     token_type: "bearer",
@@ -480,8 +442,6 @@ async function issueTokenResponse(
 
 // POST /oauth/mcp/token
 export async function handleMcpToken(request: Request, env: AuthorizeEnv): Promise<Response> {
-  if (!env.IDENTITY_DB) return Response.json({ error: "server_error" }, { status: 500 });
-
   let params: URLSearchParams;
   const ct = request.headers.get("Content-Type") ?? "";
   if (ct.includes("application/x-www-form-urlencoded")) {
@@ -499,20 +459,14 @@ export async function handleMcpToken(request: Request, env: AuthorizeEnv): Promi
   if (grantType === "refresh_token") {
     const refreshToken = params.get("refresh_token");
     if (!refreshToken) return Response.json({ error: "invalid_request" }, { status: 400 });
-    const client = await lookupClient(env.IDENTITY_DB, clientId);
+    const client = await lookupClient(env, clientId);
     if (!client) return Response.json({ error: "invalid_client" }, { status: 400 });
-    const tokenHash = await sha256Hex(refreshToken);
-    const rt = await env.IDENTITY_DB.prepare(`
-      SELECT token_hash, client_id, user_id, group_id, scopes, provider, expires_at, used, resource
-      FROM t_oauth_refresh_token WHERE token_hash = ?
-    `).bind(tokenHash).first<{
-      token_hash: string; client_id: string; user_id: string; group_id: string;
-      scopes: string; provider: string | null; expires_at: number; used: number; resource: string | null;
-    }>();
-    if (!rt || rt.client_id !== clientId) return Response.json({ error: "invalid_grant" }, { status: 400 });
-    if (rt.used) return Response.json({ error: "invalid_grant", error_description: "Refresh token already used" }, { status: 400 });
-    if (rt.expires_at < Math.floor(Date.now() / 1000)) return Response.json({ error: "invalid_grant", error_description: "Refresh token expired" }, { status: 400 });
-    await env.IDENTITY_DB.prepare("UPDATE t_oauth_refresh_token SET used = 1 WHERE token_hash = ?").bind(tokenHash).run();
+    const consume = await oauthDbFetch(env, "POST", "/api/v1/identity/oauth/refresh-tokens/consume", {
+      token_hash: await sha256Hex(refreshToken),
+      client_id: clientId,
+    });
+    if (!consume.ok) return Response.json(await consume.json(), { status: consume.status });
+    const rt = await consume.json() as { user_id: string; group_id: string; scopes: string; provider: string | null; resource: string | null };
     const { scopes, provider } = await resolveEffectiveScopes(env, clientId, rt.group_id, rt.scopes.split(" ").filter(Boolean));
     return issueTokenResponse(env, { clientId, userId: rt.user_id, groupId: rt.group_id, scopes, provider, resource: rt.resource ?? mcpResource(request, env) });
   }
@@ -525,31 +479,19 @@ export async function handleMcpToken(request: Request, env: AuthorizeEnv): Promi
     return Response.json({ error: "unsupported_grant_type" }, { status: 400 });
   }
 
-  const client = await lookupClient(env.IDENTITY_DB, clientId);
+  const client = await lookupClient(env, clientId);
   if (!client) return Response.json({ error: "invalid_client" }, { status: 400 });
 
-  const row = await env.IDENTITY_DB.prepare(`
-    SELECT code, client_id, user_id, group_id, scopes, code_challenge, code_challenge_method, redirect_uri, expires_at, used, resource
-    FROM t_oauth_authorization_code WHERE code = ?
-  `).bind(code).first<{
-    code: string; client_id: string; user_id: string; group_id: string; scopes: string;
-    code_challenge: string; code_challenge_method: string; redirect_uri: string;
-    expires_at: number; used: number; resource: string | null;
-  }>();
-
-  if (!row) return Response.json({ error: "invalid_grant" }, { status: 400 });
-  if (row.used) return Response.json({ error: "invalid_grant", error_description: "Code already used" }, { status: 400 });
-  if (row.expires_at < Math.floor(Date.now() / 1000)) return Response.json({ error: "invalid_grant", error_description: "Code expired" }, { status: 400 });
-  if (row.redirect_uri !== redirectUri) return Response.json({ error: "invalid_grant", error_description: "redirect_uri mismatch" }, { status: 400 });
-  if (row.client_id !== clientId) return Response.json({ error: "invalid_client" }, { status: 400 });
-
-  const hash = await crypto.subtle.digest("SHA-256", new TextEncoder().encode(codeVerifier));
-  const computed = toBase64Url(new Uint8Array(hash));
-  if (computed !== row.code_challenge) {
-    return Response.json({ error: "invalid_grant", error_description: "PKCE verification failed" }, { status: 400 });
-  }
-
-  await env.IDENTITY_DB.prepare("UPDATE t_oauth_authorization_code SET used = 1 WHERE code = ?").bind(code).run();
+  // Backend validates the code (existence, single-use, expiry, redirect_uri, client, PKCE) and
+  // marks it used, returning the grant context.
+  const consume = await oauthDbFetch(env, "POST", "/api/v1/identity/oauth/authorization-codes/consume", {
+    code,
+    client_id: clientId,
+    redirect_uri: redirectUri,
+    code_verifier: codeVerifier,
+  });
+  if (!consume.ok) return Response.json(await consume.json(), { status: consume.status });
+  const row = await consume.json() as { user_id: string; group_id: string; scopes: string; resource: string | null };
 
   const { scopes, provider } = await resolveEffectiveScopes(env, clientId, row.group_id, row.scopes.split(" ").filter(Boolean));
   return issueTokenResponse(env, { clientId, userId: row.user_id, groupId: row.group_id, scopes, provider, resource: row.resource ?? mcpResource(request, env) });

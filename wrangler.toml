@@ -15,11 +15,6 @@ workers_dev = true
 [env.stage.observability]
 enabled = true
 
-[[env.stage.d1_databases]]
-binding = "IDENTITY_DB"
-database_name = "identity-stage"
-database_id = "20dfc9c6-170c-47e7-927c-d703918a6449"
-
 [env.stage.vars]
 LOG_LEVEL = "info"
 FRONTEND_ORIGIN = "https://front-stage.tachiiri.workers.dev"
@@ -41,11 +36,6 @@ workers_dev = true
 [env.production.observability]
 enabled = true
 
-[[env.production.d1_databases]]
-binding = "IDENTITY_DB"
-database_name = "identity-production"
-database_id = "01fc4992-e113-435a-be70-226cddcfa092"
-
 [env.production.vars]
 LOG_LEVEL = "warn"
 FRONTEND_ORIGIN = "https://front-production.tachiiri.workers.dev"
@@ -66,12 +56,6 @@ workers_dev = true
 
 [env.dev.observability]
 enabled = true
-
-[[env.dev.d1_databases]]
-binding = "IDENTITY_DB"
-database_name = "identity-dev"
-database_id = "38652751-ca79-47ae-ac3f-92b59088e11e"
-remote = true
 
 [[env.dev.services]]
 binding = "BACKEND"

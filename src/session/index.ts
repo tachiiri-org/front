@@ -1,9 +1,7 @@
-import type { D1Database } from '@cloudflare/workers-types';
-
 type SecretValue = string | { get(): Promise<string> };
 
 export type AuthorizeEnv = {
-  readonly IDENTITY_DB?: D1Database;
+  // The identity DB is reached only through the backend; the front worker holds no binding.
   readonly actor?: { tenant?: string; userId?: string; scopes?: string[] };
   readonly BACKEND?: {
     fetch(request: Request): Promise<Response>;
