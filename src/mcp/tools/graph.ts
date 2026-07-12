@@ -231,6 +231,31 @@ export const GRAPH_TOOLS = [
     },
   },
   {
+    name: "graph_export",
+    description:
+      "Export the WHOLE graph in one call: every node (id + label) AND every relation line (prose with ⟦...⟧ resolved to labels, plus its participant nodes). This is the bulk counterpart to the per-node read tools — reach for it when you need full coverage of the graph's definitions/relations (auditing, understanding the whole model, checking what is/isn't captured) instead of sampling node-by-node. For a single node's relations use graph_read_relations; to find where a word appears use graph_search_relations.",
+    inputSchema: {
+      type: "object",
+      properties: {
+        graph_id: { type: "string", description: "Word graph ID (e.g. 'word-graph-1')" },
+      },
+      required: ["graph_id"],
+    },
+  },
+  {
+    name: "graph_search_relations",
+    description:
+      "Full-text search across ALL relation texts in the graph for `word` — matches the relation prose OR any participant node's label — and returns the matching relation lines with participants. The global counterpart to graph_read_relations (which needs a node_id): use this to find WHERE a concept/design/task is described when you don't know which node holds it (e.g. 'deploy', 'ReBAC', '越境').",
+    inputSchema: {
+      type: "object",
+      properties: {
+        graph_id: { type: "string", description: "Word graph ID (e.g. 'word-graph-1')" },
+        word: { type: "string", description: "Substring to search for in relation bodies and participant labels (case-insensitive)" },
+      },
+      required: ["graph_id", "word"],
+    },
+  },
+  {
     name: "graph_add_node",
     description: "Create a new node in the graph. Returns the new node id. Optionally connects the new node to a parent.",
     inputSchema: {
@@ -422,6 +447,31 @@ export async function callGraphTool(
         ? `ノード [${nodeId}] の関係のうち '${word}' を含むもの（${lines.length}件）:`
         : `ノード [${nodeId}] の関係（${lines.length}件）:`;
       const text = [header, ...lines.map(relationLineText)].join("\n\n");
+      return { content: [{ type: "text", text }] };
+    }
+
+    if (name === "graph_export") {
+      const res = await graphFetch(env, graphId, "export");
+      if (!res.ok) throw new Error(`graph_export_failed:${res.status}`);
+      const data = (await res.json()) as { nodes?: ApiNode[]; relations?: ApiLine[] };
+      const nodes = data.nodes ?? [];
+      const relations = data.relations ?? [];
+      const nodesText = nodes.length ? nodes.map(nodeLine).join("\n") : "(no nodes)";
+      const relText = relations.length ? relations.map(relationLineText).join("\n\n") : "(no relations)";
+      const text = `# グラフ ${graphId} 全体エクスポート\n\n## ノード（${nodes.length}件）\n${nodesText}\n\n## リレーション（${relations.length}件）\n${relText}`;
+      return { content: [{ type: "text", text }] };
+    }
+
+    if (name === "graph_search_relations") {
+      const word = String(args.word);
+      const res = await graphFetch(env, graphId, `search-relations?q=${encodeURIComponent(word)}`);
+      if (!res.ok) throw new Error(`graph_search_relations_failed:${res.status}`);
+      const data = (await res.json()) as { lines?: ApiLine[] };
+      const lines = data.lines ?? [];
+      if (lines.length === 0) {
+        return { content: [{ type: "text", text: `'${word}' を含むリレーションはありません` }] };
+      }
+      const text = [`'${word}' を含むリレーション（${lines.length}件）:`, ...lines.map(relationLineText)].join("\n\n");
       return { content: [{ type: "text", text }] };
     }
 
