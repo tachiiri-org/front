@@ -231,23 +231,13 @@ export async function handleAutoSelectOrg(request: Request, env: AuthorizeEnv): 
 
   const headers = new Headers({ 'Content-Type': 'application/json; charset=utf-8' });
 
-  // OAuth ログインの email は callback で既に group DB に登録済み（トークンに P2 を持たせない）。
-  // ここでは magic-link 経路の magic_email のみ扱う。
-  const magicEmail = cookies.get('magic_email') ? decodeURIComponent(cookies.get('magic_email')!) : null;
-  const email = magicEmail;
-
-  // org_user_id is derived from (groupId, userId) alone. Update the signed identity with
-  // the selected group and derived org-user id (plus the JS-readable group hint).
+  // email→group DB 登録は OAuth callback / magic-link verify で完了済み。ここでは email を扱わない
+  // （P2 を cookie に持たせない）。group_id は非PII なので選択誘導にのみ使う。
   const orgUser = await resolveOrgUser(env, groupId, userId);
   for (const c of await identitySetCookies(env, { userId, groupId, orgUserId: orgUser?.orgUserId })) {
     headers.append('Set-Cookie', c);
   }
-  if (email) {
-    // Register email → identity_user_id in group DB so magic link recovery works (P2 email lives here only).
-    await registerGroupMember(env, groupId, email, userId).catch(() => null);
-  }
-  if (magicEmail || magicGroupId) {
-    headers.append('Set-Cookie', `magic_email=; Path=/; Max-Age=0`);
+  if (magicGroupId) {
     headers.append('Set-Cookie', `magic_group_id=; Path=/; Max-Age=0`);
   }
 
@@ -272,23 +262,14 @@ export async function handleSelectOrg(request: Request, env: AuthorizeEnv): Prom
   headers.set('Location', returnTo.startsWith('/') ? returnTo : '/');
 
   if (identityUserId) {
-    // OAuth ログインの email は callback で既に group DB に登録済み（トークンに P2 を持たせない）。
-    // ここでは magic-link 経路の magic_email のみ扱う。
-    const magicEmail = cookies.get('magic_email') ? decodeURIComponent(cookies.get('magic_email')!) : null;
-    const email = magicEmail;
-
-    // org_user_id is derived from (orgId, identityUserId) alone. Update the signed identity
-    // with the selected group and derived org-user id (plus the JS-readable group hint).
+    // email→group DB 登録は OAuth callback / magic-link verify で完了済み。ここでは email を扱わない
+    // （P2 を cookie に持たせない）。
     const orgUser = await resolveOrgUser(env, orgId, identityUserId);
     for (const c of await identitySetCookies(env, { userId: identityUserId, groupId: orgId, orgUserId: orgUser?.orgUserId })) {
       headers.append('Set-Cookie', c);
     }
-    if (email) {
-      // Register email → identity_user_id in group DB so magic link recovery works (P2 email lives here only).
-      await registerGroupMember(env, orgId, email, identityUserId).catch(() => null);
-    }
-    if (magicEmail) {
-      headers.append('Set-Cookie', `magic_email=; Path=/; Max-Age=0`);
+    const hadMagicGroupId = cookies.get('magic_group_id');
+    if (hadMagicGroupId) {
       headers.append('Set-Cookie', `magic_group_id=; Path=/; Max-Age=0`);
     }
   }
@@ -440,7 +421,7 @@ export async function handleMagicLinkVerify(
       await registerGroupMember(env, org.id, result.email, userId);
 
       for (const c of await identitySetCookies(env, { userId })) headers.append('Set-Cookie', c);
-      headers.append('Set-Cookie', `magic_email=${encodeURIComponent(result.email)}; ${shortCookieOpts}`);
+      // email(P2) は cookie に載せない。登録はこの verify 内で完了済み。group_id は非PIIなので選択誘導に残す。
       headers.append('Set-Cookie', `magic_group_id=${encodeURIComponent(org.id)}; ${shortCookieOpts}`);
       headers.append('Set-Cookie', `login_intent=; Path=/; Max-Age=0`);
       headers.set('Location', '/group-select');
@@ -455,7 +436,7 @@ export async function handleMagicLinkVerify(
       }
 
       for (const c of await identitySetCookies(env, { userId })) headers.append('Set-Cookie', c);
-      headers.append('Set-Cookie', `magic_email=${encodeURIComponent(result.email)}; ${shortCookieOpts}`);
+      // email(P2) は cookie に載せない。login はメンバー確認のみで登録は既存。group_id は非PIIなので残す。
       headers.append('Set-Cookie', `magic_group_id=${encodeURIComponent(result.group_id)}; ${shortCookieOpts}`);
       headers.set('Location', '/group-select');
       return new Response(null, { status: 302, headers });
@@ -464,8 +445,8 @@ export async function handleMagicLinkVerify(
     return new Response(null, { status: 302, headers: { Location: '/login?error=invalid_magic_link' } });
   }
 
-  // General login (no org context): set magic_email and return to login for OAuth
-  headers.append('Set-Cookie', `magic_email=${encodeURIComponent(result.email)}; ${shortCookieOpts}`);
+  // General login (no org context): OAuth へ戻す。email(P2) は cookie に載せない
+  // （OAuth callback 側で email を group DB へ登録する＝Phase1）。
   headers.set('Location', '/login');
   return new Response(null, { status: 302, headers });
 }
