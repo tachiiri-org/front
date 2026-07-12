@@ -458,14 +458,31 @@ export async function registerGroupMember(
   groupId: string,
   email: string,
   userId: string,
+  role: "owner" | "editor" | "viewer" = "editor",
 ): Promise<void> {
   const res = await authorizeFetch(env, {
     path: "/api/v1/graph/members",
+    // ReBAC 播種(P2a): group_id/role を渡すと members POST が group エンティティのロールタプルも付与する。
     method: "POST",
-    body: JSON.stringify({ email, userId }),
+    body: JSON.stringify({ email, userId, group_id: groupId, role }),
     tenantContext: { tenantId: groupId },
   });
   if (!res.ok) throw new Error(`register_group_member_failed:${res.status}`);
+}
+
+// group エンティティのロールを付与（email 無しでも可。作成者=owner の付与や P3 のロール管理に使う）。
+export async function grantGroupRole(
+  env: AuthorizeEnv,
+  groupId: string,
+  userId: string,
+  role: "owner" | "editor" | "viewer",
+): Promise<void> {
+  await authorizeFetch(env, {
+    path: "/api/v1/graph/relation",
+    method: "POST",
+    body: JSON.stringify({ object_type: "group", object_id: groupId, role, subject_id: userId }),
+    tenantContext: { tenantId: groupId },
+  });
 }
 
 export async function getDefaultGroup(env: AuthorizeEnv, userId: string): Promise<string | null> {
@@ -501,11 +518,13 @@ export async function registerLoginEmailToGroup(
   if (!email) return;
   try {
     let groupId = await getDefaultGroup(env, userId);
+    let role: "owner" | "editor" = "editor";
     if (!groupId) {
       const org = await createOrganization(env, userId, DEFAULT_GROUP_NAME);
       groupId = org.id;
+      role = "owner"; // 新規グループの作成者はオーナー（ReBAC 播種）
     }
-    await registerGroupMember(env, groupId, email, userId);
+    await registerGroupMember(env, groupId, email, userId, role);
   } catch {
     // 登録失敗はログインをブロックしない（magic-link 復旧用マッピングは次回ログインで補完される）。
   }

@@ -1,6 +1,6 @@
 import type { SpecDocument } from '../shared/spec-document';
 import type { UiShellSettings } from '../shared/ui-shell-settings';
-import { readGitHubSession, readGitHubConnectSession, readGoogleSession, readMicrosoftSession, readOidcSession, listUserOrganizations, createOrganization, resolveOrgUser, getDefaultGroup, verifyMagicLinkToken, createBareUser, findMemberByEmail, registerGroupMember, fetchGroupInfo, setGroupName, resolveGroupName } from '../identify';
+import { readGitHubSession, readGitHubConnectSession, readGoogleSession, readMicrosoftSession, readOidcSession, listUserOrganizations, createOrganization, resolveOrgUser, getDefaultGroup, verifyMagicLinkToken, createBareUser, findMemberByEmail, registerGroupMember, fetchGroupInfo, setGroupName, resolveGroupName, grantGroupRole } from '../identify';
 import { parseCookies, serializeCookie } from '../session/cookies';
 import { readIdentity, identitySetCookies } from '../session/identity';
 import { authorizeFetch } from '../session/fetch';
@@ -296,6 +296,8 @@ export async function handleOrgCreate(
   }
 
   const org = await createOrganization(env, userId, body.name);
+  // ReBAC 播種(P2a): 作成者はこのグループの owner。
+  await grantGroupRole(env, org.id, userId, 'owner').catch(() => null);
   return json(org, { status: 201 });
 }
 
@@ -418,7 +420,8 @@ export async function handleMagicLinkVerify(
       // Create user + group, register email in group DB
       const userId = await createBareUser(env);
       const org = await createOrganization(env, userId, result.group_name);
-      await registerGroupMember(env, org.id, result.email, userId);
+      // ReBAC 播種(P2a): magic-link での group 作成者は owner。
+      await registerGroupMember(env, org.id, result.email, userId, 'owner');
 
       for (const c of await identitySetCookies(env, { userId })) headers.append('Set-Cookie', c);
       // email(P2) は cookie に載せない。登録はこの verify 内で完了済み。group_id は非PIIなので選択誘導に残す。
