@@ -4,9 +4,13 @@ import { issueMcpToken } from "../session/token";
 import { authorizeFetch } from "../session/fetch";
 import { MCP_OAUTH_PARAMS_COOKIE } from "../session/github";
 import { readIdentity, identityClearCookies } from "../session/identity";
-import { createOrganization } from "../identify";
+import { createOrganization, listUserOrganizations } from "../identify";
 
 const CODE_TTL = 60 * 10; // 10 minutes
+
+function escapeHtml(s: string): string {
+  return s.replace(/[&<>"']/g, (c) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" }[c] as string));
+}
 
 type McpOAuthParams = {
   client_id: string;
@@ -122,7 +126,7 @@ export async function handleMcpRegister(request: Request, env: AuthorizeEnv): Pr
   };
 
   const clientId = crypto.randomUUID();
-  const clientName = body.client_name ?? "Unknown Client";
+  const clientName = body.client_name ?? "MCP Client";
   const redirectUris = body.redirect_uris ?? [];
 
   try {
@@ -238,15 +242,10 @@ export async function handleMcpSelectOrg(request: Request, env: AuthorizeEnv): P
     return new Response("Invalid session.", { status: 400 });
   }
 
-  const orgsRes = await authorizeFetch(env, {
-    path: `/api/v1/identity/organizations?user_id=${encodeURIComponent(userId)}`,
-    method: "GET",
-  });
-  const { organizations = [] } = orgsRes.ok
-    ? (await orgsRes.json() as { organizations: { id: string; name: string }[] })
-    : { organizations: [] };
+  // 名前は group DB を正とする（identity は id のみ返す）。listUserOrganizations が group DB から解決する。
+  const organizations = await listUserOrganizations(env, userId).catch(() => [] as { id: string; name: string }[]);
 
-  const options = organizations.map((o) => `<option value="${o.id}">${o.name}</option>`).join("");
+  const options = organizations.map((o) => `<option value="${escapeHtml(o.id)}">${escapeHtml(o.name)}</option>`).join("");
   const html = `<!DOCTYPE html>
 <html lang="en">
 <head>
@@ -406,15 +405,25 @@ async function resolveEffectiveScopes(
 
 // Issue a short-lived access token + a fresh rotating refresh token, and build the
 // token endpoint response. Only the SHA-256 hash of the refresh token is stored.
+// 安定なエージェント口座 id を (認可ユーザー, client_name) から決定的に導く。client_id は DCR 登録ごとに
+// 変わる揮発値なので識別子には使わない。client_name はクライアントが RFC 7591 登録で名乗る種類名
+// （例 "Claude Code (front-dev)"）。取得できない場合は "MCP Client" にフォールバック。
+async function resolveAgentId(env: AuthorizeEnv, userId: string, clientId: string): Promise<string> {
+  const client = await lookupClient(env, clientId).catch(() => null);
+  const clientName = client?.name || "MCP Client";
+  return sha256Hex(`${userId}|${clientName}`);
+}
+
 async function issueTokenResponse(
   env: AuthorizeEnv,
   input: { clientId: string; userId: string; groupId: string; scopes: string[]; provider?: string; resource: string },
 ): Promise<Response> {
+  const agentId = await resolveAgentId(env, input.userId, input.clientId);
   const accessToken = await issueMcpToken(env, {
     groupId: input.groupId,
     userId: input.userId,
     scopes: input.scopes,
-    clientId: input.clientId,
+    agentId,
     provider: input.provider,
     audience: input.resource,
   });

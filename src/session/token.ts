@@ -101,7 +101,7 @@ export async function verifyInternalToken(
 
 export async function issueMcpToken(
   env: { INTERNAL_AUTH_SIGNING_KEY?: SecretValue; INTERNAL_AUTH_TOKEN_ISSUER?: string },
-  input: { groupId: string; userId: string; scopes: string[]; clientId: string; provider?: string; audience: string },
+  input: { groupId: string; userId: string; scopes: string[]; agentId: string; provider?: string; audience: string },
 ): Promise<string> {
   const signingKey = await resolveSecret(env.INTERNAL_AUTH_SIGNING_KEY);
   if (!signingKey) throw new Error("missing_internal_auth_signing_key");
@@ -109,7 +109,9 @@ export async function issueMcpToken(
   const now = Math.floor(Date.now() / 1000);
   const payload: InternalTokenClaims = {
     claims_set_version: 1,
-    actor_id: input.clientId,
+    // 実行者 (AI エージェント) の識別子は「安定なエージェント口座 id」。OAuth の client_id は DCR で
+    // 登録ごとに変わる揮発値なので、(認可ユーザー, client_name) から導いた安定 id を actor_id に使う。
+    actor_id: input.agentId,
     actor_type: "ai",
     iss: env.INTERNAL_AUTH_TOKEN_ISSUER ?? "front",
     // RFC 8707: aud is the specific resource this token is for (the MCP server URL).
