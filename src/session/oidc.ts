@@ -1,4 +1,4 @@
-import { exchangeOidcOAuthCode, serializeOidcSessionCookie, findOrCreateUserByOidc } from "../identify";
+import { exchangeOidcOAuthCode, serializeOidcSessionCookie, findOrCreateUserByOidc, registerLoginEmailToGroup } from "../identify";
 import { clearCookie, parseCookies, serializeCookie } from "./cookies";
 import { identitySetCookies } from "./identity";
 import type { AuthorizeEnv } from "./index";
@@ -120,6 +120,8 @@ export async function handleOidcLoginCallback(context: RouteContext): Promise<Re
     for (const c of await identitySetCookies(context.env, { userId })) {
       headers.append("Set-Cookie", c);
     }
+    // email を group DB に着地させる（cookie/認証DB を経由しない）。手元の oidcSession.email を使う。
+    await registerLoginEmailToGroup(context.env, userId, oidcSession.email);
   } catch {
     // identity lookup failure is non-fatal; org-select page will handle missing state
   }

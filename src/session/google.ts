@@ -1,4 +1,4 @@
-import { exchangeGoogleOAuthCode, serializeGoogleSessionCookie, findOrCreateUserByGoogle, linkGoogleToUser } from "../identify";
+import { exchangeGoogleOAuthCode, serializeGoogleSessionCookie, findOrCreateUserByGoogle, linkGoogleToUser, registerLoginEmailToGroup } from "../identify";
 import { clearCookie, parseCookies, serializeCookie } from "./cookies";
 import { readIdentity, identitySetCookies } from "./identity";
 import type { AuthorizeEnv } from "./index";
@@ -114,6 +114,8 @@ export async function handleGoogleLoginCallback(context: RouteContext): Promise<
       for (const c of await identitySetCookies(context.env, { userId })) {
         headers.append("Set-Cookie", c);
       }
+      // email を group DB に着地させる（cookie/認証DB を経由しない）。手元の googleSession.email を使う。
+      await registerLoginEmailToGroup(context.env, userId, googleSession.email);
     }
   } catch {
     // identity lookup failure is non-fatal; org-select page will handle the missing state

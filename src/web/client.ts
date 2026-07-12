@@ -177,9 +177,8 @@ const renderNav = async (screenId: string): Promise<void> => {
         (authStatus.github.authenticated || authStatus.google.authenticated || authStatus.microsoft?.authenticated || authStatus.oidc?.authenticated),
     );
     if (providerAuthed || hasIdentitySession) {
-      const displayName = authStatus?.github.login
-        ? `@${authStatus.github.login}`
-        : (authStatus?.google.email ?? authStatus?.microsoft?.email ?? authStatus?.oidc?.email ?? '');
+      // email/name は PII なのでナビに出さない。GitHub は公開ハンドル @login、それ以外は汎用ラベル。
+      const displayName = authStatus?.github.login ? `@${authStatus.github.login}` : 'ログイン中';
       if (displayName) {
         const userEl = document.createElement('span');
         userEl.textContent = displayName;
@@ -423,9 +422,9 @@ const loadEditor = async (screenId: string): Promise<void> => {
 
 type AuthStatus = {
   github: { authenticated: boolean; login: string | null };
-  google: { authenticated: boolean; email: string | null; name: string | null };
-  microsoft: { authenticated: boolean; email: string | null; name: string | null };
-  oidc?: { authenticated: boolean; email: string | null; name: string | null };
+  google: { authenticated: boolean };
+  microsoft: { authenticated: boolean };
+  oidc?: { authenticated: boolean };
 };
 
 type IdentityStatus = {

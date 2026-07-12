@@ -23,8 +23,8 @@ function el<K extends keyof HTMLElementTagNameMap>(
 
 type AuthStatus = {
   github: { authenticated: boolean; login: string | null };
-  google: { authenticated: boolean; email: string | null };
-  microsoft: { authenticated: boolean; email: string | null };
+  google: { authenticated: boolean };
+  microsoft: { authenticated: boolean };
 };
 
 export const renderSettingsPage = async (root: HTMLElement): Promise<void> => {
@@ -66,13 +66,14 @@ export const renderSettingsPage = async (root: HTMLElement): Promise<void> => {
       key: 'google',
       label: 'Google',
       startPath: '/oauth/google/start',
-      identity: auth?.google.email ?? null,
+      // email は PII なので出さない（連携の有無のみ表示）。
+      identity: null,
     },
     {
       key: 'microsoft',
       label: 'Microsoft',
       startPath: '/oauth/microsoft/start',
-      identity: auth?.microsoft.email ?? null,
+      identity: null,
     },
   ];
 

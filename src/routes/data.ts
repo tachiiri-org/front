@@ -165,20 +165,16 @@ export async function handleAuthStatus(
         authenticated: Boolean(githubConnectSession),
         scopes: githubConnectSession?.scopes ?? null,
       },
+      // email/name は返さない（P2 を出さない）。連携の有無のみ。表示に email が要る場合は
+      // group DB の検証済み email を本人にのみ出す（別途）。
       google: {
         authenticated: Boolean(googleSession),
-        email: googleSession?.email ?? null,
-        name: googleSession?.name ?? null,
       },
       microsoft: {
         authenticated: Boolean(microsoftSession),
-        email: microsoftSession?.email ?? null,
-        name: microsoftSession?.name ?? null,
       },
       oidc: {
         authenticated: Boolean(oidcSession),
-        email: oidcSession?.email ?? null,
-        name: oidcSession?.name ?? null,
       },
     },
     { status: 200 },
@@ -235,14 +231,10 @@ export async function handleAutoSelectOrg(request: Request, env: AuthorizeEnv): 
 
   const headers = new Headers({ 'Content-Type': 'application/json; charset=utf-8' });
 
+  // OAuth ログインの email は callback で既に group DB に登録済み（トークンに P2 を持たせない）。
+  // ここでは magic-link 経路の magic_email のみ扱う。
   const magicEmail = cookies.get('magic_email') ? decodeURIComponent(cookies.get('magic_email')!) : null;
-  const [githubSession, googleSession] = await Promise.allSettled([
-    readGitHubSession(request, env),
-    readGoogleSession(request, env),
-  ]);
-  const email = magicEmail ??
-    (githubSession.status === 'fulfilled' ? githubSession.value?.email : null) ??
-    (googleSession.status === 'fulfilled' ? googleSession.value?.email : null);
+  const email = magicEmail;
 
   // org_user_id is derived from (groupId, userId) alone. Update the signed identity with
   // the selected group and derived org-user id (plus the JS-readable group hint).
@@ -280,14 +272,10 @@ export async function handleSelectOrg(request: Request, env: AuthorizeEnv): Prom
   headers.set('Location', returnTo.startsWith('/') ? returnTo : '/');
 
   if (identityUserId) {
+    // OAuth ログインの email は callback で既に group DB に登録済み（トークンに P2 を持たせない）。
+    // ここでは magic-link 経路の magic_email のみ扱う。
     const magicEmail = cookies.get('magic_email') ? decodeURIComponent(cookies.get('magic_email')!) : null;
-    const [githubSession, googleSession] = await Promise.allSettled([
-      readGitHubSession(request, env),
-      readGoogleSession(request, env),
-    ]);
-    const email = magicEmail ??
-      (githubSession.status === 'fulfilled' ? githubSession.value?.email : null) ??
-      (googleSession.status === 'fulfilled' ? googleSession.value?.email : null);
+    const email = magicEmail;
 
     // org_user_id is derived from (orgId, identityUserId) alone. Update the signed identity
     // with the selected group and derived org-user id (plus the JS-readable group hint).

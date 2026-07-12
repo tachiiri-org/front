@@ -2,16 +2,20 @@ import { authorizeFetch, type AuthorizeEnv } from "./session";
 import { issueSessionToken, readSessionToken } from "./session/token";
 import { parseCookies, serializeCookie, clearCookie } from "./session/cookies";
 
-// GitHub login session (read:user scope — identity only)
+// GitHub login session (read:user scope — identity only).
+// STORED in the cookie: no PII (no email, no display name). email/name are only used
+// in-process at the OAuth callback (see IdentifyGitHubExchange) and never persisted here.
 export type IdentifyGitHubSession = {
   authenticated: true;
   accessToken: string;
   viewer: {
     login: string;
-    name: string | null;
   };
-  email: string | null;
 };
+
+// What the callback receives from the code exchange — includes PII (email) used once, in
+// process, to land the email in the group DB. Never written to the session cookie.
+export type IdentifyGitHubExchange = IdentifyGitHubSession & { email: string | null };
 
 // GitHub connect session (repo and other resource scopes)
 export type IdentifyGitHubConnectSession = {
@@ -20,21 +24,21 @@ export type IdentifyGitHubConnectSession = {
   scopes: string;
 };
 
-// Google login session (openid email profile)
+// Google login session. STORED in the cookie: no PII (only the authenticated flag). email/sub
+// are used in-process at the callback (IdentifyGoogleExchange) and never persisted here.
 export type IdentifyGoogleSession = {
   authenticated: true;
-  email: string;
-  name: string | null;
-  sub: string;
 };
 
-// Microsoft login session (OIDC — openid email profile)
+export type IdentifyGoogleExchange = IdentifyGoogleSession & { email: string; name: string | null; sub: string };
+
+// Microsoft login session. STORED in the cookie: no PII (only the authenticated flag). email/sub
+// are used in-process at the callback (IdentifyMicrosoftExchange) and never persisted here.
 export type IdentifyMicrosoftSession = {
   authenticated: true;
-  email: string;
-  name: string | null;
-  sub: string;
 };
+
+export type IdentifyMicrosoftExchange = IdentifyMicrosoftSession & { email: string; name: string | null; sub: string };
 
 const GITHUB_SESSION_COOKIE = "__Host-github_session";
 const GITHUB_CONNECT_SESSION_COOKIE = "__Host-github_connect_session";
@@ -59,7 +63,7 @@ export async function exchangeGitHubOAuthCode(
   env: AuthorizeEnv,
   code: string,
   redirectUri: string,
-): Promise<IdentifyGitHubSession> {
+): Promise<IdentifyGitHubExchange> {
   const response = await authorizeFetch(env, {
     path: "/api/v1/identify/session/github/oauth/callback",
     method: "POST",
@@ -68,7 +72,7 @@ export async function exchangeGitHubOAuthCode(
   if (!response.ok) {
     throw new Error(`identify_github_oauth_exchange_failed:${response.status}`);
   }
-  return (await response.json()) as IdentifyGitHubSession;
+  return (await response.json()) as IdentifyGitHubExchange;
 }
 
 export async function serializeGitHubSessionCookie(
@@ -76,7 +80,12 @@ export async function serializeGitHubSessionCookie(
   env: AuthorizeEnv,
   request: Request,
 ): Promise<string> {
-  const token = await issueSessionToken(env, { ...session }, SESSION_TTL);
+  // Allowlist non-PII fields explicitly — never spread the exchange object (it may carry email).
+  const token = await issueSessionToken(
+    env,
+    { authenticated: session.authenticated, accessToken: session.accessToken, viewer: { login: session.viewer.login } },
+    SESSION_TTL,
+  );
   return serializeCookie(GITHUB_SESSION_COOKIE, token, {
     maxAge: SESSION_TTL,
     path: "/",
@@ -173,7 +182,7 @@ export async function exchangeGoogleOAuthCode(
   env: AuthorizeEnv,
   code: string,
   redirectUri: string,
-): Promise<IdentifyGoogleSession> {
+): Promise<IdentifyGoogleExchange> {
   const response = await authorizeFetch(env, {
     path: "/api/v1/identify/session/google/oauth/callback",
     method: "POST",
@@ -183,7 +192,7 @@ export async function exchangeGoogleOAuthCode(
     const body = await response.text().catch(() => "");
     throw new Error(`identify_google_oauth_exchange_failed:${response.status}:${body}`);
   }
-  return (await response.json()) as IdentifyGoogleSession;
+  return (await response.json()) as IdentifyGoogleExchange;
 }
 
 export async function serializeGoogleSessionCookie(
@@ -191,7 +200,8 @@ export async function serializeGoogleSessionCookie(
   env: AuthorizeEnv,
   request: Request,
 ): Promise<string> {
-  const token = await issueSessionToken(env, { ...session }, SESSION_TTL);
+  // Allowlist non-PII fields explicitly — never spread the exchange object (it carries email).
+  const token = await issueSessionToken(env, { authenticated: session.authenticated }, SESSION_TTL);
   return serializeCookie(GOOGLE_SESSION_COOKIE, token, {
     maxAge: SESSION_TTL,
     path: "/",
@@ -422,6 +432,31 @@ export async function setDefaultGroup(env: AuthorizeEnv, userId: string, groupId
   });
 }
 
+// 既定グループ名（汎用・非PII）。個人名など自由入力の PII は認証DBに載せないため、初回自動作成は
+// この汎用名で作り、あとでユーザーがリネームする（リネームは group DB 側で持つ — Phase 2）。
+const DEFAULT_GROUP_NAME = "マイグループ";
+
+// メンバーの email を group DB（P2 の唯一の正規の置き場所 — cookie にも全体共通の認証DBにも置かない）に
+// 登録する。email が正当に手元にある OAuth callback の瞬間に呼ぶ。まだグループを持たない新規ユーザーには
+// 汎用名で既定グループを自動作成する（＝アカウント作成と同時にグループが出る）。非致命的（失敗してもログインは通す）。
+export async function registerLoginEmailToGroup(
+  env: AuthorizeEnv,
+  userId: string,
+  email: string | null,
+): Promise<void> {
+  if (!email) return;
+  try {
+    let groupId = await getDefaultGroup(env, userId);
+    if (!groupId) {
+      const org = await createOrganization(env, userId, DEFAULT_GROUP_NAME);
+      groupId = org.id;
+    }
+    await registerGroupMember(env, groupId, email, userId);
+  } catch {
+    // 登録失敗はログインをブロックしない（magic-link 復旧用マッピングは次回ログインで補完される）。
+  }
+}
+
 // ---- Microsoft login ----
 
 export function buildMicrosoftLoginUrl(env: Pick<AuthorizeEnv, "FRONTEND_ORIGIN">): string {
@@ -432,7 +467,7 @@ export async function exchangeMicrosoftOAuthCode(
   env: AuthorizeEnv,
   code: string,
   redirectUri: string,
-): Promise<IdentifyMicrosoftSession> {
+): Promise<IdentifyMicrosoftExchange> {
   const response = await authorizeFetch(env, {
     path: "/api/v1/identify/session/microsoft/oauth/callback",
     method: "POST",
@@ -442,7 +477,7 @@ export async function exchangeMicrosoftOAuthCode(
     const body = await response.text().catch(() => "");
     throw new Error(`identify_microsoft_oauth_exchange_failed:${response.status}:${body}`);
   }
-  return (await response.json()) as IdentifyMicrosoftSession;
+  return (await response.json()) as IdentifyMicrosoftExchange;
 }
 
 export async function serializeMicrosoftSessionCookie(
@@ -450,7 +485,8 @@ export async function serializeMicrosoftSessionCookie(
   env: AuthorizeEnv,
   request: Request,
 ): Promise<string> {
-  const token = await issueSessionToken(env, { ...session }, SESSION_TTL);
+  // Allowlist non-PII fields explicitly — never spread the exchange object (it carries email).
+  const token = await issueSessionToken(env, { authenticated: session.authenticated }, SESSION_TTL);
   return serializeCookie(MICROSOFT_SESSION_COOKIE, token, {
     maxAge: SESSION_TTL,
     path: "/",
@@ -506,8 +542,13 @@ export async function findOrCreateUserByMicrosoft(
 
 // ---- OIDC login ----
 
+// OIDC login session. STORED in the cookie: no PII (only the authenticated flag). oidcId/sub/email
+// are used in-process at the callback (IdentifyOidcExchange) and never persisted here.
 export type IdentifyOidcSession = {
   authenticated: true;
+};
+
+export type IdentifyOidcExchange = IdentifyOidcSession & {
   oidcId: string;
   sub: string;
   email: string | null;
@@ -521,7 +562,7 @@ export async function exchangeOidcOAuthCode(
   oidcId: string,
   code: string,
   redirectUri: string,
-): Promise<IdentifyOidcSession> {
+): Promise<IdentifyOidcExchange> {
   // First fetch provider config
   const configRes = await authorizeFetch(env, {
     path: `/api/v1/identity/oidc/${encodeURIComponent(oidcId)}`,
@@ -546,7 +587,7 @@ export async function exchangeOidcOAuthCode(
     const body = await response.text().catch(() => "");
     throw new Error(`identify_oidc_exchange_failed:${response.status}:${body}`);
   }
-  return (await response.json()) as IdentifyOidcSession;
+  return (await response.json()) as IdentifyOidcExchange;
 }
 
 export async function serializeOidcSessionCookie(
@@ -554,7 +595,8 @@ export async function serializeOidcSessionCookie(
   env: AuthorizeEnv,
   request: Request,
 ): Promise<string> {
-  const token = await issueSessionToken(env, { ...session }, SESSION_TTL);
+  // Allowlist non-PII fields explicitly — never spread the exchange object (it carries email).
+  const token = await issueSessionToken(env, { authenticated: session.authenticated }, SESSION_TTL);
   return serializeCookie(OIDC_SESSION_COOKIE, token, {
     maxAge: SESSION_TTL,
     path: "/",

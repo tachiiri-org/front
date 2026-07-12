@@ -1,4 +1,4 @@
-import { exchangeMicrosoftOAuthCode, serializeMicrosoftSessionCookie, findOrCreateUserByMicrosoft, linkMicrosoftToUser } from "../identify";
+import { exchangeMicrosoftOAuthCode, serializeMicrosoftSessionCookie, findOrCreateUserByMicrosoft, linkMicrosoftToUser, registerLoginEmailToGroup } from "../identify";
 import { clearCookie, parseCookies, serializeCookie } from "./cookies";
 import { readIdentity, identitySetCookies } from "./identity";
 import type { AuthorizeEnv } from "./index";
@@ -115,6 +115,8 @@ export async function handleMicrosoftLoginCallback(context: RouteContext): Promi
       for (const c of await identitySetCookies(context.env, { userId })) {
         headers.append("Set-Cookie", c);
       }
+      // email を group DB に着地させる（cookie/認証DB を経由しない）。手元の microsoftSession.email を使う。
+      await registerLoginEmailToGroup(context.env, userId, microsoftSession.email);
     }
   } catch {
     // identity lookup failure is non-fatal; org-select page will handle the missing state
