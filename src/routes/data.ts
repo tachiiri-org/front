@@ -1,6 +1,6 @@
 import type { SpecDocument } from '../shared/spec-document';
 import type { UiShellSettings } from '../shared/ui-shell-settings';
-import { readGitHubSession, readGitHubConnectSession, readGoogleSession, readMicrosoftSession, readOidcSession, listUserOrganizations, createOrganization, resolveOrgUser, getDefaultGroup, verifyMagicLinkToken, createBareUser, findMemberByEmail, registerGroupMember, fetchGroupInfo, setGroupName } from '../identify';
+import { readGitHubSession, readGitHubConnectSession, readGoogleSession, readMicrosoftSession, readOidcSession, listUserOrganizations, createOrganization, resolveOrgUser, getDefaultGroup, verifyMagicLinkToken, createBareUser, findMemberByEmail, registerGroupMember, fetchGroupInfo, setGroupName, resolveGroupName } from '../identify';
 import { parseCookies, serializeCookie } from '../session/cookies';
 import { readIdentity, identitySetCookies } from '../session/identity';
 import { authorizeFetch } from '../session/fetch';
@@ -584,9 +584,13 @@ export async function handleOrgGroupSelectPage(
     path: `/api/v1/identity/orgs/${encodeURIComponent(orgId)}/groups`,
     method: 'GET',
   });
-  const groups: Array<{ id: string; name: string }> = res.ok
-    ? ((await res.json()) as { groups: Array<{ id: string; name: string }> }).groups
+  // 名前は group DB を正とする（認証DBは id のみ返す）。各グループ名を group DB から解決。
+  const groupIds: string[] = res.ok
+    ? ((await res.json()) as { groups: Array<{ id: string }> }).groups.map((g) => g.id)
     : [];
+  const groups = await Promise.all(
+    groupIds.map(async (id) => ({ id, name: (await resolveGroupName(env, id)) ?? id })),
+  );
 
   const safeReturnTo = returnTo.startsWith('/') ? returnTo : '/';
   const items = groups
