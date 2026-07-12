@@ -1,6 +1,6 @@
 import type { SpecDocument } from '../shared/spec-document';
 import type { UiShellSettings } from '../shared/ui-shell-settings';
-import { readGitHubSession, readGitHubConnectSession, readGoogleSession, readMicrosoftSession, readOidcSession, listUserOrganizations, createOrganization, resolveOrgUser, getDefaultGroup, verifyMagicLinkToken, createBareUser, findMemberByEmail, registerGroupMember, fetchGroupInfo } from '../identify';
+import { readGitHubSession, readGitHubConnectSession, readGoogleSession, readMicrosoftSession, readOidcSession, listUserOrganizations, createOrganization, resolveOrgUser, getDefaultGroup, verifyMagicLinkToken, createBareUser, findMemberByEmail, registerGroupMember, fetchGroupInfo, setGroupName } from '../identify';
 import { parseCookies, serializeCookie } from '../session/cookies';
 import { readIdentity, identitySetCookies } from '../session/identity';
 import { authorizeFetch } from '../session/fetch';
@@ -316,6 +316,28 @@ export async function handleOrgCreate(
 
   const org = await createOrganization(env, userId, body.name);
   return json(org, { status: 201 });
+}
+
+// PUT /api/v1/auth/organizations/:id/name — グループ名を group DB に設定/リネーム。
+// 認可: ログイン中かつ当該グループのメンバーであること（自分の所属外は変更不可）。
+export async function handleOrgRename(request: Request, env: AuthorizeEnv): Promise<Response | null> {
+  const url = new URL(request.url);
+  const m = url.pathname.match(/^\/api\/v1\/auth\/organizations\/([^/]+)\/name$/);
+  if (!m || request.method !== 'PUT') return null;
+
+  const userId = (await readIdentity(env, request))?.userId;
+  if (!userId) return json({ error: 'not_authenticated' }, { status: 401 });
+
+  const groupId = decodeURIComponent(m[1]);
+  const body = (await request.json().catch(() => ({}))) as { name?: string };
+  const name = body.name?.trim();
+  if (!name) return json({ error: 'name_required' }, { status: 400 });
+
+  const orgs = await listUserOrganizations(env, userId).catch(() => [] as { id: string }[]);
+  if (!orgs.some((o) => o.id === groupId)) return json({ error: 'forbidden' }, { status: 403 });
+
+  await setGroupName(env, groupId, name);
+  return json({ id: groupId, name }, { status: 200 });
 }
 
 export async function handleOrgMembers(request: Request, env: AuthorizeEnv): Promise<Response | null> {

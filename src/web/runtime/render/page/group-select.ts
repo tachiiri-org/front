@@ -93,8 +93,25 @@ export const renderGroupSelectPage = async (root: HTMLElement): Promise<void> =>
         borderRadius: '6px', color: C.text, fontSize: '14px', fontFamily: 'monospace',
         cursor: 'pointer', width: '100%', textAlign: 'left',
       });
-      row.appendChild(el('span', { color: C.bright }, org.name));
-      row.appendChild(el('span', { color: C.dim }, '→'));
+      const nameSpan = el('span', { color: C.bright }, org.name);
+      row.appendChild(nameSpan);
+      const right = el('span', { display: 'flex', alignItems: 'center', gap: '12px' });
+      // リネーム（グループ名は group DB を正とする。行クリック＝選択とは分離）。
+      const renameBtn = el('span', { color: C.dim, cursor: 'pointer', fontSize: '12px' }, '✎');
+      renameBtn.addEventListener('click', async (e) => {
+        e.stopPropagation();
+        const next = window.prompt('グループ名を変更', nameSpan.textContent ?? '');
+        if (next == null) return;
+        const name = next.trim();
+        if (!name) return;
+        const res = await fetch(`/api/v1/auth/organizations/${encodeURIComponent(org.id)}/name`, {
+          method: 'PUT', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ name }),
+        }).catch(() => null);
+        if (res?.ok) nameSpan.textContent = name;
+      });
+      right.appendChild(renameBtn);
+      right.appendChild(el('span', { color: C.dim }, '→'));
+      row.appendChild(right);
       row.addEventListener('click', () => {
         const returnToParam = returnTo.startsWith('/') ? `&returnTo=${encodeURIComponent(returnTo)}` : '';
         window.location.href = `/api/v1/auth/select-org?group_id=${encodeURIComponent(org.id)}${returnToParam}`;

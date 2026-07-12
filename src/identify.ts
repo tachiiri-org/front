@@ -330,8 +330,15 @@ export async function listUserOrganizations(env: AuthorizeEnv, userId: string): 
     method: "GET",
   });
   if (!res.ok) throw new Error(`identity_list_orgs_failed:${res.status}`);
-  const data = (await res.json()) as { organizations: IdentityOrg[] };
-  return data.organizations;
+  const data = (await res.json()) as { organizations: { id: string; name?: string }[] };
+  // Phase2: グループ名は group DB を正とする。認証DBからは id のみを使い、名前は各 group DB から解決
+  // （旧グループは遅延移行）。認証DB由来の name は移行期間の最終フォールバックに残す。
+  return Promise.all(
+    data.organizations.map(async (o) => ({
+      id: o.id,
+      name: (await resolveGroupName(env, o.id)) ?? o.name ?? o.id,
+    })),
+  );
 }
 
 export async function createOrganization(env: AuthorizeEnv, userId: string, name: string): Promise<IdentityOrg> {
@@ -369,6 +376,30 @@ export async function setGroupName(env: AuthorizeEnv, groupId: string, name: str
   });
 }
 
+// 認証DBの旧グループ名（移行元。Phase2 の contract で撤去予定）。
+async function fetchLegacyGroupName(env: AuthorizeEnv, groupId: string): Promise<string | null> {
+  const res = await authorizeFetch(env, {
+    path: `/api/v1/identity/groups/${encodeURIComponent(groupId)}`,
+    method: "GET",
+  });
+  if (!res.ok) return null;
+  return ((await res.json()) as { id: string; name: string | null }).name ?? null;
+}
+
+// グループ名の解決: group DB を正とし、まだ無い既存グループは認証DBから読んで group DB へ遅延移行する
+// （読まれた分だけ自己修復。全件掃きは 2b の backfill、認証DB名の撤去は 2d の contract）。
+export async function resolveGroupName(env: AuthorizeEnv, groupId: string): Promise<string | null> {
+  let name = await getGroupName(env, groupId);
+  if (name == null) {
+    const legacy = await fetchLegacyGroupName(env, groupId);
+    if (legacy) {
+      await setGroupName(env, groupId, legacy).catch(() => null);
+      name = legacy;
+    }
+  }
+  return name;
+}
+
 export async function searchOrganizationsByName(env: AuthorizeEnv, name: string): Promise<{ id: string }[]> {
   const res = await authorizeFetch(env, {
     path: `/api/v1/identity/organizations/search?name=${encodeURIComponent(name)}`,
@@ -391,12 +422,9 @@ export async function verifyMagicLinkToken(
 }
 
 export async function fetchGroupInfo(env: AuthorizeEnv, groupId: string): Promise<{ id: string; name: string } | null> {
-  const res = await authorizeFetch(env, {
-    path: `/api/v1/identity/groups/${encodeURIComponent(groupId)}`,
-    method: "GET",
-  });
-  if (!res.ok) return null;
-  return (await res.json()) as { id: string; name: string };
+  // Phase2: 名前は group DB を正とする（旧グループは遅延移行）。
+  const name = await resolveGroupName(env, groupId);
+  return { id: groupId, name: name ?? groupId };
 }
 
 export async function createBareUser(env: AuthorizeEnv): Promise<string> {

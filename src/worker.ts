@@ -9,7 +9,7 @@ import { handleGoogleLoginStart, handleGoogleLoginCallback } from './session/goo
 import { handleMicrosoftLoginStart, handleMicrosoftLoginCallback } from './session/microsoft';
 import type { AuthorizeEnv } from './session';
 import { readIdentity, identityClearCookies } from './session/identity';
-import { handleApiRequest as handleDataApiRequest, handleGitHubAuthStatus, handleAuthStatus, handleIdentityStatus, handleOrgCreate, handleSelectOrg, handleOrgMembers, handleAutoSelectOrg, handleMagicLinkRequest, handleMagicLinkVerify, handleMemberCheck, handleGroupLoginPage, handleOrgSlugLogin, handleOrgGroupsApi, handleOrgGroupSelectPage } from './routes/data';
+import { handleApiRequest as handleDataApiRequest, handleGitHubAuthStatus, handleAuthStatus, handleIdentityStatus, handleOrgCreate, handleOrgRename, handleSelectOrg, handleOrgMembers, handleAutoSelectOrg, handleMagicLinkRequest, handleMagicLinkVerify, handleMemberCheck, handleGroupLoginPage, handleOrgSlugLogin, handleOrgGroupsApi, handleOrgGroupSelectPage } from './routes/data';
 import { handleApiRequest as handleLayoutApiRequest } from './routes/layout';
 import { handleMcp } from './mcp/handler';
 import {
@@ -257,6 +257,10 @@ async function fetchInner(request: Request, env: Env): Promise<Response> {
     }
     if (pathname === '/api/v1/auth/organizations' && request.method === 'POST') {
       const res = await handleOrgCreate(request, env);
+      if (res) return res;
+    }
+    if (/^\/api\/v1\/auth\/organizations\/[^/]+\/name$/.test(pathname) && request.method === 'PUT') {
+      const res = await handleOrgRename(request, env);
       if (res) return res;
     }
     if (pathname === '/api/v1/auth/auto-select-org' && request.method === 'GET') {
