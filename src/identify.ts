@@ -341,7 +341,32 @@ export async function createOrganization(env: AuthorizeEnv, userId: string, name
     body: JSON.stringify({ user_id: userId, name }),
   });
   if (!res.ok) throw new Error(`identity_create_org_failed:${res.status}`);
-  return (await res.json()) as IdentityOrg;
+  const org = (await res.json()) as IdentityOrg;
+  // Phase2: グループ名は group DB を正の置き場所とする（PII 混入しうるため認証DBに置かない）。
+  // expand 期間は認証DB（createOrganization 内）と group DB の二重書き。読みは後で group DB へ切替。
+  await setGroupName(env, org.id, name).catch(() => null);
+  return org;
+}
+
+// グループ名を group DB から読む（Phase2 の正の置き場所）。
+export async function getGroupName(env: AuthorizeEnv, groupId: string): Promise<string | null> {
+  const res = await authorizeFetch(env, {
+    path: `/api/v1/graph/group-name?group_id=${encodeURIComponent(groupId)}`,
+    method: "GET",
+    tenantContext: { tenantId: groupId },
+  });
+  if (!res.ok) return null;
+  return ((await res.json()) as { name: string | null }).name;
+}
+
+// グループ名を group DB に設定/リネームする。
+export async function setGroupName(env: AuthorizeEnv, groupId: string, name: string): Promise<void> {
+  await authorizeFetch(env, {
+    path: "/api/v1/graph/group-name",
+    method: "PUT",
+    body: JSON.stringify({ group_id: groupId, name }),
+    tenantContext: { tenantId: groupId },
+  });
 }
 
 export async function searchOrganizationsByName(env: AuthorizeEnv, name: string): Promise<{ id: string }[]> {
