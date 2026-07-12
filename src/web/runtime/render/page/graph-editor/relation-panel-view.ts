@@ -797,15 +797,15 @@ export function createRelationPanelView(
   // 新しい関係行を anchorRow の直後に「楽観的に」挿入する（全再描画しない＝画面が点滅しない・①）。
   // 本文にノードリンク(チップ)が無ければ末尾にこのノードの ⟦id⟧ を付けて当該ノードに紐づける。
   // 後で手動でその末尾チップを外せばチップ0になり ⑤ で「リンクなし」へ移る。並び順は保存する。
-  const insertRelationAfter = async (anchorRow: HTMLElement, extraText = ''): Promise<void> => {
-    if (!currentNodeId) return;
+  const insertRelationAfter = async (anchorRow: HTMLElement, extraText = ''): Promise<HTMLElement | null> => {
+    if (!currentNodeId) return null;
     // The subject may still be a freshly-created node whose real id hasn't landed — never persist a
     // ⟦temp-N⟧ chip / temp participant (it can never resolve to a real node). Wait for the real id.
     const nid = await ctx.awaitRealId(currentNodeId);
-    if (!nid) return;
+    if (!nid) return null;
     const newBody = hasNodeLink(extraText) ? extraText : `${extraText}⟦${nid}⟧`;
     const created = await apiCreateRelation(ctx.gId, nid, lang, newBody);
-    if (!created) return;
+    if (!created) return null;
     const subjLabel = currentPath?.[currentPath.length - 1]?.label ?? '';
     const subj: ExplorerNode = { id: nid, ...(lang === 'ja' ? { ja: subjLabel } : { en: subjLabel }) };
     const newRow = renderRelationRow({ lineId: created.lineId, body: { [lang]: newBody }, participants: [subj] });
@@ -814,6 +814,7 @@ export function createRelationPanelView(
     const firstTa = newRow.querySelector('textarea') as HTMLTextAreaElement | null;
     if (firstTa) { firstTa.focus(); firstTa.setSelectionRange(firstTa.value.length, firstTa.value.length); }
     await apiReorderNodeRelations(ctx.gId, nid, relationRows().map((r) => r.dataset.lineId!));
+    return newRow;
   };
 
   // ノードパネルの draft 行と同じ構成（spacer+四角+入力）。テキストを書いて Enter で作成。
@@ -869,6 +870,23 @@ export function createRelationPanelView(
     ta.addEventListener('focus', () => { ta.style.color = TEXT_HIGH; clearSelection(); });
     ta.addEventListener('blur', () => { if (!ta.value.trim()) ta.style.color = TEXT_DIM; if (mention?.anchor === ta) closeMenu(); });
     ta.addEventListener('input', () => { resize(); void draftMention(); });
+    // 複数行ペースト → 行ごとに1リレーション（ノードパネルの paste と同じ挙動）。1つのリレーションに
+    // 複数行が入らないよう、改行で分割して各行を当該ノードの関係として順に作成する。単一行はブラウザ既定に任せる。
+    ta.addEventListener('paste', (e) => {
+      const text = e.clipboardData?.getData('text/plain') ?? '';
+      const lines = text.split(/\r?\n/).map((l) => l.trim()).filter((l) => l.length > 0);
+      if (lines.length <= 1) return; // 単一行 → 既定のペースト
+      e.preventDefault();
+      ta.value = ''; resize();
+      void (async () => {
+        let anchor: HTMLElement = row;
+        for (const line of lines) {
+          const created = await insertRelationAfter(anchor, line);
+          if (!created) break;
+          anchor = created;
+        }
+      })();
+    });
     ta.addEventListener('keydown', async (e) => {
       // @ メニューが開いている間は ↑↓/Enter で候補選択、Esc で閉じる。
       if (menuOpen) {

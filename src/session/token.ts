@@ -153,8 +153,8 @@ export async function issueInternalToken(
   // machine actorType is the user acting (人が実行者). Explicit program/ai callers
   // (admin/ops, MCP) are honored as-is. front acting on its own behalf (no subject) is
   // the front system-internal program account (a real m_account record, not a synthetic
-  // id). NOTE: the subject here still comes from the unsigned identity cookie; making it
-  // trustworthy is Step 2 (signed identity / gap 9).
+  // id). The subject is sourced from the signed, server-verified identity cookie
+  // (session/identity.ts readIdentity), so it is trustworthy for accountability.
   const actorType = input.actorType ?? (input.subjectId ? "human" : "program");
   const actorId = actorType === "human" && input.subjectId ? input.subjectId : FRONT_SYSTEM_ACCOUNT_ID;
   const payload: InternalTokenClaims = {
