@@ -440,6 +440,31 @@ export function createRelationPanelView(
         autosize(ta);
       });
       ta.addEventListener('input', () => { autosize(ta); void handleMention(ta); save(); });
+      // 複数行ペースト → 行ごとに1リレーション（draft 行・ノードパネルの paste と同じ挙動）。
+      // 1行目はキャレット位置へ取り込んでこのリレーションに残し、残りの行はこの関係行の直後に
+      // 1行=1リレーションで順に作成する。既定に任せると1つの textarea に改行が入り、単一リレーション内で
+      // 改行されてしまう（[1a042d75]修正 #複数行ペースト）。単一行はブラウザ既定に任せる。
+      ta.addEventListener('paste', (e) => {
+        const text = e.clipboardData?.getData('text/plain') ?? '';
+        const lines = text.split(/\r?\n/).map((l) => l.trim()).filter((l) => l.length > 0);
+        if (lines.length <= 1) return; // 単一行 → 既定のペースト
+        e.preventDefault();
+        const start = ta.selectionStart ?? ta.value.length;
+        const end = ta.selectionEnd ?? ta.value.length;
+        ta.value = ta.value.slice(0, start) + lines[0] + ta.value.slice(end);
+        const caret = start + lines[0].length;
+        autosize(ta);
+        ta.setSelectionRange(caret, caret);
+        save();
+        void (async () => {
+          let anchor: HTMLElement = row;
+          for (let k = 1; k < lines.length; k++) {
+            const created = await insertRelationAfter(anchor, lines[k]);
+            if (!created) break;
+            anchor = created;
+          }
+        })();
+      });
       // 他の場所を選んで textarea からフォーカスが外れたら、@ドロップダウンは閉じる。
       // （項目は mousedown+preventDefault でフォーカスを奪わないので、項目選択では blur しない。
       //   確定時は onPick が先に closeMenu→mention=null するため、ガードで二重閉じも防ぐ。）
