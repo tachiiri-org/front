@@ -686,11 +686,10 @@ export function createRelationPanelView(
 
   // 貼り付けの1行を1リレーションとして作成する（Enter の insertRelationAfter とは別挙動＝自動 ⟦node⟧ は付けない）。
   // - 本文中の [[名前]] は ⟦id⟧ チップへ変換（ラベル完全一致で既存リンク、無ければ同名ノードを新規作成）。
-  // - マークあり → 現在ノードを主語(参加者・自己チップは出さない)にし、マークノードを参加者(チップ)に。現在ノードの
-  //   関係として表示される。本文にチップがあるので⑤で主語が外れることもない。
-  // - マーク無しの素の行 → 現在ノードに紐付けず「リンクなし(orphan)」に（scratch 主語で作って主語 ray を外す。
-  //   本文が残るのでバックエンドは行を保持）。
-  // 現在ノードが参加者に含まれる行だけ関係行を anchor 直後へ挿入して返す。リンクなし等は null（呼び出し側で件数のみ）。
+  // - 現在ノードを主語(参加者)にして作成し、その関係行を anchor 直後へ挿入して返す＝貼った全行がこのパネルに出る。
+  //   マークノードは追加の参加者(チップ)に。現在ノード自身のチップは本文に入れない（自動 ⟦node⟧ 廃止）。
+  //   マーク無しの素の行はチップ0のまま現在ノード配下に出る（後で本文だけ編集すると⑤でリンクなしへ移る＝据え置き）。
+  // - orphan ビュー等で現在ノードが無い場合のみ、マーク先ノード配下／リンクなしに作り、このパネルには出さない(null)。
   const insertPastedRelation = async (anchorRow: HTMLElement, line: string): Promise<HTMLElement | null> => {
     const re = /\[\[([^\]]+)\]\]/g;
     const marks: Array<{ id: string; label: string }> = [];
@@ -708,29 +707,31 @@ export function createRelationPanelView(
     const body = bodyParts.join('');
     const cur = currentNodeId ? await ctx.awaitRealId(currentNodeId) : null;
 
-    if (marks.length === 0) {
-      // マーク無し → リンクなし(orphan)。scratch 主語で作成→主語 ray を外す。現在ノードが無ければ任意の1ノードで代用。
-      let scratch = cur;
-      if (!scratch) { const { nodes } = await fetchAllNodes(ctx.gId, [], 0, lang); scratch = nodes[0]?.id ?? null; }
-      if (!scratch) return null; // 空グラフ等: scratch が無く orphan を作れない
-      const created = await apiCreateRelation(ctx.gId, scratch, lang, body);
+    if (!cur) {
+      // 現在ノードが無い（orphan ビュー等）。マークがあればマーク先ノード配下に、無ければリンクなしに作る。
+      if (marks.length === 0) {
+        const { nodes } = await fetchAllNodes(ctx.gId, [], 0, lang);
+        const scratch = nodes[0]?.id ?? null;
+        if (!scratch) return null; // 空グラフ等: scratch が無く作れない
+        const created = await apiCreateRelation(ctx.gId, scratch, lang, body);
+        if (!created) return null;
+        await apiRemoveRay(ctx.gId, created.lineId, scratch); // 主語を外してリンクなしへ（本文が残るので保持）
+        return null;
+      }
+      const created = await apiCreateRelation(ctx.gId, marks[0].id, lang, body);
       if (!created) return null;
-      await apiRemoveRay(ctx.gId, created.lineId, scratch);
-      return null;
+      for (const x of marks) if (x.id !== marks[0].id) await apiAddRay(ctx.gId, created.lineId, x.id);
+      return null; // このパネル（現在ノード無し）には出さない
     }
 
-    // マークあり → 主語=現在ノード（無ければ先頭マーク）。マークノードを参加者(チップ)に足す。
-    const subj = cur ?? marks[0].id;
-    const created = await apiCreateRelation(ctx.gId, subj, lang, body);
+    // 現在ノードあり → 現在ノードを主語(参加者・自己チップは出さない)にし、マークノードを参加者(チップ)として追加。
+    const created = await apiCreateRelation(ctx.gId, cur, lang, body);
     if (!created) return null;
-    for (const x of marks) if (x.id !== subj) await apiAddRay(ctx.gId, created.lineId, x.id);
+    for (const x of marks) if (x.id !== cur) await apiAddRay(ctx.gId, created.lineId, x.id);
 
-    // 現在ノードが参加者に含まれなければ（orphan ビュー等でマーク先だけ）このパネルには出さない。
-    if (!cur || (subj !== cur && !marks.some((x) => x.id === cur))) return null;
-
-    // 参加者リスト（チップのラベル解決用）。主語=現在ノードでチップが無い場合はそれも参加者に含める。
+    // 参加者リスト（チップのラベル解決用）。自己チップが無い現在ノードも参加者として含める。
     const participants: ExplorerNode[] = [];
-    if (subj === cur && !marks.some((x) => x.id === cur)) {
+    if (!marks.some((x) => x.id === cur)) {
       const subjLabel = currentPath?.[currentPath.length - 1]?.label ?? '';
       participants.push({ id: cur, ...(lang === 'ja' ? { ja: subjLabel } : { en: subjLabel }) } as ExplorerNode);
     }
