@@ -464,16 +464,19 @@ export function createRelationPanelView(
           startK = 1;
         }
         void (async () => {
+          const rest = lines.slice(startK);
+          const markMap = await buildMarkMap(rest); // 追加分のマークを1回のノード取得でまとめて解決
           let anchor: HTMLElement = row;
           let shown = 0;
-          let made = 0;
-          for (let k = startK; k < lines.length; k++) {
-            made++;
-            const created = await insertPastedRelation(anchor, lines[k]);
+          for (const line of rest) {
+            const created = await insertPastedRelation(anchor, line, markMap);
             if (created) { anchor = created; shown++; }
           }
-          const hidden = made - shown;
-          if (made > 0 && hidden > 0) showToast(`${made}件を作成（うち ${hidden}件はリンクなし等で別表示）`);
+          if (shown > 0 && currentNodeId) {
+            const cur = await ctx.awaitRealId(currentNodeId);
+            if (cur) await apiReorderNodeRelations(ctx.gId, cur, relationRows().map((r) => r.dataset.lineId!));
+          }
+          if (rest.length > 0 && shown < rest.length) showToast(`${rest.length}件中 ${shown}件を作成`);
         })();
       });
       // 他の場所を選んで textarea からフォーカスが外れたら、@ドロップダウンは閉じる。
@@ -670,19 +673,31 @@ export function createRelationPanelView(
     return newRow;
   };
 
-  // 貼り付け用: [[名前]] マークをノードIDへ解決（ラベル完全一致で既存リンク、無ければ新規作成）。
-  const resolveMark = async (name: string): Promise<string | null> => {
-    const q = name.trim();
-    if (!q) return null;
-    const { nodes } = await fetchAllNodes(ctx.gId, [], 0, lang, undefined, q);
-    const exact = nodes.find((n) => labelOf(n, lang) === q);
-    if (exact) return ctx.awaitRealId(exact.id);
-    const created = await apiCreateNode(ctx.gId, lang, q);
-    return created ? ctx.awaitRealId(created.id) : null;
-  };
-
   // 本文に [[名前]] マークが1つでも含まれるか（貼り付けの検出用）。
   const hasMark = (s: string): boolean => /\[\[[^\]]+\]\]/.test(s);
+
+  // 貼り付け前に、全行の [[名前]] を「1回のノード取得」でまとめて解決する。返り値: 名前(trim) → nodeId。
+  // 既存はラベル完全一致でリンク、無ければ同名ノードを新規作成。DO は 120 reads/60s のレート制限があり、
+  // マークごとに検索(q)を撃つと大量ペーストで制限に当たり後続の作成が失敗する。そこで全ノードを一度だけ
+  // 引いてローカル照合し、read を名前数に比例させない（新規作成の書き込みのみ名前数分）。
+  const buildMarkMap = async (lines: string[]): Promise<Map<string, string>> => {
+    const names = new Set<string>();
+    for (const line of lines) {
+      for (const mm of line.matchAll(/\[\[([^\]]+)\]\]/g)) { const n = mm[1].trim(); if (n) names.add(n); }
+    }
+    const map = new Map<string, string>();
+    if (names.size === 0) return map;
+    const { nodes } = await fetchAllNodes(ctx.gId, [], 0, lang, undefined, undefined, 100000);
+    const byLabel = new Map<string, string>();
+    for (const n of nodes) { const l = labelOf(n, lang); if (l && !byLabel.has(l)) byLabel.set(l, n.id); }
+    for (const name of names) {
+      const existing = byLabel.get(name);
+      if (existing) { const rid = await ctx.awaitRealId(existing); if (rid) map.set(name, rid); continue; }
+      const created = await apiCreateNode(ctx.gId, lang, name);
+      if (created) { const rid = await ctx.awaitRealId(created.id); if (rid) { map.set(name, rid); byLabel.set(name, rid); } }
+    }
+    return map;
+  };
 
   // 貼り付けの1行を1リレーションとして作成する（Enter の insertRelationAfter とは別挙動＝自動 ⟦node⟧ は付けない）。
   // - 本文中の [[名前]] は ⟦id⟧ チップへ変換（ラベル完全一致で既存リンク、無ければ同名ノードを新規作成）。
@@ -690,7 +705,7 @@ export function createRelationPanelView(
   //   マークノードは追加の参加者(チップ)に。現在ノード自身のチップは本文に入れない（自動 ⟦node⟧ 廃止）。
   //   マーク無しの素の行はチップ0のまま現在ノード配下に出る（後で本文だけ編集すると⑤でリンクなしへ移る＝据え置き）。
   // - orphan ビュー等で現在ノードが無い場合のみ、マーク先ノード配下／リンクなしに作り、このパネルには出さない(null)。
-  const insertPastedRelation = async (anchorRow: HTMLElement, line: string): Promise<HTMLElement | null> => {
+  const insertPastedRelation = async (anchorRow: HTMLElement, line: string, markMap: Map<string, string>): Promise<HTMLElement | null> => {
     const re = /\[\[([^\]]+)\]\]/g;
     const marks: Array<{ id: string; label: string }> = [];
     const bodyParts: string[] = [];
@@ -698,9 +713,10 @@ export function createRelationPanelView(
     let m: RegExpExecArray | null;
     while ((m = re.exec(line))) {
       if (m.index > last) bodyParts.push(line.slice(last, m.index));
-      const id = await resolveMark(m[1]);
-      if (id) { bodyParts.push(`⟦${id}⟧`); marks.push({ id, label: m[1].trim() }); }
-      else bodyParts.push(m[0]); // 解決失敗は素のテキストのまま残す
+      const name = m[1].trim();
+      const id = markMap.get(name); // 事前解決済み（buildMarkMap）。未解決名は素のテキストのまま残す。
+      if (id) { bodyParts.push(`⟦${id}⟧`); marks.push({ id, label: name }); }
+      else bodyParts.push(m[0]);
       last = m.index + m[0].length;
     }
     if (last < line.length) bodyParts.push(line.slice(last));
@@ -739,8 +755,7 @@ export function createRelationPanelView(
 
     const newRow = renderRelationRow({ lineId: created.lineId, body: { [lang]: body }, participants });
     anchorRow.insertAdjacentElement('afterend', newRow);
-    await apiReorderNodeRelations(ctx.gId, cur, relationRows().map((r) => r.dataset.lineId!));
-    return newRow;
+    return newRow; // 並び替えは呼び出し側で最後に1回だけ行う（行ごとに撃たない）
   };
 
   // ノードパネルの draft 行と同じ構成（spacer+四角+入力）。テキストを書いて Enter で作成。
@@ -806,14 +821,18 @@ export function createRelationPanelView(
       e.preventDefault();
       ta.value = ''; resize();
       void (async () => {
+        const markMap = await buildMarkMap(lines); // 全行のマークを1回のノード取得でまとめて解決
         let anchor: HTMLElement = row;
         let shown = 0;
         for (const line of lines) {
-          const created = await insertPastedRelation(anchor, line);
+          const created = await insertPastedRelation(anchor, line, markMap);
           if (created) { anchor = created; shown++; }
         }
-        const hidden = lines.length - shown;
-        showToast(hidden > 0 ? `${lines.length}件を作成（うち ${hidden}件はリンクなし等で別表示）` : `${lines.length}件を作成`);
+        if (shown > 0 && currentNodeId) {
+          const cur = await ctx.awaitRealId(currentNodeId);
+          if (cur) await apiReorderNodeRelations(ctx.gId, cur, relationRows().map((r) => r.dataset.lineId!));
+        }
+        showToast(shown < lines.length ? `${lines.length}件中 ${shown}件を作成` : `${lines.length}件を作成`);
       })();
     });
     ta.addEventListener('keydown', async (e) => {
