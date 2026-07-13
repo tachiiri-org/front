@@ -385,18 +385,18 @@ export function createRelationPanelView(
       const nodeLink = document.createElement('span');
       nodeLink.dataset.nodeLink = id;
       nodeLink.contentEditable = 'false';
-      // 下線はテキストと同じ色・dashed。左クリックで検索ポップオーバー（差し替え／削除）、
-      // 右クリックで右にそのノードの関係パネルを開く（②）。× は廃止。
+      // 下線はテキストと同じ色・dashed。左クリックで右にそのノードの関係パネルを開く（関係を辿る）、
+      // 右クリックでノード検索メニュー（差し替え／削除）。× は廃止。
       nodeLink.style.cssText = `display:inline-block;vertical-align:top;line-height:1.5;font-size:14px;color:${TEXT_HIGH};border-bottom:1px dashed currentColor;margin:0;user-select:none;cursor:pointer;`;
       const txt = document.createElement('span');
       txt.textContent = label ?? labelById.get(id) ?? id;
       nodeLink.appendChild(txt);
-      // 左クリック = このノードを選択（＝表示切替: 関係パネルはこのノードの関係、選択中ソースの
-      // ノードパネルはこのノードの子を出す）。右クリック = ノード検索メニュー（差し替え／削除）。
+      // 左クリック = このノードの関係を出す関係パネルをもう1つ右に開く（ノードリンクを辿って関係を掘る）。
+      // 右クリック = ノード検索メニュー（差し替え／削除）。
       nodeLink.addEventListener('mousedown', (e) => {
         if (e.button !== 0) return;
         e.preventDefault();
-        ctx.selectNode?.(id, nodeLink.textContent ?? undefined);
+        ctx.openRelationPanel?.(id, nodeLink.textContent ?? undefined);
       });
       nodeLink.addEventListener('contextmenu', (e) => {
         e.preventDefault();

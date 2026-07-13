@@ -172,8 +172,9 @@ export function createPanelsView(ctx: GraphEditorContext): {
   // relation head (re-inserted each render by the view).
   const relationView: PanelView = createRelationPanelView(ctx, { lang: ctx.state.lang, initialNodeId: null, leadingHeadEl: makeGrip('rel-primary') });
 
-  // ② Open an additional relation panel showing `nodeId`'s relations (independent; closable). Kept
-  // for programmatic use; the chip right-click no longer triggers it.
+  // Open an additional relation panel showing `nodeId`'s relations (independent; closable), appended
+  // at the right end. Triggered by left-clicking a node-link chip in a relation — so you drill into a
+  // node's relations by following its links, building a left→right trail of relation panels.
   ctx.openRelationPanel = (nodeId, label) => {
     const id = `rel-x-${++relPanelSeq}`;
     const view = createRelationPanelView(ctx, { lang: ctx.state.lang, initialNodeId: nodeId, leadingHeadEl: makeGrip(id) });
@@ -582,7 +583,6 @@ export function createPanelsView(ctx: GraphEditorContext): {
     };
 
     addItem('ルート', null);
-    addItem('選択中', SELECTION_SRC);
     for (const p of nodePanels) {
       if (p.config.id !== nodePanelId) addItem(p.config.label, p.config.id);
     }
@@ -656,12 +656,12 @@ export function createPanelsView(ctx: GraphEditorContext): {
   };
 
   // ── Init ─────────────────────────────────────────────────────────
-  // Default layout = 3 panels: ノード(ルート) / リレーション / ノード(選択中の子). The primary relation
-  // panel is always inserted right after the FIRST node panel; node panel configs persist (order among
-  // themselves) but the mixed order with the relation panel is not persisted (resets to this on reload).
+  // Default layout = ノード(ルート) + リレーション. The primary relation panel is inserted right after
+  // the FIRST node panel; node panel configs persist (order among themselves) but the mixed order with
+  // the relation panel is not persisted (resets to this on reload). Node-link left-click opens a further
+  // relation panel to the right, so drilling into relations is how you navigate (no children pane).
   const defaultConfigs = (): NodePanelConfig[] => [
     { ...newNodePanelConfig('パネル 1', ctx.state.lang), sourcePanelId: null },
-    { ...newNodePanelConfig('パネル 2', ctx.state.lang), sourcePanelId: SELECTION_SRC },
   ];
   const init = () => {
     el.innerHTML = '';
@@ -669,9 +669,10 @@ export function createPanelsView(ctx: GraphEditorContext): {
     relationPanels.length = 0;
 
     const saved = loadNodePanels(ctx.gId, ctx.state.lang);
-    // A lone default root panel (the pre-redesign default) upgrades to the new 3-panel default.
-    const trivial = !!saved && saved.length === 1 && (saved[0].sourcePanelId == null);
-    const configs: NodePanelConfig[] = (saved?.length && !trivial) ? saved : defaultConfigs();
+    // Drop the vestigial 「選択中の子」 (SELECTION_SRC) node panels: node hierarchy/children was removed,
+    // so such a panel now shows nothing useful. Existing saved layouts are cleaned up on load.
+    const savedClean = saved?.filter((c) => c.sourcePanelId !== SELECTION_SRC) ?? null;
+    const configs: NodePanelConfig[] = (savedClean && savedClean.length) ? savedClean : defaultConfigs();
 
     const relInst = createRelationPanel('rel-primary', relationView, true);
     relationPanels.push(relInst);
