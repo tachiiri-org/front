@@ -144,7 +144,8 @@ export function createPanelsView(ctx: GraphEditorContext): {
   };
 
   // Wrap a relation PanelView (whose head already hosts a reorder grip via leadingHeadEl) in a
-  // reorderable container. `primary` panels have no close button; extras get a × close.
+  // reorderable container. Every panel gets a × close. Closing the primary keeps its shared view
+  // alive (reopened by the next node-row selection via ensurePrimaryPanel); extras are disposed.
   const createRelationPanel = (id: string, view: PanelView, primary: boolean): RelationPanelInstance => {
     const containerEl = document.createElement('div');
     containerEl.dataset.panelId = id;
@@ -153,23 +154,21 @@ export function createPanelsView(ctx: GraphEditorContext): {
     containerEl.appendChild(view.el);
     const inst: RelationPanelInstance = { id, view, containerEl, primary };
     addDropZone(id, containerEl);
-    if (!primary) {
-      const closeBtn = document.createElement('button');
-      closeBtn.textContent = '×';
-      closeBtn.style.cssText = `position:absolute;top:2px;right:4px;z-index:3;background:transparent;border:none;color:${TEXT_DIM};cursor:pointer;font-size:13px;line-height:1;`;
-      closeBtn.addEventListener('click', () => {
-        const i = relationPanels.indexOf(inst);
-        if (i >= 0) relationPanels.splice(i, 1);
-        view.unregister();
-        containerEl.remove();
-      });
-      containerEl.appendChild(closeBtn);
-    }
+    const closeBtn = document.createElement('button');
+    closeBtn.textContent = '×';
+    closeBtn.style.cssText = `position:absolute;top:2px;right:4px;z-index:3;background:transparent;border:none;color:${TEXT_DIM};cursor:pointer;font-size:13px;line-height:1;`;
+    closeBtn.addEventListener('click', () => {
+      const i = relationPanels.indexOf(inst);
+      if (i >= 0) relationPanels.splice(i, 1);
+      containerEl.remove();
+      if (!primary) view.unregister();
+    });
+    containerEl.appendChild(closeBtn);
     return inst;
   };
 
-  // The primary relation panel (always present, follows the global selection). Its grip lives in the
-  // relation head (re-inserted each render by the view).
+  // The primary relation panel's view (follows the global selection; closable via ×, and re-opened by
+  // ensurePrimaryPanel on the next node-row selection). Its grip lives in the relation head.
   const relationView: PanelView = createRelationPanelView(ctx, { lang: ctx.state.lang, initialNodeId: null, leadingHeadEl: makeGrip('rel-primary') });
 
   // Open an additional relation panel showing `nodeId`'s relations (independent; closable), appended
@@ -186,6 +185,18 @@ export function createPanelsView(ctx: GraphEditorContext): {
       await view.setParent(nodeId, undefined, path);
     })();
     requestAnimationFrame(() => { el.scrollLeft = el.scrollWidth; });
+  };
+
+  // Re-create the primary relation panel (wrapping the persistent relationView) if it has been closed,
+  // so selecting a node row always has a panel to show that node's relations. Re-inserted at its home
+  // spot: right after the first node panel (matching the initial layout).
+  const ensurePrimaryPanel = () => {
+    if (relationPanels.some((p) => p.primary)) return;
+    const relInst = createRelationPanel('rel-primary', relationView, true);
+    relationPanels.push(relInst);
+    const firstNode = nodePanels[0]?.containerEl;
+    if (firstNode && firstNode.parentElement === el) el.insertBefore(relInst.containerEl, firstNode.nextSibling);
+    else el.appendChild(relInst.containerEl);
   };
 
   const applyFullscreenLayout = () => {
@@ -221,6 +232,7 @@ export function createPanelsView(ctx: GraphEditorContext): {
     selectedNodeId = nodeId;
     if (nodeId !== null && updateRelation) {
       ctx.setActiveRelation(null);
+      ensurePrimaryPanel();
       void relationView.setParent(nodeId, ancestorIds, path);
     }
     for (const p of nodePanels) {
