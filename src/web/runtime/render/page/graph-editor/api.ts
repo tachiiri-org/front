@@ -91,69 +91,11 @@ export async function fetchBookmarkedNodes(
   return { nodes, hasMore: false };
 }
 
-export async function fetchChildren(graphId: string, nodeId: string, limit: number): Promise<ExplorerNode[]> {
-  const r = await apiFetch(`/api/v1/graph/${graphId}/node/${nodeId}/children?limit=${limit}`);
-  if (!r.ok) return [];
-  const data = await r.json() as { nodes: ExplorerNode[] };
-  // Defensive dedup by id: legacy parallel edges can return the same node twice,
-  // which would render duplicate rows that all share one id (deleting one deletes all).
-  const seen = new Set<string>();
-  return (data.nodes ?? [])
-    .filter((n) => (seen.has(n.id) ? false : (seen.add(n.id), true)));
-}
-
-// Whole structural tree in one response (full-load editor): every member node with labels/colors,
-// plus per-parent ordered child ids. The client assembles a single-parent tree from `parents`.
-export async function fetchTree(graphId: string): Promise<{ nodes: ExplorerNode[]; parents: Record<string, string[]> }> {
-  const r = await apiFetch(`/api/v1/graph/${graphId}/tree`);
-  if (!r.ok) return { nodes: [], parents: {} };
-  const data = await r.json() as { nodes?: ExplorerNode[]; parents?: Record<string, string[]> };
-  return { nodes: data.nodes ?? [], parents: data.parents ?? {} };
-}
-
-// Declaratively persist structure: for each parent, its children are exactly `childIds` in order.
-// Backend reconciles edges/orientation/order idempotently. Returns true on success (204).
-export async function saveTree(
-  graphId: string,
-  parents: { parentId: string; childIds: string[] }[],
-  keepalive = false,
-): Promise<boolean> {
-  const r = await apiFetch(`/api/v1/graph/${graphId}/tree`, {
-    method: 'PUT',
-    headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify({ parents }),
-    keepalive,
-  });
-  return r.ok;
-}
-
-// A node's ORIENTED parents (the nodes marked as its parent via h_orientation). Used to render a
-// multi-parent node under each of its paths in a mirror/drill pane.
-export async function fetchParents(graphId: string, nodeId: string): Promise<ExplorerNode[]> {
-  const r = await apiFetch(`/api/v1/graph/${graphId}/node/${nodeId}/parents`);
-  if (!r.ok) return [];
-  const data = await r.json() as { nodes: ExplorerNode[] };
-  const seen = new Set<string>();
-  return (data.nodes ?? []).filter((n) => (seen.has(n.id) ? false : (seen.add(n.id), true)));
-}
-
-// How many places a node appears as a child in the tree (structural placements, oriented OR not).
-// Used by delete to decide "multi-placed → unlink this spot" vs "last placement → delete entity".
-// More reliable than fetchParents (which only counts ORIENTED parents) for that decision.
-export async function fetchPlacementCount(graphId: string, nodeId: string): Promise<number> {
-  const r = await apiFetch(`/api/v1/graph/${graphId}/node/${nodeId}/placement-count`);
-  if (!r.ok) return 1;
-  const data = await r.json() as { count?: number };
-  return data.count ?? 1;
-}
-
+// Create a node (flat: the graph is a flat node list + relation lines, so there is no parent).
 export async function apiCreateNode(
-  graphId: string, parentId: string | null, lang: 'en' | 'ja', label: string,
-  insertAfterId?: string,
+  graphId: string, lang: 'en' | 'ja', label: string,
 ): Promise<ExplorerNode | null> {
-  const labelField = label ? (lang === 'en' ? { en: label } : { ja: label }) : {};
-  const insertAfterField = insertAfterId ? { insertAfterId } : {};
-  const body = parentId ? { parentId, ...labelField, ...insertAfterField } : labelField;
+  const body = label ? (lang === 'en' ? { en: label } : { ja: label }) : {};
   const r = await apiFetch(`/api/v1/graph/${graphId}/node`, {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
@@ -174,32 +116,18 @@ export async function apiUpdateNode(
   });
 }
 
-// ノード削除。promoteToId を渡すと、削除ノードの子をその親(=祖父母)へ昇格させてから消す
-// （子が「リンクなし」に落ちないように）。省略時は従来通り。
-// 戻り値 ok=false は削除が拒否されたことを表す。relationCount>0 なら「関係テキストが紐づくため
-// 削除不可」（バックエンドの 409 ガード）。呼び出し側は楽観的に消した UI を戻す。
+// ノード削除。戻り値 ok=false は削除が拒否されたことを表す。relationCount>0 なら「関係テキストが
+// 紐づくため削除不可」（バックエンドの 409 ガード）。呼び出し側は楽観的に消した UI を戻す。
 export async function apiDeleteNode(
-  graphId: string, nodeId: string, promoteToId?: string,
+  graphId: string, nodeId: string,
 ): Promise<{ ok: boolean; relationCount?: number }> {
-  const q = promoteToId ? `?promoteTo=${encodeURIComponent(promoteToId)}` : '';
-  const r = await apiFetch(`/api/v1/graph/${graphId}/node/${nodeId}${q}`, { method: 'DELETE' });
+  const r = await apiFetch(`/api/v1/graph/${graphId}/node/${nodeId}`, { method: 'DELETE' });
   if (r.ok) return { ok: true };
   if (r.status === 409) {
     const data = await r.json().catch(() => ({})) as { relationCount?: number };
     return { ok: false, relationCount: data.relationCount };
   }
   return { ok: false };
-}
-
-export async function apiToggleLink(graphId: string, sourceId: string, targetId: string): Promise<boolean> {
-  const r = await apiFetch(`/api/v1/graph/${graphId}/node/${sourceId}/link`, {
-    method: 'POST',
-    headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify({ targetId }),
-  });
-  if (!r.ok) return false;
-  const data = await r.json() as { linked: boolean };
-  return data.linked;
 }
 
 export async function fetchBookmarks(graphId: string): Promise<string[]> {
@@ -246,15 +174,6 @@ export async function apiLinkNode(graphId: string, nodeId: string, targetNodeId:
   return data.linked;
 }
 
-// 構造リンクの親向き(h_orientation)を設定。parentId が線の親側になる（clear=true で無向へ戻す）。
-export async function apiOrient(graphId: string, nodeId: string, parentId: string, clear = false): Promise<void> {
-  await apiFetch(`/api/v1/graph/${graphId}/orient`, {
-    method: 'POST',
-    headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify({ nodeId, parentId, ...(clear ? { clear: true } : {}) }),
-  });
-}
-
 // 冪等アンリンク: node→target の辺を外す（無ければ何もしない）。返り値は最終状態。
 export async function apiUnlinkNode(graphId: string, nodeId: string, targetNodeId: string): Promise<boolean> {
   const r = await apiFetch(`/api/v1/graph/${graphId}/link`, {
@@ -265,18 +184,6 @@ export async function apiUnlinkNode(graphId: string, nodeId: string, targetNodeI
   if (!r.ok) return false;
   const data = await r.json() as { linked: boolean };
   return data.linked;
-}
-
-export async function apiMoveNode(
-  graphId: string, nodeId: string, parentId: string, direction: 'up' | 'down',
-  afterSwapSiblingIds: string[], keepalive = false,
-): Promise<void> {
-  await apiFetch(`/api/v1/graph/${graphId}/node/${nodeId}/move`, {
-    method: 'PATCH',
-    headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify({ direction, parentId, afterSwapSiblingIds }),
-    keepalive,
-  });
 }
 
 // ── 関係 line (relation line) ────────────────────────────────────────────────
@@ -291,32 +198,13 @@ export async function fetchNodeRelations(graphId: string, nodeId: string): Promi
   return data.lines ?? [];
 }
 
-// ノードの（向き付けされた）親ノード一覧。DAG なので複数返り得る。
-export async function fetchNodeParents(graphId: string, nodeId: string): Promise<ExplorerNode[]> {
-  const r = await apiFetch(`/api/v1/graph/${graphId}/node/${nodeId}/parents`);
-  if (!r.ok) return [];
-  const data = await r.json() as { nodes: ExplorerNode[] };
-  return data.nodes ?? [];
-}
-
-// ルート→…→nodeId のパンくずパスを、親を辿って構築する（先頭の親を採用）。
-// 起点ノードのラベルは呼び出し側が渡す（チップの表示ラベル）。root は「ルート」表記に揃える。
+// フラットモードのパンくず: 階層は無いので「ルート › nodeId」の2段（root 未設定なら nodeId のみ）。
+// 起点ノードのラベルは呼び出し側が渡す。lang は互換のため受けるが未使用。
 export async function fetchNodePath(
-  graphId: string, nodeId: string, label: string, rootNodeId: string | null, lang: 'en' | 'ja',
+  _graphId: string, nodeId: string, label: string, rootNodeId: string | null, _lang: 'en' | 'ja',
 ): Promise<Array<{ id: string | null; label: string }>> {
-  const labelOf = (n: ExplorerNode) => (lang === 'ja' ? n.ja : n.en) || (lang === 'ja' ? n.en : n.ja) || n.id;
   const chain: Array<{ id: string | null; label: string }> = [{ id: nodeId, label }];
-  const seen = new Set<string>([nodeId]);
-  let cur = nodeId;
-  for (let i = 0; i < 30; i++) {
-    const parents = await fetchNodeParents(graphId, cur);
-    const p = parents.find((x) => !seen.has(x.id));
-    if (!p || (rootNodeId && p.id === rootNodeId)) break; // root はプレフィックスで足す
-    seen.add(p.id);
-    chain.unshift({ id: p.id, label: labelOf(p) });
-    cur = p.id;
-  }
-  if (rootNodeId) chain.unshift({ id: rootNodeId, label: 'ルート' });
+  if (rootNodeId && rootNodeId !== nodeId) chain.unshift({ id: rootNodeId, label: 'ルート' });
   return chain;
 }
 

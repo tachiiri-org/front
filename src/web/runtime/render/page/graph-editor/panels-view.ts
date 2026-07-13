@@ -144,7 +144,8 @@ export function createPanelsView(ctx: GraphEditorContext): {
   };
 
   // Wrap a relation PanelView (whose head already hosts a reorder grip via leadingHeadEl) in a
-  // reorderable container. `primary` panels have no close button; extras get a × close.
+  // reorderable container. Every panel gets a × close. Closing the primary keeps its shared view
+  // alive (reopened by the next node-row selection via ensurePrimaryPanel); extras are disposed.
   const createRelationPanel = (id: string, view: PanelView, primary: boolean): RelationPanelInstance => {
     const containerEl = document.createElement('div');
     containerEl.dataset.panelId = id;
@@ -153,27 +154,26 @@ export function createPanelsView(ctx: GraphEditorContext): {
     containerEl.appendChild(view.el);
     const inst: RelationPanelInstance = { id, view, containerEl, primary };
     addDropZone(id, containerEl);
-    if (!primary) {
-      const closeBtn = document.createElement('button');
-      closeBtn.textContent = '×';
-      closeBtn.style.cssText = `position:absolute;top:2px;right:4px;z-index:3;background:transparent;border:none;color:${TEXT_DIM};cursor:pointer;font-size:13px;line-height:1;`;
-      closeBtn.addEventListener('click', () => {
-        const i = relationPanels.indexOf(inst);
-        if (i >= 0) relationPanels.splice(i, 1);
-        view.unregister();
-        containerEl.remove();
-      });
-      containerEl.appendChild(closeBtn);
-    }
+    const closeBtn = document.createElement('button');
+    closeBtn.textContent = '×';
+    closeBtn.style.cssText = `position:absolute;top:2px;right:4px;z-index:3;background:transparent;border:none;color:${TEXT_DIM};cursor:pointer;font-size:13px;line-height:1;`;
+    closeBtn.addEventListener('click', () => {
+      const i = relationPanels.indexOf(inst);
+      if (i >= 0) relationPanels.splice(i, 1);
+      containerEl.remove();
+      if (!primary) view.unregister();
+    });
+    containerEl.appendChild(closeBtn);
     return inst;
   };
 
-  // The primary relation panel (always present, follows the global selection). Its grip lives in the
-  // relation head (re-inserted each render by the view).
+  // The primary relation panel's view (follows the global selection; closable via ×, and re-opened by
+  // ensurePrimaryPanel on the next node-row selection). Its grip lives in the relation head.
   const relationView: PanelView = createRelationPanelView(ctx, { lang: ctx.state.lang, initialNodeId: null, leadingHeadEl: makeGrip('rel-primary') });
 
-  // ② Open an additional relation panel showing `nodeId`'s relations (independent; closable). Kept
-  // for programmatic use; the chip right-click no longer triggers it.
+  // Open an additional relation panel showing `nodeId`'s relations (independent; closable), appended
+  // at the right end. Triggered by left-clicking a node-link chip in a relation — so you drill into a
+  // node's relations by following its links, building a left→right trail of relation panels.
   ctx.openRelationPanel = (nodeId, label) => {
     const id = `rel-x-${++relPanelSeq}`;
     const view = createRelationPanelView(ctx, { lang: ctx.state.lang, initialNodeId: nodeId, leadingHeadEl: makeGrip(id) });
@@ -185,6 +185,18 @@ export function createPanelsView(ctx: GraphEditorContext): {
       await view.setParent(nodeId, undefined, path);
     })();
     requestAnimationFrame(() => { el.scrollLeft = el.scrollWidth; });
+  };
+
+  // Re-create the primary relation panel (wrapping the persistent relationView) if it has been closed,
+  // so selecting a node row always has a panel to show that node's relations. Re-inserted at its home
+  // spot: right after the first node panel (matching the initial layout).
+  const ensurePrimaryPanel = () => {
+    if (relationPanels.some((p) => p.primary)) return;
+    const relInst = createRelationPanel('rel-primary', relationView, true);
+    relationPanels.push(relInst);
+    const firstNode = nodePanels[0]?.containerEl;
+    if (firstNode && firstNode.parentElement === el) el.insertBefore(relInst.containerEl, firstNode.nextSibling);
+    else el.appendChild(relInst.containerEl);
   };
 
   const applyFullscreenLayout = () => {
@@ -220,6 +232,7 @@ export function createPanelsView(ctx: GraphEditorContext): {
     selectedNodeId = nodeId;
     if (nodeId !== null && updateRelation) {
       ctx.setActiveRelation(null);
+      ensurePrimaryPanel();
       void relationView.setParent(nodeId, ancestorIds, path);
     }
     for (const p of nodePanels) {
@@ -582,7 +595,6 @@ export function createPanelsView(ctx: GraphEditorContext): {
     };
 
     addItem('ルート', null);
-    addItem('選択中', SELECTION_SRC);
     for (const p of nodePanels) {
       if (p.config.id !== nodePanelId) addItem(p.config.label, p.config.id);
     }
@@ -656,12 +668,12 @@ export function createPanelsView(ctx: GraphEditorContext): {
   };
 
   // ── Init ─────────────────────────────────────────────────────────
-  // Default layout = 3 panels: ノード(ルート) / リレーション / ノード(選択中の子). The primary relation
-  // panel is always inserted right after the FIRST node panel; node panel configs persist (order among
-  // themselves) but the mixed order with the relation panel is not persisted (resets to this on reload).
+  // Default layout = ノード(ルート) + リレーション. The primary relation panel is inserted right after
+  // the FIRST node panel; node panel configs persist (order among themselves) but the mixed order with
+  // the relation panel is not persisted (resets to this on reload). Node-link left-click opens a further
+  // relation panel to the right, so drilling into relations is how you navigate (no children pane).
   const defaultConfigs = (): NodePanelConfig[] => [
     { ...newNodePanelConfig('パネル 1', ctx.state.lang), sourcePanelId: null },
-    { ...newNodePanelConfig('パネル 2', ctx.state.lang), sourcePanelId: SELECTION_SRC },
   ];
   const init = () => {
     el.innerHTML = '';
@@ -669,9 +681,10 @@ export function createPanelsView(ctx: GraphEditorContext): {
     relationPanels.length = 0;
 
     const saved = loadNodePanels(ctx.gId, ctx.state.lang);
-    // A lone default root panel (the pre-redesign default) upgrades to the new 3-panel default.
-    const trivial = !!saved && saved.length === 1 && (saved[0].sourcePanelId == null);
-    const configs: NodePanelConfig[] = (saved?.length && !trivial) ? saved : defaultConfigs();
+    // Drop the vestigial 「選択中の子」 (SELECTION_SRC) node panels: node hierarchy/children was removed,
+    // so such a panel now shows nothing useful. Existing saved layouts are cleaned up on load.
+    const savedClean = saved?.filter((c) => c.sourcePanelId !== SELECTION_SRC) ?? null;
+    const configs: NodePanelConfig[] = (savedClean && savedClean.length) ? savedClean : defaultConfigs();
 
     const relInst = createRelationPanel('rel-primary', relationView, true);
     relationPanels.push(relInst);
