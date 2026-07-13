@@ -440,10 +440,9 @@ export function createRelationPanelView(
         autosize(ta);
       });
       ta.addEventListener('input', () => { autosize(ta); void handleMention(ta); save(); });
-      // 複数行ペースト → 行ごとに1リレーション（draft 行・ノードパネルの paste と同じ挙動）。
-      // 1行目はキャレット位置へ取り込んでこのリレーションに残し、残りの行はこの関係行の直後に
-      // 1行=1リレーションで順に作成する。既定に任せると1つの textarea に改行が入り、単一リレーション内で
-      // 改行されてしまう（[1a042d75]修正 #複数行ペースト）。単一行はブラウザ既定に任せる。
+      // 複数行ペースト → 1行目はキャレット位置へ取り込んでこのリレーションに残し、2行目以降は行ごとに
+      // 1リレーション（[[名前]]→チップ、マーク無しはリンクなし）。既定に任せると1つの textarea に改行が入り
+      // 単一リレーション内で改行されてしまう（[1a042d75]修正 #複数行ペースト）。単一行はブラウザ既定に任せる。
       ta.addEventListener('paste', (e) => {
         const text = e.clipboardData?.getData('text/plain') ?? '';
         const lines = text.split(/\r?\n/).map((l) => l.trim()).filter((l) => l.length > 0);
@@ -458,11 +457,14 @@ export function createRelationPanelView(
         save();
         void (async () => {
           let anchor: HTMLElement = row;
+          let shown = 0;
           for (let k = 1; k < lines.length; k++) {
-            const created = await insertRelationAfter(anchor, lines[k]);
-            if (!created) break;
-            anchor = created;
+            const created = await insertPastedRelation(anchor, lines[k]);
+            if (created) { anchor = created; shown++; }
           }
+          const rest = lines.length - 1;
+          const hidden = rest - shown;
+          if (rest > 0 && hidden > 0) showToast(`${rest}件を追加（うち ${hidden}件はリンクなし等で別表示）`);
         })();
       });
       // 他の場所を選んで textarea からフォーカスが外れたら、@ドロップダウンは閉じる。
@@ -659,6 +661,61 @@ export function createRelationPanelView(
     return newRow;
   };
 
+  // 貼り付け用: [[名前]] マークをノードIDへ解決（ラベル完全一致で既存リンク、無ければ新規作成）。
+  const resolveMark = async (name: string): Promise<string | null> => {
+    const q = name.trim();
+    if (!q) return null;
+    const { nodes } = await fetchAllNodes(ctx.gId, [], 0, lang, undefined, q);
+    const exact = nodes.find((n) => labelOf(n, lang) === q);
+    if (exact) return ctx.awaitRealId(exact.id);
+    const created = await apiCreateNode(ctx.gId, lang, q);
+    return created ? ctx.awaitRealId(created.id) : null;
+  };
+
+  // 貼り付けの1行を1リレーションとして作成する（Enter の insertRelationAfter とは別挙動＝自動 ⟦node⟧ は付けない）。
+  // - 本文中の [[名前]] は ⟦id⟧ チップへ変換（参加者=そのノード）。マーク無しの素の行は「リンクなし(orphan)」に
+  //   する（現在ノードには自動で紐付けない）＝ scratch 主語で作って主語 ray を外す（本文が残るので行は保持）。
+  // - 現在ノードが参加者に含まれる行だけ、その関係行を anchor 直後へ挿入して返す。他ノード配下やリンクなしは
+  //   このパネルには出ないので null を返す（呼び出し側は件数カウントのみ）。
+  const insertPastedRelation = async (anchorRow: HTMLElement, line: string): Promise<HTMLElement | null> => {
+    const re = /\[\[([^\]]+)\]\]/g;
+    const ids: Array<{ id: string; label: string }> = [];
+    const bodyParts: string[] = [];
+    let last = 0;
+    let m: RegExpExecArray | null;
+    while ((m = re.exec(line))) {
+      if (m.index > last) bodyParts.push(line.slice(last, m.index));
+      const id = await resolveMark(m[1]);
+      if (id) { bodyParts.push(`⟦${id}⟧`); ids.push({ id, label: m[1].trim() }); }
+      else bodyParts.push(m[0]); // 解決失敗は素のテキストのまま残す
+      last = m.index + m[0].length;
+    }
+    if (last < line.length) bodyParts.push(line.slice(last));
+    const body = bodyParts.join('');
+
+    if (ids.length > 0) {
+      // マークあり → 先頭ノードを主語に作成、残りを ray 追加。現在ノードに紐付く行だけパネルに出す。
+      const created = await apiCreateRelation(ctx.gId, ids[0].id, lang, body);
+      if (!created) return null;
+      for (let k = 1; k < ids.length; k++) await apiAddRay(ctx.gId, created.lineId, ids[k].id);
+      if (!currentNodeId || !ids.some((x) => x.id === currentNodeId)) return null; // 別ノード配下 → 非表示
+      const participants = ids.map((x) => ({ id: x.id, ...(lang === 'ja' ? { ja: x.label } : { en: x.label }) })) as ExplorerNode[];
+      const newRow = renderRelationRow({ lineId: created.lineId, body: { [lang]: body }, participants });
+      anchorRow.insertAdjacentElement('afterend', newRow);
+      await apiReorderNodeRelations(ctx.gId, currentNodeId, relationRows().map((r) => r.dataset.lineId!));
+      return newRow;
+    }
+
+    // マーク無し → リンクなし(orphan)。scratch 主語で作成→主語 ray を外す。現在ノードが無ければ任意の1ノードで代用。
+    let scratch = currentNodeId ? await ctx.awaitRealId(currentNodeId) : null;
+    if (!scratch) { const { nodes } = await fetchAllNodes(ctx.gId, [], 0, lang); scratch = nodes[0]?.id ?? null; }
+    if (!scratch) return null; // 空グラフ等: scratch が無く orphan を作れない
+    const created = await apiCreateRelation(ctx.gId, scratch, lang, body);
+    if (!created) return null;
+    await apiRemoveRay(ctx.gId, created.lineId, scratch);
+    return null;
+  };
+
   // ノードパネルの draft 行と同じ構成（spacer+四角+入力）。テキストを書いて Enter で作成。
   const makeDraftRow = (nodeId: string): HTMLElement => {
     const row = document.createElement('div');
@@ -711,8 +768,8 @@ export function createRelationPanelView(
     ta.addEventListener('focus', () => { ta.style.color = TEXT_HIGH; clearSelection(); });
     ta.addEventListener('blur', () => { if (!ta.value.trim()) ta.style.color = TEXT_DIM; if (mention?.anchor === ta) closeMenu(); });
     ta.addEventListener('input', () => { resize(); void draftMention(); });
-    // 複数行ペースト → 行ごとに1リレーション（ノードパネルの paste と同じ挙動）。1つのリレーションに
-    // 複数行が入らないよう、改行で分割して各行を当該ノードの関係として順に作成する。単一行はブラウザ既定に任せる。
+    // 複数行ペースト → 行ごとに1リレーション。[[名前]] はノードリンク(チップ)へ変換し、マーク無しの素の行は
+    // リンクなし(orphan)にする（現在ノードへは自動で紐付けない＝自動 ⟦node⟧ は付けない）。単一行はブラウザ既定に任せる。
     ta.addEventListener('paste', (e) => {
       const text = e.clipboardData?.getData('text/plain') ?? '';
       const lines = text.split(/\r?\n/).map((l) => l.trim()).filter((l) => l.length > 0);
@@ -721,11 +778,13 @@ export function createRelationPanelView(
       ta.value = ''; resize();
       void (async () => {
         let anchor: HTMLElement = row;
+        let shown = 0;
         for (const line of lines) {
-          const created = await insertRelationAfter(anchor, line);
-          if (!created) break;
-          anchor = created;
+          const created = await insertPastedRelation(anchor, line);
+          if (created) { anchor = created; shown++; }
         }
+        const hidden = lines.length - shown;
+        showToast(hidden > 0 ? `${lines.length}件を作成（うち ${hidden}件はリンクなし等で別表示）` : `${lines.length}件を作成`);
       })();
     });
     ta.addEventListener('keydown', async (e) => {
