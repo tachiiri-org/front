@@ -7,8 +7,8 @@ export const TEXT_MID = '#aaa';
 export const TEXT_DIM = '#555';
 export const SELECT_STRONG = '#3a6ea8';
 
-// Reserved id for the synthetic "リンクなし" entry (parentless nodes inbox). Selecting it in the
-// node panel makes the relation dock list the orphan nodes (GET /node/__orphan__/children).
+// Reserved id for the synthetic "リンクなし" entry. Used by the relation panel to distinguish the
+// orphan-relations view (参加ノードを持たない関係) from a real node target.
 export const ORPHAN_ID = '__orphan__';
 export const ORPHAN_LABEL = 'リンクなし';
 
