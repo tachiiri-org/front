@@ -2,7 +2,7 @@ import type { GraphEditorContext, PanelView, ExplorerNode, ExplorerRelation, Pan
 import { BORDER, TEXT_HIGH, TEXT_MID, TEXT_DIM, SELECT_STRONG, ORPHAN_ID, showToast } from './constants';
 import {
   fetchNodeRelations, apiCreateRelation, apiSetRelationText, apiAddRay, apiRemoveRay, fetchAllNodes, apiCreateNode,
-  fetchOrphanRelations, apiDeleteRelation, apiDeleteNode, apiReorderNodeRelations, apiUpdateNode,
+  fetchOrphanRelations, apiDeleteRelation, apiDeleteNode, apiReorderNodeRelations, apiUpdateNode, apiPasteRelations,
 } from './api';
 
 // 関係 (relation) パネル。関係 = テキストとノード参照(チップ)が交互に並ぶ1行（セグメント分割編集）。
@@ -464,16 +464,10 @@ export function createRelationPanelView(
           startK = 1;
         }
         void (async () => {
-          let anchor: HTMLElement = row;
-          let shown = 0;
-          let made = 0;
-          for (let k = startK; k < lines.length; k++) {
-            made++;
-            const created = await insertPastedRelation(anchor, lines[k]);
-            if (created) { anchor = created; shown++; }
-          }
-          const hidden = made - shown;
-          if (made > 0 && hidden > 0) showToast(`${made}件を作成（うち ${hidden}件はリンクなし等で別表示）`);
+          const rest = lines.slice(startK);
+          if (rest.length === 0) return;
+          const shown = await pasteLines(row, rest);
+          if (shown < rest.length) showToast(`${rest.length}件中 ${shown}件を作成`);
         })();
       });
       // 他の場所を選んで textarea からフォーカスが外れたら、@ドロップダウンは閉じる。
@@ -670,77 +664,28 @@ export function createRelationPanelView(
     return newRow;
   };
 
-  // 貼り付け用: [[名前]] マークをノードIDへ解決（ラベル完全一致で既存リンク、無ければ新規作成）。
-  const resolveMark = async (name: string): Promise<string | null> => {
-    const q = name.trim();
-    if (!q) return null;
-    const { nodes } = await fetchAllNodes(ctx.gId, [], 0, lang, undefined, q);
-    const exact = nodes.find((n) => labelOf(n, lang) === q);
-    if (exact) return ctx.awaitRealId(exact.id);
-    const created = await apiCreateNode(ctx.gId, lang, q);
-    return created ? ctx.awaitRealId(created.id) : null;
-  };
-
   // 本文に [[名前]] マークが1つでも含まれるか（貼り付けの検出用）。
   const hasMark = (s: string): boolean => /\[\[[^\]]+\]\]/.test(s);
 
-  // 貼り付けの1行を1リレーションとして作成する（Enter の insertRelationAfter とは別挙動＝自動 ⟦node⟧ は付けない）。
-  // - 本文中の [[名前]] は ⟦id⟧ チップへ変換（ラベル完全一致で既存リンク、無ければ同名ノードを新規作成）。
-  // - 現在ノードを主語(参加者)にして作成し、その関係行を anchor 直後へ挿入して返す＝貼った全行がこのパネルに出る。
-  //   マークノードは追加の参加者(チップ)に。現在ノード自身のチップは本文に入れない（自動 ⟦node⟧ 廃止）。
-  //   マーク無しの素の行はチップ0のまま現在ノード配下に出る（後で本文だけ編集すると⑤でリンクなしへ移る＝据え置き）。
-  // - orphan ビュー等で現在ノードが無い場合のみ、マーク先ノード配下／リンクなしに作り、このパネルには出さない(null)。
-  const insertPastedRelation = async (anchorRow: HTMLElement, line: string): Promise<HTMLElement | null> => {
-    const re = /\[\[([^\]]+)\]\]/g;
-    const marks: Array<{ id: string; label: string }> = [];
-    const bodyParts: string[] = [];
-    let last = 0;
-    let m: RegExpExecArray | null;
-    while ((m = re.exec(line))) {
-      if (m.index > last) bodyParts.push(line.slice(last, m.index));
-      const id = await resolveMark(m[1]);
-      if (id) { bodyParts.push(`⟦${id}⟧`); marks.push({ id, label: m[1].trim() }); }
-      else bodyParts.push(m[0]); // 解決失敗は素のテキストのまま残す
-      last = m.index + m[0].length;
-    }
-    if (last < line.length) bodyParts.push(line.slice(last));
-    const body = bodyParts.join('');
+  // 貼り付けの複数行を「1リクエスト」で作成する。サーバ側(/paste)が各行の [[名前]] を解決（当該langのラベル
+  // 完全一致で既存リンク、無ければ新規ノード作成）し、現在ノードを主語に関係作成＋ray まで行う。行ごとに多数の
+  // 書き込みを撃つと write レート制限(60/60s)に当たり大量ペーストの後半が失敗するため、1貼り付け＝1書き込みに畳む。
+  // 現在ノードが参加者に含まれる行だけ anchor 直後へ順に挿入して表示し、挿入数を返す。並び替えは最後に1回だけ。
+  // 現在ノードが無い(orphan ビュー等)場合は subjectId 無しで作成し、このパネルには出さない（マーク先／リンクなしへ）。
+  const pasteLines = async (anchorRow: HTMLElement, lines: string[]): Promise<number> => {
     const cur = currentNodeId ? await ctx.awaitRealId(currentNodeId) : null;
-
-    if (!cur) {
-      // 現在ノードが無い（orphan ビュー等）。マークがあればマーク先ノード配下に、無ければリンクなしに作る。
-      if (marks.length === 0) {
-        const { nodes } = await fetchAllNodes(ctx.gId, [], 0, lang);
-        const scratch = nodes[0]?.id ?? null;
-        if (!scratch) return null; // 空グラフ等: scratch が無く作れない
-        const created = await apiCreateRelation(ctx.gId, scratch, lang, body);
-        if (!created) return null;
-        await apiRemoveRay(ctx.gId, created.lineId, scratch); // 主語を外してリンクなしへ（本文が残るので保持）
-        return null;
-      }
-      const created = await apiCreateRelation(ctx.gId, marks[0].id, lang, body);
-      if (!created) return null;
-      for (const x of marks) if (x.id !== marks[0].id) await apiAddRay(ctx.gId, created.lineId, x.id);
-      return null; // このパネル（現在ノード無し）には出さない
+    const created = await apiPasteRelations(ctx.gId, lang, cur, lines);
+    let anchor: HTMLElement = anchorRow;
+    let shown = 0;
+    for (const rel of created) {
+      if (!cur || !rel.participants?.some((p) => p.id === cur)) continue; // 現在ノードが参加者の行のみ表示
+      const newRow = renderRelationRow(rel);
+      anchor.insertAdjacentElement('afterend', newRow);
+      anchor = newRow;
+      shown++;
     }
-
-    // 現在ノードあり → 現在ノードを主語(参加者・自己チップは出さない)にし、マークノードを参加者(チップ)として追加。
-    const created = await apiCreateRelation(ctx.gId, cur, lang, body);
-    if (!created) return null;
-    for (const x of marks) if (x.id !== cur) await apiAddRay(ctx.gId, created.lineId, x.id);
-
-    // 参加者リスト（チップのラベル解決用）。自己チップが無い現在ノードも参加者として含める。
-    const participants: ExplorerNode[] = [];
-    if (!marks.some((x) => x.id === cur)) {
-      const subjLabel = currentPath?.[currentPath.length - 1]?.label ?? '';
-      participants.push({ id: cur, ...(lang === 'ja' ? { ja: subjLabel } : { en: subjLabel }) } as ExplorerNode);
-    }
-    for (const x of marks) participants.push({ id: x.id, ...(lang === 'ja' ? { ja: x.label } : { en: x.label }) } as ExplorerNode);
-
-    const newRow = renderRelationRow({ lineId: created.lineId, body: { [lang]: body }, participants });
-    anchorRow.insertAdjacentElement('afterend', newRow);
-    await apiReorderNodeRelations(ctx.gId, cur, relationRows().map((r) => r.dataset.lineId!));
-    return newRow;
+    if (shown > 0 && cur) await apiReorderNodeRelations(ctx.gId, cur, relationRows().map((r) => r.dataset.lineId!));
+    return shown;
   };
 
   // ノードパネルの draft 行と同じ構成（spacer+四角+入力）。テキストを書いて Enter で作成。
@@ -806,14 +751,8 @@ export function createRelationPanelView(
       e.preventDefault();
       ta.value = ''; resize();
       void (async () => {
-        let anchor: HTMLElement = row;
-        let shown = 0;
-        for (const line of lines) {
-          const created = await insertPastedRelation(anchor, line);
-          if (created) { anchor = created; shown++; }
-        }
-        const hidden = lines.length - shown;
-        showToast(hidden > 0 ? `${lines.length}件を作成（うち ${hidden}件はリンクなし等で別表示）` : `${lines.length}件を作成`);
+        const shown = await pasteLines(row, lines);
+        showToast(shown < lines.length ? `${lines.length}件中 ${shown}件を作成` : `${lines.length}件を作成`);
       })();
     });
     ta.addEventListener('keydown', async (e) => {
