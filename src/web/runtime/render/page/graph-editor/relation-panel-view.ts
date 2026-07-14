@@ -2,7 +2,7 @@ import type { GraphEditorContext, PanelView, ExplorerNode, ExplorerRelation, Pan
 import { BORDER, TEXT_HIGH, TEXT_MID, TEXT_DIM, SELECT_STRONG, ORPHAN_ID, showToast } from './constants';
 import {
   fetchNodeRelations, apiCreateRelation, apiSetRelationText, apiAddRay, apiRemoveRay, fetchAllNodes, apiCreateNode,
-  fetchOrphanRelations, apiDeleteRelation, apiDeleteNode, apiReorderNodeRelations, apiUpdateNode,
+  fetchOrphanRelations, apiDeleteRelation, apiDeleteNode, apiReorderNodeRelations, apiUpdateNode, apiPasteRelations,
 } from './api';
 
 // 関係 (relation) パネル。関係 = テキストとノード参照(チップ)が交互に並ぶ1行（セグメント分割編集）。
@@ -465,18 +465,9 @@ export function createRelationPanelView(
         }
         void (async () => {
           const rest = lines.slice(startK);
-          const markMap = await buildMarkMap(rest); // 追加分のマークを1回のノード取得でまとめて解決
-          let anchor: HTMLElement = row;
-          let shown = 0;
-          for (const line of rest) {
-            const created = await insertPastedRelation(anchor, line, markMap);
-            if (created) { anchor = created; shown++; }
-          }
-          if (shown > 0 && currentNodeId) {
-            const cur = await ctx.awaitRealId(currentNodeId);
-            if (cur) await apiReorderNodeRelations(ctx.gId, cur, relationRows().map((r) => r.dataset.lineId!));
-          }
-          if (rest.length > 0 && shown < rest.length) showToast(`${rest.length}件中 ${shown}件を作成`);
+          if (rest.length === 0) return;
+          const shown = await pasteLines(row, rest);
+          if (shown < rest.length) showToast(`${rest.length}件中 ${shown}件を作成`);
         })();
       });
       // 他の場所を選んで textarea からフォーカスが外れたら、@ドロップダウンは閉じる。
@@ -676,86 +667,25 @@ export function createRelationPanelView(
   // 本文に [[名前]] マークが1つでも含まれるか（貼り付けの検出用）。
   const hasMark = (s: string): boolean => /\[\[[^\]]+\]\]/.test(s);
 
-  // 貼り付け前に、全行の [[名前]] を「1回のノード取得」でまとめて解決する。返り値: 名前(trim) → nodeId。
-  // 既存はラベル完全一致でリンク、無ければ同名ノードを新規作成。DO は 120 reads/60s のレート制限があり、
-  // マークごとに検索(q)を撃つと大量ペーストで制限に当たり後続の作成が失敗する。そこで全ノードを一度だけ
-  // 引いてローカル照合し、read を名前数に比例させない（新規作成の書き込みのみ名前数分）。
-  const buildMarkMap = async (lines: string[]): Promise<Map<string, string>> => {
-    const names = new Set<string>();
-    for (const line of lines) {
-      for (const mm of line.matchAll(/\[\[([^\]]+)\]\]/g)) { const n = mm[1].trim(); if (n) names.add(n); }
-    }
-    const map = new Map<string, string>();
-    if (names.size === 0) return map;
-    const { nodes } = await fetchAllNodes(ctx.gId, [], 0, lang, undefined, undefined, 100000);
-    const byLabel = new Map<string, string>();
-    for (const n of nodes) { const l = labelOf(n, lang); if (l && !byLabel.has(l)) byLabel.set(l, n.id); }
-    for (const name of names) {
-      const existing = byLabel.get(name);
-      if (existing) { const rid = await ctx.awaitRealId(existing); if (rid) map.set(name, rid); continue; }
-      const created = await apiCreateNode(ctx.gId, lang, name);
-      if (created) { const rid = await ctx.awaitRealId(created.id); if (rid) { map.set(name, rid); byLabel.set(name, rid); } }
-    }
-    return map;
-  };
-
-  // 貼り付けの1行を1リレーションとして作成する（Enter の insertRelationAfter とは別挙動＝自動 ⟦node⟧ は付けない）。
-  // - 本文中の [[名前]] は ⟦id⟧ チップへ変換（ラベル完全一致で既存リンク、無ければ同名ノードを新規作成）。
-  // - 現在ノードを主語(参加者)にして作成し、その関係行を anchor 直後へ挿入して返す＝貼った全行がこのパネルに出る。
-  //   マークノードは追加の参加者(チップ)に。現在ノード自身のチップは本文に入れない（自動 ⟦node⟧ 廃止）。
-  //   マーク無しの素の行はチップ0のまま現在ノード配下に出る（後で本文だけ編集すると⑤でリンクなしへ移る＝据え置き）。
-  // - orphan ビュー等で現在ノードが無い場合のみ、マーク先ノード配下／リンクなしに作り、このパネルには出さない(null)。
-  const insertPastedRelation = async (anchorRow: HTMLElement, line: string, markMap: Map<string, string>): Promise<HTMLElement | null> => {
-    const re = /\[\[([^\]]+)\]\]/g;
-    const marks: Array<{ id: string; label: string }> = [];
-    const bodyParts: string[] = [];
-    let last = 0;
-    let m: RegExpExecArray | null;
-    while ((m = re.exec(line))) {
-      if (m.index > last) bodyParts.push(line.slice(last, m.index));
-      const name = m[1].trim();
-      const id = markMap.get(name); // 事前解決済み（buildMarkMap）。未解決名は素のテキストのまま残す。
-      if (id) { bodyParts.push(`⟦${id}⟧`); marks.push({ id, label: name }); }
-      else bodyParts.push(m[0]);
-      last = m.index + m[0].length;
-    }
-    if (last < line.length) bodyParts.push(line.slice(last));
-    const body = bodyParts.join('');
+  // 貼り付けの複数行を「1リクエスト」で作成する。サーバ側(/paste)が各行の [[名前]] を解決（当該langのラベル
+  // 完全一致で既存リンク、無ければ新規ノード作成）し、現在ノードを主語に関係作成＋ray まで行う。行ごとに多数の
+  // 書き込みを撃つと write レート制限(60/60s)に当たり大量ペーストの後半が失敗するため、1貼り付け＝1書き込みに畳む。
+  // 現在ノードが参加者に含まれる行だけ anchor 直後へ順に挿入して表示し、挿入数を返す。並び替えは最後に1回だけ。
+  // 現在ノードが無い(orphan ビュー等)場合は subjectId 無しで作成し、このパネルには出さない（マーク先／リンクなしへ）。
+  const pasteLines = async (anchorRow: HTMLElement, lines: string[]): Promise<number> => {
     const cur = currentNodeId ? await ctx.awaitRealId(currentNodeId) : null;
-
-    if (!cur) {
-      // 現在ノードが無い（orphan ビュー等）。マークがあればマーク先ノード配下に、無ければリンクなしに作る。
-      if (marks.length === 0) {
-        const { nodes } = await fetchAllNodes(ctx.gId, [], 0, lang);
-        const scratch = nodes[0]?.id ?? null;
-        if (!scratch) return null; // 空グラフ等: scratch が無く作れない
-        const created = await apiCreateRelation(ctx.gId, scratch, lang, body);
-        if (!created) return null;
-        await apiRemoveRay(ctx.gId, created.lineId, scratch); // 主語を外してリンクなしへ（本文が残るので保持）
-        return null;
-      }
-      const created = await apiCreateRelation(ctx.gId, marks[0].id, lang, body);
-      if (!created) return null;
-      for (const x of marks) if (x.id !== marks[0].id) await apiAddRay(ctx.gId, created.lineId, x.id);
-      return null; // このパネル（現在ノード無し）には出さない
+    const created = await apiPasteRelations(ctx.gId, lang, cur, lines);
+    let anchor: HTMLElement = anchorRow;
+    let shown = 0;
+    for (const rel of created) {
+      if (!cur || !rel.participants?.some((p) => p.id === cur)) continue; // 現在ノードが参加者の行のみ表示
+      const newRow = renderRelationRow(rel);
+      anchor.insertAdjacentElement('afterend', newRow);
+      anchor = newRow;
+      shown++;
     }
-
-    // 現在ノードあり → 現在ノードを主語(参加者・自己チップは出さない)にし、マークノードを参加者(チップ)として追加。
-    const created = await apiCreateRelation(ctx.gId, cur, lang, body);
-    if (!created) return null;
-    for (const x of marks) if (x.id !== cur) await apiAddRay(ctx.gId, created.lineId, x.id);
-
-    // 参加者リスト（チップのラベル解決用）。自己チップが無い現在ノードも参加者として含める。
-    const participants: ExplorerNode[] = [];
-    if (!marks.some((x) => x.id === cur)) {
-      const subjLabel = currentPath?.[currentPath.length - 1]?.label ?? '';
-      participants.push({ id: cur, ...(lang === 'ja' ? { ja: subjLabel } : { en: subjLabel }) } as ExplorerNode);
-    }
-    for (const x of marks) participants.push({ id: x.id, ...(lang === 'ja' ? { ja: x.label } : { en: x.label }) } as ExplorerNode);
-
-    const newRow = renderRelationRow({ lineId: created.lineId, body: { [lang]: body }, participants });
-    anchorRow.insertAdjacentElement('afterend', newRow);
-    return newRow; // 並び替えは呼び出し側で最後に1回だけ行う（行ごとに撃たない）
+    if (shown > 0 && cur) await apiReorderNodeRelations(ctx.gId, cur, relationRows().map((r) => r.dataset.lineId!));
+    return shown;
   };
 
   // ノードパネルの draft 行と同じ構成（spacer+四角+入力）。テキストを書いて Enter で作成。
@@ -821,17 +751,7 @@ export function createRelationPanelView(
       e.preventDefault();
       ta.value = ''; resize();
       void (async () => {
-        const markMap = await buildMarkMap(lines); // 全行のマークを1回のノード取得でまとめて解決
-        let anchor: HTMLElement = row;
-        let shown = 0;
-        for (const line of lines) {
-          const created = await insertPastedRelation(anchor, line, markMap);
-          if (created) { anchor = created; shown++; }
-        }
-        if (shown > 0 && currentNodeId) {
-          const cur = await ctx.awaitRealId(currentNodeId);
-          if (cur) await apiReorderNodeRelations(ctx.gId, cur, relationRows().map((r) => r.dataset.lineId!));
-        }
+        const shown = await pasteLines(row, lines);
         showToast(shown < lines.length ? `${lines.length}件中 ${shown}件を作成` : `${lines.length}件を作成`);
       })();
     });
