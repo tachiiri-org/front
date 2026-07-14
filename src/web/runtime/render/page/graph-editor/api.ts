@@ -221,6 +221,22 @@ export async function apiCreateRelation(
   return r.json() as Promise<ExplorerRelation>;
 }
 
+// 貼り付けの複数行を1リクエストで一括作成（サーバ側で [[名前]] 解決/新規ノード作成＋関係作成＋ray）。
+// 大量ペーストでも write レート制限(60/60s)に当たらないよう、行ごとの多数の書き込みを1リクエストに畳む。
+// subjectId を各行の主語(参加者)に。返りは作成順の関係一覧（body・participants はラベル解決済み）。
+export async function apiPasteRelations(
+  graphId: string, lang: 'en' | 'ja', subjectId: string | null, lines: string[],
+): Promise<ExplorerRelation[]> {
+  const r = await apiFetch(`/api/v1/graph/${graphId}/paste`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ lang, ...(subjectId ? { subjectId } : {}), lines }),
+  });
+  if (!r.ok) return [];
+  const data = await r.json() as { lines?: ExplorerRelation[] };
+  return data.lines ?? [];
+}
+
 // 関係 line の本文を言語ごとに設定（空文字でも行は残り、関係 line のマークは保持）。
 export async function apiSetRelationText(graphId: string, lineId: string, lang: 'en' | 'ja', body: string): Promise<void> {
   await apiFetch(`/api/v1/graph/${graphId}/line/${lineId}/body`, {
