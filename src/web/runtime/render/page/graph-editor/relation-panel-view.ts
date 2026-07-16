@@ -665,26 +665,30 @@ export function createRelationPanelView(
   };
 
   // 本文に [[名前]] マークが1つでも含まれるか（貼り付けの検出用）。
-  const hasMark = (s: string): boolean => /\[\[[^\]]+\]\]/.test(s);
+  // [[名前]]（従来）に加え ⟦参照⟧（read/コピーの参照フォーマット）も貼り付けマークとして扱う。
+  // サーバ /paste が両方を等価に解決する。
+  const hasMark = (s: string): boolean => /\[\[[^\]]+\]\]|⟦[^⟧]+⟧/.test(s);
 
-  // 貼り付けの複数行を「1リクエスト」で作成する。サーバ側(/paste)が各行の [[名前]] を解決（当該langのラベル
-  // 完全一致で既存リンク、無ければ新規ノード作成）し、現在ノードを主語に関係作成＋ray まで行う。行ごとに多数の
-  // 書き込みを撃つと write レート制限(60/60s)に当たり大量ペーストの後半が失敗するため、1貼り付け＝1書き込みに畳む。
-  // 現在ノードが参加者に含まれる行だけ anchor 直後へ順に挿入して表示し、挿入数を返す。並び替えは最後に1回だけ。
-  // 現在ノードが無い(orphan ビュー等)場合は subjectId 無しで作成し、このパネルには出さない（マーク先／リンクなしへ）。
+  // 貼り付けの複数行を「1リクエスト」で作成する。サーバ側(/paste)が各行の [[名前]]／⟦参照⟧ を解決（当該langの
+  // ラベル完全一致で既存リンク、無ければ新規ノード作成）して関係を作成する。行ごとに多数の書き込みを撃つと write
+  // レート制限(60/60s)に当たり大量ペーストの後半が失敗するため、1貼り付け＝1書き込みに畳む。
+  //
+  // 選択中ノードは「主語(subjectId)」として送らない＝貼り付けた行へ現在ノードを自動で紐付けない（Enter の
+  // insertRelationAfter とは別挙動）。各行の参加者は本文中のマーク先ノードだけになり、マークが1つも無い素の行は
+  // 参加者ゼロの「リンクなし(orphan)」になる（現在ノードとの ray は張らない）。作成した各行は一時的にこのパネルへ
+  // 楽観的に表示するが、実体は現在ノードの関係ではないので、次の再描画(render)で現在ノードの関係一覧からは消える
+  // （マークが現在ノード自身を含む行だけが本当に現在ノードの関係として残る）。並べ替えは現在ノードの関係ではない
+  // ため行わない。
   const pasteLines = async (anchorRow: HTMLElement, lines: string[]): Promise<number> => {
-    const cur = currentNodeId ? await ctx.awaitRealId(currentNodeId) : null;
-    const created = await apiPasteRelations(ctx.gId, lang, cur, lines);
+    const created = await apiPasteRelations(ctx.gId, lang, null, lines);
     let anchor: HTMLElement = anchorRow;
     let shown = 0;
     for (const rel of created) {
-      if (!cur || !rel.participants?.some((p) => p.id === cur)) continue; // 現在ノードが参加者の行のみ表示
       const newRow = renderRelationRow(rel);
       anchor.insertAdjacentElement('afterend', newRow);
       anchor = newRow;
       shown++;
     }
-    if (shown > 0 && cur) await apiReorderNodeRelations(ctx.gId, cur, relationRows().map((r) => r.dataset.lineId!));
     return shown;
   };
 
