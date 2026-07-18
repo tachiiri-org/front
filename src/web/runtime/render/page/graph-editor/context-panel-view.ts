@@ -4,12 +4,13 @@ import {
   fetchNodeContext, apiCreateBlock, apiSetBlockText, apiSetBlockHeading, apiReorderBlocks, apiDeleteBlock,
 } from './api';
 
-// コンテキスト(ノードのページ)パネル。ノードと1:1で、順序付きブロック列を縦に描画する。
-// - 見出しブロック = リレーション参照(規範=定義)。h2/h3 の level と direct(このノードが参加するか)を持つ。
-//   本文はリレーション(line)の共有オブジェクトなので、ここでは読み取り表示＋ナビゲート(チップで辿る)に留め、
-//   定義の編集はリレーションパネル側で行う（単一ソース）。
-// - テキストブロック = 非規範フリーテキスト(言語別・ノードリンク無し)。ここでインライン編集・自動保存する。
-// ブロックの並び替え(▲▼)、見出しの h2/h3 切替、ブロック除去(✕)、テキスト追加(＋テキスト)を提供する。
+// コンテキスト(ノードのページ)パネル。ノードと1:1で、順序付きブロック列をアウトライナー的に描画する。
+// リレーション/ノードパネルと基盤 UI を揃える: 左に四角のガター、行フォーカスで操作、キーボード駆動。
+// - 見出しブロック = リレーション参照(規範=定義)。太字。h2/h3 はサイズではなくインデントで表す。direct=
+//   このノードが参加するか(間接は ↳)。本文はリレーション(line)の共有オブジェクトなので、ここでは読み取り
+//   表示＋チップで辿るに留め、定義編集はリレーションパネルで行う(単一ソース)。
+// - テキストブロック = 非規範フリーテキスト(言語別・ノードリンク無し)。通常字。インライン編集・自動保存。
+// 操作: Enter=テキスト追加 / Shift+Alt+↑↓=並び替え / Ctrl+Shift+Backspace=削除（大元データを参照で更新）。
 // リレーションパネルで見出し(関係)を選ぶと ctx.focusContextHeading 経由で該当見出しへスクロールする。
 
 function labelOf(n: ExplorerNode, lang: 'en' | 'ja'): string {
@@ -18,7 +19,6 @@ function labelOf(n: ExplorerNode, lang: 'en' | 'ja'): string {
   return primary || fallback || n.id;
 }
 
-// 本文を [テキスト, メンション(⟦id⟧), …] に分解（relation-panel-view の同名ヘルパと同じ規則）。
 function splitTokens(body: string): Array<{ t: 'txt'; v: string } | { t: 'men'; id: string }> {
   const out: Array<{ t: 'txt'; v: string } | { t: 'men'; id: string }> = [];
   const re = /⟦([^⟧]+)⟧/g;
@@ -42,8 +42,8 @@ export function createContextPanelView(
   let currentPath: PanelPathEntry[] | null = null;
   let currentBlocks: ContextBlock[] = [];
   let renderToken = 0;
-  const canvas = document.createElement('canvas');
-  const cctx = canvas.getContext('2d');
+  // 再描画後にフォーカスを戻す先。行を作り直すため、blockId/lineId/ドラフト で指定する。
+  let pendingFocus: { type: 'block'; key: string } | { type: 'line'; key: string } | { type: 'draft' } | null = null;
 
   const el = document.createElement('div');
   el.style.cssText = `flex:1;display:flex;flex-direction:column;overflow:hidden;`;
@@ -53,22 +53,25 @@ export function createContextPanelView(
   el.appendChild(head);
 
   const bodyEl = document.createElement('div');
-  bodyEl.style.cssText = `flex:1;overflow-y:auto;padding:8px 10px;`;
+  bodyEl.style.cssText = `flex:1;overflow-y:auto;padding:6px 8px;`;
   el.appendChild(bodyEl);
 
-  // blockId → その行の DOM。focusContextHeading のスクロール先解決に使う（見出しは lineId でも引ける）。
   const rowByBlock = new Map<string, HTMLElement>();
   const rowByLine = new Map<string, HTMLElement>();
+  let draftTa: HTMLTextAreaElement | null = null;
 
-  // ── 並べ替え ───────────────────────────────────────────────────────────────
-  // 現在の並びから idx の要素を dir 方向へ1つ動かし、全順序をサーバへ保存して再描画。
-  // 仮想見出し id("h:<lineId>")もそのまま送れる（サーバが実体化する）。
-  const moveBlock = async (idx: number, dir: 'up' | 'down') => {
+  // ── 大元データを参照した並び替え・削除・追加 ──────────────────────────────────
+  // 並び替え: currentBlocks の順を入れ替え → 全順序を apiReorderBlocks で保存（仮想見出し "h:<lineId>" は
+  // サーバが実体化）。返りで currentBlocks を更新して再描画。
+  const moveBlock = async (block: ContextBlock, dir: 'up' | 'down') => {
     if (!currentNodeId) return;
-    const order = currentBlocks.map((b) => b.blockId);
+    const idx = currentBlocks.indexOf(block);
+    if (idx < 0) return;
     const j = dir === 'up' ? idx - 1 : idx + 1;
-    if (j < 0 || j >= order.length) return;
+    if (j < 0 || j >= currentBlocks.length) return;
+    const order = currentBlocks.map((b) => b.blockId);
     [order[idx], order[j]] = [order[j], order[idx]];
+    pendingFocus = block.kind === 'heading' ? { type: 'line', key: block.line.lineId } : { type: 'block', key: block.blockId };
     const token = ++renderToken;
     const blocks = await apiReorderBlocks(ctx.gId, currentNodeId, order);
     if (token !== renderToken) return;
@@ -76,69 +79,91 @@ export function createContextPanelView(
     renderBody();
   };
 
-  const setHeadingLevel = async (block: Extract<ContextBlock, { kind: 'heading' }>, level: 2 | 3) => {
-    if (!currentNodeId) return;
-    if (block.blockId.startsWith('h:')) {
-      // 未実体化の仮想見出し: 一旦 order を送って実体化 → level を当てるより、level 付きで見出し追加が要る。
-      // ここでは並べ替えAPIで実体化し、再取得後に実体 blockId へ level を当てる。
-      const order = currentBlocks.map((b) => b.blockId);
-      const blocks = await apiReorderBlocks(ctx.gId, currentNodeId, order);
-      const real = blocks.find((b) => b.kind === 'heading' && b.line.lineId === block.line.lineId);
-      currentBlocks = blocks;
-      if (real) await apiSetBlockHeading(ctx.gId, real.blockId, { level });
-    } else {
-      await apiSetBlockHeading(ctx.gId, block.blockId, { level });
-    }
-    await render();
-  };
-
+  // 削除: 直接リレーションの見出しは非表示にできない（P1・次読込で仮想見出しとして再掲）。
+  // 間接見出し・テキストは実体を削除。楽観的に currentBlocks から外し、隣へフォーカスを送る。
   const deleteBlock = async (block: ContextBlock) => {
-    if (block.blockId.startsWith('h:')) {
-      // 仮想見出し（未実体化の直接リレーション）はまだ実体が無い。P1 では直接リレーションの非表示は
-      // 未対応（次読込で再び見出しとして出る）。実体化済みの見出し/テキストのみ除去できる。
+    if (block.kind === 'heading' && block.direct) {
       showToast('直接リレーションの見出しは非表示にできません（P1）');
       return;
     }
+    const idx = currentBlocks.indexOf(block);
     await apiDeleteBlock(ctx.gId, block.blockId);
-    await render();
-  };
-
-  const addTextBlock = async () => {
-    if (!currentNodeId) return;
-    const res = await apiCreateBlock(ctx.gId, currentNodeId, { kind: 'text', lang, body: '' });
-    if (!res) return;
-    currentBlocks = res.blocks;
+    currentBlocks = currentBlocks.filter((b) => b !== block);
+    const n = currentBlocks[Math.min(idx, currentBlocks.length - 1)];
+    pendingFocus = n
+      ? (n.kind === 'heading' ? { type: 'line', key: n.line.lineId } : { type: 'block', key: n.blockId })
+      : { type: 'draft' };
     renderBody();
-    // 追加したテキストブロックへフォーカス。
-    const row = rowByBlock.get(res.blockId);
-    (row?.querySelector('textarea') as HTMLTextAreaElement | null)?.focus();
   };
 
-  // ── 行の共通操作ツールバー（▲▼ / ✕ / h2·h3） ──────────────────────────────
-  const makeToolbar = (idx: number, block: ContextBlock): HTMLElement => {
-    const bar = document.createElement('div');
-    bar.style.cssText = `flex-shrink:0;display:flex;align-items:center;gap:2px;opacity:0;transition:opacity .1s;`;
-    const mkBtn = (label: string, title: string, act: () => void): HTMLButtonElement => {
-      const b = document.createElement('button');
-      b.textContent = label;
-      b.title = title;
-      b.style.cssText = `background:transparent;border:none;color:${TEXT_DIM};cursor:pointer;font-size:11px;padding:0 3px;line-height:1;`;
-      b.addEventListener('mousedown', (e) => e.preventDefault());
-      b.addEventListener('click', act);
-      return b;
-    };
-    if (block.kind === 'heading') {
-      const cur = block.level === 3 ? 3 : 2;
-      bar.appendChild(mkBtn(cur === 2 ? 'H2' : 'H3', 'クリックで h2/h3 を切替', () => void setHeadingLevel(block, cur === 2 ? 3 : 2)));
+  // テキスト追加: 末尾に作成 → anchor の直後へ並べ替え（anchor 見出しは lineId で対応づけ）。
+  const addTextAfter = async (anchor: ContextBlock | null, initial = '') => {
+    if (!currentNodeId) return;
+    const res = await apiCreateBlock(ctx.gId, currentNodeId, { kind: 'text', lang, body: initial });
+    if (!res) return;
+    let blocks = res.blocks;
+    const newId = res.blockId;
+    if (anchor) {
+      const anchorId = anchor.kind === 'heading'
+        ? blocks.find((b) => b.kind === 'heading' && b.line.lineId === anchor.line.lineId)?.blockId
+        : anchor.blockId;
+      if (anchorId && anchorId !== newId) {
+        const order = blocks.map((b) => b.blockId).filter((id) => id !== newId);
+        const ai = order.indexOf(anchorId);
+        if (ai >= 0) { order.splice(ai + 1, 0, newId); blocks = await apiReorderBlocks(ctx.gId, currentNodeId, order); }
+      }
     }
-    bar.appendChild(mkBtn('▲', '1つ上へ', () => void moveBlock(idx, 'up')));
-    bar.appendChild(mkBtn('▼', '1つ下へ', () => void moveBlock(idx, 'down')));
-    bar.appendChild(mkBtn('✕', block.kind === 'heading' ? 'この見出しをページから外す' : 'このテキストを削除', () => void deleteBlock(block)));
-    return bar;
+    currentBlocks = blocks;
+    pendingFocus = { type: 'block', key: newId };
+    renderBody();
   };
 
-  // ── 見出しブロック（=リレーション参照, 読み取り表示＋ナビゲート） ────────────────
-  const renderHeadingRow = (idx: number, block: Extract<ContextBlock, { kind: 'heading' }>): HTMLElement => {
+  // 見出しの h2/h3 を切替（Tab=h3 / Shift+Tab=h2）。仮想見出しは並べ替えで実体化してから level を当てる。
+  const setHeadingLevel = async (block: Extract<ContextBlock, { kind: 'heading' }>, level: 2 | 3) => {
+    if (!currentNodeId) return;
+    let blockId = block.blockId;
+    if (blockId.startsWith('h:')) {
+      const blocks = await apiReorderBlocks(ctx.gId, currentNodeId, currentBlocks.map((b) => b.blockId));
+      currentBlocks = blocks;
+      const real = blocks.find((b) => b.kind === 'heading' && b.line.lineId === block.line.lineId);
+      if (!real) return;
+      blockId = real.blockId;
+    }
+    await apiSetBlockHeading(ctx.gId, blockId, { level });
+    pendingFocus = { type: 'line', key: block.line.lineId };
+    await reload();
+  };
+
+  // 共通キー: Shift+Alt+↑↓ = 並び替え / Ctrl(Cmd)+Shift+Backspace = 削除。処理したら true。
+  const handleCommonKey = (e: KeyboardEvent, block: ContextBlock): boolean => {
+    if ((e.key === 'ArrowUp' || e.key === 'ArrowDown') && e.shiftKey && e.altKey) {
+      e.preventDefault(); void moveBlock(block, e.key === 'ArrowDown' ? 'down' : 'up'); return true;
+    }
+    if (e.key === 'Backspace' && e.shiftKey && (e.ctrlKey || e.metaKey)) {
+      e.preventDefault(); void deleteBlock(block); return true;
+    }
+    return false;
+  };
+
+  // ── 左ガター（四角） ── リレーション/ノードパネルと同じ 6px spacer + 18px 四角ラッパ。
+  const makeGutter = (): { bw: HTMLElement; square: HTMLElement; spacer: HTMLElement } => {
+    const spacer = document.createElement('span');
+    spacer.style.cssText = `flex-shrink:0;width:6px;`;
+    const bw = document.createElement('span');
+    bw.style.cssText = `flex-shrink:0;display:flex;align-items:center;justify-content:center;width:18px;height:21px;cursor:pointer;`;
+    const square = document.createElement('span');
+    square.style.cssText = `width:7px;height:7px;border-radius:1px;box-sizing:border-box;background:transparent;border:1.5px solid ${TEXT_DIM};`;
+    bw.appendChild(square);
+    return { bw, square, spacer };
+  };
+  // フォーカス中の行の四角を塗る（アクティブ表示・リレーションパネルの流儀）。
+  const setSquareActive = (square: HTMLElement, on: boolean) => {
+    if (on) { square.style.background = SELECT_STRONG; square.style.border = 'none'; }
+    else { square.style.background = 'transparent'; square.style.border = `1.5px solid ${TEXT_DIM}`; }
+  };
+
+  // ── 見出しブロック（=リレーション参照, 読み取り表示＋ナビゲート, 太字・サイズ一定・インデントで階層） ──
+  const renderHeadingRow = (block: Extract<ContextBlock, { kind: 'heading' }>): HTMLElement => {
     const relation: ExplorerRelation = block.line;
     const labelById = new Map(relation.participants.map((p) => [p.id, labelOf(p, lang)] as const));
     const level = block.level === 3 ? 3 : 2;
@@ -146,30 +171,29 @@ export function createContextPanelView(
     const row = document.createElement('div');
     row.dataset.blockId = block.blockId;
     row.dataset.lineId = relation.lineId;
-    row.style.cssText = `display:flex;align-items:flex-start;gap:6px;margin:${level === 2 ? '14px' : '10px'} 0 4px ${level === 3 ? '16px' : '0'};`;
+    row.tabIndex = 0;
+    row.style.cssText = `display:flex;align-items:flex-start;padding:2px 0;outline:none;margin-left:${level === 3 ? 18 : 0}px;`;
+    const { bw, square, spacer } = makeGutter();
 
     const content = document.createElement('div');
-    content.style.cssText = `flex:1;min-width:0;line-height:1.5;font-weight:600;color:${TEXT_HIGH};font-size:${level === 2 ? '15px' : '13px'};`;
-
-    // 直接/間接バッジ（間接＝このノードが参加しないリレーション＝辿りによる説明）。
+    content.style.cssText = `flex:1;min-width:0;line-height:1.5;font-size:14px;font-weight:600;color:${TEXT_HIGH};`;
     if (!block.direct) {
       const badge = document.createElement('span');
-      badge.textContent = '↳';
+      badge.textContent = '↳ ';
       badge.title = '間接リレーション（このノードは参加しないが、定義の合理性を辿るために掲載）';
-      badge.style.cssText = `color:${TEXT_DIM};font-weight:400;margin-right:4px;`;
+      badge.style.cssText = `color:${TEXT_DIM};font-weight:400;`;
       content.appendChild(badge);
     }
-
     const body = relation.body[lang] ?? relation.body[lang === 'ja' ? 'en' : 'ja'] ?? '';
     for (const tok of splitTokens(body)) {
-      if (tok.t === 'txt') {
-        if (tok.v) content.appendChild(document.createTextNode(tok.v));
-      } else {
+      if (tok.t === 'txt') { if (tok.v) content.appendChild(document.createTextNode(tok.v)); }
+      else {
         const chip = document.createElement('span');
         chip.textContent = labelById.get(tok.id) ?? tok.id;
-        chip.style.cssText = `color:${TEXT_HIGH};border-bottom:1px dashed currentColor;cursor:pointer;`;
+        chip.style.cssText = `border-bottom:1px dashed currentColor;cursor:pointer;`;
         chip.title = 'このノードの関係を右に開く';
-        chip.addEventListener('click', () => ctx.openRelationPanel?.(tok.id, chip.textContent ?? undefined));
+        chip.addEventListener('mousedown', (e) => e.preventDefault());
+        chip.addEventListener('click', (e) => { e.stopPropagation(); ctx.openRelationPanel?.(tok.id, chip.textContent ?? undefined); });
         content.appendChild(chip);
       }
     }
@@ -180,24 +204,32 @@ export function createContextPanelView(
       content.appendChild(empty);
     }
 
-    row.append(content, makeToolbar(idx, block));
-    row.addEventListener('mouseenter', () => { (row.lastElementChild as HTMLElement).style.opacity = '1'; });
-    row.addEventListener('mouseleave', () => { (row.lastElementChild as HTMLElement).style.opacity = '0'; });
+    row.append(spacer, bw, content);
+    bw.addEventListener('mousedown', (e) => e.preventDefault());
+    bw.addEventListener('click', () => row.focus());
+    row.addEventListener('focus', () => setSquareActive(square, true));
+    row.addEventListener('blur', () => setSquareActive(square, false));
+    row.addEventListener('keydown', (e) => {
+      if (handleCommonKey(e, block)) return;
+      if (e.key === 'Enter' && !e.shiftKey) { e.preventDefault(); void addTextAfter(block); return; }
+      if (e.key === 'Tab') { e.preventDefault(); void setHeadingLevel(block, e.shiftKey ? 2 : 3); return; }
+    });
     rowByLine.set(relation.lineId, row);
     return row;
   };
 
-  // ── テキストブロック（非規範フリーテキスト, インライン編集） ──────────────────────
-  const renderTextRow = (idx: number, block: Extract<ContextBlock, { kind: 'text' }>): HTMLElement => {
+  // ── テキストブロック（非規範フリーテキスト, 通常字, インライン編集） ──────────────
+  const renderTextRow = (block: Extract<ContextBlock, { kind: 'text' }>): HTMLElement => {
     const row = document.createElement('div');
     row.dataset.blockId = block.blockId;
-    row.style.cssText = `display:flex;align-items:flex-start;gap:6px;margin:4px 0;`;
+    row.style.cssText = `display:flex;align-items:flex-start;padding:2px 0;`;
+    const { bw, square, spacer } = makeGutter();
 
     const ta = document.createElement('textarea');
     ta.value = block.body[lang] ?? block.body[lang === 'ja' ? 'en' : 'ja'] ?? '';
     ta.rows = 1;
     ta.placeholder = 'コンテキスト（非規範のフリーテキスト）…';
-    ta.style.cssText = `flex:1;min-width:0;background:transparent;border:none;outline:none;resize:none;font-size:13px;font-family:inherit;line-height:1.6;padding:0;color:${TEXT_MID};overflow:hidden;`;
+    ta.style.cssText = `flex:1;min-width:0;background:transparent;border:none;outline:none;resize:none;font-size:14px;font-family:inherit;line-height:1.5;padding:0 4px;color:${TEXT_HIGH};overflow:hidden;`;
     const autosize = () => { ta.style.height = 'auto'; ta.style.height = `${ta.scrollHeight}px`; };
     let saveTimer: ReturnType<typeof setTimeout> | undefined;
     const save = (immediate = false) => {
@@ -205,24 +237,65 @@ export function createContextPanelView(
       const doSave = () => { void apiSetBlockText(ctx.gId, block.blockId, lang, ta.value); block.body[lang] = ta.value; };
       if (immediate) doSave(); else saveTimer = setTimeout(doSave, 400);
     };
+    ta.addEventListener('focus', () => setSquareActive(square, true));
+    ta.addEventListener('blur', () => { setSquareActive(square, false); save(true); });
     ta.addEventListener('input', () => { autosize(); save(); });
-    ta.addEventListener('blur', () => save(true));
-    // 空のテキストブロックで Backspace（先頭）→ ブロック削除。
     ta.addEventListener('keydown', (e) => {
-      if (e.key === 'Backspace' && ta.value === '') { e.preventDefault(); void deleteBlock(block); }
+      if (handleCommonKey(e, block)) return;
+      if (e.key === 'Enter' && !e.shiftKey) { e.preventDefault(); save(true); void addTextAfter(block); return; }
+      if (e.key === 'Backspace' && ta.value === '') { e.preventDefault(); void deleteBlock(block); return; }
     });
     setTimeout(autosize, 0);
 
-    row.append(ta, makeToolbar(idx, block));
-    row.addEventListener('mouseenter', () => { (row.lastElementChild as HTMLElement).style.opacity = '1'; });
-    row.addEventListener('mouseleave', () => { (row.lastElementChild as HTMLElement).style.opacity = '0'; });
+    row.append(spacer, bw, ta);
+    bw.addEventListener('mousedown', (e) => e.preventDefault());
+    bw.addEventListener('click', () => ta.focus());
     return row;
+  };
+
+  // ── 末尾のドラフト行（＝追加の入口。＋ボタンの代替。Enter で確定＋作成） ──────────────
+  const makeDraftRow = (): HTMLElement => {
+    const row = document.createElement('div');
+    row.style.cssText = `display:flex;align-items:flex-start;padding:2px 0;`;
+    const { bw, spacer } = makeGutter();
+    const ta = document.createElement('textarea');
+    ta.rows = 1;
+    ta.placeholder = 'テキストを追加…（Enter）';
+    ta.style.cssText = `flex:1;min-width:0;background:transparent;border:none;outline:none;resize:none;font-size:14px;font-family:inherit;line-height:1.5;padding:0 4px;color:${TEXT_DIM};overflow:hidden;`;
+    const autosize = () => { ta.style.height = 'auto'; ta.style.height = `${ta.scrollHeight}px`; };
+    ta.addEventListener('focus', () => { ta.style.color = TEXT_HIGH; });
+    ta.addEventListener('blur', () => { if (!ta.value.trim()) ta.style.color = TEXT_DIM; });
+    ta.addEventListener('input', autosize);
+    ta.addEventListener('keydown', (e) => {
+      if (e.key === 'Enter' && !e.shiftKey) {
+        e.preventDefault();
+        const val = ta.value;
+        if (!val.trim()) return;
+        ta.value = ''; autosize();
+        pendingFocus = { type: 'draft' };
+        void addTextAfter(null, val);
+      }
+    });
+    bw.addEventListener('mousedown', (e) => e.preventDefault());
+    bw.addEventListener('click', () => ta.focus());
+    row.append(spacer, bw, ta);
+    draftTa = ta;
+    return row;
+  };
+
+  const applyPendingFocus = () => {
+    const pf = pendingFocus; pendingFocus = null;
+    if (!pf) return;
+    if (pf.type === 'draft') { draftTa?.focus(); return; }
+    if (pf.type === 'block') { (rowByBlock.get(pf.key)?.querySelector('textarea') as HTMLTextAreaElement | null)?.focus(); return; }
+    if (pf.type === 'line') { rowByLine.get(pf.key)?.focus(); return; }
   };
 
   const renderBody = (): void => {
     bodyEl.innerHTML = '';
     rowByBlock.clear();
     rowByLine.clear();
+    draftTa = null;
     if (!currentNodeId) {
       const hint = document.createElement('div');
       hint.textContent = 'ノードを選ぶと、そのコンテキスト（ページ）が出ます。';
@@ -230,28 +303,28 @@ export function createContextPanelView(
       bodyEl.appendChild(hint);
       return;
     }
-    currentBlocks.forEach((block, idx) => {
-      const row = block.kind === 'heading' ? renderHeadingRow(idx, block) : renderTextRow(idx, block);
+    for (const block of currentBlocks) {
+      const row = block.kind === 'heading' ? renderHeadingRow(block) : renderTextRow(block);
       rowByBlock.set(block.blockId, row);
       bodyEl.appendChild(row);
-    });
-    // 末尾のテキスト追加ボタン。
-    const addRow = document.createElement('div');
-    addRow.style.cssText = `margin-top:10px;`;
-    const addBtn = document.createElement('button');
-    addBtn.textContent = '＋ テキスト';
-    addBtn.title = '非規範のテキストブロックを追加';
-    addBtn.style.cssText = `background:transparent;border:1px dashed ${BORDER};color:${TEXT_MID};cursor:pointer;font-size:12px;padding:3px 8px;border-radius:4px;`;
-    addBtn.addEventListener('click', () => void addTextBlock());
-    addRow.appendChild(addBtn);
-    bodyEl.appendChild(addRow);
+    }
+    bodyEl.appendChild(makeDraftRow());
+    applyPendingFocus();
+  };
+
+  // 本体だけ再取得して描画（head は作り直さない）。
+  const reload = async (): Promise<void> => {
+    if (!currentNodeId) { currentBlocks = []; renderBody(); return; }
+    const token = ++renderToken;
+    const blocks = await fetchNodeContext(ctx.gId, currentNodeId);
+    if (token !== renderToken) return;
+    currentBlocks = blocks;
+    renderBody();
   };
 
   // ── ヘッダ（パンくず＋⟳＋言語） ────────────────────────────────────────────
   const render = async (): Promise<void> => {
-    const token = ++renderToken;
     head.innerHTML = '';
-
     const ctrlRow = document.createElement('div');
     ctrlRow.style.cssText = `display:flex;align-items:center;gap:4px;height:28px;box-sizing:border-box;padding:0 6px;border-bottom:1px solid ${BORDER};`;
     if (opts.leadingHeadEl) ctrlRow.appendChild(opts.leadingHeadEl);
@@ -263,7 +336,7 @@ export function createContextPanelView(
     reloadBtn.textContent = '⟳';
     reloadBtn.title = 'コンテキストを再読み込み';
     reloadBtn.style.cssText = `background:transparent;border:none;color:${TEXT_DIM};cursor:pointer;font-size:13px;padding:0 2px;line-height:1;flex-shrink:0;`;
-    reloadBtn.addEventListener('click', () => { reloadBtn.style.color = TEXT_HIGH; void render().finally(() => { reloadBtn.style.color = TEXT_DIM; }); });
+    reloadBtn.addEventListener('click', () => { reloadBtn.style.color = TEXT_HIGH; void reload().finally(() => { reloadBtn.style.color = TEXT_DIM; }); });
     ctrlRow.appendChild(reloadBtn);
     const langBtn = document.createElement('button');
     langBtn.textContent = lang.toUpperCase();
@@ -280,12 +353,7 @@ export function createContextPanelView(
       ctrlRow.appendChild(closeBtn);
     }
     head.appendChild(ctrlRow);
-
-    if (!currentNodeId) { currentBlocks = []; renderBody(); return; }
-    const blocks = await fetchNodeContext(ctx.gId, currentNodeId);
-    if (token !== renderToken) return;
-    currentBlocks = blocks;
-    renderBody();
+    await reload();
   };
 
   // リレーションパネルで見出し(関係)が選ばれたら、その見出し行へスクロール＋一瞬ハイライト。
@@ -293,7 +361,7 @@ export function createContextPanelView(
     const row = rowByLine.get(lineId);
     if (!row) return;
     row.scrollIntoView({ block: 'center', behavior: 'smooth' });
-    const content = row.firstElementChild as HTMLElement | null;
+    const content = row.lastElementChild as HTMLElement | null;
     if (content) {
       const prev = content.style.background;
       content.style.background = SELECT_STRONG;
@@ -310,7 +378,7 @@ export function createContextPanelView(
     el,
     head,
     load: () => render(),
-    refresh: () => { void render(); },
+    refresh: () => { void reload(); },
     search: async () => { /* コンテキスト列は top-bar 検索の対象外 */ },
     setParent: async (nodeId, _excl, path) => { currentNodeId = nodeId; currentPath = path ?? null; await render(); },
     getAncestorIds: () => new Set<string>(),
