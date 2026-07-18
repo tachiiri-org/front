@@ -153,8 +153,8 @@ export function createPanelsView(ctx: GraphEditorContext): {
   const createRelationPanel = (id: string, view: PanelView, primary: boolean): RelationPanelInstance => {
     const containerEl = document.createElement('div');
     containerEl.dataset.panelId = id;
-    containerEl.style.cssText = `flex:1 1 0;min-height:160px;display:flex;flex-direction:column;overflow:hidden;position:relative;`;
-    view.el.style.flex = '1';
+    // Content-height (可変): the panel takes its natural height; relationColumn scrolls the stack.
+    containerEl.style.cssText = `flex:0 0 auto;display:flex;flex-direction:column;overflow:hidden;position:relative;`;
     containerEl.appendChild(view.el);
     const inst: RelationPanelInstance = { id, view, containerEl, primary };
     const closeBtn = document.createElement('button');
@@ -173,7 +173,7 @@ export function createPanelsView(ctx: GraphEditorContext): {
 
   // The primary relation panel's view (follows the global selection; closable via ×, and re-opened by
   // ensurePrimaryPanel on the next node-row selection). Its grip lives in the relation head.
-  const relationView: PanelView = createRelationPanelView(ctx, { lang: ctx.state.lang, initialNodeId: null });
+  const relationView: PanelView = createRelationPanelView(ctx, { lang: ctx.state.lang, initialNodeId: null, autoHeight: true });
 
   // The persistent context (node page) panel — the right-hand DOCUMENT view, driven by the global
   // selection alongside the relation panel (which stays the navigator/outline). A fixed right column
@@ -198,7 +198,7 @@ export function createPanelsView(ctx: GraphEditorContext): {
   // node's relations by following its links, building a left→right trail of relation panels.
   ctx.openRelationPanel = (nodeId, label) => {
     const id = `rel-x-${++relPanelSeq}`;
-    const view = createRelationPanelView(ctx, { lang: ctx.state.lang, initialNodeId: nodeId });
+    const view = createRelationPanelView(ctx, { lang: ctx.state.lang, initialNodeId: nodeId, autoHeight: true, compact: true });
     const inst = createRelationPanel(id, view, false);
     relationPanels.push(inst);
     relationColumn.appendChild(inst.containerEl);   // stack BELOW the current relation panel(s)

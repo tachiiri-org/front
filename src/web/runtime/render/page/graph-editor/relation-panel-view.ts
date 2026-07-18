@@ -39,7 +39,7 @@ function splitTokens(body: string): Array<{ t: 'txt'; v: string } | { t: 'men'; 
 
 export function createRelationPanelView(
   ctx: GraphEditorContext,
-  opts: { lang: 'en' | 'ja'; initialNodeId?: string | null; onClose?: () => void; leadingHeadEl?: HTMLElement },
+  opts: { lang: 'en' | 'ja'; initialNodeId?: string | null; onClose?: () => void; leadingHeadEl?: HTMLElement; compact?: boolean; autoHeight?: boolean },
 ): PanelView {
   let lang = opts.lang;
   let currentNodeId: string | null = opts.initialNodeId ?? null;
@@ -60,7 +60,8 @@ export function createRelationPanelView(
   const cctx = canvas.getContext('2d');
 
   const el = document.createElement('div');
-  el.style.cssText = `flex:1;display:flex;flex-direction:column;overflow:hidden;`;
+  // autoHeight: 縦スタック時は内容の高さに合わせて可変（等分しない）。列側(relationColumn)がスクロールを持つ。
+  el.style.cssText = opts.autoHeight ? `display:flex;flex-direction:column;` : `flex:1;display:flex;flex-direction:column;overflow:hidden;`;
 
   // ノードパネルと同じ2行構成: 1行目=操作（言語切替 + ⟳ + リンクなし, 28px）、2行目=パンくず。
   // 各行が自分の border-bottom を持つので行間にも線が入り、ノードパネルと高さ・見た目が揃う。
@@ -69,7 +70,7 @@ export function createRelationPanelView(
   el.appendChild(head);
 
   const bodyEl = document.createElement('div');
-  bodyEl.style.cssText = `flex:1;overflow-y:auto;padding:6px 8px;`;
+  bodyEl.style.cssText = opts.autoHeight ? `padding:6px 8px;` : `flex:1;overflow-y:auto;padding:6px 8px;`;
   el.appendChild(bodyEl);
 
   // ── @メンション ドロップダウン（使い回し） ──────────────────────────────────
@@ -856,6 +857,8 @@ export function createRelationPanelView(
     filterQuery = ''; // ノード切替/再読込では検索状態をリセット（新しい関係一覧を全件表示）。
 
     // ── 0行目: 検索（ノードパネルの検索行と同形・最上部・プレースホルダ文言なし＝虫眼鏡のみ） ──
+    // compact（2つ目以降の下方展開パネル）では検索行を出さない。
+    if (!opts.compact) {
     const searchRow = document.createElement('div');
     searchRow.style.cssText = `display:flex;align-items:center;gap:4px;height:28px;box-sizing:border-box;padding:0 6px;border-bottom:1px solid ${BORDER};`;
     const searchIconWrap = document.createElement('span');
@@ -880,18 +883,22 @@ export function createRelationPanelView(
     // ので、同じ要素をここで毎回先頭へ差し込む（リスナは要素に付いているので保持される）。
     if (opts.leadingHeadEl) searchRow.insertBefore(opts.leadingHeadEl, searchRow.firstChild);
     head.appendChild(searchRow);
+    }
 
     // ── 1行目: 操作（リンクなし + ⟳ + 言語切替） ── ノードペインヘッダと同じ 28px+下線。
     // 並び: 左=リンクなし、右寄せで ⟳・JA/EN（ノードパネルと同様に言語切替を右端へ）。
     const ctrlRow = document.createElement('div');
     ctrlRow.style.cssText = `display:flex;align-items:center;gap:4px;height:28px;box-sizing:border-box;padding:0 6px;border-bottom:1px solid ${BORDER};`;
     // 「リンクなし」トグル: 参加ノードを持たない関係の一覧（移行・編集中の受け皿）。左端。
-    const orphanBtn = document.createElement('button');
-    orphanBtn.textContent = 'リンクなし';
-    orphanBtn.title = '参加ノードを持たない関係（リンクなし）を表示';
-    orphanBtn.style.cssText = `flex-shrink:0;background:${orphanMode ? SELECT_STRONG : 'transparent'};border:1px solid ${BORDER};color:${orphanMode ? '#fff' : TEXT_MID};cursor:pointer;font-size:10px;padding:1px 6px;border-radius:3px;`;
-    orphanBtn.addEventListener('click', () => { orphanMode = !orphanMode; void render(); });
-    ctrlRow.appendChild(orphanBtn);
+    // compact（2つ目以降の下方展開パネル）では出さない。
+    if (!opts.compact) {
+      const orphanBtn = document.createElement('button');
+      orphanBtn.textContent = 'リンクなし';
+      orphanBtn.title = '参加ノードを持たない関係（リンクなし）を表示';
+      orphanBtn.style.cssText = `flex-shrink:0;background:${orphanMode ? SELECT_STRONG : 'transparent'};border:1px solid ${BORDER};color:${orphanMode ? '#fff' : TEXT_MID};cursor:pointer;font-size:10px;padding:1px 6px;border-radius:3px;`;
+      orphanBtn.addEventListener('click', () => { orphanMode = !orphanMode; void render(); });
+      ctrlRow.appendChild(orphanBtn);
+    }
     // パネル内更新ボタン（ノードパネルの ⟳ と同じ）。関係一覧を再取得する。右寄せの先頭。
     const reloadBtn = document.createElement('button');
     reloadBtn.textContent = '⟳';
