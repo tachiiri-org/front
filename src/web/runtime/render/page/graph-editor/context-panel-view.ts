@@ -1,7 +1,8 @@
 import type { GraphEditorContext, PanelView, ExplorerNode, ExplorerRelation, ContextBlock, PanelPathEntry } from './types';
-import { BORDER, TEXT_HIGH, TEXT_MID, TEXT_DIM, SELECT_STRONG, showToast } from './constants';
+import { BORDER, TEXT_HIGH, TEXT_MID, TEXT_DIM, SELECT_STRONG } from './constants';
 import {
   fetchNodeContext, apiCreateBlock, apiSetBlockText, apiSetBlockHeading, apiReorderBlocks, apiDeleteBlock,
+  apiSetRelationText, apiRemoveRay, apiDeleteRelation,
 } from './api';
 
 // コンテキスト(ノードのページ)パネル。ノードと1:1で、順序付きブロック列をアウトライナー的に描画する。
@@ -59,6 +60,9 @@ export function createContextPanelView(
   const rowByBlock = new Map<string, HTMLElement>();
   const rowByLine = new Map<string, HTMLElement>();
   let draftTa: HTMLTextAreaElement | null = null;
+  // 見出し(リレーション)行のセグメント幅計測用（リレーションパネルと同じインライン割り付け）。
+  const canvas = document.createElement('canvas');
+  const cctx = canvas.getContext('2d');
 
   // ── 大元データを参照した並び替え・削除・追加 ──────────────────────────────────
   // 並び替え: currentBlocks の順を入れ替え → 全順序を apiReorderBlocks で保存（仮想見出し "h:<lineId>" は
@@ -79,15 +83,12 @@ export function createContextPanelView(
     renderBody();
   };
 
-  // 削除: 直接リレーションの見出しは非表示にできない（P1・次読込で仮想見出しとして再掲）。
-  // 間接見出し・テキストは実体を削除。楽観的に currentBlocks から外し、隣へフォーカスを送る。
+  // 削除: 見出しは「大元のリレーションごと削除」（リレーションパネルと同じ・全ページから消える）。
+  // テキストブロックはそのブロックを削除。楽観的に currentBlocks から外し、隣へフォーカスを送る。
   const deleteBlock = async (block: ContextBlock) => {
-    if (block.kind === 'heading' && block.direct) {
-      showToast('直接リレーションの見出しは非表示にできません（P1）');
-      return;
-    }
     const idx = currentBlocks.indexOf(block);
-    await apiDeleteBlock(ctx.gId, block.blockId);
+    if (block.kind === 'heading') await apiDeleteRelation(ctx.gId, block.line.lineId);
+    else await apiDeleteBlock(ctx.gId, block.blockId);
     currentBlocks = currentBlocks.filter((b) => b !== block);
     const n = currentBlocks[Math.min(idx, currentBlocks.length - 1)];
     pendingFocus = n
@@ -162,7 +163,9 @@ export function createContextPanelView(
     else { square.style.background = 'transparent'; square.style.border = `1.5px solid ${TEXT_DIM}`; }
   };
 
-  // ── 見出しブロック（=リレーション参照, 読み取り表示＋ナビゲート, 太字・サイズ一定・インデントで階層） ──
+  // ── 見出しブロック（=リレーション参照）── リレーションパネルと同じ span+textarea の編集行。太字・サイズ
+  // 一定・インデントで階層。本文はリレーション(line)の共有オブジェクトを編集するので、ここで直すと全ページに
+  // 反映される（単一ソース）。@メンションでの新規ノードリンク追加はリレーションパネル側（次段で共通化予定）。
   const renderHeadingRow = (block: Extract<ContextBlock, { kind: 'heading' }>): HTMLElement => {
     const relation: ExplorerRelation = block.line;
     const labelById = new Map(relation.participants.map((p) => [p.id, labelOf(p, lang)] as const));
@@ -171,49 +174,129 @@ export function createContextPanelView(
     const row = document.createElement('div');
     row.dataset.blockId = block.blockId;
     row.dataset.lineId = relation.lineId;
-    row.tabIndex = 0;
-    row.style.cssText = `display:flex;align-items:flex-start;padding:2px 0;outline:none;margin-left:${level === 3 ? 18 : 0}px;`;
+    row.style.cssText = `display:flex;align-items:flex-start;padding:2px 0;margin-left:${level === 3 ? 18 : 0}px;`;
     const { bw, square, spacer } = makeGutter();
 
     const content = document.createElement('div');
-    content.style.cssText = `flex:1;min-width:0;line-height:1.5;font-size:14px;font-weight:600;color:${TEXT_HIGH};`;
+    content.style.cssText = `flex:1;min-width:0;line-height:1.5;`;
     if (!block.direct) {
       const badge = document.createElement('span');
+      badge.dataset.badge = '1';
       badge.textContent = '↳ ';
       badge.title = '間接リレーション（このノードは参加しないが、定義の合理性を辿るために掲載）';
-      badge.style.cssText = `color:${TEXT_DIM};font-weight:400;`;
+      badge.style.cssText = `color:${TEXT_DIM};font-weight:400;font-size:14px;`;
       content.appendChild(badge);
     }
+
+    // content の [textarea | chip(span)] を連結して本文(⟦id⟧入り)へ復元。
+    const rebuild = (): string => Array.from(content.children).map((c) => {
+      const cel = c as HTMLElement;
+      if (cel.dataset.badge) return '';
+      const id = cel.dataset.nodeLink;
+      return id ? `⟦${id}⟧` : (c as HTMLTextAreaElement).value;
+    }).join('');
+    let saveTimer: ReturnType<typeof setTimeout> | undefined;
+    const save = (immediate = false) => {
+      if (saveTimer) clearTimeout(saveTimer);
+      const doSave = () => { const body = rebuild(); relation.body[lang] = body; void apiSetRelationText(ctx.gId, relation.lineId, lang, body); };
+      if (immediate) doSave(); else saveTimer = setTimeout(doSave, 400);
+    };
+    const autosize = (ta: HTMLTextAreaElement) => {
+      const text = ta.value || '';
+      let w = 8;
+      if (cctx) { cctx.font = '600 14px sans-serif'; w = cctx.measureText(text).width + 2; }
+      const max = content.clientWidth || 99999;
+      const firstTa = content.querySelector('textarea');
+      if (firstTa === ta && text === '' && content.lastElementChild !== ta) {
+        ta.style.width = document.activeElement === ta ? '8px' : '0px';
+      } else {
+        ta.style.width = w <= max ? `${Math.max(8, w)}px` : '100%';
+      }
+      ta.style.height = 'auto';
+      ta.style.height = `${ta.scrollHeight}px`;
+    };
+
+    const removeChip = (chip: HTMLElement) => {
+      const id = chip.dataset.nodeLink;
+      const prev = chip.previousElementSibling as HTMLTextAreaElement | null;
+      const next = chip.nextElementSibling as HTMLTextAreaElement | null;
+      if (prev && next && prev.tagName === 'TEXTAREA' && next.tagName === 'TEXTAREA') {
+        const caret = prev.value.length;
+        prev.value = prev.value + next.value;
+        next.remove();
+        autosize(prev);
+        prev.focus();
+        prev.setSelectionRange(caret, caret);
+      }
+      chip.remove();
+      save(true);
+      const stillUsed = Array.from(content.children).some((c) => (c as HTMLElement).dataset.nodeLink === id);
+      if (id && !stillUsed) void apiRemoveRay(ctx.gId, relation.lineId, id);
+    };
+
+    const mkChip = (id: string): HTMLElement => {
+      const chip = document.createElement('span');
+      chip.dataset.nodeLink = id;
+      chip.contentEditable = 'false';
+      chip.style.cssText = `display:inline-block;vertical-align:top;line-height:1.5;font-size:14px;font-weight:600;color:${TEXT_HIGH};border-bottom:1px dashed currentColor;user-select:none;cursor:pointer;`;
+      const t = document.createElement('span');
+      t.textContent = labelById.get(id) ?? id;
+      chip.appendChild(t);
+      chip.title = 'このノードの関係を開く';
+      chip.addEventListener('mousedown', (e) => { if ((e as MouseEvent).button === 0) { e.preventDefault(); ctx.openRelationPanel?.(id, chip.textContent ?? undefined); } });
+      return chip;
+    };
+
+    const mkTa = (v: string): HTMLTextAreaElement => {
+      const ta = document.createElement('textarea');
+      ta.value = v;
+      ta.rows = 1;
+      ta.style.cssText = `display:inline-block;vertical-align:top;background:transparent;border:none;outline:none;resize:none;font-size:14px;font-weight:600;font-family:inherit;line-height:1.5;padding:0;margin:0;overflow:hidden;color:${TEXT_HIGH};`;
+      ta.addEventListener('focus', () => { setSquareActive(square, true); autosize(ta); });
+      ta.addEventListener('blur', () => { setSquareActive(square, false); save(true); autosize(ta); });
+      ta.addEventListener('input', () => { autosize(ta); save(); });
+      ta.addEventListener('keydown', (e) => {
+        if (handleCommonKey(e, block)) return;
+        if (e.key === 'Enter' && !e.shiftKey) { e.preventDefault(); save(true); void addTextAfter(block); return; }
+        if (e.key === 'Tab') { e.preventDefault(); void setHeadingLevel(block, e.shiftKey ? 2 : 3); return; }
+        const atStart = ta.selectionStart === 0 && ta.selectionEnd === 0;
+        const atEnd = ta.selectionStart === ta.value.length && ta.selectionEnd === ta.value.length;
+        // 端で←→はチップを跨いで隣のテキスト片へ。Backspace(先頭)/Delete(末尾)で隣接チップを削除。
+        if (e.key === 'ArrowLeft' && atStart) {
+          const chip = ta.previousElementSibling as HTMLElement | null;
+          const prevTa = chip?.previousElementSibling as HTMLTextAreaElement | null;
+          if (chip?.dataset.nodeLink && prevTa) { e.preventDefault(); prevTa.focus(); prevTa.setSelectionRange(prevTa.value.length, prevTa.value.length); }
+          return;
+        }
+        if (e.key === 'ArrowRight' && atEnd) {
+          const chip = ta.nextElementSibling as HTMLElement | null;
+          const nextTa = chip?.nextElementSibling as HTMLTextAreaElement | null;
+          if (chip?.dataset.nodeLink && nextTa) { e.preventDefault(); nextTa.focus(); nextTa.setSelectionRange(0, 0); }
+          return;
+        }
+        if (e.key === 'Backspace' && atStart) {
+          const prev = ta.previousElementSibling as HTMLElement | null;
+          if (prev?.dataset.nodeLink) { e.preventDefault(); removeChip(prev); }
+          return;
+        }
+        if (e.key === 'Delete' && atEnd) {
+          const next = ta.nextElementSibling as HTMLElement | null;
+          if (next?.dataset.nodeLink) { e.preventDefault(); removeChip(next); }
+        }
+      });
+      setTimeout(() => autosize(ta), 0);
+      return ta;
+    };
+
     const body = relation.body[lang] ?? relation.body[lang === 'ja' ? 'en' : 'ja'] ?? '';
     for (const tok of splitTokens(body)) {
-      if (tok.t === 'txt') { if (tok.v) content.appendChild(document.createTextNode(tok.v)); }
-      else {
-        const chip = document.createElement('span');
-        chip.textContent = labelById.get(tok.id) ?? tok.id;
-        chip.style.cssText = `border-bottom:1px dashed currentColor;cursor:pointer;`;
-        chip.title = 'このノードの関係を右に開く';
-        chip.addEventListener('mousedown', (e) => e.preventDefault());
-        chip.addEventListener('click', (e) => { e.stopPropagation(); ctx.openRelationPanel?.(tok.id, chip.textContent ?? undefined); });
-        content.appendChild(chip);
-      }
-    }
-    if (body.trim() === '') {
-      const empty = document.createElement('span');
-      empty.textContent = '(空の関係)';
-      empty.style.cssText = `color:${TEXT_DIM};font-weight:400;`;
-      content.appendChild(empty);
+      if (tok.t === 'txt') content.appendChild(mkTa(tok.v));
+      else content.appendChild(mkChip(tok.id));
     }
 
     row.append(spacer, bw, content);
     bw.addEventListener('mousedown', (e) => e.preventDefault());
-    bw.addEventListener('click', () => row.focus());
-    row.addEventListener('focus', () => setSquareActive(square, true));
-    row.addEventListener('blur', () => setSquareActive(square, false));
-    row.addEventListener('keydown', (e) => {
-      if (handleCommonKey(e, block)) return;
-      if (e.key === 'Enter' && !e.shiftKey) { e.preventDefault(); void addTextAfter(block); return; }
-      if (e.key === 'Tab') { e.preventDefault(); void setHeadingLevel(block, e.shiftKey ? 2 : 3); return; }
-    });
+    bw.addEventListener('click', () => (content.querySelector('textarea') as HTMLTextAreaElement | null)?.focus());
     rowByLine.set(relation.lineId, row);
     return row;
   };
@@ -287,7 +370,7 @@ export function createContextPanelView(
     if (!pf) return;
     if (pf.type === 'draft') { draftTa?.focus(); return; }
     if (pf.type === 'block') { (rowByBlock.get(pf.key)?.querySelector('textarea') as HTMLTextAreaElement | null)?.focus(); return; }
-    if (pf.type === 'line') { rowByLine.get(pf.key)?.focus(); return; }
+    if (pf.type === 'line') { (rowByLine.get(pf.key)?.querySelector('textarea') as HTMLTextAreaElement | null)?.focus(); return; }
   };
 
   const renderBody = (): void => {
