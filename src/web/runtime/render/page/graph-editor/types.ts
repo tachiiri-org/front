@@ -8,7 +8,7 @@ export type ExplorerRelation = { lineId: string; body: Record<string, string>; p
 
 // コンテキスト = (node, relation) に添える非規範テキスト注釈のブロック（言語別本文）。定義(line)は
 // 共有・単一だが、注釈はどのノードから見ているかで別物。バックエンド /node/:id/line/:lineId/context に対応。
-export type CtxBlock = { blockId: string; body: Record<string, string> };
+export type ContextBlock = { blockId: string; body: Record<string, string> };
 
 // Cross-pane drag state for the multi-pane (パネル) view. Each pane is an independent
 // outliner instance with its own closure scope, so the source pane records the dragged

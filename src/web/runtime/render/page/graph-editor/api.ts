@@ -1,4 +1,4 @@
-import type { CtxBlock, ExplorerNode, ExplorerRelation } from './types';
+import type { ContextBlock, ExplorerNode, ExplorerRelation } from './types';
 
 // ── Client-side request gate ──────────────────────────────────────────────
 // The graph runs on a single-threaded per-tenant Durable Object behind a 120-reads/60s rate
@@ -310,24 +310,24 @@ export async function apiDeleteRelation(graphId: string, lineId: string): Promis
 // /node/:id/line/:lineId/context 系に対応。定義(line)は共有・単一だが注釈はノード別。
 
 // (node, line) のコンテキスト（テキストブロック列）を取得。
-export async function fetchLineContext(graphId: string, nodeId: string, lineId: string): Promise<CtxBlock[]> {
+export async function fetchLineContext(graphId: string, nodeId: string, lineId: string): Promise<ContextBlock[]> {
   const r = await apiFetch(`/api/v1/graph/${graphId}/node/${nodeId}/line/${lineId}/context`);
   if (!r.ok) return [];
-  const data = await r.json() as { blocks: CtxBlock[] };
+  const data = await r.json() as { blocks: ContextBlock[] };
   return data.blocks ?? [];
 }
 
 // テキストブロックを末尾に追加。返りは更新後のブロック列。
-export async function apiCreateCtxBlock(
+export async function apiCreateContextBlock(
   graphId: string, nodeId: string, lineId: string, lang: 'en' | 'ja', body = '',
-): Promise<{ blockId: string; blocks: CtxBlock[] } | null> {
+): Promise<{ blockId: string; blocks: ContextBlock[] } | null> {
   const r = await apiFetch(`/api/v1/graph/${graphId}/node/${nodeId}/line/${lineId}/block`, {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
     body: JSON.stringify({ lang, body }),
   });
   if (!r.ok) return null;
-  return r.json() as Promise<{ blockId: string; blocks: CtxBlock[] }>;
+  return r.json() as Promise<{ blockId: string; blocks: ContextBlock[] }>;
 }
 
 // テキストブロックの本文を言語ごとに設定。
@@ -340,14 +340,14 @@ export async function apiSetBlockText(graphId: string, blockId: string, lang: 'e
 }
 
 // (node, line) のブロック並び順を明示配列で保存。返りは更新後。
-export async function apiReorderCtxBlocks(graphId: string, nodeId: string, lineId: string, order: string[]): Promise<CtxBlock[]> {
+export async function apiReorderContextBlocks(graphId: string, nodeId: string, lineId: string, order: string[]): Promise<ContextBlock[]> {
   const r = await apiFetch(`/api/v1/graph/${graphId}/node/${nodeId}/line/${lineId}/blocks/order`, {
     method: 'PATCH',
     headers: { 'Content-Type': 'application/json' },
     body: JSON.stringify({ order }),
   });
   if (!r.ok) return [];
-  const data = await r.json() as { blocks: CtxBlock[] };
+  const data = await r.json() as { blocks: ContextBlock[] };
   return data.blocks ?? [];
 }
 

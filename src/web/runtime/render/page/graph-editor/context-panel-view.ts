@@ -1,6 +1,6 @@
-import type { GraphEditorContext, PanelView, CtxBlock, PanelPathEntry } from './types';
+import type { GraphEditorContext, PanelView, ContextBlock, PanelPathEntry } from './types';
 import { BORDER, TEXT_HIGH, TEXT_MID, TEXT_DIM, SELECT_STRONG } from './constants';
-import { fetchLineContext, apiCreateCtxBlock, apiSetBlockText, apiReorderCtxBlocks, apiDeleteBlock } from './api';
+import { fetchLineContext, apiCreateContextBlock, apiSetBlockText, apiReorderContextBlocks, apiDeleteBlock } from './api';
 
 // コンテキストパネル。キーは (node, relation) の複合。リレーションパネルで選択中のリレーション × 現在ノード
 // に添える【非規範のフリーテキスト】注釈だけを、アウトライナー的に縦に並べる（見出し/階層はここには無い）。
@@ -14,7 +14,7 @@ export function createContextPanelView(
   let lang = opts.lang;
   let currentNodeId: string | null = null;
   let currentLineId: string | null = null;
-  let currentBlocks: CtxBlock[] = [];
+  let currentBlocks: ContextBlock[] = [];
   let renderToken = 0;
   let pendingFocus: { type: 'block'; key: string } | { type: 'draft' } | null = null;
 
@@ -59,7 +59,7 @@ export function createContextPanelView(
   };
 
   // ── 大元データを参照した並び替え・削除・追加（すべて (node,line) スコープ） ────────────
-  const moveBlock = async (block: CtxBlock, dir: 'up' | 'down') => {
+  const moveBlock = async (block: ContextBlock, dir: 'up' | 'down') => {
     if (!currentNodeId || !currentLineId) return;
     const idx = currentBlocks.indexOf(block);
     if (idx < 0) return;
@@ -69,13 +69,13 @@ export function createContextPanelView(
     [order[idx], order[j]] = [order[j], order[idx]];
     pendingFocus = { type: 'block', key: block.blockId };
     const token = ++renderToken;
-    const blocks = await apiReorderCtxBlocks(ctx.gId, currentNodeId, currentLineId, order);
+    const blocks = await apiReorderContextBlocks(ctx.gId, currentNodeId, currentLineId, order);
     if (token !== renderToken) return;
     currentBlocks = blocks;
     renderBody();
   };
 
-  const deleteBlock = async (block: CtxBlock) => {
+  const deleteBlock = async (block: ContextBlock) => {
     const idx = currentBlocks.indexOf(block);
     await apiDeleteBlock(ctx.gId, block.blockId);
     currentBlocks = currentBlocks.filter((b) => b !== block);
@@ -84,16 +84,16 @@ export function createContextPanelView(
     renderBody();
   };
 
-  const addTextAfter = async (anchor: CtxBlock | null, initial = '') => {
+  const addTextAfter = async (anchor: ContextBlock | null, initial = '') => {
     if (!currentNodeId || !currentLineId) return;
-    const res = await apiCreateCtxBlock(ctx.gId, currentNodeId, currentLineId, lang, initial);
+    const res = await apiCreateContextBlock(ctx.gId, currentNodeId, currentLineId, lang, initial);
     if (!res) return;
     let blocks = res.blocks;
     const newId = res.blockId;
     if (anchor) {
       const order = blocks.map((b) => b.blockId).filter((id) => id !== newId);
       const ai = order.indexOf(anchor.blockId);
-      if (ai >= 0) { order.splice(ai + 1, 0, newId); blocks = await apiReorderCtxBlocks(ctx.gId, currentNodeId, currentLineId, order); }
+      if (ai >= 0) { order.splice(ai + 1, 0, newId); blocks = await apiReorderContextBlocks(ctx.gId, currentNodeId, currentLineId, order); }
     }
     currentBlocks = blocks;
     pendingFocus = { type: 'block', key: newId };
@@ -102,18 +102,18 @@ export function createContextPanelView(
 
   const addTextAtStart = async (initial = '') => {
     if (!currentNodeId || !currentLineId) return;
-    const res = await apiCreateCtxBlock(ctx.gId, currentNodeId, currentLineId, lang, initial);
+    const res = await apiCreateContextBlock(ctx.gId, currentNodeId, currentLineId, lang, initial);
     if (!res) return;
     const newId = res.blockId;
     const order = res.blocks.map((b) => b.blockId).filter((id) => id !== newId);
     order.unshift(newId);
-    currentBlocks = await apiReorderCtxBlocks(ctx.gId, currentNodeId, currentLineId, order);
+    currentBlocks = await apiReorderContextBlocks(ctx.gId, currentNodeId, currentLineId, order);
     pendingFocus = { type: 'block', key: newId };
     renderBody();
   };
 
   // ── テキストブロック行 ──────────────────────────────────────────────────────
-  const renderTextRow = (block: CtxBlock): HTMLElement => {
+  const renderTextRow = (block: ContextBlock): HTMLElement => {
     const row = document.createElement('div');
     row.dataset.blockId = block.blockId;
     row.style.cssText = `display:flex;align-items:flex-start;padding:2px 0;`;
