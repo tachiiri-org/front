@@ -886,7 +886,8 @@ export function createRelationPanelView(
     }
 
     // ── 1行目: 操作（リンクなし + ⟳ + 言語切替） ── ノードペインヘッダと同じ 28px+下線。
-    // 並び: 左=リンクなし、右寄せで ⟳・JA/EN（ノードパネルと同様に言語切替を右端へ）。
+    // compact（2つ目以降の下方展開パネル）では操作行（リンクなし・⟳・言語）を丸ごと出さない。
+    if (!opts.compact) {
     const ctrlRow = document.createElement('div');
     ctrlRow.style.cssText = `display:flex;align-items:center;gap:4px;height:28px;box-sizing:border-box;padding:0 6px;border-bottom:1px solid ${BORDER};`;
     // 「リンクなし」トグル: 参加ノードを持たない関係の一覧（移行・編集中の受け皿）。左端。
@@ -923,6 +924,7 @@ export function createRelationPanelView(
       ctrlRow.appendChild(closeBtn);
     }
     head.appendChild(ctrlRow);
+    }
 
     // ── 2行目: パンくず（ルート › … › 現在ノード） ── アウトラインの bcEl と同じ見た目。
     const bcRow = document.createElement('div');
