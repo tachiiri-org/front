@@ -61,6 +61,9 @@ export function createContextPanelView(
   // 折りたたみ中の見出し(lineId)。空 = 全展開（既定）。h2 をたたむと配下のテキスト・h3（とそのテキスト）が、
   // h3 をたたむとその直後のテキストが隠れる。
   const collapsedLines = new Set<string>();
+  // 当面、コンテキストパネルにはリレーション（見出し）を出さない。階層はリレーションパネル側に持たせ、
+  // h2/h3 の合成は後日の課題。見出し描画は残してあり、この 1 箇所を true にすれば元に戻せる。
+  const SHOW_HEADINGS: boolean = false;
   let draftTa: HTMLTextAreaElement | null = null;
 
   // ── 大元データを参照した並び替え・削除・追加 ──────────────────────────────────
@@ -363,6 +366,7 @@ export function createContextPanelView(
     let curH2: string | null = null; let h2Collapsed = false;
     let curH3: string | null = null; let h3Collapsed = false;
     currentBlocks.forEach((block, i) => {
+      if (block.kind === 'heading' && !SHOW_HEADINGS) return; // リレーション（見出し）は当面出さない
       const next = currentBlocks[i + 1];
       let depth = 0; let visible = true; let hasChildren = false;
       if (block.kind === 'heading' && block.level !== 3) {
