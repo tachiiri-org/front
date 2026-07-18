@@ -135,6 +135,17 @@ export function createContextPanelView(
     await reload();
   };
 
+  // 上下カーソルで行（ノード）間をフォーカス移動。bodyEl 直下の行（ブロック行＋ドラフト行）単位で上下する。
+  const focusAdjacentRow = (fromEl: HTMLElement, dir: 'up' | 'down'): boolean => {
+    const rows = Array.from(bodyEl.children) as HTMLElement[];
+    const idx = rows.findIndex((r) => r.contains(fromEl));
+    if (idx === -1) return false;
+    const target = rows[idx + (dir === 'down' ? 1 : -1)];
+    const ta = target?.querySelector('textarea') as HTMLTextAreaElement | null;
+    if (ta) { ta.focus(); const p = ta.value.length; ta.setSelectionRange(p, p); return true; }
+    return false;
+  };
+
   // 共通キー: Shift+Alt+↑↓ = 並び替え / Ctrl(Cmd)+Shift+Backspace = 削除。処理したら true。
   const handleCommonKey = (e: KeyboardEvent, block: ContextBlock): boolean => {
     if ((e.key === 'ArrowUp' || e.key === 'ArrowDown') && e.shiftKey && e.altKey) {
@@ -204,7 +215,7 @@ export function createContextPanelView(
     const autosize = (ta: HTMLTextAreaElement) => {
       const text = ta.value || '';
       let w = 8;
-      if (cctx) { cctx.font = '600 14px sans-serif'; w = cctx.measureText(text).width + 2; }
+      if (cctx) { cctx.font = '700 14px sans-serif'; w = cctx.measureText(text).width + 2; }
       const max = content.clientWidth || 99999;
       const firstTa = content.querySelector('textarea');
       if (firstTa === ta && text === '' && content.lastElementChild !== ta) {
@@ -238,7 +249,7 @@ export function createContextPanelView(
       const chip = document.createElement('span');
       chip.dataset.nodeLink = id;
       chip.contentEditable = 'false';
-      chip.style.cssText = `display:inline-block;vertical-align:top;line-height:1.5;font-size:14px;font-weight:600;color:${TEXT_HIGH};border-bottom:1px dashed currentColor;user-select:none;cursor:pointer;`;
+      chip.style.cssText = `display:inline-block;vertical-align:top;line-height:1.5;font-size:14px;font-weight:700;color:${TEXT_HIGH};border-bottom:1px dashed currentColor;user-select:none;cursor:pointer;`;
       const t = document.createElement('span');
       t.textContent = labelById.get(id) ?? id;
       chip.appendChild(t);
@@ -251,13 +262,14 @@ export function createContextPanelView(
       const ta = document.createElement('textarea');
       ta.value = v;
       ta.rows = 1;
-      ta.style.cssText = `display:inline-block;vertical-align:top;background:transparent;border:none;outline:none;resize:none;font-size:14px;font-weight:600;font-family:inherit;line-height:1.5;padding:0;margin:0;overflow:hidden;color:${TEXT_HIGH};`;
+      ta.style.cssText = `display:inline-block;vertical-align:top;background:transparent;border:none;outline:none;resize:none;font-size:14px;font-weight:700;font-family:inherit;line-height:1.5;padding:0;margin:0;overflow:hidden;color:${TEXT_HIGH};`;
       ta.addEventListener('focus', () => { setSquareActive(square, true); autosize(ta); });
       ta.addEventListener('blur', () => { setSquareActive(square, false); save(true); autosize(ta); });
       ta.addEventListener('input', () => { autosize(ta); save(); });
       ta.addEventListener('keydown', (e) => {
         if (handleCommonKey(e, block)) return;
         if (e.key === 'Enter' && !e.shiftKey) { e.preventDefault(); save(true); void addTextAfter(block); return; }
+        if ((e.key === 'ArrowUp' || e.key === 'ArrowDown') && !e.shiftKey && !e.ctrlKey && !e.metaKey && !e.altKey) { e.preventDefault(); focusAdjacentRow(ta, e.key === 'ArrowDown' ? 'down' : 'up'); return; }
         if (e.key === 'Tab') { e.preventDefault(); void setHeadingLevel(block, e.shiftKey ? 2 : 3); return; }
         const atStart = ta.selectionStart === 0 && ta.selectionEnd === 0;
         const atEnd = ta.selectionStart === ta.value.length && ta.selectionEnd === ta.value.length;
@@ -311,7 +323,6 @@ export function createContextPanelView(
     const ta = document.createElement('textarea');
     ta.value = block.body[lang] ?? block.body[lang === 'ja' ? 'en' : 'ja'] ?? '';
     ta.rows = 1;
-    ta.placeholder = 'コンテキスト（非規範のフリーテキスト）…';
     ta.style.cssText = `flex:1;min-width:0;background:transparent;border:none;outline:none;resize:none;font-size:14px;font-family:inherit;line-height:1.5;padding:0 4px;color:${TEXT_HIGH};overflow:hidden;`;
     const autosize = () => { ta.style.height = 'auto'; ta.style.height = `${ta.scrollHeight}px`; };
     let saveTimer: ReturnType<typeof setTimeout> | undefined;
@@ -326,6 +337,8 @@ export function createContextPanelView(
     ta.addEventListener('keydown', (e) => {
       if (handleCommonKey(e, block)) return;
       if (e.key === 'Enter' && !e.shiftKey) { e.preventDefault(); save(true); void addTextAfter(block); return; }
+      if ((e.key === 'ArrowUp' || e.key === 'ArrowDown') && !e.shiftKey && !e.ctrlKey && !e.metaKey && !e.altKey) { e.preventDefault(); focusAdjacentRow(ta, e.key === 'ArrowDown' ? 'down' : 'up'); return; }
+      if (e.key === 'Tab') { e.preventDefault(); return; } // テキストは階層を持たない: フォーカスが飛ばないよう握り潰す
       if (e.key === 'Backspace' && ta.value === '') { e.preventDefault(); void deleteBlock(block); return; }
     });
     setTimeout(autosize, 0);
@@ -356,7 +369,10 @@ export function createContextPanelView(
         ta.value = ''; autosize();
         pendingFocus = { type: 'draft' };
         void addTextAfter(null, val);
+        return;
       }
+      if (e.key === 'ArrowUp' && !e.shiftKey && !e.ctrlKey && !e.metaKey && !e.altKey) { e.preventDefault(); focusAdjacentRow(ta, 'up'); return; }
+      if (e.key === 'Tab') { e.preventDefault(); return; }
     });
     bw.addEventListener('mousedown', (e) => e.preventDefault());
     bw.addEventListener('click', () => ta.focus());
