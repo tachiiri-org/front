@@ -100,18 +100,6 @@ export function createContextPanelView(
     renderBody();
   };
 
-  const addTextAtStart = async (initial = '') => {
-    if (!currentNodeId || !currentLineId) return;
-    const res = await apiCreateContextBlock(ctx.gId, currentNodeId, currentLineId, lang, initial);
-    if (!res) return;
-    const newId = res.blockId;
-    const order = res.blocks.map((b) => b.blockId).filter((id) => id !== newId);
-    order.unshift(newId);
-    currentBlocks = await apiReorderContextBlocks(ctx.gId, currentNodeId, currentLineId, order);
-    pendingFocus = { type: 'block', key: newId };
-    renderBody();
-  };
-
   // ── テキストブロック行 ──────────────────────────────────────────────────────
   const renderTextRow = (block: ContextBlock): HTMLElement => {
     const row = document.createElement('div');
@@ -150,24 +138,49 @@ export function createContextPanelView(
   };
 
   // ── ドラフト行（追加の入口。top=先頭に追加 / bottom=末尾に追加。Enter で確定） ──────────
+  // ドラフト行（追加の入口）。リレーションパネルと同じく【打鍵で debounce 自動保存】する: 初回の非空入力で
+  // このドラフトを実ブロック化（作成）し、以降は同じ textarea のまま本文を更新する。Enter は不要（続けて
+  // 別の行を足したいときの便宜として残す）。atTop=先頭 / それ以外=末尾に materialize する。
   const makeDraftRow = (atTop: boolean): HTMLElement => {
     const row = document.createElement('div');
     row.style.cssText = `display:flex;align-items:flex-start;padding:2px 0;`;
-    const { bw, spacer } = makeGutter();
+    const { bw, square, spacer } = makeGutter();
     const ta = document.createElement('textarea');
     ta.rows = 1;
     ta.style.cssText = `flex:1;min-width:0;background:transparent;border:none;outline:none;resize:none;font-size:14px;font-family:inherit;line-height:1.5;padding:0;color:${TEXT_DIM};overflow:hidden;`;
     const autosize = () => { ta.style.height = 'auto'; ta.style.height = `${ta.scrollHeight}px`; };
-    ta.addEventListener('focus', () => { ta.style.color = TEXT_HIGH; });
-    ta.addEventListener('blur', () => { if (!ta.value.trim()) ta.style.color = TEXT_DIM; });
-    ta.addEventListener('input', autosize);
-    ta.addEventListener('keydown', (e) => {
+    let blockId: string | null = null;
+    let saveTimer: ReturnType<typeof setTimeout> | undefined;
+    const flush = async () => {
+      if (!currentNodeId || !currentLineId) return;
+      const val = ta.value;
+      if (blockId) { await apiSetBlockText(ctx.gId, blockId, lang, val); return; } // 既に実ブロック → 本文更新
+      if (!val.trim()) return;
+      const res = await apiCreateContextBlock(ctx.gId, currentNodeId, currentLineId, lang, val); // 初回入力で作成
+      if (!res) return;
+      blockId = res.blockId;
+      row.dataset.blockId = blockId;
+      if (atTop) {
+        const order = res.blocks.map((b) => b.blockId).filter((id) => id !== blockId);
+        order.unshift(blockId);
+        currentBlocks = await apiReorderContextBlocks(ctx.gId, currentNodeId, currentLineId, order);
+        if (!row.previousElementSibling) bodyEl.insertBefore(makeDraftRow(true), row); // 空の先頭ドラフトを再設置
+      } else {
+        currentBlocks = res.blocks;
+        if (!row.nextElementSibling) bodyEl.appendChild(makeDraftRow(false)); // 空の末尾ドラフトを再設置
+      }
+    };
+    const save = (immediate = false) => { if (saveTimer) clearTimeout(saveTimer); if (immediate) void flush(); else saveTimer = setTimeout(() => void flush(), 400); };
+    ta.addEventListener('focus', () => { setSquareActive(square, true); ta.style.color = TEXT_HIGH; });
+    ta.addEventListener('blur', () => { setSquareActive(square, false); save(true); if (!ta.value.trim() && !blockId) ta.style.color = TEXT_DIM; });
+    ta.addEventListener('input', () => { autosize(); ta.style.color = TEXT_HIGH; save(); });
+    ta.addEventListener('keydown', async (e) => {
       if (e.key === 'Enter' && !e.shiftKey) {
         e.preventDefault();
-        const val = ta.value;
-        if (!val.trim()) return;
-        ta.value = ''; autosize();
-        if (atTop) void addTextAtStart(val); else void addTextAfter(null, val);
+        if (saveTimer) clearTimeout(saveTimer);
+        await flush();
+        const nd = (atTop ? row.previousElementSibling : row.nextElementSibling) as HTMLElement | null;
+        (nd?.querySelector('textarea') as HTMLTextAreaElement | null)?.focus();
         return;
       }
       if ((e.key === 'ArrowUp' || e.key === 'ArrowDown') && !e.shiftKey && !e.ctrlKey && !e.metaKey && !e.altKey) { e.preventDefault(); focusAdjacentRow(ta, e.key === 'ArrowDown' ? 'down' : 'up'); return; }
