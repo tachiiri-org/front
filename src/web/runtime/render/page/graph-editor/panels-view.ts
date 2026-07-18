@@ -147,14 +147,16 @@ export function createPanelsView(ctx: GraphEditorContext): {
   // Wrap a relation PanelView (whose head already hosts a reorder grip via leadingHeadEl) in a
   // reorderable container. Every panel gets a × close. Closing the primary keeps its shared view
   // alive (reopened by the next node-row selection via ensurePrimaryPanel); extras are disposed.
+  // A relation panel stacked vertically inside relationColumn (flex row -> now a column entry). Every
+  // panel gets a × close. Closing the primary keeps its shared view alive (reopened by the next
+  // node-row selection via ensurePrimaryPanel); extras are disposed.
   const createRelationPanel = (id: string, view: PanelView, primary: boolean): RelationPanelInstance => {
     const containerEl = document.createElement('div');
     containerEl.dataset.panelId = id;
-    containerEl.style.cssText = `flex:1 1 0;min-width:300px;display:flex;flex-direction:column;border-left:1px solid ${BORDER};overflow:hidden;position:relative;`;
+    containerEl.style.cssText = `flex:1 1 0;min-height:160px;display:flex;flex-direction:column;overflow:hidden;position:relative;`;
     view.el.style.flex = '1';
     containerEl.appendChild(view.el);
     const inst: RelationPanelInstance = { id, view, containerEl, primary };
-    addDropZone(id, containerEl);
     const closeBtn = document.createElement('button');
     closeBtn.textContent = '×';
     closeBtn.style.cssText = `position:absolute;top:2px;right:4px;z-index:3;background:transparent;border:none;color:${TEXT_DIM};cursor:pointer;font-size:13px;line-height:1;`;
@@ -162,6 +164,7 @@ export function createPanelsView(ctx: GraphEditorContext): {
       const i = relationPanels.indexOf(inst);
       if (i >= 0) relationPanels.splice(i, 1);
       containerEl.remove();
+      refreshRelationBorders();
       if (!primary) view.unregister();
     });
     containerEl.appendChild(closeBtn);
@@ -170,7 +173,7 @@ export function createPanelsView(ctx: GraphEditorContext): {
 
   // The primary relation panel's view (follows the global selection; closable via ×, and re-opened by
   // ensurePrimaryPanel on the next node-row selection). Its grip lives in the relation head.
-  const relationView: PanelView = createRelationPanelView(ctx, { lang: ctx.state.lang, initialNodeId: null, leadingHeadEl: makeGrip('rel-primary') });
+  const relationView: PanelView = createRelationPanelView(ctx, { lang: ctx.state.lang, initialNodeId: null });
 
   // The persistent context (node page) panel — the right-hand DOCUMENT view, driven by the global
   // selection alongside the relation panel (which stays the navigator/outline). A fixed right column
@@ -182,20 +185,29 @@ export function createPanelsView(ctx: GraphEditorContext): {
   contextView.el.style.flex = '1';
   contextContainer.appendChild(contextView.el);
 
+  // リレーションパネルは1つの列の中に「縦スタック」で積む。ノードリンク(チップ)をクリックすると、右に
+  // 新しい列を増やすのではなく、この列の一番下にリレーションパネルを追加する（下方展開）。
+  const relationColumn = document.createElement('div');
+  relationColumn.style.cssText = `flex:1 1 0;min-width:320px;display:flex;flex-direction:column;overflow-y:auto;border-left:1px solid ${BORDER};`;
+  const refreshRelationBorders = () => {
+    Array.from(relationColumn.children).forEach((c, i) => { (c as HTMLElement).style.borderTop = i === 0 ? 'none' : `1px solid ${BORDER}`; });
+  };
+
   // Open an additional relation panel showing `nodeId`'s relations (independent; closable), appended
   // at the right end. Triggered by left-clicking a node-link chip in a relation — so you drill into a
   // node's relations by following its links, building a left→right trail of relation panels.
   ctx.openRelationPanel = (nodeId, label) => {
     const id = `rel-x-${++relPanelSeq}`;
-    const view = createRelationPanelView(ctx, { lang: ctx.state.lang, initialNodeId: nodeId, leadingHeadEl: makeGrip(id) });
+    const view = createRelationPanelView(ctx, { lang: ctx.state.lang, initialNodeId: nodeId });
     const inst = createRelationPanel(id, view, false);
     relationPanels.push(inst);
-    el.appendChild(inst.containerEl);
+    relationColumn.appendChild(inst.containerEl);   // stack BELOW the current relation panel(s)
+    refreshRelationBorders();
     void (async () => {
       const path = await fetchNodePath(ctx.gId, nodeId, label ?? '', ctx.rootNodeId, ctx.state.lang);
       await view.setParent(nodeId, undefined, path);
     })();
-    requestAnimationFrame(() => { el.scrollLeft = el.scrollWidth; });
+    requestAnimationFrame(() => { relationColumn.scrollTop = relationColumn.scrollHeight; });
   };
 
   // Re-create the primary relation panel (wrapping the persistent relationView) if it has been closed,
@@ -205,9 +217,8 @@ export function createPanelsView(ctx: GraphEditorContext): {
     if (relationPanels.some((p) => p.primary)) return;
     const relInst = createRelationPanel('rel-primary', relationView, true);
     relationPanels.push(relInst);
-    const firstNode = nodePanels[0]?.containerEl;
-    if (firstNode && firstNode.parentElement === el) el.insertBefore(relInst.containerEl, firstNode.nextSibling);
-    else el.appendChild(relInst.containerEl);
+    relationColumn.insertBefore(relInst.containerEl, relationColumn.firstChild); // primary sits on top
+    refreshRelationBorders();
   };
 
   const applyFullscreenLayout = () => {
@@ -227,8 +238,8 @@ export function createPanelsView(ctx: GraphEditorContext): {
       }
       p.updateFsBtn();
     }
-    // In fullscreen, hide relation panels + the context panel too (only the one node panel is shown).
-    for (const rp of relationPanels) rp.containerEl.style.display = isFs ? 'none' : '';
+    // In fullscreen, hide the relation column + context panel too (only the one node panel is shown).
+    relationColumn.style.display = isFs ? 'none' : '';
     contextContainer.style.display = isFs ? 'none' : '';
   };
 
@@ -699,17 +710,21 @@ export function createPanelsView(ctx: GraphEditorContext): {
     const savedClean = saved?.filter((c) => c.sourcePanelId !== SELECTION_SRC) ?? null;
     const configs: NodePanelConfig[] = (savedClean && savedClean.length) ? savedClean : defaultConfigs();
 
+    // The relation column holds a vertical stack of relation panels (primary on top).
+    relationColumn.innerHTML = '';
     const relInst = createRelationPanel('rel-primary', relationView, true);
     relationPanels.push(relInst);
+    relationColumn.appendChild(relInst.containerEl);
+    refreshRelationBorders();
 
     configs.forEach((cfg, i) => {
       const inst = createNodePanel(cfg);
       nodePanels.push(inst);
       el.appendChild(inst.containerEl);
-      // Insert the primary relation panel right after the first node panel.
-      if (i === 0) el.appendChild(relInst.containerEl);
+      // Insert the relation column right after the first node panel.
+      if (i === 0) el.appendChild(relationColumn);
     });
-    if (configs.length === 0) el.appendChild(relInst.containerEl);
+    if (configs.length === 0) el.appendChild(relationColumn);
     // The context (document) panel is the right-most column.
     el.appendChild(contextContainer);
 
