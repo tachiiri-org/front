@@ -885,48 +885,9 @@ export function createRelationPanelView(
     head.appendChild(searchRow);
     }
 
-    // ── 1行目: 操作（リンクなし + ⟳ + 言語切替） ── ノードペインヘッダと同じ 28px+下線。
-    // compact（2つ目以降の下方展開パネル）では操作行（リンクなし・⟳・言語）を丸ごと出さない。
-    if (!opts.compact) {
-    const ctrlRow = document.createElement('div');
-    ctrlRow.style.cssText = `display:flex;align-items:center;gap:4px;height:28px;box-sizing:border-box;padding:0 6px;border-bottom:1px solid ${BORDER};`;
-    // 「リンクなし」トグル: 参加ノードを持たない関係の一覧（移行・編集中の受け皿）。左端。
-    // compact（2つ目以降の下方展開パネル）では出さない。
-    if (!opts.compact) {
-      const orphanBtn = document.createElement('button');
-      orphanBtn.textContent = 'リンクなし';
-      orphanBtn.title = '参加ノードを持たない関係（リンクなし）を表示';
-      orphanBtn.style.cssText = `flex-shrink:0;background:${orphanMode ? SELECT_STRONG : 'transparent'};border:1px solid ${BORDER};color:${orphanMode ? '#fff' : TEXT_MID};cursor:pointer;font-size:10px;padding:1px 6px;border-radius:3px;`;
-      orphanBtn.addEventListener('click', () => { orphanMode = !orphanMode; void render(); });
-      ctrlRow.appendChild(orphanBtn);
-    }
-    // パネル内更新ボタン（ノードパネルの ⟳ と同じ）。関係一覧を再取得する。右寄せの先頭。
-    const reloadBtn = document.createElement('button');
-    reloadBtn.textContent = '⟳';
-    reloadBtn.title = '関係を再読み込み';
-    reloadBtn.style.cssText = `margin-left:auto;background:transparent;border:none;color:${TEXT_DIM};cursor:pointer;font-size:13px;padding:0 2px;line-height:1;flex-shrink:0;`;
-    reloadBtn.addEventListener('click', () => { reloadBtn.style.color = TEXT_HIGH; void render().finally(() => { reloadBtn.style.color = TEXT_DIM; }); });
-    ctrlRow.appendChild(reloadBtn);
-    // 言語切替（ノードパネルのパネル別 JA/EN と同じ）。右端。
-    const langBtn = document.createElement('button');
-    langBtn.textContent = lang.toUpperCase();
-    langBtn.title = lang === 'ja' ? 'この関係パネルの言語: 日本語（クリックでEN）' : 'この関係パネルの言語: 英語（クリックでJA）';
-    langBtn.style.cssText = `background:transparent;border:1px solid ${BORDER};color:${TEXT_MID};cursor:pointer;font-size:10px;padding:1px 4px;border-radius:3px;flex-shrink:0;line-height:1.4;`;
-    langBtn.addEventListener('click', () => { lang = lang === 'ja' ? 'en' : 'ja'; void render(); });
-    ctrlRow.appendChild(langBtn);
-    // ② 右クリックで開いた追加パネルには閉じるボタンを付ける（固定 dock には付かない）。右端。
-    if (opts.onClose) {
-      const closeBtn = document.createElement('button');
-      closeBtn.textContent = '×';
-      closeBtn.title = 'この関係パネルを閉じる';
-      closeBtn.style.cssText = `background:transparent;border:none;color:${TEXT_DIM};cursor:pointer;font-size:14px;padding:0 2px;line-height:1;flex-shrink:0;`;
-      closeBtn.addEventListener('click', () => opts.onClose!());
-      ctrlRow.appendChild(closeBtn);
-    }
-    head.appendChild(ctrlRow);
-    }
+    // 操作行（リンクなし・言語）は撤去。更新(⟳)はパンくず行へ移設（下記）。
 
-    // ── 2行目: パンくず（ルート › … › 現在ノード） ── アウトラインの bcEl と同じ見た目。
+    // ── パンくず（ルート › … › 現在ノード）＋ 更新(⟳) ── アウトラインの bcEl と同じ見た目。
     const bcRow = document.createElement('div');
     bcRow.style.cssText = `display:flex;align-items:center;gap:2px;padding:4px 8px 4px 10px;border-bottom:1px solid ${BORDER};font-size:12px;min-width:0;`;
     const title = document.createElement('span');
@@ -956,6 +917,15 @@ export function createRelationPanelView(
       title.textContent = '関係';
     }
     bcRow.appendChild(title);
+    // 更新(⟳)はパンくず行の右端へ（旧・操作行から移設）。compact パネルには出さない。
+    if (!opts.compact) {
+      const reloadBtn = document.createElement('button');
+      reloadBtn.textContent = '⟳';
+      reloadBtn.title = '関係を再読み込み';
+      reloadBtn.style.cssText = `flex-shrink:0;background:transparent;border:none;color:${TEXT_DIM};cursor:pointer;font-size:13px;padding:0 2px;line-height:1;`;
+      reloadBtn.addEventListener('click', () => { reloadBtn.style.color = TEXT_HIGH; void render().finally(() => { reloadBtn.style.color = TEXT_DIM; }); });
+      bcRow.appendChild(reloadBtn);
+    }
     head.appendChild(bcRow);
 
     if (orphanMode) {

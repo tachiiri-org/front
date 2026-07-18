@@ -117,6 +117,19 @@ export function createContextPanelView(
     renderBody();
   };
 
+  // 先頭にテキストを追加（一番上の空行から作るとき）。作成→先頭へ並べ替え。
+  const addTextAtStart = async (initial = '') => {
+    if (!currentNodeId) return;
+    const res = await apiCreateBlock(ctx.gId, currentNodeId, { kind: 'text', lang, body: initial });
+    if (!res) return;
+    const newId = res.blockId;
+    const order = res.blocks.map((b) => b.blockId).filter((id) => id !== newId);
+    order.unshift(newId);
+    currentBlocks = await apiReorderBlocks(ctx.gId, currentNodeId, order);
+    pendingFocus = { type: 'block', key: newId };
+    renderBody();
+  };
+
   // 見出しの h2/h3 を切替（Tab=h3 / Shift+Tab=h2）。仮想見出しは並べ替えで実体化してから level を当てる。
   const setHeadingLevel = async (block: Extract<ContextBlock, { kind: 'heading' }>, level: 2 | 3) => {
     if (!currentNodeId) return;
@@ -292,7 +305,7 @@ export function createContextPanelView(
   };
 
   // ── 末尾のドラフト行（＝追加の入口。＋ボタンの代替。Enter で確定＋作成） ──────────────
-  const makeDraftRow = (): HTMLElement => {
+  const makeDraftRow = (atTop: boolean): HTMLElement => {
     const row = document.createElement('div');
     row.style.cssText = `display:flex;align-items:flex-start;padding:2px 0;`;
     const caretSlot = document.createElement('span');
@@ -311,17 +324,16 @@ export function createContextPanelView(
         const val = ta.value;
         if (!val.trim()) return;
         ta.value = ''; autosize();
-        pendingFocus = { type: 'draft' };
-        void addTextAfter(null, val);
+        if (atTop) void addTextAtStart(val); else void addTextAfter(null, val);
         return;
       }
-      if (e.key === 'ArrowUp' && !e.shiftKey && !e.ctrlKey && !e.metaKey && !e.altKey) { e.preventDefault(); focusAdjacentRow(ta, 'up'); return; }
+      if ((e.key === 'ArrowUp' || e.key === 'ArrowDown') && !e.shiftKey && !e.ctrlKey && !e.metaKey && !e.altKey) { e.preventDefault(); focusAdjacentRow(ta, e.key === 'ArrowDown' ? 'down' : 'up'); return; }
       if (e.key === 'Tab') { e.preventDefault(); return; }
     });
     bw.addEventListener('mousedown', (e) => e.preventDefault());
     bw.addEventListener('click', () => ta.focus());
     row.append(caretSlot, spacer, bw, ta);
-    draftTa = ta;
+    if (!atTop) draftTa = ta;
     return row;
   };
 
@@ -345,6 +357,7 @@ export function createContextPanelView(
       bodyEl.appendChild(hint);
       return;
     }
+    bodyEl.appendChild(makeDraftRow(true)); // 一番上の空行（ここから入力すると先頭に追加）
     // ブロック列の見出し階層（h2 > h3 > テキスト）を先頭から解釈しながら、可視ブロックだけ描画する。
     // h2 の配下 = 次の h2 までの「テキスト＋h3（とそのテキスト）」、h3 の配下 = 次の見出しまでのテキスト。
     let curH2: string | null = null; let h2Collapsed = false;
@@ -374,7 +387,7 @@ export function createContextPanelView(
       rowByBlock.set(block.blockId, row);
       bodyEl.appendChild(row);
     });
-    bodyEl.appendChild(makeDraftRow());
+    bodyEl.appendChild(makeDraftRow(false));
     applyPendingFocus();
   };
 
