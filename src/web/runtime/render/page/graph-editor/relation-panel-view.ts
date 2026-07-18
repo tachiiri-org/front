@@ -162,8 +162,8 @@ export function createRelationPanelView(
       ctx.setActiveRelation({ lineId: relation.lineId, participants: new Set(relation.participants.map((p) => p.id)) });
     }
     updateActiveHighlight();
-    // 右のコンテキストパネルを、この関係(=見出し)へスクロール（アウトライン→ドキュメントのナビ）。
-    ctx.focusContextHeading?.(relation.lineId);
+    // 右のコンテキストパネルを、この (現在ノード, 選択リレーション) の注釈に切り替える。
+    ctx.setContextTarget?.(currentNodeId, relation.lineId);
   };
   const updateActiveHighlight = () => {
     const activeId = ctx.activeRelation?.lineId ?? null;

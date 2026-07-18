@@ -178,7 +178,7 @@ export function createPanelsView(ctx: GraphEditorContext): {
   // The persistent context (node page) panel — the right-hand DOCUMENT view, driven by the global
   // selection alongside the relation panel (which stays the navigator/outline). A fixed right column
   // for P1 (not reorderable/closable). Selecting a heading in the relation panel scrolls this to it.
-  const contextView: PanelView = createContextPanelView(ctx, { lang: ctx.state.lang, initialNodeId: null });
+  const contextView: PanelView = createContextPanelView(ctx, { lang: ctx.state.lang });
   const contextContainer = document.createElement('div');
   contextContainer.dataset.panelId = 'ctx-primary';
   contextContainer.style.cssText = `flex:1 1 0;min-width:320px;display:flex;flex-direction:column;border-left:1px solid ${BORDER};overflow:hidden;position:relative;`;
@@ -258,9 +258,9 @@ export function createPanelsView(ctx: GraphEditorContext): {
     selectedNodeId = nodeId;
     if (nodeId !== null && updateRelation && changed) {
       ctx.setActiveRelation(null);
+      ctx.setContextTarget?.(null, null); // ノードを変えたら、リレーション未選択＝コンテキストは空に
       ensurePrimaryPanel();
       void relationView.setParent(nodeId, ancestorIds, path);
-      void contextView.setParent(nodeId, ancestorIds, path);
     }
     for (const p of nodePanels) {
       if (p.config.sourcePanelId === SELECTION_SRC && !p.config.pinned) {

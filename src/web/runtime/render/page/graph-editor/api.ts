@@ -1,4 +1,4 @@
-import type { ContextBlock, ExplorerNode, ExplorerRelation } from './types';
+import type { CtxBlock, ExplorerNode, ExplorerRelation } from './types';
 
 // ── Client-side request gate ──────────────────────────────────────────────
 // The graph runs on a single-threaded per-tenant Durable Object behind a 120-reads/60s rate
@@ -305,31 +305,29 @@ export async function apiDeleteRelation(graphId: string, lineId: string): Promis
   await apiFetch(`/api/v1/graph/${graphId}/line/${lineId}`, { method: 'DELETE' });
 }
 
-// ── コンテキスト (ノードのページ) ─────────────────────────────────────────────
-// ノード1:1のページ＝順序付きブロック列。見出しブロックはリレーション参照(定義=単一ソース)、テキスト
-// ブロックは非規範フリーテキスト。バックエンド /node/:id/context 系に対応。見出しの line_id を直すのは
-// リレーション本体の編集(既存 apiSetRelationText 等)であり、全ページに反映される。
+// ── コンテキスト ((node, relation) の注釈) ───────────────────────────────────
+// (node, line) の複合キーに紐づく非規範テキストブロックの順序付きリスト。バックエンド
+// /node/:id/line/:lineId/context 系に対応。定義(line)は共有・単一だが注釈はノード別。
 
-// ノードのコンテキスト(ブロック列)を取得。未編集ノードでも直接リレーションが見出しとして返る。
-export async function fetchNodeContext(graphId: string, nodeId: string): Promise<ContextBlock[]> {
-  const r = await apiFetch(`/api/v1/graph/${graphId}/node/${nodeId}/context`);
+// (node, line) のコンテキスト（テキストブロック列）を取得。
+export async function fetchLineContext(graphId: string, nodeId: string, lineId: string): Promise<CtxBlock[]> {
+  const r = await apiFetch(`/api/v1/graph/${graphId}/node/${nodeId}/line/${lineId}/context`);
   if (!r.ok) return [];
-  const data = await r.json() as { blocks: ContextBlock[] };
+  const data = await r.json() as { blocks: CtxBlock[] };
   return data.blocks ?? [];
 }
 
-// ブロックを追加(末尾)。テキスト or 見出し(既存リレーションの line を参照)。返りは更新後のブロック列。
-export async function apiCreateBlock(
-  graphId: string, nodeId: string,
-  block: { kind: 'text'; lang: 'en' | 'ja'; body?: string } | { kind: 'heading'; lineId: string; level?: 2 | 3 },
-): Promise<{ blockId: string; blocks: ContextBlock[] } | null> {
-  const r = await apiFetch(`/api/v1/graph/${graphId}/node/${nodeId}/block`, {
+// テキストブロックを末尾に追加。返りは更新後のブロック列。
+export async function apiCreateCtxBlock(
+  graphId: string, nodeId: string, lineId: string, lang: 'en' | 'ja', body = '',
+): Promise<{ blockId: string; blocks: CtxBlock[] } | null> {
+  const r = await apiFetch(`/api/v1/graph/${graphId}/node/${nodeId}/line/${lineId}/block`, {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify(block),
+    body: JSON.stringify({ lang, body }),
   });
   if (!r.ok) return null;
-  return r.json() as Promise<{ blockId: string; blocks: ContextBlock[] }>;
+  return r.json() as Promise<{ blockId: string; blocks: CtxBlock[] }>;
 }
 
 // テキストブロックの本文を言語ごとに設定。
@@ -341,30 +339,19 @@ export async function apiSetBlockText(graphId: string, blockId: string, lang: 'e
   });
 }
 
-// 見出しブロックの level(h2/h3) と/または 参照 line を変更。
-export async function apiSetBlockHeading(
-  graphId: string, blockId: string, opts: { level?: 2 | 3; lineId?: string },
-): Promise<void> {
-  await apiFetch(`/api/v1/graph/${graphId}/block/${blockId}/heading`, {
-    method: 'PATCH',
-    headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify(opts),
-  });
-}
-
-// ブロックの並び順を明示配列で保存。仮想見出し id ("h:<lineId>") はサーバ側で実体化される。返りは更新後。
-export async function apiReorderBlocks(graphId: string, nodeId: string, order: string[]): Promise<ContextBlock[]> {
-  const r = await apiFetch(`/api/v1/graph/${graphId}/node/${nodeId}/blocks/order`, {
+// (node, line) のブロック並び順を明示配列で保存。返りは更新後。
+export async function apiReorderCtxBlocks(graphId: string, nodeId: string, lineId: string, order: string[]): Promise<CtxBlock[]> {
+  const r = await apiFetch(`/api/v1/graph/${graphId}/node/${nodeId}/line/${lineId}/blocks/order`, {
     method: 'PATCH',
     headers: { 'Content-Type': 'application/json' },
     body: JSON.stringify({ order }),
   });
   if (!r.ok) return [];
-  const data = await r.json() as { blocks: ContextBlock[] };
+  const data = await r.json() as { blocks: CtxBlock[] };
   return data.blocks ?? [];
 }
 
-// ブロックをページから除去(見出しならリレーション本体は消えない)。
+// テキストブロックを削除。
 export async function apiDeleteBlock(graphId: string, blockId: string): Promise<void> {
   await apiFetch(`/api/v1/graph/${graphId}/block/${blockId}`, { method: 'DELETE' });
 }
