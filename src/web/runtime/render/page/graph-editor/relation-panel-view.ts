@@ -3,6 +3,7 @@ import { BORDER, TEXT_HIGH, TEXT_MID, TEXT_DIM, SELECT_STRONG, ORPHAN_ID, showTo
 import {
   fetchNodeRelations, apiCreateRelation, apiSetRelationText, apiAddRay, apiRemoveRay, fetchAllNodes, apiCreateNode,
   fetchOrphanRelations, apiDeleteRelation, apiDeleteNode, apiReorderNodeRelations, apiUpdateNode, apiPasteRelations,
+  apiSetRelationLevel,
 } from './api';
 
 // 関係 (relation) パネル。関係 = テキストとノード参照(チップ)が交互に並ぶ1行（セグメント分割編集）。
@@ -287,7 +288,26 @@ export function createRelationPanelView(
 
     const row = document.createElement('div');
     row.dataset.lineId = relation.lineId;
-    row.style.cssText = `display:flex;align-items:flex-start;padding:2px 0;`;
+    // アウトライン階層: レベル分だけ左インデント（Tab/Shift+Tab で増減）。
+    const initLevel = relation.level ?? 0;
+    row.dataset.level = String(initLevel);
+    row.style.cssText = `display:flex;align-items:flex-start;padding:2px 0;margin-left:${initLevel * 18}px;`;
+    const applyLevel = (lv: number) => { row.dataset.level = String(lv); row.style.marginLeft = `${lv * 18}px`; };
+    // Tab=1つ下げる / Shift+Tab=1つ上げる。下げは「直前の関係行のレベル+1」まで（先頭行は0のまま）。並びは
+    // ノード別なので orphan 表示中や対象ノード未確定のときは不可。レベルはノード別に保存する。
+    const changeLevel = (delta: number) => {
+      if (orphanMode || !currentNodeId) return;
+      const cur = Number(row.dataset.level ?? '0');
+      let next = Math.max(0, cur + delta);
+      if (delta > 0) {
+        const prev = row.previousElementSibling as HTMLElement | null;
+        const prevLevel = prev && prev.dataset.lineId ? Number(prev.dataset.level ?? '0') : -1;
+        next = Math.max(0, Math.min(next, prevLevel + 1));
+      }
+      if (next === cur) return;
+      applyLevel(next);
+      void apiSetRelationLevel(ctx.gId, currentNodeId, relation.lineId, next);
+    };
     const spacer = document.createElement('span');
     spacer.style.cssText = `flex-shrink:0;width:6px;`;
     const bw = document.createElement('span');
@@ -486,6 +506,8 @@ export function createRelationPanelView(
           if (e.key === 'Escape') { closeMenu(); return; }
         }
         if (e.key === 'Escape') { closeMenu(); clearSelection(); return; }
+        // Tab=階層を1つ下げる / Shift+Tab=1つ上げる（フォーカスは移動させない）。
+        if (e.key === 'Tab') { e.preventDefault(); changeLevel(e.shiftKey ? -1 : 1); return; }
         // Ctrl/Cmd+Shift+Backspace で関係(行)そのものを削除。複数選択中は選択行すべて。
         if (e.key === 'Backspace' && (e.ctrlKey || e.metaKey) && e.shiftKey) {
           e.preventDefault();

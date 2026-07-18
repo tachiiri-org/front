@@ -274,6 +274,15 @@ export async function apiReorderRay(graphId: string, lineId: string, order: stri
   });
 }
 
+// 関係(line)行のアウトライン階層（インデント深さ）をノード別に保存。
+export async function apiSetRelationLevel(graphId: string, nodeId: string, lineId: string, level: number): Promise<void> {
+  await apiFetch(`/api/v1/graph/${graphId}/node/${nodeId}/line/${lineId}/level`, {
+    method: 'PATCH',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ level }),
+  });
+}
+
 // ノードの関係(line)行の並び順を明示配列で保存（h_node_relation チェーンを貼り直す）。
 export async function apiReorderNodeRelations(graphId: string, nodeId: string, order: string[]): Promise<void> {
   await apiFetch(`/api/v1/graph/${graphId}/node/${nodeId}/lines/order`, {

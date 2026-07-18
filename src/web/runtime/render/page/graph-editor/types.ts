@@ -2,7 +2,9 @@ export type ExplorerNode = { id: string; en?: string; ja?: string; color?: strin
 
 // 関係 line: テキスト本文(body, 言語ごと)と順序付き参加者(participants, 先頭=主語)を持つ n 項エッジ。
 // 構造ツリーの枝(テキスト無しの line)とは別物で、各参加ノードの「関係」一覧として現れる。
-export type ExplorerRelation = { lineId: string; body: Record<string, string>; participants: ExplorerNode[] };
+// level = リレーションパネルでのアウトライン階層（インデント深さ, 0=トップ, ノード別）。h2/h3 の意味付けは
+// せず単なる親子。省略時は 0。
+export type ExplorerRelation = { lineId: string; body: Record<string, string>; participants: ExplorerNode[]; level?: number };
 
 // コンテキスト(ノードのページ)を構成する順序付きブロック。見出しブロックは規範=リレーション参照で、
 // h2/h3 の level と、そのノードがそのリレーションに参加するか(direct)を持つ。テキストブロックは
