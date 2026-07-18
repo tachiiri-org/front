@@ -2,6 +2,7 @@ import type { GraphEditorContext, PanelView, PanelPathEntry } from './types';
 import { BORDER, TEXT_HIGH, TEXT_MID, TEXT_DIM, SELECT_STRONG } from './constants';
 import { createNodePanelView } from './node-panel-view';
 import { createRelationPanelView } from './relation-panel-view';
+import { createContextPanelView } from './context-panel-view';
 import { fetchNodePath } from './api';
 
 type NodePanelConfig = {
@@ -171,6 +172,16 @@ export function createPanelsView(ctx: GraphEditorContext): {
   // ensurePrimaryPanel on the next node-row selection). Its grip lives in the relation head.
   const relationView: PanelView = createRelationPanelView(ctx, { lang: ctx.state.lang, initialNodeId: null, leadingHeadEl: makeGrip('rel-primary') });
 
+  // The persistent context (node page) panel — the right-hand DOCUMENT view, driven by the global
+  // selection alongside the relation panel (which stays the navigator/outline). A fixed right column
+  // for P1 (not reorderable/closable). Selecting a heading in the relation panel scrolls this to it.
+  const contextView: PanelView = createContextPanelView(ctx, { lang: ctx.state.lang, initialNodeId: null });
+  const contextContainer = document.createElement('div');
+  contextContainer.dataset.panelId = 'ctx-primary';
+  contextContainer.style.cssText = `flex:1 1 0;min-width:320px;display:flex;flex-direction:column;border-left:1px solid ${BORDER};overflow:hidden;position:relative;`;
+  contextView.el.style.flex = '1';
+  contextContainer.appendChild(contextView.el);
+
   // Open an additional relation panel showing `nodeId`'s relations (independent; closable), appended
   // at the right end. Triggered by left-clicking a node-link chip in a relation — so you drill into a
   // node's relations by following its links, building a left→right trail of relation panels.
@@ -216,8 +227,9 @@ export function createPanelsView(ctx: GraphEditorContext): {
       }
       p.updateFsBtn();
     }
-    // In fullscreen, hide relation panels too (only the one node panel is shown).
+    // In fullscreen, hide relation panels + the context panel too (only the one node panel is shown).
     for (const rp of relationPanels) rp.containerEl.style.display = isFs ? 'none' : '';
+    contextContainer.style.display = isFs ? 'none' : '';
   };
 
   // ── Global selection (最後にクリックされたノード) ──────────────────────────
@@ -234,6 +246,7 @@ export function createPanelsView(ctx: GraphEditorContext): {
       ctx.setActiveRelation(null);
       ensurePrimaryPanel();
       void relationView.setParent(nodeId, ancestorIds, path);
+      void contextView.setParent(nodeId, ancestorIds, path);
     }
     for (const p of nodePanels) {
       if (p.config.sourcePanelId === SELECTION_SRC && !p.config.pinned) {
@@ -697,6 +710,8 @@ export function createPanelsView(ctx: GraphEditorContext): {
       if (i === 0) el.appendChild(relInst.containerEl);
     });
     if (configs.length === 0) el.appendChild(relInst.containerEl);
+    // The context (document) panel is the right-most column.
+    el.appendChild(contextContainer);
 
     updateAllSrcBtns();
   };
@@ -723,6 +738,7 @@ export function createPanelsView(ctx: GraphEditorContext): {
       p.view.setLang(lang);
     }
     relationView.setLang(lang);
+    contextView.setLang(lang);
     saveAll();
   };
 

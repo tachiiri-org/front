@@ -4,6 +4,13 @@ export type ExplorerNode = { id: string; en?: string; ja?: string; color?: strin
 // 構造ツリーの枝(テキスト無しの line)とは別物で、各参加ノードの「関係」一覧として現れる。
 export type ExplorerRelation = { lineId: string; body: Record<string, string>; participants: ExplorerNode[] };
 
+// コンテキスト(ノードのページ)を構成する順序付きブロック。見出しブロックは規範=リレーション参照で、
+// h2/h3 の level と、そのノードがそのリレーションに参加するか(direct)を持つ。テキストブロックは
+// 非規範のフリーテキスト(言語別, ノードリンクを含まない)。バックエンド /node/:id/context に対応。
+export type ContextBlock =
+  | { blockId: string; kind: 'heading'; level: number; direct: boolean; line: ExplorerRelation }
+  | { blockId: string; kind: 'text'; body: Record<string, string> };
+
 // Cross-pane drag state for the multi-pane (パネル) view. Each pane is an independent
 // outliner instance with its own closure scope, so the source pane records the dragged
 // node(s) here on dragstart and the target pane reads them on drop — letting a node be
@@ -117,4 +124,9 @@ export interface GraphEditorContext {
   // relation panel (its relations) and any node panel sourced from 「選択中」(its children). Called
   // by left-clicking a relation node-link chip and on node-row focus.
   selectNode?: (nodeId: string, label?: string) => void;
+  // Registered by the context panel: scroll/focus the heading block that references `lineId`. The
+  // relation panel calls this when a relation (=見出し) is activated, so selecting a heading in the
+  // relation navigator jumps the right-hand context document to that heading. No-op if the line has
+  // no heading on the current node's page.
+  focusContextHeading?: (lineId: string) => void;
 }
