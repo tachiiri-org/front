@@ -190,6 +190,14 @@ export async function apiUnlinkNode(graphId: string, nodeId: string, targetNodeI
 // A relation line is an n-ary edge that carries free-text prose (body) connecting its participant
 // nodes (ordered; head = subject). See backend p_line_body / h_ray.
 
+// グラフ全体（全ノード＋全リレーション）を1レスポンスで。近さ計算(seriation)の共起行列に使う。
+export async function fetchGraphExport(graphId: string): Promise<{ nodes: ExplorerNode[]; relations: ExplorerRelation[] }> {
+  const r = await apiFetch(`/api/v1/graph/${graphId}/export`);
+  if (!r.ok) return { nodes: [], relations: [] };
+  const data = await r.json() as { nodes?: ExplorerNode[]; relations?: ExplorerRelation[] };
+  return { nodes: data.nodes ?? [], relations: data.relations ?? [] };
+}
+
 // ノードが参加している関係 line 一覧（本文＋順序付き参加者）。ツリー枝は含まれない。
 export async function fetchNodeRelations(graphId: string, nodeId: string): Promise<ExplorerRelation[]> {
   const r = await apiFetch(`/api/v1/graph/${graphId}/node/${nodeId}/lines`);

@@ -5,6 +5,7 @@ import {
   fetchOrphanRelations, apiDeleteRelation, apiDeleteNode, apiReorderNodeRelations, apiUpdateNode, apiPasteRelations,
   apiSetRelationLevel,
 } from './api';
+import { getSeriationPositions } from './seriation';
 
 // 関係 (relation) パネル。関係 = テキストとノード参照(チップ)が交互に並ぶ1行（セグメント分割編集）。
 // - テキスト片は普通の <textarea>（IMEはその中で素直に効く・部分装飾の問題が起きない）。
@@ -962,6 +963,15 @@ export function createRelationPanelView(
     const nodeId = currentNodeId;
     const relations = await fetchNodeRelations(ctx.gId, nodeId);
     if (token !== renderToken) return;
+    // 並びのベースは自動: 相手ノードの「近さ順（seriation 位置）」でソート → テーマの塊が自動で立ち上がる。
+    // 手動並べ替えは長期でズレるので基準にしない（自動のみ）。1次元なので複数領域に触れる関係は境界に来る。
+    const pos = await getSeriationPositions(ctx.gId);
+    if (token !== renderToken) return;
+    const keyOf = (r: ExplorerRelation): number => {
+      const others = r.participants.filter((p) => p.id !== nodeId).map((p) => pos.get(p.id)).filter((v): v is number => v != null);
+      return others.length ? Math.min(...others) : Number.POSITIVE_INFINITY;
+    };
+    relations.sort((a, b) => keyOf(a) - keyOf(b));
     currentRelations = relations; currentDraftNodeId = nodeId; // 追加ドラフト行はこのノード宛て
     renderBody();
   };
