@@ -432,6 +432,10 @@ export function createContextPanelView(
       ctrlRow.appendChild(closeBtn);
     }
     head.appendChild(ctrlRow);
+    // 2行目: 中身が空の行（他パネルのヘッダ段数・高さと揃えるための空行）。
+    const emptyRow = document.createElement('div');
+    emptyRow.style.cssText = `height:28px;box-sizing:border-box;border-bottom:1px solid ${BORDER};`;
+    head.appendChild(emptyRow);
     await reload();
   };
 

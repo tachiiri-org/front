@@ -252,8 +252,11 @@ export function createPanelsView(ctx: GraphEditorContext): {
   // selection; FALSE for a relation chip left-click — clicking a chip only drills the 「選択中」node
   // panel to the chip's children and must NOT re-render (=flash) the relation panel you're reading.
   const setSelectedNode = (nodeId: string | null, ancestorIds: Set<string> = new Set(), path: PanelPathEntry[] = [], updateRelation = true) => {
+    // 同じノードの再選択（ウィンドウ復帰でノード行 textarea が再フォーカスされる等）では関係/コンテキスト
+    // パネルを再描画しない — 無駄な再取得・チラつきを防ぐ。
+    const changed = nodeId !== selectedNodeId;
     selectedNodeId = nodeId;
-    if (nodeId !== null && updateRelation) {
+    if (nodeId !== null && updateRelation && changed) {
       ctx.setActiveRelation(null);
       ensurePrimaryPanel();
       void relationView.setParent(nodeId, ancestorIds, path);

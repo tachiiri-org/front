@@ -856,10 +856,10 @@ export function createRelationPanelView(
     selAnchor = null; selCursor = null; // 行を作り直すので複数選択はリセット。
     filterQuery = ''; // ノード切替/再読込では検索状態をリセット（新しい関係一覧を全件表示）。
 
-    // ── 0行目: 検索（ノードパネルの検索行と同形・最上部・プレースホルダ文言なし＝虫眼鏡のみ） ──
-    // compact（2つ目以降の下方展開パネル）では検索行を出さない。
+    // ── 検索行（パンくずの下に置く。compact では出さない） ── ノードパネルの検索行と同形（虫眼鏡のみ）。
+    let searchRow: HTMLDivElement | null = null;
     if (!opts.compact) {
-    const searchRow = document.createElement('div');
+    searchRow = document.createElement('div');
     searchRow.style.cssText = `display:flex;align-items:center;gap:4px;height:28px;box-sizing:border-box;padding:0 6px;border-bottom:1px solid ${BORDER};`;
     const searchIconWrap = document.createElement('span');
     searchIconWrap.style.cssText = `flex-shrink:0;display:flex;align-items:center;justify-content:center;width:18px;color:${TEXT_DIM};`;
@@ -882,10 +882,9 @@ export function createRelationPanelView(
     // 並び替え用グリップ（panels-view から渡される）を最上部行の左端に。head は render 毎に作り直される
     // ので、同じ要素をここで毎回先頭へ差し込む（リスナは要素に付いているので保持される）。
     if (opts.leadingHeadEl) searchRow.insertBefore(opts.leadingHeadEl, searchRow.firstChild);
-    head.appendChild(searchRow);
     }
 
-    // 操作行（リンクなし・言語）は撤去。更新(⟳)はパンくず行へ移設（下記）。
+    // 操作行（リンクなし・言語）は撤去。更新(⟳)はパンくず行へ移設（下記）。パンくずを先に、検索を下に。
 
     // ── パンくず（ルート › … › 現在ノード）＋ 更新(⟳) ── アウトラインの bcEl と同じ見た目。
     const bcRow = document.createElement('div');
@@ -926,7 +925,8 @@ export function createRelationPanelView(
       reloadBtn.addEventListener('click', () => { reloadBtn.style.color = TEXT_HIGH; void render().finally(() => { reloadBtn.style.color = TEXT_DIM; }); });
       bcRow.appendChild(reloadBtn);
     }
-    head.appendChild(bcRow);
+    head.appendChild(bcRow);            // パンくずが上
+    if (searchRow) head.appendChild(searchRow); // 検索はパンくずの下
 
     if (orphanMode) {
       const relations = await fetchOrphanRelations(ctx.gId);
