@@ -215,7 +215,7 @@ export function createContextPanelView(
     const autosize = (ta: HTMLTextAreaElement) => {
       const text = ta.value || '';
       let w = 8;
-      if (cctx) { cctx.font = '700 14px sans-serif'; w = cctx.measureText(text).width + 2; }
+      if (cctx) { cctx.font = '300 14px sans-serif'; w = cctx.measureText(text).width + 2; }
       const max = content.clientWidth || 99999;
       const firstTa = content.querySelector('textarea');
       if (firstTa === ta && text === '' && content.lastElementChild !== ta) {
@@ -249,7 +249,7 @@ export function createContextPanelView(
       const chip = document.createElement('span');
       chip.dataset.nodeLink = id;
       chip.contentEditable = 'false';
-      chip.style.cssText = `display:inline-block;vertical-align:top;line-height:1.5;font-size:14px;font-weight:700;color:${TEXT_HIGH};border-bottom:1px dashed currentColor;user-select:none;cursor:pointer;`;
+      chip.style.cssText = `display:inline-block;vertical-align:top;line-height:1.5;font-size:14px;font-weight:300;color:${TEXT_HIGH};border-bottom:1px dashed currentColor;user-select:none;cursor:pointer;`;
       const t = document.createElement('span');
       t.textContent = labelById.get(id) ?? id;
       chip.appendChild(t);
@@ -262,7 +262,7 @@ export function createContextPanelView(
       const ta = document.createElement('textarea');
       ta.value = v;
       ta.rows = 1;
-      ta.style.cssText = `display:inline-block;vertical-align:top;background:transparent;border:none;outline:none;resize:none;font-size:14px;font-weight:700;font-family:inherit;line-height:1.5;padding:0;margin:0;overflow:hidden;color:${TEXT_HIGH};`;
+      ta.style.cssText = `display:inline-block;vertical-align:top;background:transparent;border:none;outline:none;resize:none;font-size:14px;font-weight:300;font-family:inherit;line-height:1.5;padding:0;margin:0;overflow:hidden;color:${TEXT_HIGH};`;
       ta.addEventListener('focus', () => { setSquareActive(square, true); autosize(ta); });
       ta.addEventListener('blur', () => { setSquareActive(square, false); save(true); autosize(ta); });
       ta.addEventListener('input', () => { autosize(ta); save(); });
