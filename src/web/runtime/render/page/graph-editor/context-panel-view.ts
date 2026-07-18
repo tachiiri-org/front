@@ -260,7 +260,6 @@ export function createContextPanelView(
     const { bw, spacer } = makeGutter();
     const ta = document.createElement('textarea');
     ta.rows = 1;
-    ta.placeholder = 'テキストを追加…（Enter）';
     ta.style.cssText = `flex:1;min-width:0;background:transparent;border:none;outline:none;resize:none;font-size:14px;font-family:inherit;line-height:1.5;padding:0 4px;color:${TEXT_DIM};overflow:hidden;`;
     const autosize = () => { ta.style.height = 'auto'; ta.style.height = `${ta.scrollHeight}px`; };
     ta.addEventListener('focus', () => { ta.style.color = TEXT_HIGH; });
