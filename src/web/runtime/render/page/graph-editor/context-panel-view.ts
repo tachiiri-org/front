@@ -191,13 +191,7 @@ export function createContextPanelView(
     bodyEl.innerHTML = '';
     rowByBlock.clear();
     draftTa = null;
-    if (!currentNodeId || !currentLineId) {
-      const hint = document.createElement('div');
-      hint.textContent = 'リレーションを選ぶと、そのコンテキスト（注釈）が出ます。';
-      hint.style.cssText = `color:${TEXT_DIM};font-size:12px;padding:8px;`;
-      bodyEl.appendChild(hint);
-      return;
-    }
+    if (!currentNodeId || !currentLineId) return; // リレーション未選択のときは空（ナビ文言も出さない）
     bodyEl.appendChild(makeDraftRow(true)); // 一番上の空行
     for (const block of currentBlocks) {
       const row = renderTextRow(block);
