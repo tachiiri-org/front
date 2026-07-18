@@ -59,6 +59,9 @@ export function createContextPanelView(
 
   const rowByBlock = new Map<string, HTMLElement>();
   const rowByLine = new Map<string, HTMLElement>();
+  // 折りたたみ中の見出し(lineId)。空 = 全展開（既定）。h2 をたたむと配下のテキスト・h3（とそのテキスト）が、
+  // h3 をたたむとその直後のテキストが隠れる。
+  const collapsedLines = new Set<string>();
   let draftTa: HTMLTextAreaElement | null = null;
   // 見出し(リレーション)行のセグメント幅計測用（リレーションパネルと同じインライン割り付け）。
   const canvas = document.createElement('canvas');
@@ -146,6 +149,14 @@ export function createContextPanelView(
     return false;
   };
 
+  // 見出しの折りたたみ/展開（Ctrl+↑=たたむ / Ctrl+↓=ひらく・クリックでも）。既定は全展開。
+  const toggleCollapse = (lineId: string, collapse?: boolean) => {
+    const c = collapse ?? !collapsedLines.has(lineId);
+    if (c) collapsedLines.add(lineId); else collapsedLines.delete(lineId);
+    pendingFocus = { type: 'line', key: lineId };
+    renderBody();
+  };
+
   // 共通キー: Shift+Alt+↑↓ = 並び替え / Ctrl(Cmd)+Shift+Backspace = 削除。処理したら true。
   const handleCommonKey = (e: KeyboardEvent, block: ContextBlock): boolean => {
     if ((e.key === 'ArrowUp' || e.key === 'ArrowDown') && e.shiftKey && e.altKey) {
@@ -177,15 +188,24 @@ export function createContextPanelView(
   // ── 見出しブロック（=リレーション参照）── リレーションパネルと同じ span+textarea の編集行。太字・サイズ
   // 一定・インデントで階層。本文はリレーション(line)の共有オブジェクトを編集するので、ここで直すと全ページに
   // 反映される（単一ソース）。@メンションでの新規ノードリンク追加はリレーションパネル側（次段で共通化予定）。
-  const renderHeadingRow = (block: Extract<ContextBlock, { kind: 'heading' }>): HTMLElement => {
+  const renderHeadingRow = (block: Extract<ContextBlock, { kind: 'heading' }>, opts: { depth: number; hasChildren: boolean; collapsed: boolean }): HTMLElement => {
     const relation: ExplorerRelation = block.line;
     const labelById = new Map(relation.participants.map((p) => [p.id, labelOf(p, lang)] as const));
-    const level = block.level === 3 ? 3 : 2;
 
     const row = document.createElement('div');
     row.dataset.blockId = block.blockId;
     row.dataset.lineId = relation.lineId;
-    row.style.cssText = `display:flex;align-items:flex-start;padding:2px 0;margin-left:${level === 3 ? 18 : 0}px;`;
+    row.style.cssText = `display:flex;align-items:flex-start;padding:2px 0;margin-left:${opts.depth * 18}px;`;
+    // 折りたたみキャレット（配下がある見出しのみ）。全行に 12px スロットを置いて左端を揃える。
+    const caret = document.createElement('span');
+    caret.style.cssText = `flex-shrink:0;width:12px;display:flex;align-items:center;justify-content:center;height:21px;color:${TEXT_DIM};font-size:9px;`;
+    if (opts.hasChildren) {
+      caret.textContent = opts.collapsed ? '▸' : '▾';
+      caret.style.cursor = 'pointer';
+      caret.title = opts.collapsed ? '展開 (Ctrl+↓)' : 'たたむ (Ctrl+↑)';
+      caret.addEventListener('mousedown', (e) => e.preventDefault());
+      caret.addEventListener('click', () => toggleCollapse(relation.lineId));
+    }
     const { bw, square, spacer } = makeGutter();
 
     const content = document.createElement('div');
@@ -269,6 +289,7 @@ export function createContextPanelView(
       ta.addEventListener('keydown', (e) => {
         if (handleCommonKey(e, block)) return;
         if (e.key === 'Enter' && !e.shiftKey) { e.preventDefault(); save(true); void addTextAfter(block); return; }
+        if ((e.key === 'ArrowUp' || e.key === 'ArrowDown') && (e.ctrlKey || e.metaKey) && !e.shiftKey && !e.altKey) { e.preventDefault(); toggleCollapse(block.line.lineId, e.key === 'ArrowUp'); return; }
         if ((e.key === 'ArrowUp' || e.key === 'ArrowDown') && !e.shiftKey && !e.ctrlKey && !e.metaKey && !e.altKey) { e.preventDefault(); focusAdjacentRow(ta, e.key === 'ArrowDown' ? 'down' : 'up'); return; }
         if (e.key === 'Tab') { e.preventDefault(); void setHeadingLevel(block, e.shiftKey ? 2 : 3); return; }
         const atStart = ta.selectionStart === 0 && ta.selectionEnd === 0;
@@ -306,7 +327,7 @@ export function createContextPanelView(
       else content.appendChild(mkChip(tok.id));
     }
 
-    row.append(spacer, bw, content);
+    row.append(caret, spacer, bw, content);
     bw.addEventListener('mousedown', (e) => e.preventDefault());
     bw.addEventListener('click', () => (content.querySelector('textarea') as HTMLTextAreaElement | null)?.focus());
     rowByLine.set(relation.lineId, row);
@@ -314,10 +335,12 @@ export function createContextPanelView(
   };
 
   // ── テキストブロック（非規範フリーテキスト, 通常字, インライン編集） ──────────────
-  const renderTextRow = (block: Extract<ContextBlock, { kind: 'text' }>): HTMLElement => {
+  const renderTextRow = (block: Extract<ContextBlock, { kind: 'text' }>, opts: { depth: number }): HTMLElement => {
     const row = document.createElement('div');
     row.dataset.blockId = block.blockId;
-    row.style.cssText = `display:flex;align-items:flex-start;padding:2px 0;`;
+    row.style.cssText = `display:flex;align-items:flex-start;padding:2px 0;margin-left:${opts.depth * 18}px;`;
+    const caretSlot = document.createElement('span');
+    caretSlot.style.cssText = `flex-shrink:0;width:12px;`;
     const { bw, square, spacer } = makeGutter();
 
     const ta = document.createElement('textarea');
@@ -343,7 +366,7 @@ export function createContextPanelView(
     });
     setTimeout(autosize, 0);
 
-    row.append(spacer, bw, ta);
+    row.append(caretSlot, spacer, bw, ta);
     bw.addEventListener('mousedown', (e) => e.preventDefault());
     bw.addEventListener('click', () => ta.focus());
     return row;
@@ -353,6 +376,8 @@ export function createContextPanelView(
   const makeDraftRow = (): HTMLElement => {
     const row = document.createElement('div');
     row.style.cssText = `display:flex;align-items:flex-start;padding:2px 0;`;
+    const caretSlot = document.createElement('span');
+    caretSlot.style.cssText = `flex-shrink:0;width:12px;`;
     const { bw, spacer } = makeGutter();
     const ta = document.createElement('textarea');
     ta.rows = 1;
@@ -376,7 +401,7 @@ export function createContextPanelView(
     });
     bw.addEventListener('mousedown', (e) => e.preventDefault());
     bw.addEventListener('click', () => ta.focus());
-    row.append(spacer, bw, ta);
+    row.append(caretSlot, spacer, bw, ta);
     draftTa = ta;
     return row;
   };
@@ -401,11 +426,33 @@ export function createContextPanelView(
       bodyEl.appendChild(hint);
       return;
     }
-    for (const block of currentBlocks) {
-      const row = block.kind === 'heading' ? renderHeadingRow(block) : renderTextRow(block);
+    // ブロック列の見出し階層（h2 > h3 > テキスト）を先頭から解釈しながら、可視ブロックだけ描画する。
+    // h2 の配下 = 次の h2 までの「テキスト＋h3（とそのテキスト）」、h3 の配下 = 次の見出しまでのテキスト。
+    let curH2: string | null = null; let h2Collapsed = false;
+    let curH3: string | null = null; let h3Collapsed = false;
+    currentBlocks.forEach((block, i) => {
+      const next = currentBlocks[i + 1];
+      let depth = 0; let visible = true; let hasChildren = false;
+      if (block.kind === 'heading' && block.level !== 3) {
+        curH2 = block.line.lineId; h2Collapsed = collapsedLines.has(curH2);
+        curH3 = null; h3Collapsed = false;
+        depth = 0; visible = true;
+        hasChildren = !!next && !(next.kind === 'heading' && next.level !== 3);
+      } else if (block.kind === 'heading') {
+        curH3 = block.line.lineId; h3Collapsed = collapsedLines.has(curH3);
+        depth = 1; visible = !h2Collapsed;
+        hasChildren = !!next && next.kind === 'text';
+      } else {
+        depth = curH3 ? 2 : (curH2 ? 1 : 0);
+        visible = !h2Collapsed && !(curH3 !== null && h3Collapsed);
+      }
+      if (!visible) return;
+      const row = block.kind === 'heading'
+        ? renderHeadingRow(block, { depth, hasChildren, collapsed: collapsedLines.has(block.line.lineId) })
+        : renderTextRow(block, { depth });
       rowByBlock.set(block.blockId, row);
       bodyEl.appendChild(row);
-    }
+    });
     bodyEl.appendChild(makeDraftRow());
     applyPendingFocus();
   };
