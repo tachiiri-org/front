@@ -205,13 +205,20 @@ export function createPanelsView(ctx: GraphEditorContext): {
     const view = createRelationPanelView(ctx, { lang: ctx.state.lang, initialNodeId: nodeId, autoHeight: true, compact: true });
     const inst = createRelationPanel(id, view, false);
     relationPanels.push(inst);
-    relationColumn.appendChild(inst.containerEl);   // stack BELOW the current relation panel(s)
-    refreshRelationBorders();
+    // 下方スタックではなく、右に独立した列として追加する（ノードリンクを辿って左→右のトレイルを作る）。
+    // 列は自前でスクロールし、パネル(inst.containerEl)を内包。× で containerEl が外れたら空列も畳む。
+    const column = document.createElement('div');
+    column.dataset.relColumn = id;
+    column.style.cssText = `flex:0 0 auto;width:360px;display:flex;flex-direction:column;overflow-y:auto;border-left:1px solid ${BORDER};`;
+    column.appendChild(inst.containerEl);
+    el.appendChild(column);
+    const obs = new MutationObserver(() => { if (!column.contains(inst.containerEl)) { column.remove(); obs.disconnect(); } });
+    obs.observe(column, { childList: true });
     void (async () => {
       const path = await fetchNodePath(ctx.gId, nodeId, label ?? '', ctx.rootNodeId, ctx.state.lang);
       await view.setParent(nodeId, undefined, path);
     })();
-    requestAnimationFrame(() => { relationColumn.scrollTop = relationColumn.scrollHeight; });
+    requestAnimationFrame(() => { el.scrollLeft = el.scrollWidth; });
   };
 
   // Re-create the primary relation panel (wrapping the persistent relationView) if it has been closed,

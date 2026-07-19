@@ -39,26 +39,41 @@ function splitTokens(body: string): Array<{ t: 'txt'; v: string } | { t: 'men'; 
   return out;
 }
 
-// 関係群を「共有する相手ノード数」を重みにした line graph 上の Louvain でサブ分割する。
-// coParts: lineId → 相手ノード id 集合（アンカー自身は除く）。戻り値 = 関係のクラスタ配列（分割不能なら1つ）。
+// 関係群を「共有する相手ノード」を重みにした line graph 上の Louvain でサブ分割する。
+// 重みは IDF: グループ内の“ほぼ全関係”に出る相手ノード（例: オーブ）は識別力ゼロ扱いにし、
+// スクエア/オポジション等の識別力ある共有ノードで割れるようにする。
+// coParts: lineId → 相手ノード id 集合（アンカー自身は除く）。
+// 戻り値 = 各クラスタ {rels, repId(代表相手 id)}（分割不能なら1つ）。
 function subClusterRelations(
   rels: ExplorerRelation[],
   coParts: Map<string, Set<string>>,
-): ExplorerRelation[][] {
+): Array<{ rels: ExplorerRelation[]; repId: string }> {
   const n = rels.length;
+  // df: グループ内で各相手ノードが登場する関係数。df=n（全関係に出現）→ idf=0（識別力なし）。
+  const df = new Map<string, number>();
+  for (const r of rels) for (const id of coParts.get(r.lineId)!) df.set(id, (df.get(id) ?? 0) + 1);
+  const idf = (id: string) => Math.log(n / (df.get(id) ?? n));
   const adj: Array<Map<number, number>> = Array.from({ length: n }, () => new Map());
   for (let i = 0; i < n; i++) {
     const si = coParts.get(rels[i].lineId)!;
     for (let j = i + 1; j < n; j++) {
       const sj = coParts.get(rels[j].lineId)!;
       let sh = 0;
-      for (const x of si) if (sj.has(x)) sh++;
-      if (sh > 0) { adj[i].set(j, sh); adj[j].set(i, sh); }
+      for (const x of si) if (sj.has(x)) sh += idf(x);
+      if (sh > 1e-9) { adj[i].set(j, sh); adj[j].set(i, sh); }
     }
   }
   const deg = new Float64Array(n); let m2 = 0;
   for (let i = 0; i < n; i++) { let d = 0; for (const w of adj[i].values()) d += w; deg[i] = d; m2 += d; }
-  if (m2 === 0) return [rels]; // 共有がゼロ＝繋がらない → 分割しない
+  const repOf = (rs2: ExplorerRelation[]): string => {
+    // 代表 = クラスタ内での出現数 × idf が最大の相手（オーブのような遍在ノードは idf=0 で除外される）。
+    const score = new Map<string, number>();
+    for (const r of rs2) for (const id of coParts.get(r.lineId)!) score.set(id, (score.get(id) ?? 0) + idf(id));
+    let repId = '', best = -1;
+    for (const [id, s] of score) if (s > best) { best = s; repId = id; }
+    return repId;
+  };
+  if (m2 === 0) return [{ rels, repId: '' }]; // 識別力ある共有がゼロ → 分割しない
   const comm = new Int32Array(n); for (let i = 0; i < n; i++) comm[i] = i;
   const sig = new Float64Array(n); for (let i = 0; i < n; i++) sig[i] = deg[i];
   for (let r = 0; r < 20; r++) {
@@ -77,7 +92,7 @@ function subClusterRelations(
   }
   const groups = new Map<number, ExplorerRelation[]>();
   comm.forEach((c, i) => { if (!groups.has(c)) groups.set(c, []); groups.get(c)!.push(rels[i]); });
-  return [...groups.values()];
+  return [...groups.values()].map((rs2) => ({ rels: rs2, repId: repOf(rs2) }));
 }
 
 export function createRelationPanelView(
@@ -882,7 +897,8 @@ export function createRelationPanelView(
   const makeDomainHeader = (text: string): HTMLElement => {
     const h = document.createElement('div');
     h.dataset.domainHeader = '1';
-    h.style.cssText = `padding:7px 8px 2px 8px;font-size:10px;color:${TEXT_DIM};border-top:1px solid ${BORDER};user-select:none;`;
+    // 見出しは TEXT_DIM(#555) より少しだけ濃く（視認性↑）。
+    h.style.cssText = `padding:7px 8px 2px 8px;font-size:10px;color:#777;border-top:1px solid ${BORDER};user-select:none;`;
     h.textContent = text || '—';
     return h;
   };
@@ -1092,17 +1108,12 @@ export function createRelationPanelView(
       const rs = byDom.get(d)!;
       // サブ分割: 膨らんだドメインのみ。size≥2 のクラスタは代表相手ラベル、余った単発はまとめて「その他」。
       const clusters: Array<{ rels: ExplorerRelation[]; label: string }> = [];
-      const raw = d >= 0 && rs.length >= SUB_THRESHOLD ? subClusterRelations(rs, coParts) : [rs];
+      const raw = d >= 0 && rs.length >= SUB_THRESHOLD ? subClusterRelations(rs, coParts) : [{ rels: rs, repId: '' }];
       if (raw.length >= 2) {
         const singles: ExplorerRelation[] = [];
         for (const c of raw) {
-          if (c.length >= 2) {
-            const freq = new Map<string, number>();
-            for (const r of c) for (const id of coParts.get(r.lineId)!) freq.set(id, (freq.get(id) ?? 0) + 1);
-            let rep = '', repN = 0;
-            for (const [id, cnt] of freq) if (cnt > repN) { repN = cnt; rep = id; }
-            clusters.push({ rels: c, label: labelById.get(rep) ?? '' });
-          } else singles.push(...c);
+          if (c.rels.length >= 2) clusters.push({ rels: c.rels, label: labelById.get(c.repId) ?? '' });
+          else singles.push(...c.rels);
         }
         if (singles.length) clusters.push({ rels: singles, label: 'その他' });
       } else clusters.push({ rels: rs, label: '' });
