@@ -97,7 +97,7 @@ function subClusterRelations(
 
 export function createRelationPanelView(
   ctx: GraphEditorContext,
-  opts: { lang: 'en' | 'ja'; initialNodeId?: string | null; onClose?: () => void; leadingHeadEl?: HTMLElement; compact?: boolean; autoHeight?: boolean },
+  opts: { lang: 'en' | 'ja'; initialNodeId?: string | null; onClose?: () => void; leadingHeadEl?: HTMLElement; compact?: boolean; autoHeight?: boolean; onNodeLinkClick?: (nodeId: string, label?: string) => void },
 ): PanelView {
   let lang = opts.lang;
   let currentNodeId: string | null = opts.initialNodeId ?? null;
@@ -487,7 +487,7 @@ export function createRelationPanelView(
       nodeLink.addEventListener('mousedown', (e) => {
         if (e.button !== 0) return;
         e.preventDefault();
-        ctx.openRelationPanel?.(id, nodeLink.textContent ?? undefined);
+        (opts.onNodeLinkClick ?? ctx.openRelationPanel)?.(id, nodeLink.textContent ?? undefined);
       });
       nodeLink.addEventListener('contextmenu', (e) => {
         e.preventDefault();
@@ -897,8 +897,8 @@ export function createRelationPanelView(
   const makeDomainHeader = (text: string): HTMLElement => {
     const h = document.createElement('div');
     h.dataset.domainHeader = '1';
-    // 見出しは TEXT_DIM(#555) より少しだけ濃く（視認性↑）。
-    h.style.cssText = `padding:7px 8px 2px 8px;font-size:10px;color:#777;border-top:1px solid ${BORDER};user-select:none;`;
+    // 見出しは視認性重視で TEXT_MID(#aaa)＋太字。
+    h.style.cssText = `padding:7px 8px 2px 8px;font-size:10px;font-weight:600;color:${TEXT_MID};border-top:1px solid ${BORDER};user-select:none;`;
     h.textContent = text || '—';
     return h;
   };
@@ -1106,12 +1106,25 @@ export function createRelationPanelView(
     let subSeq = 0;
     for (const d of domOrder) {
       const rs = byDom.get(d)!;
-      // サブ分割: 膨らんだドメインのみ。size≥2 のクラスタは代表相手ラベル、余った単発はまとめて「その他」。
+      // サブ分割: 膨らんだドメインのみ。再帰的に SUB_THRESHOLD 未満まで割る（各段で idf を再計算するので、
+      // 上位で代表だったノードは下位では遍在扱いになり、次の識別軸で割れる）。深さ上限3で暴走防止。
       const clusters: Array<{ rels: ExplorerRelation[]; label: string }> = [];
-      const raw = d >= 0 && rs.length >= SUB_THRESHOLD ? subClusterRelations(rs, coParts) : [{ rels: rs, repId: '' }];
-      if (raw.length >= 2) {
+      const leaves: Array<{ rels: ExplorerRelation[]; repId: string }> = [];
+      const recurse = (part: { rels: ExplorerRelation[]; repId: string }, depth: number): void => {
+        if (part.rels.length < SUB_THRESHOLD || depth >= 3) { leaves.push(part); return; }
+        const sub = subClusterRelations(part.rels, coParts);
+        if (sub.length < 2) { leaves.push(part); return; }
+        for (const s of sub) recurse(s, depth + 1);
+      };
+      if (d >= 0 && rs.length >= SUB_THRESHOLD) {
+        const top = subClusterRelations(rs, coParts);
+        if (top.length >= 2) for (const t of top) recurse(t, 1);
+        else leaves.push({ rels: rs, repId: '' });
+      } else leaves.push({ rels: rs, repId: '' });
+      // 葉クラスタ: size≥2 は代表相手ラベル、余った単発はまとめて「その他」。
+      if (leaves.length >= 2) {
         const singles: ExplorerRelation[] = [];
-        for (const c of raw) {
+        for (const c of leaves) {
           if (c.rels.length >= 2) clusters.push({ rels: c.rels, label: labelById.get(c.repId) ?? '' });
           else singles.push(...c.rels);
         }
