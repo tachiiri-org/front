@@ -5,7 +5,7 @@ import {
   fetchOrphanRelations, apiDeleteRelation, apiDeleteNode, apiReorderNodeRelations, apiUpdateNode, apiPasteRelations,
   apiSetRelationLevel,
 } from './api';
-import { getSeriationPositions } from './seriation';
+import { getSeriationPositions, getNodeOrder, type OrderMode } from './seriation';
 
 // 関係 (relation) パネル。関係 = テキストとノード参照(チップ)が交互に並ぶ1行（セグメント分割編集）。
 // - テキスト片は普通の <textarea>（IMEはその中で素直に効く・部分装飾の問題が起きない）。
@@ -58,6 +58,11 @@ export function createRelationPanelView(
   let filterQuery = '';
   let currentRelations: ExplorerRelation[] = [];
   let currentDraftNodeId: string | null = null; // 追加ドラフト行の対象ノード（orphan 表示中は null）。
+  // ドメイン別分割: 各関係を「相手ノードのドメイン」で束ねる。アンカーノードは単一ドメインに属するので
+  // 自分のドメインでは割れない → 相手のドメイン（別軸）で割る。ハブノードの関係がテーマ別に立ち上がる。
+  const relDomain = new Map<string, number>(); // lineId → ドメイン番号(表示順)。相手不明なら -1。
+  let relDomainLabels: string[] = [];
+  const REL_ORDER_MODE: OrderMode = { importance: 'count', intra: 'flow' }; // ノードパネル既定と揃える（分割は不変）
   const canvas = document.createElement('canvas');
   const cctx = canvas.getContext('2d');
 
@@ -200,7 +205,8 @@ export function createRelationPanelView(
   // 上下カーソルで上下の行へフォーカス移動（ノードパネルと同じ挙動）。draft 行も含めて上下移動する。
   // 行内は複数のテキスト片に分かれるので、セグメント単位ではなく「行」単位で移動する。移動できたら true。
   const focusAdjacentRow = (ta: HTMLTextAreaElement, dir: 'up' | 'down'): boolean => {
-    const rows = Array.from(bodyEl.children) as HTMLElement[];
+    // ドメイン境界ヘッダ（textarea を持たない）は飛ばして、隣の編集行へ移る。
+    const rows = (Array.from(bodyEl.children) as HTMLElement[]).filter((r) => r.querySelector('textarea'));
     const idx = rows.findIndex((r) => r.contains(ta));
     if (idx === -1) return false;
     const target = rows[idx + (dir === 'down' ? 1 : -1)];
@@ -211,7 +217,7 @@ export function createRelationPanelView(
   // 行境界のキャレット送り（⑥）: 隣接行の先頭/末尾テキスト片へキャレットを着地させる。
   // dir='up' → 上の行の最後のテキスト片の末尾、dir='down' → 下の行の先頭テキスト片の文頭。
   const focusRowEdge = (ta: HTMLTextAreaElement, dir: 'up' | 'down'): boolean => {
-    const rows = Array.from(bodyEl.children) as HTMLElement[];
+    const rows = (Array.from(bodyEl.children) as HTMLElement[]).filter((r) => r.querySelector('textarea'));
     const idx = rows.findIndex((r) => r.contains(ta));
     if (idx === -1) return false;
     const target = rows[idx + (dir === 'down' ? 1 : -1)];
@@ -826,6 +832,15 @@ export function createRelationPanelView(
     return text.toLowerCase().includes(q);
   };
 
+  // ドメイン境界ヘッダ（ノードパネルと同形）。相手ドメインが切り替わる位置に差し込む。
+  const makeDomainHeader = (text: string): HTMLElement => {
+    const h = document.createElement('div');
+    h.dataset.domainHeader = '1';
+    h.style.cssText = `padding:7px 8px 2px 8px;font-size:10px;color:${TEXT_DIM};border-top:1px solid ${BORDER};user-select:none;`;
+    h.textContent = text || '—';
+    return h;
+  };
+
   // 本体（関係行）だけを描画。検索クエリ変更時は再取得せずこれだけ呼ぶ（head は作り直さない＝入力が保持される）。
   const renderBody = (): void => {
     bodyEl.innerHTML = '';
@@ -833,8 +848,16 @@ export function createRelationPanelView(
     selAnchor = null; selCursor = null; // 行を作り直すので複数選択はリセット。
     const q = filterQuery.trim().toLowerCase();
     if (!orphanMode && currentDraftNodeId && !q) bodyEl.appendChild(makeDraftRow(currentDraftNodeId)); // 検索中は追加ドラフト行を隠す
-    for (const relation of currentRelations) {
-      if (!relationMatchesQuery(relation, q)) continue;
+    const visible = currentRelations.filter((r) => relationMatchesQuery(r, q));
+    // 相手ドメインが2つ以上に跨る時だけ境界ヘッダを出す（単一ドメインの末端ノードでは出さない＝ノイズ回避）。
+    const domsSeen = new Set(visible.map((r) => relDomain.get(r.lineId) ?? -1).filter((d) => d >= 0));
+    const showHeaders = !orphanMode && domsSeen.size >= 2;
+    let prevDom = -1;
+    for (const relation of visible) {
+      if (showHeaders) {
+        const di = relDomain.get(relation.lineId) ?? -1;
+        if (di !== prevDom && di >= 0) { bodyEl.appendChild(makeDomainHeader(relDomainLabels[di] ?? '')); prevDom = di; }
+      }
       bodyEl.appendChild(renderRelationRow(relation));
     }
     updateActiveHighlight();
@@ -878,6 +901,7 @@ export function createRelationPanelView(
     relationBoxByRelation.clear();
     selAnchor = null; selCursor = null; // 行を作り直すので複数選択はリセット。
     filterQuery = ''; // ノード切替/再読込では検索状態をリセット（新しい関係一覧を全件表示）。
+    relDomain.clear(); relDomainLabels = []; // ドメイン割り当てはノードごとに作り直す（orphan では空＝ヘッダ無し）。
 
     // ── 検索行（パンくずの下に置く。compact では出さない） ── ノードパネルの検索行と同形（虫眼鏡のみ）。
     let searchRow: HTMLDivElement | null = null;
@@ -963,15 +987,31 @@ export function createRelationPanelView(
     const nodeId = currentNodeId;
     const relations = await fetchNodeRelations(ctx.gId, nodeId);
     if (token !== renderToken) return;
-    // 並びのベースは自動: 相手ノードの「近さ順（seriation 位置）」でソート → テーマの塊が自動で立ち上がる。
-    // 手動並べ替えは長期でズレるので基準にしない（自動のみ）。1次元なので複数領域に触れる関係は境界に来る。
+    // 並びのベースは自動: まず相手ノードのドメインで束ね、ドメイン内は「近さ順（seriation 位置）」。
+    // 代表相手 = seriation 位置が最小の相手ノード。その相手のドメインをこの関係のドメインにする
+    // （アンカーは単一ドメインなので、相手のドメイン＝別軸で割ると、ハブノードの関係がテーマ別に立ち上がる）。
+    // 手動並べ替えは長期でズレるので基準にしない（自動のみ）。
     const pos = await getSeriationPositions(ctx.gId);
     if (token !== renderToken) return;
-    const keyOf = (r: ExplorerRelation): number => {
-      const others = r.participants.filter((p) => p.id !== nodeId).map((p) => pos.get(p.id)).filter((v): v is number => v != null);
-      return others.length ? Math.min(...others) : Number.POSITIVE_INFINITY;
+    const ord = await getNodeOrder(ctx.gId, REL_ORDER_MODE);
+    if (token !== renderToken) return;
+    relDomainLabels = ord.domainLabels;
+    const keyOf = (r: ExplorerRelation): { dom: number; pos: number } => {
+      const others = r.participants
+        .filter((p) => p.id !== nodeId)
+        .map((p) => ({ id: p.id, pos: pos.get(p.id) }))
+        .filter((o): o is { id: string; pos: number } => o.pos != null);
+      if (!others.length) { relDomain.set(r.lineId, -1); return { dom: Number.POSITIVE_INFINITY, pos: Number.POSITIVE_INFINITY }; }
+      const rep = others.reduce((b, o) => (o.pos < b.pos ? o : b));
+      const dom = ord.domainIndexById.get(rep.id) ?? -1;
+      relDomain.set(r.lineId, dom);
+      return { dom: dom < 0 ? Number.POSITIVE_INFINITY : dom, pos: rep.pos };
     };
-    relations.sort((a, b) => keyOf(a) - keyOf(b));
+    const keys = new Map(relations.map((r) => [r.lineId, keyOf(r)] as const));
+    relations.sort((a, b) => {
+      const ka = keys.get(a.lineId)!, kb = keys.get(b.lineId)!;
+      return ka.dom - kb.dom || ka.pos - kb.pos;
+    });
     currentRelations = relations; currentDraftNodeId = nodeId; // 追加ドラフト行はこのノード宛て
     renderBody();
   };
