@@ -4,6 +4,7 @@ import {
   fetchBookmarks, fetchBookmarkedNodes, fetchAllNodes,
   apiCreateNode, apiUpdateNode, apiDeleteNode, apiMoveBookmark,
 } from './api';
+import { getNodeOrder, type OrderMode } from './seriation';
 
 // ── Flat node list ────────────────────────────────────────────────────────
 // The graph editor is a FLAT node list + relation lines (no hierarchy / outliner). This pane shows
@@ -110,6 +111,26 @@ export function createNodePanelView(ctx: GraphEditorContext, nodePanelOpts?: Nod
   });
   draftEl.append(draftSpacer, draftBtnWrap, draftTa);
   el.appendChild(draftEl);
+
+  // ── 並び順モード（実験用トグル）──────────────────────────────────────────────
+  // ドメイン別に「重要度で種→関連度で整列」した順でノードを並べる。重要度(関係数/中心性)と
+  // 整列(フロー/フィードラー)を切り替えて見比べられる。全てクライアント計算・派生。
+  const orderMode: OrderMode = { importance: 'count', intra: 'flow' };
+  const orderRow = document.createElement('div');
+  orderRow.style.cssText = `flex-shrink:0;display:flex;align-items:center;gap:6px;padding:2px 8px 3px;border-bottom:1px solid ${BORDER};`;
+  const mkToggle = (getText: () => string, cycle: () => void): HTMLButtonElement => {
+    const b = document.createElement('button');
+    b.style.cssText = `background:transparent;border:1px solid ${BORDER};color:${TEXT_MID};cursor:pointer;font-size:10px;padding:1px 6px;border-radius:3px;`;
+    const upd = () => { b.textContent = getText(); };
+    upd();
+    b.addEventListener('click', () => { cycle(); upd(); void load(); });
+    return b;
+  };
+  orderRow.append(
+    mkToggle(() => `重要度: ${orderMode.importance === 'count' ? '関係数' : '中心性'}`, () => { orderMode.importance = orderMode.importance === 'count' ? 'evc' : 'count'; }),
+    mkToggle(() => `整列: ${orderMode.intra === 'flow' ? 'フロー' : 'フィードラー'}`, () => { orderMode.intra = orderMode.intra === 'flow' ? 'fiedler' : 'flow'; }),
+  );
+  el.appendChild(orderRow);
 
   // ── Scrollable list ───────────────────────────────────────────────────────
   const listEl = document.createElement('div');
@@ -609,16 +630,20 @@ export function createNodePanelView(ctx: GraphEditorContext, nodePanelOpts?: Nod
       applyRoots(bm);
       return;
     }
-    // Every other pane: the flat node list (same as an empty search).
+    // Every other pane: the flat node list, ordered by domain → importance-seed → relatedness.
     const lang = ctx.state.showFallback ? undefined : nodePanelLang;
-    const { nodes: all } = await fetchAllNodes(ctx.gId, [], 0, lang, undefined, undefined, 50);
+    const { nodes: all } = await fetchAllNodes(ctx.gId, [], 0, lang, undefined, undefined, 2000);
+    const rank = await getNodeOrder(ctx.gId, orderMode);
+    all.sort((a, b) => (rank.get(a.id) ?? 1e9) - (rank.get(b.id) ?? 1e9));
     applyRoots(all);
   };
 
   const search = async (query: string) => {
     if (!query) { await load(); return; }
     const lang = ctx.state.showFallback ? undefined : nodePanelLang;
-    const { nodes: found } = await fetchAllNodes(ctx.gId, [], 0, lang, undefined, query, 50);
+    const { nodes: found } = await fetchAllNodes(ctx.gId, [], 0, lang, undefined, query, 2000);
+    const rank = await getNodeOrder(ctx.gId, orderMode);
+    found.sort((a, b) => (rank.get(a.id) ?? 1e9) - (rank.get(b.id) ?? 1e9));
     applyRoots(found);
   };
 
