@@ -119,10 +119,13 @@ export function createRelationPanelView(
   // グループの並びは「件数の少ない順→多い順」（膨らんだ塊＝その他的に末尾へ）。相手不明(-1)は常に最後。
   const relDomain = new Map<string, number>(); // lineId → ドメイン番号(表示順)。相手不明なら -1。
   let relDomainLabels: string[] = [];
+  let relDomainRepIds: string[] = []; // ドメイン番号 → 代表ノード id（ヘッダのノードリンク用）
   // 膨らんだドメイングループは、関係同士の共起（相手ノードの共有＝line graph）でサブ分割する。
   const relSub = new Map<string, number>(); // lineId → サブグループ番号。サブ分割していなければ -1。
   const subLabelById = new Map<number, string>(); // サブグループ番号 → 代表相手ラベル
+  const subRepIdById = new Map<number, string>(); // サブグループ番号 → 代表相手ノード id（'' = その他）
   const SUB_THRESHOLD = 10; // この件数以上のドメイングループだけサブ分割する（末端の小グループはそのまま）
+  const SHOW_HEADER_RULE = false; // グループ見出しの区切り線(border-top)を出すか（今は無しバージョンを確認中）
   const REL_ORDER_MODE: OrderMode = { importance: 'count', intra: 'flow' }; // ノードパネル既定と揃える（分割は不変）
   const canvas = document.createElement('canvas');
   const cctx = canvas.getContext('2d');
@@ -893,21 +896,27 @@ export function createRelationPanelView(
     return text.toLowerCase().includes(q);
   };
 
-  // ドメイン境界ヘッダ（ノードパネルと同形）。相手ドメインが切り替わる位置に差し込む。
-  const makeDomainHeader = (text: string): HTMLElement => {
+  // グループ見出し（ドメイン＋サブを統合。例:「自分 / 牡牛座」「自分 / その他」）。
+  // ドメイン名・サブ名は他のノードリンクと同じ扱い＝クリックでそのノードの関係パネルを開く/更新。
+  const makeGroupHeader = (di: number, si: number): HTMLElement => {
     const h = document.createElement('div');
     h.dataset.domainHeader = '1';
-    // 見出しは視認性重視で TEXT_MID(#aaa)＋太字。
-    h.style.cssText = `padding:7px 8px 2px 8px;font-size:10px;font-weight:600;color:${TEXT_MID};border-top:1px solid ${BORDER};user-select:none;`;
-    h.textContent = text || '—';
-    return h;
-  };
-  // サブ境界ヘッダ（膨らんだドメイン内の共起クラスタ）。ドメインヘッダより控えめ・少しインデント。
-  const makeSubHeader = (text: string): HTMLElement => {
-    const h = document.createElement('div');
-    h.dataset.subHeader = '1';
-    h.style.cssText = `padding:3px 8px 1px 20px;font-size:10px;color:${TEXT_DIM};opacity:.7;user-select:none;`;
-    h.textContent = text ? `· ${text}` : '·';
+    h.style.cssText = `display:flex;align-items:center;flex-wrap:wrap;gap:0 3px;padding:7px 8px 2px 8px;font-size:10px;font-weight:600;color:${TEXT_MID};${SHOW_HEADER_RULE ? `border-top:1px solid ${BORDER};` : ''}user-select:none;`;
+    const linkSpan = (id: string, text: string): HTMLElement => {
+      const s = document.createElement('span');
+      s.textContent = text || '—';
+      if (id) {
+        s.style.cssText = `cursor:pointer;border-bottom:1px dashed currentColor;`;
+        s.addEventListener('mousedown', (e) => { e.preventDefault(); (opts.onNodeLinkClick ?? ctx.openRelationPanel)?.(id, text); });
+      }
+      return s;
+    };
+    h.appendChild(linkSpan(relDomainRepIds[di] ?? '', relDomainLabels[di] ?? ''));
+    if (si >= 0) {
+      const sep = document.createElement('span'); sep.textContent = '/'; sep.style.opacity = '.5';
+      h.appendChild(sep);
+      h.appendChild(linkSpan(subRepIdById.get(si) ?? '', subLabelById.get(si) ?? ''));
+    }
     return h;
   };
 
@@ -920,17 +929,18 @@ export function createRelationPanelView(
     if (!orphanMode && currentDraftNodeId && !q) bodyEl.appendChild(makeDraftRow(currentDraftNodeId)); // 検索中は追加ドラフト行を隠す
     const visible = currentRelations.filter((r) => relationMatchesQuery(r, q));
     // 相手ドメインが2つ以上に跨る時だけ境界ヘッダを出す（単一ドメインの末端ノードでは出さない＝ノイズ回避）。
+    // ドメインが2つ以上、またはサブ分割がある時だけ見出しを出す（末端の単一ドメインはノイズ回避）。
     const domsSeen = new Set(visible.map((r) => relDomain.get(r.lineId) ?? -1).filter((d) => d >= 0));
-    const showHeaders = !orphanMode && domsSeen.size >= 2;
-    let prevDom = -1, prevSub = -2;
+    const subSeen = visible.some((r) => (relSub.get(r.lineId) ?? -1) >= 0);
+    const showHeaders = !orphanMode && (domsSeen.size >= 2 || subSeen);
+    let prevKey = '';
     for (const relation of visible) {
       if (showHeaders) {
         const di = relDomain.get(relation.lineId) ?? -1;
-        if (di !== prevDom && di >= 0) { bodyEl.appendChild(makeDomainHeader(relDomainLabels[di] ?? '')); prevDom = di; prevSub = -2; }
+        const si = relSub.get(relation.lineId) ?? -1;
+        const key = `${di}:${si}`;
+        if (di >= 0 && key !== prevKey) { bodyEl.appendChild(makeGroupHeader(di, si)); prevKey = key; }
       }
-      // サブヘッダ（膨らんだドメインの共起クラスタ）。単一ドメインでもサブ分割があれば出す。
-      const si = relSub.get(relation.lineId) ?? -1;
-      if (si !== prevSub && si >= 0) { bodyEl.appendChild(makeSubHeader(subLabelById.get(si) ?? '')); prevSub = si; }
       bodyEl.appendChild(renderRelationRow(relation));
     }
     updateActiveHighlight();
@@ -974,13 +984,17 @@ export function createRelationPanelView(
     relationBoxByRelation.clear();
     selAnchor = null; selCursor = null; // 行を作り直すので複数選択はリセット。
     filterQuery = ''; // ノード切替/再読込では検索状態をリセット（新しい関係一覧を全件表示）。
-    relDomain.clear(); relDomainLabels = []; relSub.clear(); subLabelById.clear(); // ノードごとに作り直す（orphan では空＝ヘッダ無し）。
+    // ノードごとに作り直す（orphan では空＝ヘッダ無し）。
+    relDomain.clear(); relDomainLabels = []; relDomainRepIds = []; relSub.clear(); subLabelById.clear(); subRepIdById.clear();
 
     // ── 検索行（パンくずの下に置く。compact では出さない） ── ノードパネルの検索行と同形（虫眼鏡のみ）。
     let searchRow: HTMLDivElement | null = null;
     if (!opts.compact) {
     searchRow = document.createElement('div');
-    searchRow.style.cssText = `display:flex;align-items:center;gap:4px;height:28px;box-sizing:border-box;padding:0 6px;border-bottom:1px solid ${BORDER};`;
+    // 関係行と同じ先頭構成（bodyEl の padding-left:8 + spacer:6 + 18px枠）にして、虫眼鏡を行の□と揃える。
+    searchRow.style.cssText = `display:flex;align-items:center;padding:2px 8px 2px 8px;border-bottom:1px solid ${BORDER};`;
+    const searchSpacer = document.createElement('span');
+    searchSpacer.style.cssText = `flex-shrink:0;width:6px;`;
     const searchIconWrap = document.createElement('span');
     searchIconWrap.style.cssText = `flex-shrink:0;display:flex;align-items:center;justify-content:center;width:18px;color:${TEXT_DIM};`;
     // Inline SVG magnifier（ノードパネルと同じ）: color-emoji 非搭載環境で🔍が豆腐化するのを避ける。
@@ -998,7 +1012,7 @@ export function createRelationPanelView(
       if (e.key === 'Escape') { e.preventDefault(); searchInput.value = ''; if (searchTimer) clearTimeout(searchTimer); applyFilter(''); searchInput.blur(); }
       else if (e.key === 'Enter') { e.preventDefault(); if (searchTimer) clearTimeout(searchTimer); applyFilter(searchInput.value); }
     });
-    searchRow.append(searchIconWrap, searchInput);
+    searchRow.append(searchSpacer, searchIconWrap, searchInput);
     // 並び替え用グリップ（panels-view から渡される）を最上部行の左端に。head は render 毎に作り直される
     // ので、同じ要素をここで毎回先頭へ差し込む（リスナは要素に付いているので保持される）。
     if (opts.leadingHeadEl) searchRow.insertBefore(opts.leadingHeadEl, searchRow.firstChild);
@@ -1069,6 +1083,7 @@ export function createRelationPanelView(
     const ord = await getNodeOrder(ctx.gId, REL_ORDER_MODE);
     if (token !== renderToken) return;
     relDomainLabels = ord.domainLabels;
+    relDomainRepIds = ord.domainRepIds;
 
     // 相手ノードの id 集合（アンカー除く）とラベル、代表相手の seriation 位置を用意。
     const labelById = new Map<string, string>();
@@ -1108,7 +1123,7 @@ export function createRelationPanelView(
       const rs = byDom.get(d)!;
       // サブ分割: 膨らんだドメインのみ。再帰的に SUB_THRESHOLD 未満まで割る（各段で idf を再計算するので、
       // 上位で代表だったノードは下位では遍在扱いになり、次の識別軸で割れる）。深さ上限3で暴走防止。
-      const clusters: Array<{ rels: ExplorerRelation[]; label: string }> = [];
+      const clusters: Array<{ rels: ExplorerRelation[]; label: string; repId: string }> = [];
       const leaves: Array<{ rels: ExplorerRelation[]; repId: string }> = [];
       const recurse = (part: { rels: ExplorerRelation[]; repId: string }, depth: number): void => {
         if (part.rels.length < SUB_THRESHOLD || depth >= 3) { leaves.push(part); return; }
@@ -1121,21 +1136,21 @@ export function createRelationPanelView(
         if (top.length >= 2) for (const t of top) recurse(t, 1);
         else leaves.push({ rels: rs, repId: '' });
       } else leaves.push({ rels: rs, repId: '' });
-      // 葉クラスタ: size≥2 は代表相手ラベル、余った単発はまとめて「その他」。
+      // 葉クラスタ: size≥2 は代表相手（id+ラベル）、余った単発はまとめて「その他」。
       if (leaves.length >= 2) {
         const singles: ExplorerRelation[] = [];
         for (const c of leaves) {
-          if (c.rels.length >= 2) clusters.push({ rels: c.rels, label: labelById.get(c.repId) ?? '' });
+          if (c.rels.length >= 2) clusters.push({ rels: c.rels, label: labelById.get(c.repId) ?? '', repId: c.repId });
           else singles.push(...c.rels);
         }
-        if (singles.length) clusters.push({ rels: singles, label: 'その他' });
-      } else clusters.push({ rels: rs, label: '' });
+        if (singles.length) clusters.push({ rels: singles, label: 'その他', repId: '' });
+      } else clusters.push({ rels: rs, label: '', repId: '' });
       clusters.sort((x, y) => x.rels.length - y.rels.length); // サブも少ない順
       const showSub = clusters.length >= 2;
       for (const cl of clusters) {
         cl.rels.sort(byPos);
         const sid = subSeq++;
-        if (showSub) subLabelById.set(sid, cl.label);
+        if (showSub) { subLabelById.set(sid, cl.label); subRepIdById.set(sid, cl.repId); }
         for (const r of cl.rels) { relSub.set(r.lineId, showSub ? sid : -1); ordered.push(r); }
       }
     }

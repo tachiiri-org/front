@@ -154,8 +154,9 @@ function louvain(a: Analysis): Int32Array {
 // ── ノード並び: ドメイン別に重要度シード＋関連度整列、ドメインは重要度合計順 ───────
 export type OrderMode = { importance: 'count' | 'evc'; intra: 'flow' | 'fiedler' };
 // rank: id→表示順。domainIndexById: id→ドメイン番号(表示順)。domainLabels[i]: ドメイン i の代表概念ラベル。
-export type NodeOrder = { rank: Map<string, number>; domainIndexById: Map<string, number>; domainLabels: string[] };
-const emptyOrder = (): NodeOrder => ({ rank: new Map(), domainIndexById: new Map(), domainLabels: [] });
+// domainRepIds[i]: ドメイン i の代表概念ノード id（ヘッダのノードリンク用。孤立グループは ''）。
+export type NodeOrder = { rank: Map<string, number>; domainIndexById: Map<string, number>; domainLabels: string[]; domainRepIds: string[] };
+const emptyOrder = (): NodeOrder => ({ rank: new Map(), domainIndexById: new Map(), domainLabels: [], domainRepIds: [] });
 const orderCache = new Map<string, Promise<NodeOrder>>();
 export function getNodeOrder(graphId: string, mode: OrderMode): Promise<NodeOrder> {
   const key = `${graphId}|${mode.importance}|${mode.intra}`;
@@ -191,9 +192,11 @@ async function computeOrder(graphId: string, mode: OrderMode): Promise<NodeOrder
   const order: number[] = [];
   const domainIndexById = new Map<string, number>();
   const domainLabels: string[] = [];
+  const domainRepIds: string[] = [];
   scored.forEach(({ D }, di) => {
     const rep = D.reduce((b, g) => (imp[g] > imp[b] ? g : b), D[0]); // 代表＝重要度最大の概念
     domainLabels.push(a.labels[rep] ?? '');
+    domainRepIds.push(a.ids[rep] ?? '');
     for (const g of D) domainIndexById.set(a.ids[g], di);
     order.push(...intraOrder(D));
   });
@@ -201,11 +204,12 @@ async function computeOrder(graphId: string, mode: OrderMode): Promise<NodeOrder
   if (isolated.length) {
     const di = scored.length;
     domainLabels.push(`その他・孤立 (${isolated.length})`);
+    domainRepIds.push(''); // 単一代表なし
     const iso = isolated.slice().sort((x, y) => imp[y] - imp[x]);
     for (const g of iso) domainIndexById.set(a.ids[g], di);
     order.push(...iso);
   }
   const rank = new Map<string, number>();
   order.forEach((g, r) => rank.set(a.ids[g], r));
-  return { rank, domainIndexById, domainLabels };
+  return { rank, domainIndexById, domainLabels, domainRepIds };
 }
