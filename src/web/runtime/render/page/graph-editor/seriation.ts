@@ -10,6 +10,7 @@ import { fetchGraphExport } from './api';
 type Analysis = {
   n: number;
   ids: string[];
+  labels: string[];
   W: Map<number, Map<number, number>>;
   deg: Float64Array;
   maxDeg: number;
@@ -23,7 +24,7 @@ function getAnalysis(graphId: string): Promise<Analysis> {
   if (!p) { p = buildAnalysis(graphId).catch(() => emptyAnalysis()); analysisCache.set(graphId, p); }
   return p;
 }
-const emptyAnalysis = (): Analysis => ({ n: 0, ids: [], W: new Map(), deg: new Float64Array(0), maxDeg: 0, relCount: new Float64Array(0), evc: new Float64Array(0) });
+const emptyAnalysis = (): Analysis => ({ n: 0, ids: [], labels: [], W: new Map(), deg: new Float64Array(0), maxDeg: 0, relCount: new Float64Array(0), evc: new Float64Array(0) });
 
 async function buildAnalysis(graphId: string): Promise<Analysis> {
   const data = await fetchGraphExport(graphId);
@@ -32,6 +33,7 @@ async function buildAnalysis(graphId: string): Promise<Analysis> {
   if (n === 0) return emptyAnalysis();
   const idx = new Map(nodes.map((nd, i) => [nd.id, i] as const));
   const ids = nodes.map((nd) => nd.id);
+  const labels = nodes.map((nd) => nd.ja || nd.en || nd.id.slice(0, 6));
   const W = new Map<number, Map<number, number>>();
   const add = (a: number, b: number, w: number) => { let m = W.get(a); if (!m) { m = new Map(); W.set(a, m); } m.set(b, (m.get(b) ?? 0) + w); };
   const relCount = new Float64Array(n);
@@ -47,7 +49,7 @@ async function buildAnalysis(graphId: string): Promise<Analysis> {
   let x = new Float64Array(n).fill(1);
   const norm = (v: Float64Array) => { let s = 0; for (const t of v) s += t * t; s = Math.sqrt(s) || 1; for (let i = 0; i < v.length; i++) v[i] /= s; };
   for (let it = 0; it < 200; it++) { const y = new Float64Array(n); for (let i = 0; i < n; i++) for (const [j, w] of (W.get(i) ?? [])) y[i] += w * x[j]; norm(y); x = y; }
-  return { n, ids, W, deg, maxDeg, relCount, evc: x };
+  return { n, ids, labels, W, deg, maxDeg, relCount, evc: x };
 }
 
 // ── 連結成分 & フィードラー（近さ整列） ─────────────────────────────────────────
@@ -147,16 +149,19 @@ function louvain(a: Analysis): Int32Array {
 
 // ── ノード並び: ドメイン別に重要度シード＋関連度整列、ドメインは重要度合計順 ───────
 export type OrderMode = { importance: 'count' | 'evc'; intra: 'flow' | 'fiedler' };
-const orderCache = new Map<string, Promise<Map<string, number>>>();
-export function getNodeOrder(graphId: string, mode: OrderMode): Promise<Map<string, number>> {
+// rank: id→表示順。domainIndexById: id→ドメイン番号(表示順)。domainLabels[i]: ドメイン i の代表概念ラベル。
+export type NodeOrder = { rank: Map<string, number>; domainIndexById: Map<string, number>; domainLabels: string[] };
+const emptyOrder = (): NodeOrder => ({ rank: new Map(), domainIndexById: new Map(), domainLabels: [] });
+const orderCache = new Map<string, Promise<NodeOrder>>();
+export function getNodeOrder(graphId: string, mode: OrderMode): Promise<NodeOrder> {
   const key = `${graphId}|${mode.importance}|${mode.intra}`;
   let p = orderCache.get(key);
-  if (!p) { p = computeOrder(graphId, mode).catch(() => new Map<string, number>()); orderCache.set(key, p); }
+  if (!p) { p = computeOrder(graphId, mode).catch(() => emptyOrder()); orderCache.set(key, p); }
   return p;
 }
-async function computeOrder(graphId: string, mode: OrderMode): Promise<Map<string, number>> {
+async function computeOrder(graphId: string, mode: OrderMode): Promise<NodeOrder> {
   const a = await getAnalysis(graphId);
-  if (a.n === 0) return new Map();
+  if (a.n === 0) return emptyOrder();
   const domains = await getDomains(graphId);
   const imp = mode.importance === 'evc' ? a.evc : a.relCount;
   const posMap = mode.intra === 'fiedler' ? await getSeriationPositions(graphId) : null;
@@ -180,8 +185,15 @@ async function computeOrder(graphId: string, mode: OrderMode): Promise<Map<strin
 
   const scored = domains.map((D) => ({ D, s: D.reduce((t, g) => t + imp[g], 0) })).sort((x, y) => y.s - x.s);
   const order: number[] = [];
-  for (const { D } of scored) order.push(...intraOrder(D));
+  const domainIndexById = new Map<string, number>();
+  const domainLabels: string[] = [];
+  scored.forEach(({ D }, di) => {
+    const rep = D.reduce((b, g) => (imp[g] > imp[b] ? g : b), D[0]); // 代表＝重要度最大の概念
+    domainLabels.push(a.labels[rep] ?? '');
+    for (const g of D) domainIndexById.set(a.ids[g], di);
+    order.push(...intraOrder(D));
+  });
   const rank = new Map<string, number>();
   order.forEach((g, r) => rank.set(a.ids[g], r));
-  return rank;
+  return { rank, domainIndexById, domainLabels };
 }

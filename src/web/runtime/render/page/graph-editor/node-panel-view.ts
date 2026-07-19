@@ -4,7 +4,7 @@ import {
   fetchBookmarks, fetchBookmarkedNodes, fetchAllNodes,
   apiCreateNode, apiUpdateNode, apiDeleteNode, apiMoveBookmark,
 } from './api';
-import { getNodeOrder, type OrderMode } from './seriation';
+import { getNodeOrder, type OrderMode, type NodeOrder } from './seriation';
 
 // ── Flat node list ────────────────────────────────────────────────────────
 // The graph editor is a FLAT node list + relation lines (no hierarchy / outliner). This pane shows
@@ -116,6 +116,7 @@ export function createNodePanelView(ctx: GraphEditorContext, nodePanelOpts?: Nod
   // ドメイン別に「重要度で種→関連度で整列」した順でノードを並べる。重要度(関係数/中心性)と
   // 整列(フロー/フィードラー)を切り替えて見比べられる。全てクライアント計算・派生。
   const orderMode: OrderMode = { importance: 'count', intra: 'flow' };
+  let domainLayout: NodeOrder | null = null; // ドメイン境界の表示に使う（id→ドメイン番号 と 代表ラベル）
   const orderRow = document.createElement('div');
   orderRow.style.cssText = `flex-shrink:0;display:flex;align-items:center;gap:6px;padding:2px 8px 3px;border-bottom:1px solid ${BORDER};`;
   const mkToggle = (getText: () => string, cycle: () => void): HTMLButtonElement => {
@@ -237,10 +238,23 @@ export function createNodePanelView(ctx: GraphEditorContext, nodePanelOpts?: Nod
     draftEl.style.display = showDraft ? 'flex' : 'none';
   };
 
+  // ドメイン境界の見出し（代表概念ラベル）。どこでドメインが切り替わるか UI で分かるように。
+  const makeDomainHeader = (text: string): HTMLElement => {
+    const h = document.createElement('div');
+    h.dataset.domainHeader = '1';
+    h.style.cssText = `padding:7px 8px 2px 8px;font-size:10px;color:${TEXT_DIM};border-top:1px solid ${BORDER};user-select:none;`;
+    h.textContent = text || '—';
+    return h;
+  };
   const render = () => {
     rowMap.clear();
     listEl.innerHTML = '';
-    for (const node of nodes) listEl.appendChild(buildRow(node));
+    let prevDom = -1;
+    for (const node of nodes) {
+      const di = domainLayout?.domainIndexById.get(node.id) ?? -1;
+      if (di !== prevDom && di >= 0) { listEl.appendChild(makeDomainHeader(domainLayout?.domainLabels[di] ?? '')); prevDom = di; }
+      listEl.appendChild(buildRow(node));
+    }
     updateDraftVisibility();
     updateSelectionHighlight();
     if (nodePanelOpts?.onContentWidthChange) scheduleWidthUpdate();
@@ -633,8 +647,9 @@ export function createNodePanelView(ctx: GraphEditorContext, nodePanelOpts?: Nod
     // Every other pane: the flat node list, ordered by domain → importance-seed → relatedness.
     const lang = ctx.state.showFallback ? undefined : nodePanelLang;
     const { nodes: all } = await fetchAllNodes(ctx.gId, [], 0, lang, undefined, undefined, 2000);
-    const rank = await getNodeOrder(ctx.gId, orderMode);
-    all.sort((a, b) => (rank.get(a.id) ?? 1e9) - (rank.get(b.id) ?? 1e9));
+    const ord = await getNodeOrder(ctx.gId, orderMode);
+    domainLayout = ord;
+    all.sort((a, b) => (ord.rank.get(a.id) ?? 1e9) - (ord.rank.get(b.id) ?? 1e9));
     applyRoots(all);
   };
 
@@ -642,8 +657,9 @@ export function createNodePanelView(ctx: GraphEditorContext, nodePanelOpts?: Nod
     if (!query) { await load(); return; }
     const lang = ctx.state.showFallback ? undefined : nodePanelLang;
     const { nodes: found } = await fetchAllNodes(ctx.gId, [], 0, lang, undefined, query, 2000);
-    const rank = await getNodeOrder(ctx.gId, orderMode);
-    found.sort((a, b) => (rank.get(a.id) ?? 1e9) - (rank.get(b.id) ?? 1e9));
+    const ord = await getNodeOrder(ctx.gId, orderMode);
+    domainLayout = ord;
+    found.sort((a, b) => (ord.rank.get(a.id) ?? 1e9) - (ord.rank.get(b.id) ?? 1e9));
     applyRoots(found);
   };
 
