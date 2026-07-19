@@ -178,12 +178,16 @@ export function createPanelsView(ctx: GraphEditorContext): {
   // The persistent context (node page) panel — the right-hand DOCUMENT view, driven by the global
   // selection alongside the relation panel (which stays the navigator/outline). A fixed right column
   // for P1 (not reorderable/closable). Selecting a heading in the relation panel scrolls this to it.
-  const contextView: PanelView = createContextPanelView(ctx, { lang: ctx.state.lang });
-  const contextContainer = document.createElement('div');
-  contextContainer.dataset.panelId = 'ctx-primary';
-  contextContainer.style.cssText = `flex:1 1 0;min-width:320px;display:flex;flex-direction:column;border-left:1px solid ${BORDER};overflow:hidden;position:relative;`;
-  contextView.el.style.flex = '1';
-  contextContainer.appendChild(contextView.el);
+  // コンテキストパネルは一旦非表示（この 1 箇所を true にすれば復活）。
+  const SHOW_CONTEXT_PANEL: boolean = false;
+  const contextView: PanelView | null = SHOW_CONTEXT_PANEL ? createContextPanelView(ctx, { lang: ctx.state.lang }) : null;
+  const contextContainer: HTMLElement | null = SHOW_CONTEXT_PANEL ? document.createElement('div') : null;
+  if (contextContainer && contextView) {
+    contextContainer.dataset.panelId = 'ctx-primary';
+    contextContainer.style.cssText = `flex:1 1 0;min-width:320px;display:flex;flex-direction:column;border-left:1px solid ${BORDER};overflow:hidden;position:relative;`;
+    contextView.el.style.flex = '1';
+    contextContainer.appendChild(contextView.el);
+  }
 
   // リレーションパネルは1つの列の中に「縦スタック」で積む。ノードリンク(チップ)をクリックすると、右に
   // 新しい列を増やすのではなく、この列の一番下にリレーションパネルを追加する（下方展開）。
@@ -240,7 +244,7 @@ export function createPanelsView(ctx: GraphEditorContext): {
     }
     // In fullscreen, hide the relation column + context panel too (only the one node panel is shown).
     relationColumn.style.display = isFs ? 'none' : '';
-    contextContainer.style.display = isFs ? 'none' : '';
+    if (contextContainer) contextContainer.style.display = isFs ? 'none' : '';
   };
 
   // ── Global selection (最後にクリックされたノード) ──────────────────────────
@@ -728,8 +732,8 @@ export function createPanelsView(ctx: GraphEditorContext): {
       if (i === 0) el.appendChild(relationColumn);
     });
     if (configs.length === 0) el.appendChild(relationColumn);
-    // The context (document) panel is the right-most column.
-    el.appendChild(contextContainer);
+    // The context (document) panel is the right-most column (一旦非表示).
+    if (contextContainer) el.appendChild(contextContainer);
 
     updateAllSrcBtns();
   };
@@ -756,7 +760,7 @@ export function createPanelsView(ctx: GraphEditorContext): {
       p.view.setLang(lang);
     }
     relationView.setLang(lang);
-    contextView.setLang(lang);
+    contextView?.setLang(lang);
     saveAll();
   };
 

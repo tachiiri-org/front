@@ -94,18 +94,19 @@ async function computePositions(graphId: string): Promise<Map<string, number>> {
   return pos;
 }
 
-// ── ドメイン検出（Louvain 局所移動＋小コミュニティ併合） ───────────────────────
-const domainCache = new Map<string, Promise<number[][]>>();
-function getDomains(graphId: string): Promise<number[][]> {
+// ── ドメイン検出（Louvain 局所移動＋小コミュニティ併合。繋がらない孤立は1グループへ集約） ───────
+type Domains = { domains: number[][]; isolated: number[] };
+const domainCache = new Map<string, Promise<Domains>>();
+function getDomains(graphId: string): Promise<Domains> {
   let p = domainCache.get(graphId);
-  if (!p) { p = computeDomains(graphId).catch(() => []); domainCache.set(graphId, p); }
+  if (!p) { p = computeDomains(graphId).catch(() => ({ domains: [], isolated: [] })); domainCache.set(graphId, p); }
   return p;
 }
-async function computeDomains(graphId: string): Promise<number[][]> {
+async function computeDomains(graphId: string): Promise<Domains> {
   const a = await getAnalysis(graphId);
-  if (a.n === 0) return [];
+  if (a.n === 0) return { domains: [], isolated: [] };
   const comm = louvain(a);
-  // group + 小コミュニティ(<5)を最も繋がる大コミュニティへ併合
+  // 小コミュニティ(<minSize)を「最も繋がる大コミュニティ」へ併合。繋がり先が無い（孤立）ものは残る。
   const minSize = 5;
   const relabel = () => { const map = new Map<number, number[]>(); comm.forEach((c, i) => { if (!map.has(c)) map.set(c, []); map.get(c)!.push(i); }); return map; };
   for (let pass = 0; pass < 10; pass++) {
@@ -114,7 +115,6 @@ async function computeDomains(graphId: string): Promise<number[][]> {
     if (small.length === 0) break;
     let moved = false;
     for (const [c, mem] of small) {
-      // このコミュニティが最も繋がる別コミュニティ
       const link = new Map<number, number>();
       for (const i of mem) for (const [j, w] of (a.W.get(i) ?? [])) { const cj = comm[j]; if (cj !== c) link.set(cj, (link.get(cj) ?? 0) + w); }
       let bestC = -1, bestW = 0;
@@ -123,7 +123,11 @@ async function computeDomains(graphId: string): Promise<number[][]> {
     }
     if (!moved) break;
   }
-  return [...relabel().values()];
+  // 併合後もまだ小さい＝繋がらない孤立群。全部まとめて1つの「その他・孤立」グループに集約する。
+  const domains: number[][] = [];
+  const isolated: number[] = [];
+  for (const mem of relabel().values()) { if (mem.length >= minSize) domains.push(mem); else isolated.push(...mem); }
+  return { domains, isolated };
 }
 function louvain(a: Analysis): Int32Array {
   const n = a.n, W = a.W, deg = a.deg;
@@ -162,7 +166,7 @@ export function getNodeOrder(graphId: string, mode: OrderMode): Promise<NodeOrde
 async function computeOrder(graphId: string, mode: OrderMode): Promise<NodeOrder> {
   const a = await getAnalysis(graphId);
   if (a.n === 0) return emptyOrder();
-  const domains = await getDomains(graphId);
+  const { domains, isolated } = await getDomains(graphId);
   const imp = mode.importance === 'evc' ? a.evc : a.relCount;
   const posMap = mode.intra === 'fiedler' ? await getSeriationPositions(graphId) : null;
   const posOf = (g: number) => posMap?.get(a.ids[g]) ?? 0;
@@ -193,6 +197,14 @@ async function computeOrder(graphId: string, mode: OrderMode): Promise<NodeOrder
     for (const g of D) domainIndexById.set(a.ids[g], di);
     order.push(...intraOrder(D));
   });
+  // 孤立ノード群は最後に1グループ（重要度降順）としてまとめる。
+  if (isolated.length) {
+    const di = scored.length;
+    domainLabels.push(`その他・孤立 (${isolated.length})`);
+    const iso = isolated.slice().sort((x, y) => imp[y] - imp[x]);
+    for (const g of iso) domainIndexById.set(a.ids[g], di);
+    order.push(...iso);
+  }
   const rank = new Map<string, number>();
   order.forEach((g, r) => rank.set(a.ids[g], r));
   return { rank, domainIndexById, domainLabels };
