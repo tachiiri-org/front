@@ -39,6 +39,47 @@ function splitTokens(body: string): Array<{ t: 'txt'; v: string } | { t: 'men'; 
   return out;
 }
 
+// 関係群を「共有する相手ノード数」を重みにした line graph 上の Louvain でサブ分割する。
+// coParts: lineId → 相手ノード id 集合（アンカー自身は除く）。戻り値 = 関係のクラスタ配列（分割不能なら1つ）。
+function subClusterRelations(
+  rels: ExplorerRelation[],
+  coParts: Map<string, Set<string>>,
+): ExplorerRelation[][] {
+  const n = rels.length;
+  const adj: Array<Map<number, number>> = Array.from({ length: n }, () => new Map());
+  for (let i = 0; i < n; i++) {
+    const si = coParts.get(rels[i].lineId)!;
+    for (let j = i + 1; j < n; j++) {
+      const sj = coParts.get(rels[j].lineId)!;
+      let sh = 0;
+      for (const x of si) if (sj.has(x)) sh++;
+      if (sh > 0) { adj[i].set(j, sh); adj[j].set(i, sh); }
+    }
+  }
+  const deg = new Float64Array(n); let m2 = 0;
+  for (let i = 0; i < n; i++) { let d = 0; for (const w of adj[i].values()) d += w; deg[i] = d; m2 += d; }
+  if (m2 === 0) return [rels]; // 共有がゼロ＝繋がらない → 分割しない
+  const comm = new Int32Array(n); for (let i = 0; i < n; i++) comm[i] = i;
+  const sig = new Float64Array(n); for (let i = 0; i < n; i++) sig[i] = deg[i];
+  for (let r = 0; r < 20; r++) {
+    let improved = false;
+    for (let i = 0; i < n; i++) {
+      const ci = comm[i], ki = deg[i];
+      sig[ci] -= ki;
+      const nb = new Map<number, number>(); nb.set(ci, 0);
+      for (const [j, w] of adj[i]) { const cj = comm[j]; nb.set(cj, (nb.get(cj) ?? 0) + w); }
+      let bC = ci, bG = (nb.get(ci) ?? 0) - sig[ci] * ki / m2;
+      for (const [c, kin] of nb) { const g = kin - sig[c] * ki / m2; if (g > bG) { bG = g; bC = c; } }
+      comm[i] = bC; sig[bC] += ki;
+      if (bC !== ci) improved = true;
+    }
+    if (!improved) break;
+  }
+  const groups = new Map<number, ExplorerRelation[]>();
+  comm.forEach((c, i) => { if (!groups.has(c)) groups.set(c, []); groups.get(c)!.push(rels[i]); });
+  return [...groups.values()];
+}
+
 export function createRelationPanelView(
   ctx: GraphEditorContext,
   opts: { lang: 'en' | 'ja'; initialNodeId?: string | null; onClose?: () => void; leadingHeadEl?: HTMLElement; compact?: boolean; autoHeight?: boolean },
@@ -60,8 +101,13 @@ export function createRelationPanelView(
   let currentDraftNodeId: string | null = null; // 追加ドラフト行の対象ノード（orphan 表示中は null）。
   // ドメイン別分割: 各関係を「相手ノードのドメイン」で束ねる。アンカーノードは単一ドメインに属するので
   // 自分のドメインでは割れない → 相手のドメイン（別軸）で割る。ハブノードの関係がテーマ別に立ち上がる。
+  // グループの並びは「件数の少ない順→多い順」（膨らんだ塊＝その他的に末尾へ）。相手不明(-1)は常に最後。
   const relDomain = new Map<string, number>(); // lineId → ドメイン番号(表示順)。相手不明なら -1。
   let relDomainLabels: string[] = [];
+  // 膨らんだドメイングループは、関係同士の共起（相手ノードの共有＝line graph）でサブ分割する。
+  const relSub = new Map<string, number>(); // lineId → サブグループ番号。サブ分割していなければ -1。
+  const subLabelById = new Map<number, string>(); // サブグループ番号 → 代表相手ラベル
+  const SUB_THRESHOLD = 10; // この件数以上のドメイングループだけサブ分割する（末端の小グループはそのまま）
   const REL_ORDER_MODE: OrderMode = { importance: 'count', intra: 'flow' }; // ノードパネル既定と揃える（分割は不変）
   const canvas = document.createElement('canvas');
   const cctx = canvas.getContext('2d');
@@ -840,6 +886,14 @@ export function createRelationPanelView(
     h.textContent = text || '—';
     return h;
   };
+  // サブ境界ヘッダ（膨らんだドメイン内の共起クラスタ）。ドメインヘッダより控えめ・少しインデント。
+  const makeSubHeader = (text: string): HTMLElement => {
+    const h = document.createElement('div');
+    h.dataset.subHeader = '1';
+    h.style.cssText = `padding:3px 8px 1px 20px;font-size:10px;color:${TEXT_DIM};opacity:.7;user-select:none;`;
+    h.textContent = text ? `· ${text}` : '·';
+    return h;
+  };
 
   // 本体（関係行）だけを描画。検索クエリ変更時は再取得せずこれだけ呼ぶ（head は作り直さない＝入力が保持される）。
   const renderBody = (): void => {
@@ -852,12 +906,15 @@ export function createRelationPanelView(
     // 相手ドメインが2つ以上に跨る時だけ境界ヘッダを出す（単一ドメインの末端ノードでは出さない＝ノイズ回避）。
     const domsSeen = new Set(visible.map((r) => relDomain.get(r.lineId) ?? -1).filter((d) => d >= 0));
     const showHeaders = !orphanMode && domsSeen.size >= 2;
-    let prevDom = -1;
+    let prevDom = -1, prevSub = -2;
     for (const relation of visible) {
       if (showHeaders) {
         const di = relDomain.get(relation.lineId) ?? -1;
-        if (di !== prevDom && di >= 0) { bodyEl.appendChild(makeDomainHeader(relDomainLabels[di] ?? '')); prevDom = di; }
+        if (di !== prevDom && di >= 0) { bodyEl.appendChild(makeDomainHeader(relDomainLabels[di] ?? '')); prevDom = di; prevSub = -2; }
       }
+      // サブヘッダ（膨らんだドメインの共起クラスタ）。単一ドメインでもサブ分割があれば出す。
+      const si = relSub.get(relation.lineId) ?? -1;
+      if (si !== prevSub && si >= 0) { bodyEl.appendChild(makeSubHeader(subLabelById.get(si) ?? '')); prevSub = si; }
       bodyEl.appendChild(renderRelationRow(relation));
     }
     updateActiveHighlight();
@@ -901,7 +958,7 @@ export function createRelationPanelView(
     relationBoxByRelation.clear();
     selAnchor = null; selCursor = null; // 行を作り直すので複数選択はリセット。
     filterQuery = ''; // ノード切替/再読込では検索状態をリセット（新しい関係一覧を全件表示）。
-    relDomain.clear(); relDomainLabels = []; // ドメイン割り当てはノードごとに作り直す（orphan では空＝ヘッダ無し）。
+    relDomain.clear(); relDomainLabels = []; relSub.clear(); subLabelById.clear(); // ノードごとに作り直す（orphan では空＝ヘッダ無し）。
 
     // ── 検索行（パンくずの下に置く。compact では出さない） ── ノードパネルの検索行と同形（虫眼鏡のみ）。
     let searchRow: HTMLDivElement | null = null;
@@ -987,32 +1044,78 @@ export function createRelationPanelView(
     const nodeId = currentNodeId;
     const relations = await fetchNodeRelations(ctx.gId, nodeId);
     if (token !== renderToken) return;
-    // 並びのベースは自動: まず相手ノードのドメインで束ね、ドメイン内は「近さ順（seriation 位置）」。
-    // 代表相手 = seriation 位置が最小の相手ノード。その相手のドメインをこの関係のドメインにする
-    // （アンカーは単一ドメインなので、相手のドメイン＝別軸で割ると、ハブノードの関係がテーマ別に立ち上がる）。
+    // 並びのベース（自動）: ①相手ノードのドメインで束ね、②グループは件数の少ない順→多い順、
+    // ③膨らんだグループ(≥SUB_THRESHOLD)は関係同士の共起でサブ分割、④最内は近さ順(seriation)。
+    // 代表相手 = seriation 位置が最小の相手ノード。そのドメインをこの関係のドメインにする（別軸）。
     // 手動並べ替えは長期でズレるので基準にしない（自動のみ）。
     const pos = await getSeriationPositions(ctx.gId);
     if (token !== renderToken) return;
     const ord = await getNodeOrder(ctx.gId, REL_ORDER_MODE);
     if (token !== renderToken) return;
     relDomainLabels = ord.domainLabels;
-    const keyOf = (r: ExplorerRelation): { dom: number; pos: number } => {
-      const others = r.participants
-        .filter((p) => p.id !== nodeId)
-        .map((p) => ({ id: p.id, pos: pos.get(p.id) }))
-        .filter((o): o is { id: string; pos: number } => o.pos != null);
-      if (!others.length) { relDomain.set(r.lineId, -1); return { dom: Number.POSITIVE_INFINITY, pos: Number.POSITIVE_INFINITY }; }
-      const rep = others.reduce((b, o) => (o.pos < b.pos ? o : b));
-      const dom = ord.domainIndexById.get(rep.id) ?? -1;
+
+    // 相手ノードの id 集合（アンカー除く）とラベル、代表相手の seriation 位置を用意。
+    const labelById = new Map<string, string>();
+    const coParts = new Map<string, Set<string>>();
+    const repPos = new Map<string, number>();
+    for (const r of relations) {
+      const set = new Set<string>();
+      let best = Number.POSITIVE_INFINITY;
+      for (const p of r.participants) {
+        if (!labelById.has(p.id)) labelById.set(p.id, labelOf(p, lang));
+        if (p.id === nodeId) continue;
+        set.add(p.id);
+        const pp = pos.get(p.id);
+        if (pp != null && pp < best) best = pp;
+      }
+      coParts.set(r.lineId, set);
+      repPos.set(r.lineId, best);
+      // ドメイン = 代表相手（seriation 最小）のドメイン。相手不明なら -1。
+      let dom = -1;
+      let bestPp = Number.POSITIVE_INFINITY;
+      for (const id of set) { const pp = pos.get(id); if (pp != null && pp < bestPp) { bestPp = pp; dom = ord.domainIndexById.get(id) ?? -1; } }
       relDomain.set(r.lineId, dom);
-      return { dom: dom < 0 ? Number.POSITIVE_INFINITY : dom, pos: rep.pos };
-    };
-    const keys = new Map(relations.map((r) => [r.lineId, keyOf(r)] as const));
-    relations.sort((a, b) => {
-      const ka = keys.get(a.lineId)!, kb = keys.get(b.lineId)!;
-      return ka.dom - kb.dom || ka.pos - kb.pos;
+    }
+
+    // ドメインごとに束ね、グループは件数の少ない順。相手不明(-1)は常に最後。
+    const byDom = new Map<number, ExplorerRelation[]>();
+    for (const r of relations) { const d = relDomain.get(r.lineId)!; if (!byDom.has(d)) byDom.set(d, []); byDom.get(d)!.push(r); }
+    const domOrder = [...byDom.keys()].sort((a, b) => {
+      if (a < 0) return 1; if (b < 0) return -1;
+      return byDom.get(a)!.length - byDom.get(b)!.length || a - b;
     });
-    currentRelations = relations; currentDraftNodeId = nodeId; // 追加ドラフト行はこのノード宛て
+
+    const byPos = (x: ExplorerRelation, y: ExplorerRelation) => (repPos.get(x.lineId) ?? Infinity) - (repPos.get(y.lineId) ?? Infinity);
+    const ordered: ExplorerRelation[] = [];
+    let subSeq = 0;
+    for (const d of domOrder) {
+      const rs = byDom.get(d)!;
+      // サブ分割: 膨らんだドメインのみ。size≥2 のクラスタは代表相手ラベル、余った単発はまとめて「その他」。
+      const clusters: Array<{ rels: ExplorerRelation[]; label: string }> = [];
+      const raw = d >= 0 && rs.length >= SUB_THRESHOLD ? subClusterRelations(rs, coParts) : [rs];
+      if (raw.length >= 2) {
+        const singles: ExplorerRelation[] = [];
+        for (const c of raw) {
+          if (c.length >= 2) {
+            const freq = new Map<string, number>();
+            for (const r of c) for (const id of coParts.get(r.lineId)!) freq.set(id, (freq.get(id) ?? 0) + 1);
+            let rep = '', repN = 0;
+            for (const [id, cnt] of freq) if (cnt > repN) { repN = cnt; rep = id; }
+            clusters.push({ rels: c, label: labelById.get(rep) ?? '' });
+          } else singles.push(...c);
+        }
+        if (singles.length) clusters.push({ rels: singles, label: 'その他' });
+      } else clusters.push({ rels: rs, label: '' });
+      clusters.sort((x, y) => x.rels.length - y.rels.length); // サブも少ない順
+      const showSub = clusters.length >= 2;
+      for (const cl of clusters) {
+        cl.rels.sort(byPos);
+        const sid = subSeq++;
+        if (showSub) subLabelById.set(sid, cl.label);
+        for (const r of cl.rels) { relSub.set(r.lineId, showSub ? sid : -1); ordered.push(r); }
+      }
+    }
+    currentRelations = ordered; currentDraftNodeId = nodeId; // 追加ドラフト行はこのノード宛て
     renderBody();
   };
 
