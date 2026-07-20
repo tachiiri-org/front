@@ -151,12 +151,47 @@ function louvain(a: Analysis): Int32Array {
   return comm;
 }
 
+// 誘導部分グラフ（members 内のエッジのみ）上で Louvain。members(global index) をコミュニティ配列に割る。
+function louvainOn(members: number[], a: Analysis): number[][] {
+  const n = members.length;
+  const loc = new Map(members.map((g, i) => [g, i] as const));
+  const adj: Array<Map<number, number>> = Array.from({ length: n }, () => new Map());
+  const deg = new Float64Array(n); let m2 = 0;
+  for (let i = 0; i < n; i++) { const g = members[i]; for (const [j, w] of (a.W.get(g) ?? [])) { const lj = loc.get(j); if (lj != null) { adj[i].set(lj, w); deg[i] += w; m2 += w; } } }
+  if (m2 === 0) return [members];
+  const comm = new Int32Array(n); for (let i = 0; i < n; i++) comm[i] = i;
+  const sig = new Float64Array(n); for (let i = 0; i < n; i++) sig[i] = deg[i];
+  for (let r = 0; r < 20; r++) {
+    let improved = false;
+    for (let i = 0; i < n; i++) {
+      const ci = comm[i], ki = deg[i]; sig[ci] -= ki;
+      const nb = new Map<number, number>(); nb.set(ci, 0);
+      for (const [j, w] of adj[i]) { const cj = comm[j]; nb.set(cj, (nb.get(cj) ?? 0) + w); }
+      let bC = ci, bG = (nb.get(ci) ?? 0) - sig[ci] * ki / m2;
+      for (const [c, kin] of nb) { const g = kin - sig[c] * ki / m2; if (g > bG) { bG = g; bC = c; } }
+      comm[i] = bC; sig[bC] += ki; if (bC !== ci) improved = true;
+    }
+    if (!improved) break;
+  }
+  const groups = new Map<number, number[]>();
+  comm.forEach((c, i) => { if (!groups.has(c)) groups.set(c, []); groups.get(c)!.push(members[i]); });
+  return [...groups.values()];
+}
+// ドメイン内を再帰サブ分割: threshold 未満になるまで誘導部分グラフ上で Louvain。深さ上限3。
+function subdivide(members: number[], a: Analysis, threshold: number, depth: number): number[][] {
+  if (members.length < threshold || depth >= 3) return [members];
+  const parts = louvainOn(members, a);
+  if (parts.length < 2) return [members];
+  return parts.flatMap((p) => subdivide(p, a, threshold, depth + 1));
+}
+
 // ── ノード並び: ドメイン別に重要度シード＋関連度整列、ドメインは重要度合計順 ───────
 export type OrderMode = { importance: 'count' | 'evc'; intra: 'flow' | 'fiedler' };
 // rank: id→表示順。domainIndexById: id→ドメイン番号(表示順)。domainLabels[i]: ドメイン i の代表概念ラベル。
 // domainRepIds[i]: ドメイン i の代表概念ノード id（ヘッダのノードリンク用。孤立グループは ''）。
-export type NodeOrder = { rank: Map<string, number>; domainIndexById: Map<string, number>; domainLabels: string[]; domainRepIds: string[] };
-const emptyOrder = (): NodeOrder => ({ rank: new Map(), domainIndexById: new Map(), domainLabels: [], domainRepIds: [] });
+// subIndexById: id→サブグループ番号（ドメイン内の再帰分割。分割なしなら未設定＝ヘッダ無し）。subLabels[i]: サブ i の代表ラベル。
+export type NodeOrder = { rank: Map<string, number>; domainIndexById: Map<string, number>; domainLabels: string[]; domainRepIds: string[]; subIndexById: Map<string, number>; subLabels: string[] };
+const emptyOrder = (): NodeOrder => ({ rank: new Map(), domainIndexById: new Map(), domainLabels: [], domainRepIds: [], subIndexById: new Map(), subLabels: [] });
 const orderCache = new Map<string, Promise<NodeOrder>>();
 export function getNodeOrder(graphId: string, mode: OrderMode): Promise<NodeOrder> {
   const key = `${graphId}|${mode.importance}|${mode.intra}`;
@@ -193,12 +228,28 @@ async function computeOrder(graphId: string, mode: OrderMode): Promise<NodeOrder
   const domainIndexById = new Map<string, number>();
   const domainLabels: string[] = [];
   const domainRepIds: string[] = [];
+  const subIndexById = new Map<string, number>();
+  const subLabels: string[] = [];
+  const sumImp = (S: number[]) => S.reduce((t, g) => t + imp[g], 0);
+  let subSeq = 0;
   scored.forEach(({ D }, di) => {
     const rep = D.reduce((b, g) => (imp[g] > imp[b] ? g : b), D[0]); // 代表＝重要度最大の概念
     domainLabels.push(a.labels[rep] ?? '');
     domainRepIds.push(a.ids[rep] ?? '');
     for (const g of D) domainIndexById.set(a.ids[g], di);
-    order.push(...intraOrder(D));
+    // ドメイン内を再帰サブ分割（重要度合計の降順）。2つ以上に割れた時だけサブ見出しを付ける。
+    const subs = subdivide(D, a, 10, 1).sort((x, y) => sumImp(y) - sumImp(x));
+    if (subs.length >= 2) {
+      for (const S of subs) {
+        const sRep = S.reduce((b, g) => (imp[g] > imp[b] ? g : b), S[0]);
+        const si = subSeq++;
+        subLabels[si] = a.labels[sRep] ?? '';
+        for (const g of S) subIndexById.set(a.ids[g], si);
+        order.push(...intraOrder(S));
+      }
+    } else {
+      order.push(...intraOrder(D));
+    }
   });
   // 孤立ノード群は最後に1グループ（重要度降順）としてまとめる。
   if (isolated.length) {
@@ -211,5 +262,5 @@ async function computeOrder(graphId: string, mode: OrderMode): Promise<NodeOrder
   }
   const rank = new Map<string, number>();
   order.forEach((g, r) => rank.set(a.ids[g], r));
-  return { rank, domainIndexById, domainLabels, domainRepIds };
+  return { rank, domainIndexById, domainLabels, domainRepIds, subIndexById, subLabels };
 }

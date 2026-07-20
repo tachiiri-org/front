@@ -242,17 +242,27 @@ export function createNodePanelView(ctx: GraphEditorContext, nodePanelOpts?: Nod
   const makeDomainHeader = (text: string): HTMLElement => {
     const h = document.createElement('div');
     h.dataset.domainHeader = '1';
-    h.style.cssText = `padding:7px 8px 2px 8px;font-size:10px;color:${TEXT_DIM};border-top:1px solid ${BORDER};user-select:none;`;
+    h.style.cssText = `padding:8px 8px 2px 8px;font-size:10px;font-weight:600;color:${TEXT_MID};border-top:1px solid ${BORDER};user-select:none;`;
     h.textContent = text || '—';
+    return h;
+  };
+  // ドメイン内の再帰サブグループ見出し（ドメイン見出しより控えめ・インデント）。リレーションパネルと同じロジック。
+  const makeSubHeader = (text: string): HTMLElement => {
+    const h = document.createElement('div');
+    h.dataset.subHeader = '1';
+    h.style.cssText = `padding:3px 8px 1px 22px;font-size:10px;color:${TEXT_DIM};user-select:none;`;
+    h.textContent = text ? `· ${text}` : '·';
     return h;
   };
   const render = () => {
     rowMap.clear();
     listEl.innerHTML = '';
-    let prevDom = -1;
+    let prevDom = -1, prevSub = -1;
     for (const node of nodes) {
       const di = domainLayout?.domainIndexById.get(node.id) ?? -1;
-      if (di !== prevDom && di >= 0) { listEl.appendChild(makeDomainHeader(domainLayout?.domainLabels[di] ?? '')); prevDom = di; }
+      if (di !== prevDom && di >= 0) { listEl.appendChild(makeDomainHeader(domainLayout?.domainLabels[di] ?? '')); prevDom = di; prevSub = -1; }
+      const si = domainLayout?.subIndexById.get(node.id) ?? -1;
+      if (si !== prevSub && si >= 0) { listEl.appendChild(makeSubHeader(domainLayout?.subLabels[si] ?? '')); prevSub = si; }
       listEl.appendChild(buildRow(node));
     }
     updateDraftVisibility();
