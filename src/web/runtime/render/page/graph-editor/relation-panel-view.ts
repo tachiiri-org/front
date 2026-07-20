@@ -3,7 +3,9 @@ import { BORDER, TEXT_HIGH, TEXT_MID, TEXT_DIM, SELECT_STRONG, ORPHAN_ID, showTo
 import {
   fetchNodeRelations, apiCreateRelation, apiSetRelationText, apiAddRay, apiRemoveRay, fetchAllNodes, apiCreateNode,
   fetchOrphanRelations, apiDeleteRelation, apiDeleteNode, apiReorderNodeRelations, apiUpdateNode, apiPasteRelations,
+  apiSetRelationLevel,
 } from './api';
+import { getSeriationPositions, getNodeOrder, type OrderMode } from './seriation';
 
 // 関係 (relation) パネル。関係 = テキストとノード参照(チップ)が交互に並ぶ1行（セグメント分割編集）。
 // - テキスト片は普通の <textarea>（IMEはその中で素直に効く・部分装飾の問題が起きない）。
@@ -37,9 +39,65 @@ function splitTokens(body: string): Array<{ t: 'txt'; v: string } | { t: 'men'; 
   return out;
 }
 
+// 関係群を「共有する相手ノード」を重みにした line graph 上の Louvain でサブ分割する。
+// 重みは IDF: グループ内の“ほぼ全関係”に出る相手ノード（例: オーブ）は識別力ゼロ扱いにし、
+// スクエア/オポジション等の識別力ある共有ノードで割れるようにする。
+// coParts: lineId → 相手ノード id 集合（アンカー自身は除く）。
+// 戻り値 = 各クラスタ {rels, repId(代表相手 id)}（分割不能なら1つ）。
+function subClusterRelations(
+  rels: ExplorerRelation[],
+  coParts: Map<string, Set<string>>,
+): Array<{ rels: ExplorerRelation[]; repId: string }> {
+  const n = rels.length;
+  // df: グループ内で各相手ノードが登場する関係数。df=n（全関係に出現）→ idf=0（識別力なし）。
+  const df = new Map<string, number>();
+  for (const r of rels) for (const id of coParts.get(r.lineId)!) df.set(id, (df.get(id) ?? 0) + 1);
+  const idf = (id: string) => Math.log(n / (df.get(id) ?? n));
+  const adj: Array<Map<number, number>> = Array.from({ length: n }, () => new Map());
+  for (let i = 0; i < n; i++) {
+    const si = coParts.get(rels[i].lineId)!;
+    for (let j = i + 1; j < n; j++) {
+      const sj = coParts.get(rels[j].lineId)!;
+      let sh = 0;
+      for (const x of si) if (sj.has(x)) sh += idf(x);
+      if (sh > 1e-9) { adj[i].set(j, sh); adj[j].set(i, sh); }
+    }
+  }
+  const deg = new Float64Array(n); let m2 = 0;
+  for (let i = 0; i < n; i++) { let d = 0; for (const w of adj[i].values()) d += w; deg[i] = d; m2 += d; }
+  const repOf = (rs2: ExplorerRelation[]): string => {
+    // 代表 = クラスタ内での出現数 × idf が最大の相手（オーブのような遍在ノードは idf=0 で除外される）。
+    const score = new Map<string, number>();
+    for (const r of rs2) for (const id of coParts.get(r.lineId)!) score.set(id, (score.get(id) ?? 0) + idf(id));
+    let repId = '', best = -1;
+    for (const [id, s] of score) if (s > best) { best = s; repId = id; }
+    return repId;
+  };
+  if (m2 === 0) return [{ rels, repId: '' }]; // 識別力ある共有がゼロ → 分割しない
+  const comm = new Int32Array(n); for (let i = 0; i < n; i++) comm[i] = i;
+  const sig = new Float64Array(n); for (let i = 0; i < n; i++) sig[i] = deg[i];
+  for (let r = 0; r < 20; r++) {
+    let improved = false;
+    for (let i = 0; i < n; i++) {
+      const ci = comm[i], ki = deg[i];
+      sig[ci] -= ki;
+      const nb = new Map<number, number>(); nb.set(ci, 0);
+      for (const [j, w] of adj[i]) { const cj = comm[j]; nb.set(cj, (nb.get(cj) ?? 0) + w); }
+      let bC = ci, bG = (nb.get(ci) ?? 0) - sig[ci] * ki / m2;
+      for (const [c, kin] of nb) { const g = kin - sig[c] * ki / m2; if (g > bG) { bG = g; bC = c; } }
+      comm[i] = bC; sig[bC] += ki;
+      if (bC !== ci) improved = true;
+    }
+    if (!improved) break;
+  }
+  const groups = new Map<number, ExplorerRelation[]>();
+  comm.forEach((c, i) => { if (!groups.has(c)) groups.set(c, []); groups.get(c)!.push(rels[i]); });
+  return [...groups.values()].map((rs2) => ({ rels: rs2, repId: repOf(rs2) }));
+}
+
 export function createRelationPanelView(
   ctx: GraphEditorContext,
-  opts: { lang: 'en' | 'ja'; initialNodeId?: string | null; onClose?: () => void; leadingHeadEl?: HTMLElement },
+  opts: { lang: 'en' | 'ja'; initialNodeId?: string | null; onClose?: () => void; leadingHeadEl?: HTMLElement; compact?: boolean; autoHeight?: boolean; onNodeLinkClick?: (nodeId: string, label?: string) => void },
 ): PanelView {
   let lang = opts.lang;
   let currentNodeId: string | null = opts.initialNodeId ?? null;
@@ -54,13 +112,28 @@ export function createRelationPanelView(
   // 検索: 最上部の検索行のクエリでいま表示中の関係行を絞る（クライアント側フィルタ・再取得はしない）。
   // 対象1ノードの関係一覧（高々数十件）なので取得済みを filter するだけで足り、サーバ検索は不要。
   let filterQuery = '';
+  let relGroupFilter: { dom: number; sub: number } | null = null; // 検索サジェストで選んだグループ（null=全表示）
   let currentRelations: ExplorerRelation[] = [];
   let currentDraftNodeId: string | null = null; // 追加ドラフト行の対象ノード（orphan 表示中は null）。
+  // ドメイン別分割: 各関係を「相手ノードのドメイン」で束ねる。アンカーノードは単一ドメインに属するので
+  // 自分のドメインでは割れない → 相手のドメイン（別軸）で割る。ハブノードの関係がテーマ別に立ち上がる。
+  // グループの並びは「件数の少ない順→多い順」（膨らんだ塊＝その他的に末尾へ）。相手不明(-1)は常に最後。
+  const relDomain = new Map<string, number>(); // lineId → ドメイン番号(表示順)。相手不明なら -1。
+  let relDomainLabels: string[] = [];
+  let relDomainRepIds: string[] = []; // ドメイン番号 → 代表ノード id（ヘッダのノードリンク用）
+  // 膨らんだドメイングループは、関係同士の共起（相手ノードの共有＝line graph）でサブ分割する。
+  const relSub = new Map<string, number>(); // lineId → サブグループ番号。サブ分割していなければ -1。
+  const subLabelById = new Map<number, string>(); // サブグループ番号 → 代表相手ラベル
+  const subRepIdById = new Map<number, string>(); // サブグループ番号 → 代表相手ノード id（'' = その他）
+  const SUB_THRESHOLD = 10; // この件数以上のドメイングループだけサブ分割する（末端の小グループはそのまま）
+  const SHOW_HEADER_RULE = false; // グループ見出しの区切り線(border-top)を出すか（今は無しバージョンを確認中）
+  const REL_ORDER_MODE: OrderMode = { importance: 'count', intra: 'flow' }; // ノードパネル既定と揃える（分割は不変）
   const canvas = document.createElement('canvas');
   const cctx = canvas.getContext('2d');
 
   const el = document.createElement('div');
-  el.style.cssText = `flex:1;display:flex;flex-direction:column;overflow:hidden;`;
+  // autoHeight: 縦スタック時は内容の高さに合わせて可変（等分しない）。列側(relationColumn)がスクロールを持つ。
+  el.style.cssText = opts.autoHeight ? `display:flex;flex-direction:column;` : `flex:1;display:flex;flex-direction:column;overflow:hidden;`;
 
   // ノードパネルと同じ2行構成: 1行目=操作（言語切替 + ⟳ + リンクなし, 28px）、2行目=パンくず。
   // 各行が自分の border-bottom を持つので行間にも線が入り、ノードパネルと高さ・見た目が揃う。
@@ -69,13 +142,17 @@ export function createRelationPanelView(
   el.appendChild(head);
 
   const bodyEl = document.createElement('div');
-  bodyEl.style.cssText = `flex:1;overflow-y:auto;padding:6px 8px;`;
+  bodyEl.style.cssText = opts.autoHeight ? `padding:6px 8px;` : `flex:1;overflow-y:auto;padding:6px 8px;`;
   el.appendChild(bodyEl);
 
   // ── @メンション ドロップダウン（使い回し） ──────────────────────────────────
   const menu = document.createElement('div');
   menu.style.cssText = `position:fixed;z-index:300;background:hsl(240,14%,9%);border:1px solid ${BORDER};border-radius:6px;max-height:200px;overflow-y:auto;min-width:180px;display:none;box-shadow:0 4px 12px rgba(0,0,0,.4);`;
   document.body.appendChild(menu);
+  // 検索サジェスト用ドロップダウン（グループ一覧）。@メンションとは別要素。
+  const suggestMenu = document.createElement('div');
+  suggestMenu.style.cssText = `position:fixed;z-index:300;background:hsl(240,14%,9%);border:1px solid ${BORDER};border-radius:6px;max-height:320px;overflow-y:auto;min-width:200px;display:none;box-shadow:0 4px 12px rgba(0,0,0,.4);`;
+  document.body.appendChild(suggestMenu);
   let mention: { anchor: HTMLTextAreaElement; onPick: (n: ExplorerNode, createLabel?: string) => Promise<void> } | null = null;
   let mentionSeq = 0;
   // メニュー（@ドロップダウン / チップ検索）共通のキーボード選択。
@@ -160,6 +237,8 @@ export function createRelationPanelView(
       ctx.setActiveRelation({ lineId: relation.lineId, participants: new Set(relation.participants.map((p) => p.id)) });
     }
     updateActiveHighlight();
+    // 右のコンテキストパネルを、この (現在ノード, 選択リレーション) の注釈に切り替える。
+    ctx.setContextTarget?.(currentNodeId, relation.lineId);
   };
   const updateActiveHighlight = () => {
     const activeId = ctx.activeRelation?.lineId ?? null;
@@ -195,7 +274,8 @@ export function createRelationPanelView(
   // 上下カーソルで上下の行へフォーカス移動（ノードパネルと同じ挙動）。draft 行も含めて上下移動する。
   // 行内は複数のテキスト片に分かれるので、セグメント単位ではなく「行」単位で移動する。移動できたら true。
   const focusAdjacentRow = (ta: HTMLTextAreaElement, dir: 'up' | 'down'): boolean => {
-    const rows = Array.from(bodyEl.children) as HTMLElement[];
+    // ドメイン境界ヘッダ（textarea を持たない）は飛ばして、隣の編集行へ移る。
+    const rows = (Array.from(bodyEl.children) as HTMLElement[]).filter((r) => r.querySelector('textarea'));
     const idx = rows.findIndex((r) => r.contains(ta));
     if (idx === -1) return false;
     const target = rows[idx + (dir === 'down' ? 1 : -1)];
@@ -206,7 +286,7 @@ export function createRelationPanelView(
   // 行境界のキャレット送り（⑥）: 隣接行の先頭/末尾テキスト片へキャレットを着地させる。
   // dir='up' → 上の行の最後のテキスト片の末尾、dir='down' → 下の行の先頭テキスト片の文頭。
   const focusRowEdge = (ta: HTMLTextAreaElement, dir: 'up' | 'down'): boolean => {
-    const rows = Array.from(bodyEl.children) as HTMLElement[];
+    const rows = (Array.from(bodyEl.children) as HTMLElement[]).filter((r) => r.querySelector('textarea'));
     const idx = rows.findIndex((r) => r.contains(ta));
     if (idx === -1) return false;
     const target = rows[idx + (dir === 'down' ? 1 : -1)];
@@ -284,7 +364,26 @@ export function createRelationPanelView(
 
     const row = document.createElement('div');
     row.dataset.lineId = relation.lineId;
-    row.style.cssText = `display:flex;align-items:flex-start;padding:2px 0;`;
+    // アウトライン階層: レベル分だけ左インデント（Tab/Shift+Tab で増減）。
+    const initLevel = relation.level ?? 0;
+    row.dataset.level = String(initLevel);
+    row.style.cssText = `display:flex;align-items:flex-start;padding:2px 0;margin-left:${initLevel * 18}px;`;
+    const applyLevel = (lv: number) => { row.dataset.level = String(lv); row.style.marginLeft = `${lv * 18}px`; };
+    // Tab=1つ下げる / Shift+Tab=1つ上げる。下げは「直前の関係行のレベル+1」まで（先頭行は0のまま）。並びは
+    // ノード別なので orphan 表示中や対象ノード未確定のときは不可。レベルはノード別に保存する。
+    const changeLevel = (delta: number) => {
+      if (orphanMode || !currentNodeId) return;
+      const cur = Number(row.dataset.level ?? '0');
+      let next = Math.max(0, cur + delta);
+      if (delta > 0) {
+        const prev = row.previousElementSibling as HTMLElement | null;
+        const prevLevel = prev && prev.dataset.lineId ? Number(prev.dataset.level ?? '0') : -1;
+        next = Math.max(0, Math.min(next, prevLevel + 1));
+      }
+      if (next === cur) return;
+      applyLevel(next);
+      void apiSetRelationLevel(ctx.gId, currentNodeId, relation.lineId, next);
+    };
     const spacer = document.createElement('span');
     spacer.style.cssText = `flex-shrink:0;width:6px;`;
     const bw = document.createElement('span');
@@ -396,7 +495,7 @@ export function createRelationPanelView(
       nodeLink.addEventListener('mousedown', (e) => {
         if (e.button !== 0) return;
         e.preventDefault();
-        ctx.openRelationPanel?.(id, nodeLink.textContent ?? undefined);
+        (opts.onNodeLinkClick ?? ctx.openRelationPanel)?.(id, nodeLink.textContent ?? undefined);
       });
       nodeLink.addEventListener('contextmenu', (e) => {
         e.preventDefault();
@@ -483,6 +582,8 @@ export function createRelationPanelView(
           if (e.key === 'Escape') { closeMenu(); return; }
         }
         if (e.key === 'Escape') { closeMenu(); clearSelection(); return; }
+        // Tab=階層を1つ下げる / Shift+Tab=1つ上げる（フォーカスは移動させない）。
+        if (e.key === 'Tab') { e.preventDefault(); changeLevel(e.shiftKey ? -1 : 1); return; }
         // Ctrl/Cmd+Shift+Backspace で関係(行)そのものを削除。複数選択中は選択行すべて。
         if (e.key === 'Backspace' && (e.ctrlKey || e.metaKey) && e.shiftKey) {
           e.preventDefault();
@@ -695,7 +796,8 @@ export function createRelationPanelView(
   // ノードパネルの draft 行と同じ構成（spacer+四角+入力）。テキストを書いて Enter で作成。
   const makeDraftRow = (nodeId: string): HTMLElement => {
     const row = document.createElement('div');
-    row.style.cssText = `display:flex;align-items:flex-start;padding:2px 0;`;
+    // 新規追加行は下に区切り線を入れて、既存の関係一覧と視覚的に分ける。
+    row.style.cssText = `display:flex;align-items:flex-start;padding:2px 0 5px 0;margin-bottom:3px;border-bottom:1px solid ${BORDER};`;
     const spacer = document.createElement('span'); spacer.style.cssText = `flex-shrink:0;width:6px;`;
     const bw = document.createElement('span'); bw.style.cssText = `flex-shrink:0;display:flex;align-items:center;justify-content:center;width:18px;height:21px;cursor:pointer;`;
     const relationBox = document.createElement('span'); relationBox.style.cssText = `width:7px;height:7px;border-radius:1px;box-sizing:border-box;background:transparent;border:1.5px solid ${TEXT_DIM};`;
@@ -800,18 +902,113 @@ export function createRelationPanelView(
     return text.toLowerCase().includes(q);
   };
 
+  // グループ見出し（ドメイン＋サブを統合。例:「自分 / 牡牛座」「自分 / その他」）。
+  // ドメイン名・サブ名は他のノードリンクと同じ扱い＝クリックでそのノードの関係パネルを開く/更新。
+  const makeGroupHeader = (di: number, si: number): HTMLElement => {
+    const h = document.createElement('div');
+    h.dataset.domainHeader = '1';
+    h.style.cssText = `display:flex;align-items:center;flex-wrap:wrap;gap:0 3px;padding:7px 8px 2px 8px;font-size:10px;font-weight:600;color:${TEXT_MID};${SHOW_HEADER_RULE ? `border-top:1px solid ${BORDER};` : ''}user-select:none;`;
+    const linkSpan = (id: string, text: string): HTMLElement => {
+      const s = document.createElement('span');
+      s.textContent = text || '—';
+      if (id) {
+        s.style.cssText = `cursor:pointer;border-bottom:1px dashed currentColor;`;
+        s.addEventListener('mousedown', (e) => { e.preventDefault(); (opts.onNodeLinkClick ?? ctx.openRelationPanel)?.(id, text); });
+      }
+      return s;
+    };
+    const domId = relDomainRepIds[di] ?? '';
+    h.appendChild(linkSpan(domId, relDomainLabels[di] ?? ''));
+    if (si >= 0) {
+      const subId = subRepIdById.get(si) ?? '';
+      const subLabel = subLabelById.get(si) ?? '';
+      // サブ代表がドメイン代表と同一ノードなら重複表示しない（例「自分 / 自分」→「自分」）。
+      if (subLabel && subId !== domId) {
+        const sep = document.createElement('span'); sep.textContent = '/'; sep.style.opacity = '.5';
+        h.append(sep, linkSpan(subId, subLabel));
+      }
+    }
+    return h;
+  };
+
   // 本体（関係行）だけを描画。検索クエリ変更時は再取得せずこれだけ呼ぶ（head は作り直さない＝入力が保持される）。
   const renderBody = (): void => {
     bodyEl.innerHTML = '';
     relationBoxByRelation.clear();
     selAnchor = null; selCursor = null; // 行を作り直すので複数選択はリセット。
     const q = filterQuery.trim().toLowerCase();
-    if (!orphanMode && currentDraftNodeId && !q) bodyEl.appendChild(makeDraftRow(currentDraftNodeId)); // 検索中は追加ドラフト行を隠す
-    for (const relation of currentRelations) {
-      if (!relationMatchesQuery(relation, q)) continue;
+    if (!orphanMode && currentDraftNodeId && !q && !relGroupFilter) bodyEl.appendChild(makeDraftRow(currentDraftNodeId)); // 検索/グループ絞り込み中は追加ドラフト行を隠す
+    let visible = currentRelations.filter((r) => relationMatchesQuery(r, q));
+    if (relGroupFilter) visible = visible.filter((r) => (relDomain.get(r.lineId) ?? -1) === relGroupFilter!.dom && (relSub.get(r.lineId) ?? -1) === relGroupFilter!.sub);
+    // 相手ドメインが2つ以上に跨る時だけ境界ヘッダを出す（単一ドメインの末端ノードでは出さない＝ノイズ回避）。
+    // ドメインが2つ以上、またはサブ分割がある時だけ見出しを出す（末端の単一ドメインはノイズ回避）。
+    const domsSeen = new Set(visible.map((r) => relDomain.get(r.lineId) ?? -1).filter((d) => d >= 0));
+    const subSeen = visible.some((r) => (relSub.get(r.lineId) ?? -1) >= 0);
+    const showHeaders = !orphanMode && (domsSeen.size >= 2 || subSeen);
+    let prevKey = '';
+    for (const relation of visible) {
+      if (showHeaders) {
+        const di = relDomain.get(relation.lineId) ?? -1;
+        const si = relSub.get(relation.lineId) ?? -1;
+        const key = `${di}:${si}`;
+        if (di >= 0 && key !== prevKey) { bodyEl.appendChild(makeGroupHeader(di, si)); prevKey = key; }
+      }
       bodyEl.appendChild(renderRelationRow(relation));
     }
     updateActiveHighlight();
+  };
+
+  // ── 検索サジェスト（グループ一覧 → クリックで絞り込み。ノードパネルと同じ） ───────────────
+  const hideRelSuggest = () => { suggestMenu.style.display = 'none'; };
+  const buildRelGroups = (): Array<{ dom: number; sub: number; label: string; count: number }> => {
+    const order: string[] = []; const seen = new Set<string>();
+    const count = new Map<string, number>(); const meta = new Map<string, { dom: number; sub: number; label: string }>();
+    for (const r of currentRelations) {
+      const di = relDomain.get(r.lineId) ?? -1;
+      if (di < 0) continue;
+      const si = relSub.get(r.lineId) ?? -1;
+      const key = `${di}:${si}`;
+      count.set(key, (count.get(key) ?? 0) + 1);
+      if (!seen.has(key)) {
+        seen.add(key); order.push(key);
+        const dom = relDomainLabels[di] ?? '';
+        const domId = relDomainRepIds[di] ?? '';
+        const sub = si >= 0 ? (subLabelById.get(si) ?? '') : '';
+        const subId = si >= 0 ? (subRepIdById.get(si) ?? '') : '';
+        meta.set(key, { dom: di, sub: si, label: (sub && subId !== domId) ? `${dom} / ${sub}` : dom });
+      }
+    }
+    return order.map((k) => ({ ...meta.get(k)!, count: count.get(k) ?? 0 }));
+  };
+  const pickRelGroup = (g: { dom: number; sub: number; label: string }, anchor: HTMLInputElement) => {
+    relGroupFilter = { dom: g.dom, sub: g.sub };
+    filterQuery = '';
+    anchor.value = g.label;
+    hideRelSuggest();
+    renderBody();
+    anchor.blur();
+  };
+  const showRelSuggest = (anchor: HTMLInputElement, q: string): void => {
+    const ql = q.trim().toLowerCase();
+    const groups = buildRelGroups().filter((g) => !ql || g.label.toLowerCase().includes(ql));
+    suggestMenu.innerHTML = '';
+    if (!groups.length) { hideRelSuggest(); return; }
+    for (const g of groups) {
+      const item = document.createElement('div');
+      item.style.cssText = `padding:5px 10px;cursor:pointer;font-size:12px;white-space:nowrap;display:flex;justify-content:space-between;gap:14px;color:${TEXT_MID};`;
+      const lab = document.createElement('span'); lab.textContent = g.label;
+      const cnt = document.createElement('span'); cnt.textContent = String(g.count); cnt.style.color = TEXT_DIM;
+      item.append(lab, cnt);
+      item.addEventListener('mouseenter', () => { item.style.background = 'rgba(255,255,255,.08)'; });
+      item.addEventListener('mouseleave', () => { item.style.background = 'transparent'; });
+      item.addEventListener('mousedown', (e) => { e.preventDefault(); pickRelGroup(g, anchor); });
+      suggestMenu.appendChild(item);
+    }
+    const r = anchor.getBoundingClientRect();
+    suggestMenu.style.left = `${r.left}px`;
+    suggestMenu.style.top = `${r.bottom + 2}px`;
+    suggestMenu.style.minWidth = `${Math.max(200, r.width)}px`;
+    suggestMenu.style.display = 'block';
   };
 
   // パンくず末尾（表示中のノード）をクリックでインライン改名。ラベル span を input に差し替え、
@@ -851,11 +1048,18 @@ export function createRelationPanelView(
     bodyEl.innerHTML = '';
     relationBoxByRelation.clear();
     selAnchor = null; selCursor = null; // 行を作り直すので複数選択はリセット。
-    filterQuery = ''; // ノード切替/再読込では検索状態をリセット（新しい関係一覧を全件表示）。
+    filterQuery = ''; relGroupFilter = null; // ノード切替/再読込では検索状態をリセット（新しい関係一覧を全件表示）。
+    // ノードごとに作り直す（orphan では空＝ヘッダ無し）。
+    relDomain.clear(); relDomainLabels = []; relDomainRepIds = []; relSub.clear(); subLabelById.clear(); subRepIdById.clear();
 
-    // ── 0行目: 検索（ノードパネルの検索行と同形・最上部・プレースホルダ文言なし＝虫眼鏡のみ） ──
-    const searchRow = document.createElement('div');
-    searchRow.style.cssText = `display:flex;align-items:center;gap:4px;height:28px;box-sizing:border-box;padding:0 6px;border-bottom:1px solid ${BORDER};`;
+    // ── 検索行（パンくずの下に置く。compact では出さない） ── ノードパネルの検索行と同形（虫眼鏡のみ）。
+    let searchRow: HTMLDivElement | null = null;
+    if (!opts.compact) {
+    searchRow = document.createElement('div');
+    // 関係行と同じ先頭構成（bodyEl の padding-left:8 + spacer:6 + 18px枠）にして、虫眼鏡を行の□と揃える。
+    searchRow.style.cssText = `display:flex;align-items:center;padding:2px 8px 2px 8px;border-bottom:1px solid ${BORDER};`;
+    const searchSpacer = document.createElement('span');
+    searchSpacer.style.cssText = `flex-shrink:0;width:6px;`;
     const searchIconWrap = document.createElement('span');
     searchIconWrap.style.cssText = `flex-shrink:0;display:flex;align-items:center;justify-content:center;width:18px;color:${TEXT_DIM};`;
     // Inline SVG magnifier（ノードパネルと同じ）: color-emoji 非搭載環境で🔍が豆腐化するのを避ける。
@@ -865,59 +1069,34 @@ export function createRelationPanelView(
     searchInput.style.cssText = `flex:1;background:transparent;border:none;outline:none;font-size:13px;font-family:inherit;line-height:1.5;color:${TEXT_HIGH};padding:0 4px;min-height:20px;`;
     let searchTimer: ReturnType<typeof setTimeout> | null = null;
     const applyFilter = (v: string) => { filterQuery = v; renderBody(); };
-    searchInput.addEventListener('input', () => {
+    const si = searchInput;
+    si.addEventListener('focus', () => showRelSuggest(si, si.value));
+    si.addEventListener('blur', () => setTimeout(hideRelSuggest, 150));
+    si.addEventListener('input', () => {
+      relGroupFilter = null;              // 手入力はグループ絞り込みを解除
+      showRelSuggest(si, si.value);       // サジェストを絞り込み
       if (searchTimer) clearTimeout(searchTimer);
-      searchTimer = setTimeout(() => applyFilter(searchInput.value), 200);
+      searchTimer = setTimeout(() => applyFilter(si.value), 200);
     });
-    searchInput.addEventListener('keydown', (e) => {
-      if (e.key === 'Escape') { e.preventDefault(); searchInput.value = ''; if (searchTimer) clearTimeout(searchTimer); applyFilter(''); searchInput.blur(); }
-      else if (e.key === 'Enter') { e.preventDefault(); if (searchTimer) clearTimeout(searchTimer); applyFilter(searchInput.value); }
+    si.addEventListener('keydown', (e) => {
+      if (e.key === 'Escape') { e.preventDefault(); si.value = ''; relGroupFilter = null; hideRelSuggest(); if (searchTimer) clearTimeout(searchTimer); applyFilter(''); si.blur(); }
+      else if (e.key === 'Enter') { e.preventDefault(); hideRelSuggest(); if (searchTimer) clearTimeout(searchTimer); applyFilter(si.value); }
     });
-    searchRow.append(searchIconWrap, searchInput);
+    searchRow.append(searchSpacer, searchIconWrap, searchInput);
     // 並び替え用グリップ（panels-view から渡される）を最上部行の左端に。head は render 毎に作り直される
     // ので、同じ要素をここで毎回先頭へ差し込む（リスナは要素に付いているので保持される）。
     if (opts.leadingHeadEl) searchRow.insertBefore(opts.leadingHeadEl, searchRow.firstChild);
-    head.appendChild(searchRow);
-
-    // ── 1行目: 操作（リンクなし + ⟳ + 言語切替） ── ノードペインヘッダと同じ 28px+下線。
-    // 並び: 左=リンクなし、右寄せで ⟳・JA/EN（ノードパネルと同様に言語切替を右端へ）。
-    const ctrlRow = document.createElement('div');
-    ctrlRow.style.cssText = `display:flex;align-items:center;gap:4px;height:28px;box-sizing:border-box;padding:0 6px;border-bottom:1px solid ${BORDER};`;
-    // 「リンクなし」トグル: 参加ノードを持たない関係の一覧（移行・編集中の受け皿）。左端。
-    const orphanBtn = document.createElement('button');
-    orphanBtn.textContent = 'リンクなし';
-    orphanBtn.title = '参加ノードを持たない関係（リンクなし）を表示';
-    orphanBtn.style.cssText = `flex-shrink:0;background:${orphanMode ? SELECT_STRONG : 'transparent'};border:1px solid ${BORDER};color:${orphanMode ? '#fff' : TEXT_MID};cursor:pointer;font-size:10px;padding:1px 6px;border-radius:3px;`;
-    orphanBtn.addEventListener('click', () => { orphanMode = !orphanMode; void render(); });
-    ctrlRow.appendChild(orphanBtn);
-    // パネル内更新ボタン（ノードパネルの ⟳ と同じ）。関係一覧を再取得する。右寄せの先頭。
-    const reloadBtn = document.createElement('button');
-    reloadBtn.textContent = '⟳';
-    reloadBtn.title = '関係を再読み込み';
-    reloadBtn.style.cssText = `margin-left:auto;background:transparent;border:none;color:${TEXT_DIM};cursor:pointer;font-size:13px;padding:0 2px;line-height:1;flex-shrink:0;`;
-    reloadBtn.addEventListener('click', () => { reloadBtn.style.color = TEXT_HIGH; void render().finally(() => { reloadBtn.style.color = TEXT_DIM; }); });
-    ctrlRow.appendChild(reloadBtn);
-    // 言語切替（ノードパネルのパネル別 JA/EN と同じ）。右端。
-    const langBtn = document.createElement('button');
-    langBtn.textContent = lang.toUpperCase();
-    langBtn.title = lang === 'ja' ? 'この関係パネルの言語: 日本語（クリックでEN）' : 'この関係パネルの言語: 英語（クリックでJA）';
-    langBtn.style.cssText = `background:transparent;border:1px solid ${BORDER};color:${TEXT_MID};cursor:pointer;font-size:10px;padding:1px 4px;border-radius:3px;flex-shrink:0;line-height:1.4;`;
-    langBtn.addEventListener('click', () => { lang = lang === 'ja' ? 'en' : 'ja'; void render(); });
-    ctrlRow.appendChild(langBtn);
-    // ② 右クリックで開いた追加パネルには閉じるボタンを付ける（固定 dock には付かない）。右端。
-    if (opts.onClose) {
-      const closeBtn = document.createElement('button');
-      closeBtn.textContent = '×';
-      closeBtn.title = 'この関係パネルを閉じる';
-      closeBtn.style.cssText = `background:transparent;border:none;color:${TEXT_DIM};cursor:pointer;font-size:14px;padding:0 2px;line-height:1;flex-shrink:0;`;
-      closeBtn.addEventListener('click', () => opts.onClose!());
-      ctrlRow.appendChild(closeBtn);
     }
-    head.appendChild(ctrlRow);
 
-    // ── 2行目: パンくず（ルート › … › 現在ノード） ── アウトラインの bcEl と同じ見た目。
+    // 操作行（リンクなし・言語）は撤去。更新(⟳)はパンくず行へ移設（下記）。パンくずを先に、検索を下に。
+
+    // ── パンくず（ルート › … › 現在ノード）＋ 更新(⟳) ── アウトラインの bcEl と同じ見た目。
     const bcRow = document.createElement('div');
-    bcRow.style.cssText = `display:flex;align-items:center;gap:2px;padding:4px 8px 4px 10px;border-bottom:1px solid ${BORDER};font-size:12px;min-width:0;`;
+    // 先頭を関係行・検索行と同じ構成（padding-left:8 + spacer:6）にして、ノード名を虫眼鏡・□の列に揃える。
+    bcRow.style.cssText = `display:flex;align-items:center;gap:2px;padding:4px 8px 4px 8px;border-bottom:1px solid ${BORDER};font-size:12px;min-width:0;`;
+    const bcSpacer = document.createElement('span');
+    bcSpacer.style.cssText = `flex-shrink:0;width:6px;`;
+    bcRow.appendChild(bcSpacer);
     const title = document.createElement('span');
     title.style.cssText = `flex:1;min-width:0;color:${TEXT_HIGH};font-size:12px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;`;
     if (orphanMode) {
@@ -945,7 +1124,17 @@ export function createRelationPanelView(
       title.textContent = '関係';
     }
     bcRow.appendChild(title);
-    head.appendChild(bcRow);
+    // 更新(⟳)はパンくず行の右端へ（旧・操作行から移設）。compact パネルには出さない。
+    if (!opts.compact) {
+      const reloadBtn = document.createElement('button');
+      reloadBtn.textContent = '⟳';
+      reloadBtn.title = '関係を再読み込み';
+      reloadBtn.style.cssText = `flex-shrink:0;background:transparent;border:none;color:${TEXT_DIM};cursor:pointer;font-size:13px;padding:0 2px;line-height:1;`;
+      reloadBtn.addEventListener('click', () => { reloadBtn.style.color = TEXT_HIGH; void render().finally(() => { reloadBtn.style.color = TEXT_DIM; }); });
+      bcRow.appendChild(reloadBtn);
+    }
+    head.appendChild(bcRow);            // パンくずが上
+    if (searchRow) head.appendChild(searchRow); // 検索はパンくずの下
 
     if (orphanMode) {
       const relations = await fetchOrphanRelations(ctx.gId);
@@ -959,7 +1148,87 @@ export function createRelationPanelView(
     const nodeId = currentNodeId;
     const relations = await fetchNodeRelations(ctx.gId, nodeId);
     if (token !== renderToken) return;
-    currentRelations = relations; currentDraftNodeId = nodeId; // 追加ドラフト行はこのノード宛て
+    // 並びのベース（自動）: ①相手ノードのドメインで束ね、②グループは件数の少ない順→多い順、
+    // ③膨らんだグループ(≥SUB_THRESHOLD)は関係同士の共起でサブ分割、④最内は近さ順(seriation)。
+    // 代表相手 = seriation 位置が最小の相手ノード。そのドメインをこの関係のドメインにする（別軸）。
+    // 手動並べ替えは長期でズレるので基準にしない（自動のみ）。
+    const pos = await getSeriationPositions(ctx.gId);
+    if (token !== renderToken) return;
+    const ord = await getNodeOrder(ctx.gId, REL_ORDER_MODE);
+    if (token !== renderToken) return;
+    relDomainLabels = ord.domainLabels;
+    relDomainRepIds = ord.domainRepIds;
+
+    // 相手ノードの id 集合（アンカー除く）とラベル、代表相手の seriation 位置を用意。
+    const labelById = new Map<string, string>();
+    const coParts = new Map<string, Set<string>>();
+    const repPos = new Map<string, number>();
+    for (const r of relations) {
+      const set = new Set<string>();
+      let best = Number.POSITIVE_INFINITY;
+      for (const p of r.participants) {
+        if (!labelById.has(p.id)) labelById.set(p.id, labelOf(p, lang));
+        if (p.id === nodeId) continue;
+        set.add(p.id);
+        const pp = pos.get(p.id);
+        if (pp != null && pp < best) best = pp;
+      }
+      coParts.set(r.lineId, set);
+      repPos.set(r.lineId, best);
+      // ドメイン = 代表相手（seriation 最小）のドメイン。相手不明なら -1。
+      let dom = -1;
+      let bestPp = Number.POSITIVE_INFINITY;
+      for (const id of set) { const pp = pos.get(id); if (pp != null && pp < bestPp) { bestPp = pp; dom = ord.domainIndexById.get(id) ?? -1; } }
+      relDomain.set(r.lineId, dom);
+    }
+
+    // ドメインごとに束ね、グループは件数の少ない順。相手不明(-1)は常に最後。
+    const byDom = new Map<number, ExplorerRelation[]>();
+    for (const r of relations) { const d = relDomain.get(r.lineId)!; if (!byDom.has(d)) byDom.set(d, []); byDom.get(d)!.push(r); }
+    const domOrder = [...byDom.keys()].sort((a, b) => {
+      if (a < 0) return 1; if (b < 0) return -1;
+      return byDom.get(a)!.length - byDom.get(b)!.length || a - b;
+    });
+
+    const byPos = (x: ExplorerRelation, y: ExplorerRelation) => (repPos.get(x.lineId) ?? Infinity) - (repPos.get(y.lineId) ?? Infinity);
+    const ordered: ExplorerRelation[] = [];
+    let subSeq = 0;
+    for (const d of domOrder) {
+      const rs = byDom.get(d)!;
+      // サブ分割: 膨らんだドメインのみ。再帰的に SUB_THRESHOLD 未満まで割る（各段で idf を再計算するので、
+      // 上位で代表だったノードは下位では遍在扱いになり、次の識別軸で割れる）。深さ上限3で暴走防止。
+      const clusters: Array<{ rels: ExplorerRelation[]; label: string; repId: string }> = [];
+      const leaves: Array<{ rels: ExplorerRelation[]; repId: string }> = [];
+      const recurse = (part: { rels: ExplorerRelation[]; repId: string }, depth: number): void => {
+        if (part.rels.length < SUB_THRESHOLD || depth >= 3) { leaves.push(part); return; }
+        const sub = subClusterRelations(part.rels, coParts);
+        if (sub.length < 2) { leaves.push(part); return; }
+        for (const s of sub) recurse(s, depth + 1);
+      };
+      if (d >= 0 && rs.length >= SUB_THRESHOLD) {
+        const top = subClusterRelations(rs, coParts);
+        if (top.length >= 2) for (const t of top) recurse(t, 1);
+        else leaves.push({ rels: rs, repId: '' });
+      } else leaves.push({ rels: rs, repId: '' });
+      // 葉クラスタ: size≥2 は代表相手（id+ラベル）、余った単発はまとめて「その他」。
+      if (leaves.length >= 2) {
+        const singles: ExplorerRelation[] = [];
+        for (const c of leaves) {
+          if (c.rels.length >= 2) clusters.push({ rels: c.rels, label: labelById.get(c.repId) ?? '', repId: c.repId });
+          else singles.push(...c.rels);
+        }
+        if (singles.length) clusters.push({ rels: singles, label: 'その他', repId: '' });
+      } else clusters.push({ rels: rs, label: '', repId: '' });
+      clusters.sort((x, y) => x.rels.length - y.rels.length); // サブも少ない順
+      const showSub = clusters.length >= 2;
+      for (const cl of clusters) {
+        cl.rels.sort(byPos);
+        const sid = subSeq++;
+        if (showSub) { subLabelById.set(sid, cl.label); subRepIdById.set(sid, cl.repId); }
+        for (const r of cl.rels) { relSub.set(r.lineId, showSub ? sid : -1); ordered.push(r); }
+      }
+    }
+    currentRelations = ordered; currentDraftNodeId = nodeId; // 追加ドラフト行はこのノード宛て
     renderBody();
   };
 
@@ -1043,6 +1312,6 @@ export function createRelationPanelView(
     acceptKeyMove: async () => { /* 関係列はノード移動先になれない */ },
     getEffectiveParentId: () => null,
     getNodeParentId: () => undefined,
-    unregister: () => { ctx.refreshRelations.delete(refresh); menu.remove(); },
+    unregister: () => { ctx.refreshRelations.delete(refresh); menu.remove(); suggestMenu.remove(); },
   };
 }

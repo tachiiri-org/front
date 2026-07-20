@@ -2,7 +2,13 @@ export type ExplorerNode = { id: string; en?: string; ja?: string; color?: strin
 
 // 関係 line: テキスト本文(body, 言語ごと)と順序付き参加者(participants, 先頭=主語)を持つ n 項エッジ。
 // 構造ツリーの枝(テキスト無しの line)とは別物で、各参加ノードの「関係」一覧として現れる。
-export type ExplorerRelation = { lineId: string; body: Record<string, string>; participants: ExplorerNode[] };
+// level = リレーションパネルでのアウトライン階層（インデント深さ, 0=トップ, ノード別）。h2/h3 の意味付けは
+// せず単なる親子。省略時は 0。
+export type ExplorerRelation = { lineId: string; body: Record<string, string>; participants: ExplorerNode[]; level?: number };
+
+// コンテキスト = (node, relation) に添える非規範テキスト注釈のブロック（言語別本文）。定義(line)は
+// 共有・単一だが、注釈はどのノードから見ているかで別物。バックエンド /node/:id/line/:lineId/context に対応。
+export type ContextBlock = { blockId: string; body: Record<string, string> };
 
 // Cross-pane drag state for the multi-pane (パネル) view. Each pane is an independent
 // outliner instance with its own closure scope, so the source pane records the dragged
@@ -117,4 +123,9 @@ export interface GraphEditorContext {
   // relation panel (its relations) and any node panel sourced from 「選択中」(its children). Called
   // by left-clicking a relation node-link chip and on node-row focus.
   selectNode?: (nodeId: string, label?: string) => void;
+  // Registered by the context panel. Sets which (node, relation) の注釈 the right-hand context panel
+  // shows. The relation panel calls it when a relation is selected (nodeId = that panel's node, lineId
+  // = the selected relation), and with (null, null) to clear (e.g. a node is (re)selected and no
+  // relation is active). Context is keyed by the (node, line) composite.
+  setContextTarget?: (nodeId: string | null, lineId: string | null) => void;
 }

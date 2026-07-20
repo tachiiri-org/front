@@ -1,4 +1,4 @@
-import type { ExplorerNode, ExplorerRelation } from './types';
+import type { ContextBlock, ExplorerNode, ExplorerRelation } from './types';
 
 // ── Client-side request gate ──────────────────────────────────────────────
 // The graph runs on a single-threaded per-tenant Durable Object behind a 120-reads/60s rate
@@ -190,6 +190,14 @@ export async function apiUnlinkNode(graphId: string, nodeId: string, targetNodeI
 // A relation line is an n-ary edge that carries free-text prose (body) connecting its participant
 // nodes (ordered; head = subject). See backend p_line_body / h_ray.
 
+// グラフ全体（全ノード＋全リレーション）を1レスポンスで。近さ計算(seriation)の共起行列に使う。
+export async function fetchGraphExport(graphId: string): Promise<{ nodes: ExplorerNode[]; relations: ExplorerRelation[] }> {
+  const r = await apiFetch(`/api/v1/graph/${graphId}/export`);
+  if (!r.ok) return { nodes: [], relations: [] };
+  const data = await r.json() as { nodes?: ExplorerNode[]; relations?: ExplorerRelation[] };
+  return { nodes: data.nodes ?? [], relations: data.relations ?? [] };
+}
+
 // ノードが参加している関係 line 一覧（本文＋順序付き参加者）。ツリー枝は含まれない。
 export async function fetchNodeRelations(graphId: string, nodeId: string): Promise<ExplorerRelation[]> {
   const r = await apiFetch(`/api/v1/graph/${graphId}/node/${nodeId}/lines`);
@@ -274,6 +282,15 @@ export async function apiReorderRay(graphId: string, lineId: string, order: stri
   });
 }
 
+// 関係(line)行のアウトライン階層（インデント深さ）をノード別に保存。
+export async function apiSetRelationLevel(graphId: string, nodeId: string, lineId: string, level: number): Promise<void> {
+  await apiFetch(`/api/v1/graph/${graphId}/node/${nodeId}/line/${lineId}/level`, {
+    method: 'PATCH',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ level }),
+  });
+}
+
 // ノードの関係(line)行の並び順を明示配列で保存（h_node_relation チェーンを貼り直す）。
 export async function apiReorderNodeRelations(graphId: string, nodeId: string, order: string[]): Promise<void> {
   await apiFetch(`/api/v1/graph/${graphId}/node/${nodeId}/lines/order`, {
@@ -294,4 +311,55 @@ export async function fetchOrphanRelations(graphId: string): Promise<ExplorerRel
 // 関係(line)を丸ごと削除（チップ削除とは別の、関係そのものの削除）。
 export async function apiDeleteRelation(graphId: string, lineId: string): Promise<void> {
   await apiFetch(`/api/v1/graph/${graphId}/line/${lineId}`, { method: 'DELETE' });
+}
+
+// ── コンテキスト ((node, relation) の注釈) ───────────────────────────────────
+// (node, line) の複合キーに紐づく非規範テキストブロックの順序付きリスト。バックエンド
+// /node/:id/line/:lineId/context 系に対応。定義(line)は共有・単一だが注釈はノード別。
+
+// (node, line) のコンテキスト（テキストブロック列）を取得。
+export async function fetchLineContext(graphId: string, nodeId: string, lineId: string): Promise<ContextBlock[]> {
+  const r = await apiFetch(`/api/v1/graph/${graphId}/node/${nodeId}/line/${lineId}/context`);
+  if (!r.ok) return [];
+  const data = await r.json() as { blocks: ContextBlock[] };
+  return data.blocks ?? [];
+}
+
+// テキストブロックを末尾に追加。返りは更新後のブロック列。
+export async function apiCreateContextBlock(
+  graphId: string, nodeId: string, lineId: string, lang: 'en' | 'ja', body = '',
+): Promise<{ blockId: string; blocks: ContextBlock[] } | null> {
+  const r = await apiFetch(`/api/v1/graph/${graphId}/node/${nodeId}/line/${lineId}/block`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ lang, body }),
+  });
+  if (!r.ok) return null;
+  return r.json() as Promise<{ blockId: string; blocks: ContextBlock[] }>;
+}
+
+// テキストブロックの本文を言語ごとに設定。
+export async function apiSetBlockText(graphId: string, blockId: string, lang: 'en' | 'ja', body: string): Promise<void> {
+  await apiFetch(`/api/v1/graph/${graphId}/block/${blockId}/text`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ lang, body }),
+  });
+}
+
+// (node, line) のブロック並び順を明示配列で保存。返りは更新後。
+export async function apiReorderContextBlocks(graphId: string, nodeId: string, lineId: string, order: string[]): Promise<ContextBlock[]> {
+  const r = await apiFetch(`/api/v1/graph/${graphId}/node/${nodeId}/line/${lineId}/blocks/order`, {
+    method: 'PATCH',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ order }),
+  });
+  if (!r.ok) return [];
+  const data = await r.json() as { blocks: ContextBlock[] };
+  return data.blocks ?? [];
+}
+
+// テキストブロックを削除。
+export async function apiDeleteBlock(graphId: string, blockId: string): Promise<void> {
+  await apiFetch(`/api/v1/graph/${graphId}/block/${blockId}`, { method: 'DELETE' });
 }
