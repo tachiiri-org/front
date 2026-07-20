@@ -912,11 +912,16 @@ export function createRelationPanelView(
       }
       return s;
     };
-    h.appendChild(linkSpan(relDomainRepIds[di] ?? '', relDomainLabels[di] ?? ''));
+    const domId = relDomainRepIds[di] ?? '';
+    h.appendChild(linkSpan(domId, relDomainLabels[di] ?? ''));
     if (si >= 0) {
-      const sep = document.createElement('span'); sep.textContent = '>'; sep.style.opacity = '.5';
-      h.appendChild(sep);
-      h.appendChild(linkSpan(subRepIdById.get(si) ?? '', subLabelById.get(si) ?? ''));
+      const subId = subRepIdById.get(si) ?? '';
+      const subLabel = subLabelById.get(si) ?? '';
+      // サブ代表がドメイン代表と同一ノードなら重複表示しない（例「自分 / 自分」→「自分」）。
+      if (subLabel && subId !== domId) {
+        const sep = document.createElement('span'); sep.textContent = '/'; sep.style.opacity = '.5';
+        h.append(sep, linkSpan(subId, subLabel));
+      }
     }
     return h;
   };

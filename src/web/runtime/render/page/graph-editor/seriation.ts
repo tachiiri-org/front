@@ -190,8 +190,8 @@ export type OrderMode = { importance: 'count' | 'evc'; intra: 'flow' | 'fiedler'
 // rank: id→表示順。domainIndexById: id→ドメイン番号(表示順)。domainLabels[i]: ドメイン i の代表概念ラベル。
 // domainRepIds[i]: ドメイン i の代表概念ノード id（ヘッダのノードリンク用。孤立グループは ''）。
 // subIndexById: id→サブグループ番号（ドメイン内の再帰分割。分割なしなら未設定＝ヘッダ無し）。subLabels[i]: サブ i の代表ラベル。
-export type NodeOrder = { rank: Map<string, number>; domainIndexById: Map<string, number>; domainLabels: string[]; domainRepIds: string[]; subIndexById: Map<string, number>; subLabels: string[] };
-const emptyOrder = (): NodeOrder => ({ rank: new Map(), domainIndexById: new Map(), domainLabels: [], domainRepIds: [], subIndexById: new Map(), subLabels: [] });
+export type NodeOrder = { rank: Map<string, number>; domainIndexById: Map<string, number>; domainLabels: string[]; domainRepIds: string[]; subIndexById: Map<string, number>; subLabels: string[]; subRepIds: string[] };
+const emptyOrder = (): NodeOrder => ({ rank: new Map(), domainIndexById: new Map(), domainLabels: [], domainRepIds: [], subIndexById: new Map(), subLabels: [], subRepIds: [] });
 const orderCache = new Map<string, Promise<NodeOrder>>();
 export function getNodeOrder(graphId: string, mode: OrderMode): Promise<NodeOrder> {
   const key = `${graphId}|${mode.importance}|${mode.intra}`;
@@ -230,6 +230,7 @@ async function computeOrder(graphId: string, mode: OrderMode): Promise<NodeOrder
   const domainRepIds: string[] = [];
   const subIndexById = new Map<string, number>();
   const subLabels: string[] = [];
+  const subRepIds: string[] = [];
   const sumImp = (S: number[]) => S.reduce((t, g) => t + imp[g], 0);
   let subSeq = 0;
   scored.forEach(({ D }, di) => {
@@ -244,6 +245,7 @@ async function computeOrder(graphId: string, mode: OrderMode): Promise<NodeOrder
         const sRep = S.reduce((b, g) => (imp[g] > imp[b] ? g : b), S[0]);
         const si = subSeq++;
         subLabels[si] = a.labels[sRep] ?? '';
+        subRepIds[si] = a.ids[sRep] ?? '';
         for (const g of S) subIndexById.set(a.ids[g], si);
         order.push(...intraOrder(S));
       }
@@ -262,5 +264,5 @@ async function computeOrder(graphId: string, mode: OrderMode): Promise<NodeOrder
   }
   const rank = new Map<string, number>();
   order.forEach((g, r) => rank.set(a.ids[g], r));
-  return { rank, domainIndexById, domainLabels, domainRepIds, subIndexById, subLabels };
+  return { rank, domainIndexById, domainLabels, domainRepIds, subIndexById, subLabels, subRepIds };
 }

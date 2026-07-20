@@ -251,14 +251,30 @@ export function createNodePanelView(ctx: GraphEditorContext, nodePanelOpts?: Nod
   };
 
   // ドメイン境界の見出し（代表概念ラベル）。どこでドメインが切り替わるか UI で分かるように。
-  // ドメイン＋サブを統合した見出し（例「占星術 > 惑星」）。区切り線なし。リレーションパネルと同形。
+  // ドメイン＋サブを統合した見出し（例「占星術 / 惑星」）。区切り線なし・上下等間隔。
+  // ドメイン名・サブ名はノードリンクと同じ扱い＝クリックでそのノードの関係パネルを開く/更新。
   const makeGroupHeader = (di: number, si: number): HTMLElement => {
     const h = document.createElement('div');
     h.dataset.domainHeader = '1';
-    h.style.cssText = `padding:8px 8px 2px 8px;font-size:10px;font-weight:600;color:${TEXT_MID};user-select:none;`;
-    const dom = domainLayout?.domainLabels[di] ?? '';
-    const sub = si >= 0 ? (domainLayout?.subLabels[si] ?? '') : '';
-    h.textContent = sub ? `${dom || '—'} > ${sub}` : (dom || '—');
+    h.style.cssText = `display:flex;align-items:center;flex-wrap:wrap;gap:0 3px;padding:4px 8px;font-size:10px;font-weight:600;color:${TEXT_MID};user-select:none;`;
+    const linkSpan = (id: string, text: string): HTMLElement => {
+      const s = document.createElement('span');
+      s.textContent = text || '—';
+      if (id) {
+        s.style.cssText = `cursor:pointer;border-bottom:1px dashed currentColor;`;
+        s.addEventListener('mousedown', (e) => { e.preventDefault(); ctx.openRelationPanel?.(id, text); });
+      }
+      return s;
+    };
+    const domId = domainLayout?.domainRepIds[di] ?? '';
+    h.appendChild(linkSpan(domId, domainLayout?.domainLabels[di] ?? ''));
+    // サブ代表がドメイン代表と同一ノードなら重複表示しない（例「開発環境 / 開発環境」→「開発環境」）。
+    const subId = si >= 0 ? (domainLayout?.subRepIds[si] ?? '') : '';
+    const subLabel = si >= 0 ? (domainLayout?.subLabels[si] ?? '') : '';
+    if (subLabel && subId !== domId) {
+      const sep = document.createElement('span'); sep.textContent = '/'; sep.style.opacity = '.5';
+      h.append(sep, linkSpan(subId, subLabel));
+    }
     return h;
   };
   const render = () => {
@@ -302,8 +318,10 @@ export function createNodePanelView(ctx: GraphEditorContext, nodePanelOpts?: Nod
       if (!seen.has(key)) {
         seen.add(key); order.push(key);
         const dom = domainLayout.domainLabels[di] ?? '';
+        const domId = domainLayout.domainRepIds[di] ?? '';
         const sub = si >= 0 ? (domainLayout.subLabels[si] ?? '') : '';
-        meta.set(key, { di, si, label: sub ? `${dom} > ${sub}` : dom });
+        const subId = si >= 0 ? (domainLayout.subRepIds[si] ?? '') : '';
+        meta.set(key, { di, si, label: (sub && subId !== domId) ? `${dom} / ${sub}` : dom });
       }
     }
     return order.map((k) => ({ ...meta.get(k)!, count: count.get(k) ?? 0 }));
