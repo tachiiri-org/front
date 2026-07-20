@@ -914,7 +914,7 @@ export function createRelationPanelView(
     };
     h.appendChild(linkSpan(relDomainRepIds[di] ?? '', relDomainLabels[di] ?? ''));
     if (si >= 0) {
-      const sep = document.createElement('span'); sep.textContent = '/'; sep.style.opacity = '.5';
+      const sep = document.createElement('span'); sep.textContent = '>'; sep.style.opacity = '.5';
       h.appendChild(sep);
       h.appendChild(linkSpan(subRepIdById.get(si) ?? '', subLabelById.get(si) ?? ''));
     }

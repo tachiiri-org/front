@@ -71,13 +71,23 @@ export function createNodePanelView(ctx: GraphEditorContext, nodePanelOpts?: Nod
   searchInput.style.cssText = `flex:1;background:transparent;border:none;outline:none;font-size:14px;font-family:inherit;line-height:1.5;color:${TEXT_HIGH};padding:0 4px;min-height:20px;`;
   let searchTimer: ReturnType<typeof setTimeout> | null = null;
   const runSearch = (q: string) => { searchActive = q.trim().length > 0; void search(q.trim()); };
+  // 検索メニュー: フォーカスでドメイン>サブのグループ一覧をサジェスト。選ぶとそのグループだけに絞る。
+  let groupFilter: { di: number; si: number } | null = null; // 選択中のグループ（null=全表示）
+  const suggestMenu = document.createElement('div');
+  suggestMenu.style.cssText = `position:fixed;z-index:300;background:hsl(240,14%,9%);border:1px solid ${BORDER};border-radius:6px;max-height:320px;overflow-y:auto;min-width:200px;display:none;box-shadow:0 4px 12px rgba(0,0,0,.4);`;
+  document.body.appendChild(suggestMenu);
+  const hideSuggest = () => { suggestMenu.style.display = 'none'; };
+  searchInput.addEventListener('focus', () => showSuggest(searchInput.value));
+  searchInput.addEventListener('blur', () => setTimeout(hideSuggest, 150));
   searchInput.addEventListener('input', () => {
+    groupFilter = null;               // 手入力はグループフィルタを解除
+    showSuggest(searchInput.value);   // サジェストを絞り込み
     if (searchTimer) clearTimeout(searchTimer);
     searchTimer = setTimeout(() => runSearch(searchInput.value), 200);
   });
   searchInput.addEventListener('keydown', (e) => {
-    if (e.key === 'Escape') { e.preventDefault(); searchInput.value = ''; if (searchTimer) clearTimeout(searchTimer); runSearch(''); searchInput.blur(); }
-    else if (e.key === 'Enter') { e.preventDefault(); if (searchTimer) clearTimeout(searchTimer); runSearch(searchInput.value); }
+    if (e.key === 'Escape') { e.preventDefault(); searchInput.value = ''; groupFilter = null; hideSuggest(); if (searchTimer) clearTimeout(searchTimer); runSearch(''); searchInput.blur(); }
+    else if (e.key === 'Enter') { e.preventDefault(); hideSuggest(); if (searchTimer) clearTimeout(searchTimer); runSearch(searchInput.value); }
   });
   searchRow.append(searchIconWrap, searchInput);
   el.appendChild(searchRow);
@@ -141,6 +151,8 @@ export function createNodePanelView(ctx: GraphEditorContext, nodePanelOpts?: Nod
 
   // The displayed nodes, in order. One row per node (flat).
   let nodes: ExplorerNode[] = [];
+  let orderedAll: ExplorerNode[] = []; // 直近 load の全ノード（サジェスト・グループフィルタの母集合）
+  let fullLoaded = false;              // 現在 nodes が全件（＝サーバ検索中でない）か
   const nodeById = new Map<string, ExplorerNode>();
   // node id → row element.
   const rowMap = new Map<string, HTMLElement>();
@@ -239,30 +251,26 @@ export function createNodePanelView(ctx: GraphEditorContext, nodePanelOpts?: Nod
   };
 
   // ドメイン境界の見出し（代表概念ラベル）。どこでドメインが切り替わるか UI で分かるように。
-  const makeDomainHeader = (text: string): HTMLElement => {
+  // ドメイン＋サブを統合した見出し（例「占星術 > 惑星」）。区切り線なし。リレーションパネルと同形。
+  const makeGroupHeader = (di: number, si: number): HTMLElement => {
     const h = document.createElement('div');
     h.dataset.domainHeader = '1';
-    h.style.cssText = `padding:8px 8px 2px 8px;font-size:10px;font-weight:600;color:${TEXT_MID};border-top:1px solid ${BORDER};user-select:none;`;
-    h.textContent = text || '—';
-    return h;
-  };
-  // ドメイン内の再帰サブグループ見出し（ドメイン見出しより控えめ・インデント）。リレーションパネルと同じロジック。
-  const makeSubHeader = (text: string): HTMLElement => {
-    const h = document.createElement('div');
-    h.dataset.subHeader = '1';
-    h.style.cssText = `padding:3px 8px 1px 22px;font-size:10px;color:${TEXT_DIM};user-select:none;`;
-    h.textContent = text ? `· ${text}` : '·';
+    h.style.cssText = `padding:8px 8px 2px 8px;font-size:10px;font-weight:600;color:${TEXT_MID};user-select:none;`;
+    const dom = domainLayout?.domainLabels[di] ?? '';
+    const sub = si >= 0 ? (domainLayout?.subLabels[si] ?? '') : '';
+    h.textContent = sub ? `${dom || '—'} > ${sub}` : (dom || '—');
     return h;
   };
   const render = () => {
     rowMap.clear();
     listEl.innerHTML = '';
-    let prevDom = -1, prevSub = -1;
+    let prevKey = '';
     for (const node of nodes) {
       const di = domainLayout?.domainIndexById.get(node.id) ?? -1;
-      if (di !== prevDom && di >= 0) { listEl.appendChild(makeDomainHeader(domainLayout?.domainLabels[di] ?? '')); prevDom = di; prevSub = -1; }
       const si = domainLayout?.subIndexById.get(node.id) ?? -1;
-      if (si !== prevSub && si >= 0) { listEl.appendChild(makeSubHeader(domainLayout?.subLabels[si] ?? '')); prevSub = si; }
+      if (groupFilter && (groupFilter.di !== di || groupFilter.si !== si)) continue; // グループ絞り込み
+      const key = `${di}:${si}`;
+      if (di >= 0 && key !== prevKey) { listEl.appendChild(makeGroupHeader(di, si)); prevKey = key; }
       listEl.appendChild(buildRow(node));
     }
     updateDraftVisibility();
@@ -277,6 +285,60 @@ export function createNodePanelView(ctx: GraphEditorContext, nodePanelOpts?: Nod
     for (const n of nodes) nodeById.set(n.id, n);
     render();
   };
+
+  // 検索サジェスト用: 全ノードから (ドメイン, サブ) グループを表示順に列挙（件数付き）。
+  const buildGroups = (): Array<{ di: number; si: number; label: string; count: number }> => {
+    if (!domainLayout) return [];
+    const order: string[] = [];
+    const seen = new Set<string>();
+    const count = new Map<string, number>();
+    const meta = new Map<string, { di: number; si: number; label: string }>();
+    for (const n of orderedAll) {
+      const di = domainLayout.domainIndexById.get(n.id) ?? -1;
+      if (di < 0) continue;
+      const si = domainLayout.subIndexById.get(n.id) ?? -1;
+      const key = `${di}:${si}`;
+      count.set(key, (count.get(key) ?? 0) + 1);
+      if (!seen.has(key)) {
+        seen.add(key); order.push(key);
+        const dom = domainLayout.domainLabels[di] ?? '';
+        const sub = si >= 0 ? (domainLayout.subLabels[si] ?? '') : '';
+        meta.set(key, { di, si, label: sub ? `${dom} > ${sub}` : dom });
+      }
+    }
+    return order.map((k) => ({ ...meta.get(k)!, count: count.get(k) ?? 0 }));
+  };
+  // 選択したグループだけに絞る。サーバ検索表示中なら全件を読み直してから絞る。
+  const pickGroup = async (g: { di: number; si: number; label: string }) => {
+    groupFilter = { di: g.di, si: g.si };
+    searchInput.value = g.label;
+    searchActive = true;
+    hideSuggest();
+    if (!fullLoaded) await load(); else render();
+    searchInput.blur();
+  };
+  function showSuggest(q: string): void {
+    const ql = q.trim().toLowerCase();
+    const groups = buildGroups().filter((g) => !ql || g.label.toLowerCase().includes(ql));
+    suggestMenu.innerHTML = '';
+    if (!groups.length) { hideSuggest(); return; }
+    for (const g of groups) {
+      const item = document.createElement('div');
+      item.style.cssText = `padding:5px 10px;cursor:pointer;font-size:12px;white-space:nowrap;display:flex;justify-content:space-between;gap:14px;color:${TEXT_MID};`;
+      const lab = document.createElement('span'); lab.textContent = g.label;
+      const cnt = document.createElement('span'); cnt.textContent = String(g.count); cnt.style.color = TEXT_DIM;
+      item.append(lab, cnt);
+      item.addEventListener('mouseenter', () => { item.style.background = 'rgba(255,255,255,.08)'; });
+      item.addEventListener('mouseleave', () => { item.style.background = 'transparent'; });
+      item.addEventListener('mousedown', (e) => { e.preventDefault(); void pickGroup(g); });
+      suggestMenu.appendChild(item);
+    }
+    const r = searchInput.getBoundingClientRect();
+    suggestMenu.style.left = `${r.left}px`;
+    suggestMenu.style.top = `${r.bottom + 2}px`;
+    suggestMenu.style.minWidth = `${Math.max(200, r.width)}px`;
+    suggestMenu.style.display = 'block';
+  }
 
   // Canvas-based text width measurement — called after render to auto-size the pane width.
   const scheduleWidthUpdate = () => {
@@ -660,11 +722,13 @@ export function createNodePanelView(ctx: GraphEditorContext, nodePanelOpts?: Nod
     const ord = await getNodeOrder(ctx.gId, orderMode);
     domainLayout = ord;
     all.sort((a, b) => (ord.rank.get(a.id) ?? 1e9) - (ord.rank.get(b.id) ?? 1e9));
+    orderedAll = all.slice(); fullLoaded = true; // サジェスト・グループフィルタの母集合
     applyRoots(all);
   };
 
   const search = async (query: string) => {
     if (!query) { await load(); return; }
+    fullLoaded = false; // サーバ検索の部分集合を表示中
     const lang = ctx.state.showFallback ? undefined : nodePanelLang;
     const { nodes: found } = await fetchAllNodes(ctx.gId, [], 0, lang, undefined, query, 2000);
     const ord = await getNodeOrder(ctx.gId, orderMode);
@@ -728,6 +792,7 @@ export function createNodePanelView(ctx: GraphEditorContext, nodePanelOpts?: Nod
   const unregister = () => {
     ctx.relationRerender.delete(rerenderAllNodeBoxes);
     ctx.nodeRenamed.delete(applyExternalRename);
+    suggestMenu.remove();
   };
 
   return {
