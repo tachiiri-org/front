@@ -791,7 +791,8 @@ export function createRelationPanelView(
   // ノードパネルの draft 行と同じ構成（spacer+四角+入力）。テキストを書いて Enter で作成。
   const makeDraftRow = (nodeId: string): HTMLElement => {
     const row = document.createElement('div');
-    row.style.cssText = `display:flex;align-items:flex-start;padding:2px 0;`;
+    // 新規追加行は下に区切り線を入れて、既存の関係一覧と視覚的に分ける。
+    row.style.cssText = `display:flex;align-items:flex-start;padding:2px 0 5px 0;margin-bottom:3px;border-bottom:1px solid ${BORDER};`;
     const spacer = document.createElement('span'); spacer.style.cssText = `flex-shrink:0;width:6px;`;
     const bw = document.createElement('span'); bw.style.cssText = `flex-shrink:0;display:flex;align-items:center;justify-content:center;width:18px;height:21px;cursor:pointer;`;
     const relationBox = document.createElement('span'); relationBox.style.cssText = `width:7px;height:7px;border-radius:1px;box-sizing:border-box;background:transparent;border:1.5px solid ${TEXT_DIM};`;
@@ -1022,7 +1023,11 @@ export function createRelationPanelView(
 
     // ── パンくず（ルート › … › 現在ノード）＋ 更新(⟳) ── アウトラインの bcEl と同じ見た目。
     const bcRow = document.createElement('div');
-    bcRow.style.cssText = `display:flex;align-items:center;gap:2px;padding:4px 8px 4px 10px;border-bottom:1px solid ${BORDER};font-size:12px;min-width:0;`;
+    // 先頭を関係行・検索行と同じ構成（padding-left:8 + spacer:6）にして、ノード名を虫眼鏡・□の列に揃える。
+    bcRow.style.cssText = `display:flex;align-items:center;gap:2px;padding:4px 8px 4px 8px;border-bottom:1px solid ${BORDER};font-size:12px;min-width:0;`;
+    const bcSpacer = document.createElement('span');
+    bcSpacer.style.cssText = `flex-shrink:0;width:6px;`;
+    bcRow.appendChild(bcSpacer);
     const title = document.createElement('span');
     title.style.cssText = `flex:1;min-width:0;color:${TEXT_HIGH};font-size:12px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;`;
     if (orphanMode) {
