@@ -112,6 +112,7 @@ export function createRelationPanelView(
   // 検索: 最上部の検索行のクエリでいま表示中の関係行を絞る（クライアント側フィルタ・再取得はしない）。
   // 対象1ノードの関係一覧（高々数十件）なので取得済みを filter するだけで足り、サーバ検索は不要。
   let filterQuery = '';
+  let relGroupFilter: { dom: number; sub: number } | null = null; // 検索サジェストで選んだグループ（null=全表示）
   let currentRelations: ExplorerRelation[] = [];
   let currentDraftNodeId: string | null = null; // 追加ドラフト行の対象ノード（orphan 表示中は null）。
   // ドメイン別分割: 各関係を「相手ノードのドメイン」で束ねる。アンカーノードは単一ドメインに属するので
@@ -148,6 +149,10 @@ export function createRelationPanelView(
   const menu = document.createElement('div');
   menu.style.cssText = `position:fixed;z-index:300;background:hsl(240,14%,9%);border:1px solid ${BORDER};border-radius:6px;max-height:200px;overflow-y:auto;min-width:180px;display:none;box-shadow:0 4px 12px rgba(0,0,0,.4);`;
   document.body.appendChild(menu);
+  // 検索サジェスト用ドロップダウン（グループ一覧）。@メンションとは別要素。
+  const suggestMenu = document.createElement('div');
+  suggestMenu.style.cssText = `position:fixed;z-index:300;background:hsl(240,14%,9%);border:1px solid ${BORDER};border-radius:6px;max-height:320px;overflow-y:auto;min-width:200px;display:none;box-shadow:0 4px 12px rgba(0,0,0,.4);`;
+  document.body.appendChild(suggestMenu);
   let mention: { anchor: HTMLTextAreaElement; onPick: (n: ExplorerNode, createLabel?: string) => Promise<void> } | null = null;
   let mentionSeq = 0;
   // メニュー（@ドロップダウン / チップ検索）共通のキーボード選択。
@@ -932,8 +937,9 @@ export function createRelationPanelView(
     relationBoxByRelation.clear();
     selAnchor = null; selCursor = null; // 行を作り直すので複数選択はリセット。
     const q = filterQuery.trim().toLowerCase();
-    if (!orphanMode && currentDraftNodeId && !q) bodyEl.appendChild(makeDraftRow(currentDraftNodeId)); // 検索中は追加ドラフト行を隠す
-    const visible = currentRelations.filter((r) => relationMatchesQuery(r, q));
+    if (!orphanMode && currentDraftNodeId && !q && !relGroupFilter) bodyEl.appendChild(makeDraftRow(currentDraftNodeId)); // 検索/グループ絞り込み中は追加ドラフト行を隠す
+    let visible = currentRelations.filter((r) => relationMatchesQuery(r, q));
+    if (relGroupFilter) visible = visible.filter((r) => (relDomain.get(r.lineId) ?? -1) === relGroupFilter!.dom && (relSub.get(r.lineId) ?? -1) === relGroupFilter!.sub);
     // 相手ドメインが2つ以上に跨る時だけ境界ヘッダを出す（単一ドメインの末端ノードでは出さない＝ノイズ回避）。
     // ドメインが2つ以上、またはサブ分割がある時だけ見出しを出す（末端の単一ドメインはノイズ回避）。
     const domsSeen = new Set(visible.map((r) => relDomain.get(r.lineId) ?? -1).filter((d) => d >= 0));
@@ -950,6 +956,59 @@ export function createRelationPanelView(
       bodyEl.appendChild(renderRelationRow(relation));
     }
     updateActiveHighlight();
+  };
+
+  // ── 検索サジェスト（グループ一覧 → クリックで絞り込み。ノードパネルと同じ） ───────────────
+  const hideRelSuggest = () => { suggestMenu.style.display = 'none'; };
+  const buildRelGroups = (): Array<{ dom: number; sub: number; label: string; count: number }> => {
+    const order: string[] = []; const seen = new Set<string>();
+    const count = new Map<string, number>(); const meta = new Map<string, { dom: number; sub: number; label: string }>();
+    for (const r of currentRelations) {
+      const di = relDomain.get(r.lineId) ?? -1;
+      if (di < 0) continue;
+      const si = relSub.get(r.lineId) ?? -1;
+      const key = `${di}:${si}`;
+      count.set(key, (count.get(key) ?? 0) + 1);
+      if (!seen.has(key)) {
+        seen.add(key); order.push(key);
+        const dom = relDomainLabels[di] ?? '';
+        const domId = relDomainRepIds[di] ?? '';
+        const sub = si >= 0 ? (subLabelById.get(si) ?? '') : '';
+        const subId = si >= 0 ? (subRepIdById.get(si) ?? '') : '';
+        meta.set(key, { dom: di, sub: si, label: (sub && subId !== domId) ? `${dom} / ${sub}` : dom });
+      }
+    }
+    return order.map((k) => ({ ...meta.get(k)!, count: count.get(k) ?? 0 }));
+  };
+  const pickRelGroup = (g: { dom: number; sub: number; label: string }, anchor: HTMLInputElement) => {
+    relGroupFilter = { dom: g.dom, sub: g.sub };
+    filterQuery = '';
+    anchor.value = g.label;
+    hideRelSuggest();
+    renderBody();
+    anchor.blur();
+  };
+  const showRelSuggest = (anchor: HTMLInputElement, q: string): void => {
+    const ql = q.trim().toLowerCase();
+    const groups = buildRelGroups().filter((g) => !ql || g.label.toLowerCase().includes(ql));
+    suggestMenu.innerHTML = '';
+    if (!groups.length) { hideRelSuggest(); return; }
+    for (const g of groups) {
+      const item = document.createElement('div');
+      item.style.cssText = `padding:5px 10px;cursor:pointer;font-size:12px;white-space:nowrap;display:flex;justify-content:space-between;gap:14px;color:${TEXT_MID};`;
+      const lab = document.createElement('span'); lab.textContent = g.label;
+      const cnt = document.createElement('span'); cnt.textContent = String(g.count); cnt.style.color = TEXT_DIM;
+      item.append(lab, cnt);
+      item.addEventListener('mouseenter', () => { item.style.background = 'rgba(255,255,255,.08)'; });
+      item.addEventListener('mouseleave', () => { item.style.background = 'transparent'; });
+      item.addEventListener('mousedown', (e) => { e.preventDefault(); pickRelGroup(g, anchor); });
+      suggestMenu.appendChild(item);
+    }
+    const r = anchor.getBoundingClientRect();
+    suggestMenu.style.left = `${r.left}px`;
+    suggestMenu.style.top = `${r.bottom + 2}px`;
+    suggestMenu.style.minWidth = `${Math.max(200, r.width)}px`;
+    suggestMenu.style.display = 'block';
   };
 
   // パンくず末尾（表示中のノード）をクリックでインライン改名。ラベル span を input に差し替え、
@@ -989,7 +1048,7 @@ export function createRelationPanelView(
     bodyEl.innerHTML = '';
     relationBoxByRelation.clear();
     selAnchor = null; selCursor = null; // 行を作り直すので複数選択はリセット。
-    filterQuery = ''; // ノード切替/再読込では検索状態をリセット（新しい関係一覧を全件表示）。
+    filterQuery = ''; relGroupFilter = null; // ノード切替/再読込では検索状態をリセット（新しい関係一覧を全件表示）。
     // ノードごとに作り直す（orphan では空＝ヘッダ無し）。
     relDomain.clear(); relDomainLabels = []; relDomainRepIds = []; relSub.clear(); subLabelById.clear(); subRepIdById.clear();
 
@@ -1010,13 +1069,18 @@ export function createRelationPanelView(
     searchInput.style.cssText = `flex:1;background:transparent;border:none;outline:none;font-size:13px;font-family:inherit;line-height:1.5;color:${TEXT_HIGH};padding:0 4px;min-height:20px;`;
     let searchTimer: ReturnType<typeof setTimeout> | null = null;
     const applyFilter = (v: string) => { filterQuery = v; renderBody(); };
-    searchInput.addEventListener('input', () => {
+    const si = searchInput;
+    si.addEventListener('focus', () => showRelSuggest(si, si.value));
+    si.addEventListener('blur', () => setTimeout(hideRelSuggest, 150));
+    si.addEventListener('input', () => {
+      relGroupFilter = null;              // 手入力はグループ絞り込みを解除
+      showRelSuggest(si, si.value);       // サジェストを絞り込み
       if (searchTimer) clearTimeout(searchTimer);
-      searchTimer = setTimeout(() => applyFilter(searchInput.value), 200);
+      searchTimer = setTimeout(() => applyFilter(si.value), 200);
     });
-    searchInput.addEventListener('keydown', (e) => {
-      if (e.key === 'Escape') { e.preventDefault(); searchInput.value = ''; if (searchTimer) clearTimeout(searchTimer); applyFilter(''); searchInput.blur(); }
-      else if (e.key === 'Enter') { e.preventDefault(); if (searchTimer) clearTimeout(searchTimer); applyFilter(searchInput.value); }
+    si.addEventListener('keydown', (e) => {
+      if (e.key === 'Escape') { e.preventDefault(); si.value = ''; relGroupFilter = null; hideRelSuggest(); if (searchTimer) clearTimeout(searchTimer); applyFilter(''); si.blur(); }
+      else if (e.key === 'Enter') { e.preventDefault(); hideRelSuggest(); if (searchTimer) clearTimeout(searchTimer); applyFilter(si.value); }
     });
     searchRow.append(searchSpacer, searchIconWrap, searchInput);
     // 並び替え用グリップ（panels-view から渡される）を最上部行の左端に。head は render 毎に作り直される
@@ -1248,6 +1312,6 @@ export function createRelationPanelView(
     acceptKeyMove: async () => { /* 関係列はノード移動先になれない */ },
     getEffectiveParentId: () => null,
     getNodeParentId: () => undefined,
-    unregister: () => { ctx.refreshRelations.delete(refresh); menu.remove(); },
+    unregister: () => { ctx.refreshRelations.delete(refresh); menu.remove(); suggestMenu.remove(); },
   };
 }
