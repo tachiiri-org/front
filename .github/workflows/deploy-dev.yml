@@ -32,12 +32,8 @@ jobs:
           BUILD_TOKEN: ${{ secrets.BUILD_SCREENS_TOKEN }}
         run: bun run build-screens
 
-      - name: Set secrets (dev)
-        run: echo "$SECRET" | bunx wrangler secret put TURNSTILE_SECRET_KEY --env dev
-        env:
-          CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_DEPLOYMENT_TOKEN }}
-          CLOUDFLARE_ACCOUNT_ID: ${{ vars.CLOUDFLARE_ACCOUNT_ID }}
-          SECRET: ${{ secrets.TURNSTILE_SECRET_KEY_DEV }}
+      # TURNSTILE_SECRET_KEY はデプロイで set しない。secret-DB（secrets-dev）を source of truth とし、
+      # backend の POST /api/v1/secrets/sync/worker で front-dev worker に注入・永続させる（変更時のみ再 sync）。
 
       - name: Deploy to dev
         run: bunx wrangler deploy --env dev

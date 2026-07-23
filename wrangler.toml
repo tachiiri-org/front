@@ -23,7 +23,9 @@ GOOGLE_OAUTH_CLIENT_ID = "804252639051-hdkilk1189bomeiv9opnsu0h2basdtr8.apps.goo
 MICROSOFT_OAUTH_CLIENT_ID = "9350aec4-f659-4c8d-a48b-58c195844b09"
 LAYOUTS_BUCKET_ID = "bucket-stage"
 DEFAULT_ORG_ID = "9c95aa5e-5943-4dd0-9579-ed3725821979"
-TURNSTILE_SITE_KEY = "0x4AAAAAAdmeMgvvrbA27oL6"
+# Cloudflare Turnstile テストキー（常時パス・可視）。stage は自動化検証を通すため実キーを使わない。
+# 実挙動の確認は本番のみ。テストキー: https://developers.cloudflare.com/turnstile/troubleshooting/testing/
+TURNSTILE_SITE_KEY = "1x00000000000000000000AA"
 
 [[env.stage.services]]
 binding = "BACKEND"
@@ -71,5 +73,6 @@ GOOGLE_OAUTH_CLIENT_ID = "804252639051-hdkilk1189bomeiv9opnsu0h2basdtr8.apps.goo
 MICROSOFT_OAUTH_CLIENT_ID = "0398ec75-5040-4d01-8508-7aa813f2857c"
 LAYOUTS_BUCKET_ID = "bucket-dev"
 DEFAULT_ORG_ID = "9c95aa5e-5943-4dd0-9579-ed3725821979"
-TURNSTILE_SITE_KEY = "0x4AAAAAAdmeIKiAf-H7Ql-x"
+# Cloudflare Turnstile テストキー（常時パス・可視）。dev は headless/自動化を通すため実キーを使わない。
+TURNSTILE_SITE_KEY = "1x00000000000000000000AA"
 
