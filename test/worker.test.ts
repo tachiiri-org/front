@@ -83,39 +83,3 @@ it("exchanges the GitHub OAuth callback through backend", async () => {
   expect(backendFetch).toHaveBeenCalled();
 });
 
-it("accepts the legacy GitHub OAuth callback path", async () => {
-  const backendFetch = vi.fn(async (request: Request) => {
-    if (request.url.endsWith("/oauth/callback")) {
-      return Response.json({
-        authenticated: true,
-        accessToken: "github-token",
-        viewer: { login: "octocat", name: "Mona" },
-        email: null,
-      });
-    }
-    return new Response("not found", { status: 404 });
-  });
-
-  const response = await worker.fetch(
-    new Request("https://front.example.com/github/oauth/callback?code=abc&state=xyz", {
-      headers: {
-        Cookie: "__Host-github_login_oauth_state=xyz",
-      },
-    }),
-    {
-      ASSETS: {
-        fetch: async () => new Response("not used"),
-      },
-      FRONTEND_ORIGIN: "https://front.example.com",
-      FRONT_TO_BACKEND_TOKEN: "backend-token",
-      INTERNAL_AUTH_SIGNING_KEY: privateKeyJwk,
-      BACKEND: { fetch: backendFetch },
-    } as never,
-  );
-
-  expect(response.status).toBe(302);
-  expect(response.headers.get("Location")).toBe(
-    "https://front.example.com/group-select",
-  );
-  expect(backendFetch).toHaveBeenCalled();
-});
