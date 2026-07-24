@@ -106,7 +106,8 @@ export async function handleAuthCallback(request: Request, env: AuthorizeEnv): P
   const tokenRes = await handleMcpToken(tokenReq, env);
   if (!tokenRes.ok) {
     const detail = await tokenRes.text().catch(() => "");
-    return new Response(`token_exchange_failed: HTTP ${tokenRes.status} :: ${detail.slice(0, 500)}`, { status: 502 });
+    console.error("[rp] token exchange failed", tokenRes.status, detail.slice(0, 500));
+    return new Response("authentication_failed", { status: 502 });
   }
   const tok = (await tokenRes.json()) as { id_token?: string };
   if (!tok.id_token) return new Response("no_id_token", { status: 502 });
