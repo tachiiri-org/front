@@ -16,9 +16,15 @@ import type { StorageExplorerComponent } from './schema/component/kind/storage-e
 const HEADER_HEIGHT = 36;
 
 // Product mode: on a product host the worker injects window.__PRODUCT__ (e.g. "graph").
-// In that mode the SPA shows only that product's screen and hides the screen/env switchers.
+// Each product declares the screen(s) it exposes. A single-screen product (graph) hides the
+// selector entirely; a multi-tool product (admin) shows a selector scoped to its screens.
+// The env switcher is always hidden in product mode.
 const PRODUCT = (window as unknown as { __PRODUCT__?: string }).__PRODUCT__;
-const PRODUCT_SCREEN: Record<string, string> = { graph: 'graph-editor' };
+const PRODUCT_CONFIG: Record<string, { screens: string[] }> = {
+  graph: { screens: ['graph-editor'] },
+  admin: { screens: ['org-members', 'admin-members', 'storage-explorer'] },
+};
+const PRODUCT_SCREENS = PRODUCT ? PRODUCT_CONFIG[PRODUCT]?.screens : undefined;
 
 const nav = document.createElement('nav');
 const root = document.createElement('div');
@@ -82,7 +88,8 @@ const renderNav = async (screenId: string): Promise<void> => {
     if (gen !== navRenderGen) return;
     if (res.ok) {
       const data = (await res.json()) as { items: { value: string; label: string }[] };
-      for (const item of data.items) {
+      const items = PRODUCT_SCREENS ? data.items.filter((i) => PRODUCT_SCREENS.includes(i.value)) : data.items;
+      for (const item of items) {
         const opt = document.createElement('option');
         opt.value = item.value;
         opt.textContent = item.label;
@@ -100,7 +107,8 @@ const renderNav = async (screenId: string): Promise<void> => {
     }
   });
 
-  if (!PRODUCT) nav.appendChild(select);
+  const hideSelector = PRODUCT !== undefined && (PRODUCT_SCREENS?.length ?? 0) <= 1;
+  if (!hideSelector) nav.appendChild(select);
 
   const envSelect = document.createElement('select');
   envSelect.style.cssText =
@@ -445,8 +453,7 @@ const getCookie = (name: string): string | null => {
 
 const loadEditorBootstrap = async (): Promise<void> => {
   const pathnameScreenId = getScreenIdFromPathname();
-  const screenId = pathnameScreenId
-    ?? (PRODUCT ? (PRODUCT_SCREEN[PRODUCT] ?? await findEditorScreenId()) : await findEditorScreenId());
+  const screenId = pathnameScreenId ?? PRODUCT_SCREENS?.[0] ?? await findEditorScreenId();
 
   // Group-specific login page: /login/<uuid>
   if (/^\/login\/[0-9a-f-]{36}$/i.test(window.location.pathname)) {
