@@ -12,6 +12,7 @@
 
 import { serializeCookie, parseCookies } from "./cookies";
 import { identitySetCookies } from "./identity";
+import { handleMcpToken } from "../mcp/oauth";
 import type { AuthorizeEnv } from "./index";
 
 const RP_STATE_COOKIE = "__Host-rp_state";
@@ -87,7 +88,11 @@ export async function handleAuthCallback(request: Request, env: AuthorizeEnv): P
 
   const clientId = productClientId(url.hostname);
   const redirectUri = `https://${url.hostname}/auth/callback`;
-  const tokenRes = await fetch(`https://${authnHost(url.hostname)}/oauth/mcp/token`, {
+  // authn and this product are currently the SAME worker, and a Worker cannot fetch() its
+  // own Custom Domain (Cloudflare returns 522). Run the OP token exchange in-process.
+  // TODO: when a product becomes a separate worker, switch to a cross-worker fetch (or a
+  // service binding) to the auth origin instead of calling handleMcpToken directly.
+  const tokenReq = new Request(`https://${authnHost(url.hostname)}/oauth/mcp/token`, {
     method: "POST",
     headers: { "Content-Type": "application/x-www-form-urlencoded" },
     body: new URLSearchParams({
@@ -98,7 +103,12 @@ export async function handleAuthCallback(request: Request, env: AuthorizeEnv): P
       code_verifier: saved.verifier,
     }),
   });
-  if (!tokenRes.ok) return new Response("token_exchange_failed", { status: 502 });
+  const tokenRes = await handleMcpToken(tokenReq, env);
+  if (!tokenRes.ok) {
+    const detail = await tokenRes.text().catch(() => "");
+    console.error("[rp] token exchange failed", tokenRes.status, detail.slice(0, 500));
+    return new Response("authentication_failed", { status: 502 });
+  }
   const tok = (await tokenRes.json()) as { id_token?: string };
   if (!tok.id_token) return new Response("no_id_token", { status: 502 });
 
