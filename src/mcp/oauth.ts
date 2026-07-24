@@ -46,7 +46,15 @@ function isSecure(request: Request): boolean {
 }
 
 function origin(request: Request, env: AuthorizeEnv): string {
-  return env.FRONTEND_ORIGIN ?? new URL(request.url).origin;
+  const url = new URL(request.url);
+  // The auth/product hosts (and the workers.dev app hosts) are the OP's own canonical
+  // origins, so serve per-domain discovery/issuer/endpoints from the request origin. Fall
+  // back to the pinned FRONTEND_ORIGIN only for unrecognized hosts (Cloudflare already
+  // routes by Host, and the suffix allowlist guards against Host spoofing besides).
+  if (url.hostname.endsWith(".tachiiri.com") || url.hostname.endsWith(".workers.dev")) {
+    return url.origin;
+  }
+  return env.FRONTEND_ORIGIN ?? url.origin;
 }
 
 // RFC 8707 resource identifier for this MCP server: the canonical /mcp URL.
