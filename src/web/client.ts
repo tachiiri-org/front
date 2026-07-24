@@ -15,6 +15,11 @@ import type { StorageExplorerComponent } from './schema/component/kind/storage-e
 
 const HEADER_HEIGHT = 36;
 
+// Product mode: on a product host the worker injects window.__PRODUCT__ (e.g. "graph").
+// In that mode the SPA shows only that product's screen and hides the screen/env switchers.
+const PRODUCT = (window as unknown as { __PRODUCT__?: string }).__PRODUCT__;
+const PRODUCT_SCREEN: Record<string, string> = { graph: 'graph-editor' };
+
 const nav = document.createElement('nav');
 const root = document.createElement('div');
 document.body.appendChild(nav);
@@ -95,7 +100,7 @@ const renderNav = async (screenId: string): Promise<void> => {
     }
   });
 
-  nav.appendChild(select);
+  if (!PRODUCT) nav.appendChild(select);
 
   const envSelect = document.createElement('select');
   envSelect.style.cssText =
@@ -119,7 +124,7 @@ const renderNav = async (screenId: string): Promise<void> => {
       window.location.href = `https://${host}${window.location.pathname}`;
     }
   });
-  nav.appendChild(envSelect);
+  if (!PRODUCT) nav.appendChild(envSelect);
 
   const [authResult, identityResult] = await Promise.allSettled([
     fetch('/api/v1/auth/status'),
@@ -440,7 +445,8 @@ const getCookie = (name: string): string | null => {
 
 const loadEditorBootstrap = async (): Promise<void> => {
   const pathnameScreenId = getScreenIdFromPathname();
-  const screenId = pathnameScreenId ?? await findEditorScreenId();
+  const screenId = pathnameScreenId
+    ?? (PRODUCT ? (PRODUCT_SCREEN[PRODUCT] ?? await findEditorScreenId()) : await findEditorScreenId());
 
   // Group-specific login page: /login/<uuid>
   if (/^\/login\/[0-9a-f-]{36}$/i.test(window.location.pathname)) {

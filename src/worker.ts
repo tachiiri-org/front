@@ -27,7 +27,7 @@ import { clearGitHubSessionCookies, clearGitHubConnectSessionCookies, clearGoogl
 import { handleOidcLoginStart, handleOidcLoginCallback } from './session/oidc';
 import { handleSamlMetadata, handleSamlSsoStart, handleSamlAcs } from './session/saml';
 import { authorizeFetch } from './session/fetch';
-import { handleAuthCallback, handleProductLoginRedirect, isProductHost } from './session/rp';
+import { handleAuthCallback, handleProductLoginRedirect, isProductHost, productClientId } from './session/rp';
 
 type AssetsEnv = {
   readonly ASSETS: {
@@ -504,7 +504,13 @@ async function fetchInner(request: Request, env: Env): Promise<Response> {
       return new Response('Not Found', { status: 404 });
     }
 
-    return new Response(`<!doctype html><script type="module" src="${CLIENT_JS_PATH}"></script>`, {
+    // On a product host (e.g. graph.tachiiri.com) tell the SPA which product it is, so it
+    // renders that product's screen only (no screen/env switcher chrome).
+    const productHostname = new URL(request.url).hostname;
+    const productScript = isProductHost(productHostname)
+      ? `<script>window.__PRODUCT__=${JSON.stringify(productClientId(productHostname))}</script>`
+      : '';
+    return new Response(`<!doctype html>${productScript}<script type="module" src="${CLIENT_JS_PATH}"></script>`, {
       headers: { 'Content-Type': 'text/html; charset=UTF-8' },
     });
 }
