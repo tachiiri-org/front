@@ -2,7 +2,7 @@ import type { AuthorizeEnv } from "../session";
 import { parseCookies, serializeCookie, clearCookie } from "../session/cookies";
 import { issueMcpToken, issueIdToken, getPublicJwk } from "../session/token";
 import { authorizeFetch } from "../session/fetch";
-import { MCP_OAUTH_PARAMS_COOKIE } from "../session/github";
+import { MCP_OAUTH_PARAMS_COOKIE } from "../session/cookie-names";
 import { readIdentity, identityClearCookies } from "../session/identity";
 import { createOrganization, listUserOrganizations } from "../identify";
 

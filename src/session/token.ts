@@ -13,7 +13,7 @@ export const DEFAULT_ORGANIZATION_ID = "00000000-0000-4000-8000-000000000001";
  * When front acts on its own behalf (no user subject) it is this real program account,
  * not a synthetic id — every operation is performed by a real account.
  */
-export const FRONT_SYSTEM_ACCOUNT_ID = "00000000-0000-4000-8000-000000000002";
+const FRONT_SYSTEM_ACCOUNT_ID = "00000000-0000-4000-8000-000000000002";
 
 type SecretValue = string | { get(): Promise<string> };
 

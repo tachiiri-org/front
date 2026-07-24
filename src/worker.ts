@@ -75,7 +75,6 @@ const isPublicPath = (pathname: string): boolean =>
   pathname === '/api/v1/auth/org-groups' ||
   /^\/auth\/saml\/[^/]+\/(metadata|sso|acs)$/.test(pathname) ||
   pathname.startsWith('/oauth/') ||
-  pathname.startsWith('/github/oauth/') ||
   pathname.startsWith('/.well-known/') ||
   pathname.startsWith('/mcp') ||
   pathname.startsWith('/api/');
@@ -343,10 +342,10 @@ async function fetchInner(request: Request, env: Env): Promise<Response> {
       return new Response(null, { status: 302, headers });
     }
     // GitHub login (read:user scope — identity only)
-    if (pathname === '/oauth/github/start' || pathname === '/github/oauth/start') {
+    if (pathname === '/oauth/github/start') {
       return handleGitHubLoginStart({ request, env });
     }
-    if (pathname === '/oauth/github/callback' || pathname === '/github/oauth/callback') {
+    if (pathname === '/oauth/github/callback') {
       return handleGitHubLoginCallback({ request, env });
     }
     // GitHub connect (resource access scopes)

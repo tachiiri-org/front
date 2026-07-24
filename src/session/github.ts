@@ -2,6 +2,7 @@ import { exchangeGitHubOAuthCode, exchangeGitHubConnectCode, serializeGitHubSess
 import { clearCookie, parseCookies, serializeCookie } from "./cookies";
 import { resolveOrigin } from "./origin";
 import { readIdentity, identitySetCookies } from "./identity";
+import { IDENTITY_LINK_MODE_COOKIE, MCP_OAUTH_PARAMS_COOKIE } from "./cookie-names";
 import type { AuthorizeEnv } from "./index";
 
 type GitHubOAuthEnv = AuthorizeEnv;
@@ -222,6 +223,4 @@ const LOGIN_STATE_COOKIE_NAME = "__Host-github_login_oauth_state";
 const LOGIN_RETURN_TO_COOKIE = "__Host-github_login_return_to";
 const CONNECT_STATE_COOKIE_NAME = "__Host-github_connect_oauth_state";
 const CONNECT_RETURN_TO_COOKIE = "__Host-github_connect_return_to";
-const IDENTITY_LINK_MODE_COOKIE = "identity_link_mode";
-export const MCP_OAUTH_PARAMS_COOKIE = "__Host-mcp_oauth_params";
 const STATE_TTL_SECONDS = 60 * 10;
