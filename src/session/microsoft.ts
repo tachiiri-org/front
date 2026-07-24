@@ -1,5 +1,6 @@
 import { exchangeMicrosoftOAuthCode, serializeMicrosoftSessionCookie, findOrCreateUserByMicrosoft, linkMicrosoftToUser, registerLoginEmailToGroup } from "../identify";
 import { clearCookie, parseCookies, serializeCookie } from "./cookies";
+import { resolveOrigin } from "./origin";
 import { readIdentity, identitySetCookies } from "./identity";
 import type { AuthorizeEnv } from "./index";
 import { MCP_OAUTH_PARAMS_COOKIE } from "./google";
@@ -24,7 +25,7 @@ function createRandomState(): string {
 }
 
 function resolveFrontendOrigin(request: Request, env: MicrosoftOAuthEnv): string {
-  return env.FRONTEND_ORIGIN ?? new URL(request.url).origin;
+  return resolveOrigin(request, env);
 }
 
 function isSecureRequest(request: Request): boolean {
