@@ -18,10 +18,13 @@ import type { AuthorizeEnv } from "./index";
 const RP_STATE_COOKIE = "__Host-rp_state";
 const RP_TTL = 600; // 10 minutes to complete the round-trip
 
-// The auth origin for a product host: replace the product label with "authn".
-// dev.graph.tachiiri.com -> dev.authn.tachiiri.com ; graph.tachiiri.com -> authn.tachiiri.com
+// The auth origin for a product host: replace the product label (the one before "tachiiri")
+// with "authn". graph.tachiiri.com -> authn.tachiiri.com ; dev.admin.tachiiri.com -> dev.authn.tachiiri.com
 function authnHost(hostname: string): string {
-  return hostname.replace(/(^|\.)graph(\.|$)/, "$1authn$2");
+  const parts = hostname.split(".");
+  const i = parts.indexOf("tachiiri");
+  if (i > 0) parts[i - 1] = "authn";
+  return parts.join(".");
 }
 
 // Product client_id = the label immediately before "tachiiri" (the product role).
