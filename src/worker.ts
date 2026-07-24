@@ -27,6 +27,7 @@ import { clearGitHubSessionCookies, clearGitHubConnectSessionCookies, clearGoogl
 import { handleOidcLoginStart, handleOidcLoginCallback } from './session/oidc';
 import { handleSamlMetadata, handleSamlSsoStart, handleSamlAcs } from './session/saml';
 import { authorizeFetch } from './session/fetch';
+import { handleAuthCallback, handleProductLoginRedirect, isProductHost } from './session/rp';
 
 type AssetsEnv = {
   readonly ASSETS: {
@@ -206,6 +207,18 @@ export default {
 
 async function fetchInner(request: Request, env: Env): Promise<Response> {
     const pathname = new URL(request.url).pathname;
+
+    // Product (relying-party) hosts (e.g. graph.tachiiri.com) delegate authentication to
+    // the auth origin. Only active on product domains; workers.dev / authn hosts are
+    // unaffected, so this is a no-op for the current app until those domains go live.
+    if (isProductHost(new URL(request.url).hostname)) {
+      if (pathname === '/auth/callback') {
+        return handleAuthCallback(request, env);
+      }
+      if (isNavigationRequest(request) && !isPublicPath(pathname) && !(await readIdentity(env, request))) {
+        return handleProductLoginRedirect(request, env);
+      }
+    }
 
     if (pathname === '/api/v1/spec-document' || pathname === '/api/v1/ui-shell-settings') {
       const apiResponse = await handleDataApiRequest(request, env);
