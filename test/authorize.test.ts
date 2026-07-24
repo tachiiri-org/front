@@ -154,7 +154,7 @@ describe("authorize helpers", () => {
     const env = { INTERNAL_AUTH_SIGNING_KEY: privateKeyJwk };
     const token = await issueSessionToken(env, sessionData);
     const request = new Request("https://front.example.com/", {
-      headers: { Cookie: `github_session=${token}` },
+      headers: { Cookie: `__Host-github_session=${token}` },
     });
 
     await expect(readGitHubSession(request, env)).resolves.toMatchObject(sessionData);
