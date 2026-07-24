@@ -62,7 +62,7 @@ it("exchanges the GitHub OAuth callback through backend", async () => {
   const response = await worker.fetch(
     new Request("https://front.example.com/oauth/github/callback?code=abc&state=xyz", {
       headers: {
-        Cookie: "github_login_oauth_state=xyz",
+        Cookie: "__Host-github_login_oauth_state=xyz",
       },
     }),
     {
@@ -99,7 +99,7 @@ it("accepts the legacy GitHub OAuth callback path", async () => {
   const response = await worker.fetch(
     new Request("https://front.example.com/github/oauth/callback?code=abc&state=xyz", {
       headers: {
-        Cookie: "github_login_oauth_state=xyz",
+        Cookie: "__Host-github_login_oauth_state=xyz",
       },
     }),
     {

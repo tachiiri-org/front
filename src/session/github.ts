@@ -39,15 +39,10 @@ function getGitHubConnectCallbackUrl(request: Request, env: GitHubOAuthEnv): str
   return getGitHubLoginCallbackUrl(request, env);
 }
 
-/** @deprecated Use getGitHubLoginCallbackUrl or getGitHubConnectCallbackUrl */
-function getGitHubCallbackUrl(request: Request, env: GitHubOAuthEnv): string {
-  return getGitHubLoginCallbackUrl(request, env);
-}
-
 function buildGitHubAuthorizeUrl(request: Request, env: GitHubOAuthEnv, state: string, scope: string, callbackUrl?: string): string {
   const url = new URL("https://github.com/login/oauth/authorize");
   url.searchParams.set("client_id", env.GITHUB_OAUTH_CLIENT_ID ?? "");
-  url.searchParams.set("redirect_uri", callbackUrl ?? getGitHubCallbackUrl(request, env));
+  url.searchParams.set("redirect_uri", callbackUrl ?? getGitHubLoginCallbackUrl(request, env));
   url.searchParams.set("scope", scope);
   url.searchParams.set("state", state);
   return url.toString();
@@ -222,23 +217,11 @@ export async function handleGitHubConnectCallback(context: RouteContext): Promis
   return new Response(null, { status: 302, headers });
 }
 
-/** @deprecated Use handleGitHubLoginStart */
-export function handleGitHubOAuthStart(context: RouteContext): Response {
-  return handleGitHubLoginStart(context);
-}
-
-/** @deprecated Use handleGitHubLoginCallback */
-export async function handleGitHubOAuthCallback(context: RouteContext): Promise<Response> {
-  return handleGitHubLoginCallback(context);
-}
 
 const LOGIN_STATE_COOKIE_NAME = "__Host-github_login_oauth_state";
 const LOGIN_RETURN_TO_COOKIE = "__Host-github_login_return_to";
 const CONNECT_STATE_COOKIE_NAME = "__Host-github_connect_oauth_state";
 const CONNECT_RETURN_TO_COOKIE = "__Host-github_connect_return_to";
-export const IDENTITY_USER_ID_COOKIE = "identity_user_id";
-export const IDENTITY_LINK_MODE_COOKIE = "identity_link_mode";
+const IDENTITY_LINK_MODE_COOKIE = "identity_link_mode";
 export const MCP_OAUTH_PARAMS_COOKIE = "__Host-mcp_oauth_params";
-/** @deprecated Use LOGIN_STATE_COOKIE_NAME or CONNECT_STATE_COOKIE_NAME */
-const STATE_COOKIE_NAME = LOGIN_STATE_COOKIE_NAME;
 const STATE_TTL_SECONDS = 60 * 10;
