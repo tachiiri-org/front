@@ -14,6 +14,8 @@ import { handleApiRequest as handleLayoutApiRequest } from './routes/layout';
 import { handleMcp } from './mcp/handler';
 import {
   handleOAuthMetadata,
+  handleOpenIDConfiguration,
+  handleJwks,
   handleMcpRegister,
   handleMcpAuthorize,
   handleMcpSelectOrg,
@@ -397,6 +399,12 @@ async function fetchInner(request: Request, env: Env): Promise<Response> {
 
     if (pathname === '/.well-known/oauth-authorization-server') {
       return handleOAuthMetadata(request, env);
+    }
+    if (pathname === '/.well-known/openid-configuration') {
+      return handleOpenIDConfiguration(request, env);
+    }
+    if (pathname === '/.well-known/jwks.json') {
+      return handleJwks(request, env);
     }
     if (pathname === '/oauth/mcp/register' && request.method === 'POST') {
       return handleMcpRegister(request, env);

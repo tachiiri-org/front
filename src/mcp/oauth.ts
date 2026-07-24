@@ -1,6 +1,6 @@
 import type { AuthorizeEnv } from "../session";
 import { parseCookies, serializeCookie, clearCookie } from "../session/cookies";
-import { issueMcpToken } from "../session/token";
+import { issueMcpToken, issueIdToken, getPublicJwk } from "../session/token";
 import { authorizeFetch } from "../session/fetch";
 import { MCP_OAUTH_PARAMS_COOKIE } from "../session/github";
 import { readIdentity, identityClearCookies } from "../session/identity";
@@ -113,6 +113,33 @@ export function handleOAuthMetadata(request: Request, env: AuthorizeEnv): Respon
     token_endpoint_auth_methods_supported: ["none"],
     scopes_supported: ["graph:read", "graph:write"],
   });
+}
+
+// GET /.well-known/openid-configuration  (OIDC Discovery)
+// This origin is an OpenID Provider: the OAuth endpoints above plus JWKS and id_token.
+export function handleOpenIDConfiguration(request: Request, env: AuthorizeEnv): Response {
+  const base = origin(request, env);
+  return Response.json({
+    issuer: base,
+    authorization_endpoint: `${base}/oauth/mcp/authorize`,
+    token_endpoint: `${base}/oauth/mcp/token`,
+    registration_endpoint: `${base}/oauth/mcp/register`,
+    jwks_uri: `${base}/.well-known/jwks.json`,
+    response_types_supported: ["code"],
+    grant_types_supported: ["authorization_code", "refresh_token"],
+    code_challenge_methods_supported: ["S256"],
+    token_endpoint_auth_methods_supported: ["none"],
+    subject_types_supported: ["public"],
+    id_token_signing_alg_values_supported: ["ES256"],
+    scopes_supported: ["openid", "graph:read", "graph:write"],
+    claims_supported: ["iss", "sub", "aud", "exp", "iat", "auth_time", "group_id"],
+  });
+}
+
+// GET /.well-known/jwks.json  — public signing key so clients can verify id_tokens.
+export async function handleJwks(request: Request, env: AuthorizeEnv): Promise<Response> {
+  const jwk = await getPublicJwk(env);
+  return Response.json({ keys: jwk ? [jwk] : [] });
 }
 
 // POST /oauth/mcp/register  (RFC 7591 Dynamic Client Registration)
@@ -440,13 +467,19 @@ async function issueTokenResponse(
     resource: input.resource,
   });
   if (!stored.ok) return Response.json({ error: "server_error" }, { status: 502 });
-  return Response.json({
+  const body: Record<string, unknown> = {
     access_token: accessToken,
     token_type: "bearer",
     expires_in: ACCESS_TTL,
     refresh_token: refreshToken,
     scope: input.scopes.join(" "),
-  });
+  };
+  // OIDC: return an id_token only when the client asked for the openid scope. Existing
+  // MCP clients request graph:* scopes (no openid) and are unaffected.
+  if (input.scopes.includes("openid")) {
+    body.id_token = await issueIdToken(env, { clientId: input.clientId, userId: input.userId, groupId: input.groupId });
+  }
+  return Response.json(body);
 }
 
 // POST /oauth/mcp/token

@@ -133,6 +133,42 @@ export async function issueMcpToken(
   return `${signingInput}.${toBase64Url(new Uint8Array(signature))}`;
 }
 
+// Public JWK derived from the ES256 signing key, for the OIDC JWKS endpoint. Strips the
+// private scalar (d) and non-public fields; publishes the public point plus use/alg so
+// clients can verify id_tokens. Null when the signing key is unset.
+export async function getPublicJwk(env: { INTERNAL_AUTH_SIGNING_KEY?: SecretValue }): Promise<Record<string, unknown> | null> {
+  const signingKey = await resolveSecret(env.INTERNAL_AUTH_SIGNING_KEY);
+  if (!signingKey) return null;
+  const { d: _d, key_ops: _ko, ext: _ext, ...pub } = JSON.parse(signingKey) as Record<string, unknown>;
+  return { ...pub, use: "sig", alg: "ES256" };
+}
+
+// OIDC id_token: an identity assertion about the authenticated user for a specific client.
+// Per OIDC, aud = client_id and sub = the stable user id. Signed with the same ES256 key
+// as the access token, so the existing verify key / JWKS covers it.
+export async function issueIdToken(
+  env: { INTERNAL_AUTH_SIGNING_KEY?: SecretValue; INTERNAL_AUTH_TOKEN_ISSUER?: string },
+  input: { clientId: string; userId: string; groupId?: string; authTime?: number },
+): Promise<string> {
+  const signingKey = await resolveSecret(env.INTERNAL_AUTH_SIGNING_KEY);
+  if (!signingKey) throw new Error("missing_internal_auth_signing_key");
+  const key = await importSigningKey(signingKey);
+  const now = Math.floor(Date.now() / 1000);
+  const payload = {
+    iss: env.INTERNAL_AUTH_TOKEN_ISSUER ?? "front",
+    sub: input.userId,
+    aud: input.clientId,
+    exp: now + 300,
+    iat: now,
+    auth_time: input.authTime ?? now,
+    ...(input.groupId ? { group_id: input.groupId } : {}),
+  };
+  const header = { alg: "ES256", typ: "JWT" };
+  const signingInput = `${toBase64Url(encoder.encode(JSON.stringify(header)))}.${toBase64Url(encoder.encode(JSON.stringify(payload)))}`;
+  const signature = await crypto.subtle.sign({ name: "ECDSA", hash: "SHA-256" }, key, encoder.encode(signingInput));
+  return `${signingInput}.${toBase64Url(new Uint8Array(signature))}`;
+}
+
 async function resolveSecret(value: SecretValue | undefined): Promise<string | undefined> {
   if (value && typeof value !== "string") {
     return value.get();
