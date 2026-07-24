@@ -7,7 +7,7 @@ import {
   type AuthorizeEnv,
 } from "../src/session";
 import {
-  buildGitHubOAuthStartUrl,
+  buildGitHubLoginUrl,
   exchangeGitHubOAuthCode,
   readGitHubSession,
 } from "../src/identify";
@@ -136,11 +136,11 @@ describe("authorize helpers", () => {
 
   it("builds the front GitHub OAuth start URL", () => {
     expect(
-      buildGitHubOAuthStartUrl({
+      buildGitHubLoginUrl({
         FRONTEND_ORIGIN: "https://front-dev.tachiiri.workers.dev",
       }),
     ).toBe(
-      "https://front-dev.tachiiri.workers.dev/oauth/github/start?scope=read%3Auser",
+      "https://front-dev.tachiiri.workers.dev/oauth/github/start",
     );
   });
 
