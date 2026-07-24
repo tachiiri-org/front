@@ -1,5 +1,6 @@
 import { exchangeOidcOAuthCode, serializeOidcSessionCookie, findOrCreateUserByOidc, registerLoginEmailToGroup } from "../identify";
 import { clearCookie, parseCookies, serializeCookie } from "./cookies";
+import { resolveOrigin } from "./origin";
 import { identitySetCookies } from "./identity";
 import type { AuthorizeEnv } from "./index";
 import { authorizeFetch } from "./fetch";
@@ -28,7 +29,7 @@ function createRandomState(): string {
 }
 
 function resolveFrontendOrigin(request: Request, env: AuthorizeEnv): string {
-  return env.FRONTEND_ORIGIN ?? new URL(request.url).origin;
+  return resolveOrigin(request, env);
 }
 
 function isSecureRequest(request: Request): boolean {

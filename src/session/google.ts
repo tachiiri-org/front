@@ -1,5 +1,6 @@
 import { exchangeGoogleOAuthCode, serializeGoogleSessionCookie, findOrCreateUserByGoogle, linkGoogleToUser, registerLoginEmailToGroup } from "../identify";
 import { clearCookie, parseCookies, serializeCookie } from "./cookies";
+import { resolveOrigin } from "./origin";
 import { readIdentity, identitySetCookies } from "./identity";
 import type { AuthorizeEnv } from "./index";
 
@@ -23,7 +24,7 @@ function createRandomState(): string {
 }
 
 function resolveFrontendOrigin(request: Request, env: GoogleOAuthEnv): string {
-  return env.FRONTEND_ORIGIN ?? new URL(request.url).origin;
+  return resolveOrigin(request, env);
 }
 
 function isSecureRequest(request: Request): boolean {
