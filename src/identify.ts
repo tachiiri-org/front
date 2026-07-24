@@ -52,13 +52,6 @@ export function buildGitHubLoginUrl(env: Pick<AuthorizeEnv, "FRONTEND_ORIGIN">):
   return new URL("/oauth/github/start", env.FRONTEND_ORIGIN ?? "http://localhost:8787").toString();
 }
 
-/** @deprecated Use buildGitHubLoginUrl */
-export function buildGitHubOAuthStartUrl(env: Pick<AuthorizeEnv, "FRONTEND_ORIGIN">, scope = "read:user"): string {
-  const url = new URL("/oauth/github/start", env.FRONTEND_ORIGIN ?? "http://localhost:8787");
-  if (scope) url.searchParams.set("scope", scope);
-  return url.toString();
-}
-
 export async function exchangeGitHubOAuthCode(
   env: AuthorizeEnv,
   code: string,
@@ -110,9 +103,6 @@ export async function readGitHubSession(
 export function clearGitHubSessionCookies(request: Request): string[] {
   return [clearCookie(GITHUB_SESSION_COOKIE, request)];
 }
-
-/** @deprecated Call clearGitHubSessionCookies and set headers in the response instead */
-export async function logoutGitHub(_env: AuthorizeEnv): Promise<void> {}
 
 // ---- GitHub connect (resource access) ----
 
@@ -169,9 +159,6 @@ export function clearGitHubConnectSessionCookies(request: Request): string[] {
   return [clearCookie(GITHUB_CONNECT_SESSION_COOKIE, request)];
 }
 
-/** @deprecated Call clearGitHubConnectSessionCookies instead */
-export async function disconnectGitHub(_env: AuthorizeEnv): Promise<void> {}
-
 // ---- Google login ----
 
 export function buildGoogleLoginUrl(env: Pick<AuthorizeEnv, "FRONTEND_ORIGIN">): string {
@@ -226,9 +213,6 @@ export async function readGoogleSession(
 export function clearGoogleSessionCookies(request: Request): string[] {
   return [clearCookie(GOOGLE_SESSION_COOKIE, request)];
 }
-
-/** @deprecated Call clearGoogleSessionCookies instead */
-export async function logoutGoogle(_env: AuthorizeEnv): Promise<void> {}
 
 // ---- Identity (user / org management) ----
 
@@ -400,15 +384,6 @@ export async function resolveGroupName(env: AuthorizeEnv, groupId: string): Prom
   return name;
 }
 
-export async function searchOrganizationsByName(env: AuthorizeEnv, name: string): Promise<{ id: string }[]> {
-  const res = await authorizeFetch(env, {
-    path: `/api/v1/identity/organizations/search?name=${encodeURIComponent(name)}`,
-    method: "GET",
-  });
-  if (!res.ok) return [];
-  return ((await res.json()) as { organizations: { id: string }[] }).organizations;
-}
-
 export async function verifyMagicLinkToken(
   env: AuthorizeEnv,
   token: string,
@@ -493,14 +468,6 @@ export async function getDefaultGroup(env: AuthorizeEnv, userId: string): Promis
   if (!res.ok) return null;
   const data = (await res.json()) as { group_id: string | null };
   return data.group_id;
-}
-
-export async function setDefaultGroup(env: AuthorizeEnv, userId: string, groupId: string): Promise<void> {
-  await authorizeFetch(env, {
-    path: `/api/v1/identity/users/${encodeURIComponent(userId)}/default-group`,
-    method: "PUT",
-    body: JSON.stringify({ group_id: groupId }),
-  });
 }
 
 // 既定グループ名（汎用・非PII）。個人名など自由入力の PII は認証DBに載せないため、初回自動作成は

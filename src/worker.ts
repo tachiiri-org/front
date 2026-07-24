@@ -1,7 +1,7 @@
 import { CLIENT_JS_PATH } from './client-path';
 import {
-  handleGitHubOAuthCallback,
-  handleGitHubOAuthStart,
+  handleGitHubLoginCallback,
+  handleGitHubLoginStart,
   handleGitHubConnectStart,
   handleGitHubConnectCallback,
 } from './session/github';
@@ -344,10 +344,10 @@ async function fetchInner(request: Request, env: Env): Promise<Response> {
     }
     // GitHub login (read:user scope — identity only)
     if (pathname === '/oauth/github/start' || pathname === '/github/oauth/start') {
-      return handleGitHubOAuthStart({ request, env });
+      return handleGitHubLoginStart({ request, env });
     }
     if (pathname === '/oauth/github/callback' || pathname === '/github/oauth/callback') {
-      return handleGitHubOAuthCallback({ request, env });
+      return handleGitHubLoginCallback({ request, env });
     }
     // GitHub connect (resource access scopes)
     if (pathname === '/oauth/github/connect/start') {

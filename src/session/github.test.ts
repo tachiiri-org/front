@@ -5,8 +5,6 @@ import {
   handleGitHubLoginCallback,
   handleGitHubConnectStart,
   handleGitHubConnectCallback,
-  handleGitHubOAuthStart,
-  handleGitHubOAuthCallback,
 } from './github';
 
 describe('handleGitHubLoginStart', () => {
@@ -129,34 +127,6 @@ describe('handleGitHubConnectCallback', () => {
       request: new Request('https://front.example.com/oauth/github/connect/callback?code=abc&state=xyz', {
         headers: { Cookie: 'github_connect_oauth_state=different-state' },
       }),
-      env: {},
-    } as never);
-
-    expect(response.status).toBe(400);
-  });
-});
-
-// Backward-compatibility: deprecated aliases still work
-describe('handleGitHubOAuthStart (deprecated alias)', () => {
-  it('delegates to handleGitHubLoginStart', () => {
-    const response = handleGitHubOAuthStart({
-      request: new Request('https://front.example.com/oauth/github/start'),
-      env: {
-        GITHUB_OAUTH_CLIENT_ID: 'test-client-id',
-        FRONTEND_ORIGIN: 'https://front.example.com',
-      },
-    } as never);
-
-    expect(response.status).toBe(302);
-    const location = new URL(response.headers.get('Location') ?? '');
-    expect(location.searchParams.get('scope')).toBe('read:user');
-  });
-});
-
-describe('handleGitHubOAuthCallback (deprecated alias)', () => {
-  it('returns 400 when state cookie is missing', async () => {
-    const response = await handleGitHubOAuthCallback({
-      request: new Request('https://front.example.com/oauth/github/callback?code=abc&state=xyz'),
       env: {},
     } as never);
 
