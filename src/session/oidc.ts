@@ -4,13 +4,12 @@ import { resolveOrigin } from "./origin";
 import { identitySetCookies } from "./identity";
 import type { AuthorizeEnv } from "./index";
 import { authorizeFetch } from "./fetch";
-import { MCP_OAUTH_PARAMS_COOKIE } from "./google";
+import { MCP_OAUTH_PARAMS_COOKIE } from "./cookie-names";
 
 const OIDC_STATE_COOKIE = "__Host-oidc_login_oauth_state";
 const OIDC_ID_COOKIE = "__Host-oidc_login_oidc_id";
 const OIDC_RETURN_TO_COOKIE = "__Host-oidc_login_return_to";
 export const OIDC_ORG_ID_COOKIE = "__Host-oidc_login_org_id";
-const IDENTITY_USER_ID_COOKIE = "identity_user_id";
 const STATE_TTL_SECONDS = 60 * 10;
 
 type RouteContext = {

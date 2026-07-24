@@ -340,7 +340,7 @@ export async function createOrganization(env: AuthorizeEnv, userId: string, name
 }
 
 // グループ名を group DB から読む（Phase2 の正の置き場所）。
-export async function getGroupName(env: AuthorizeEnv, groupId: string): Promise<string | null> {
+async function getGroupName(env: AuthorizeEnv, groupId: string): Promise<string | null> {
   const res = await authorizeFetch(env, {
     path: `/api/v1/graph/group-name?group_id=${encodeURIComponent(groupId)}`,
     method: "GET",

@@ -8,7 +8,6 @@ const SP_ENTITY_ID_PATH = '/auth/saml';
 function isSecureRequest(request: Request): boolean {
   return new URL(request.url).protocol === 'https:';
 }
-const IDENTITY_USER_ID_COOKIE = 'identity_user_id';
 const SAML_RELAY_STATE_COOKIE = '__Host-saml_relay_state';
 
 type RouteContext = { request: Request; env: AuthorizeEnv };

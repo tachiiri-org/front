@@ -8,12 +8,12 @@ import { issueSessionToken, readSessionToken } from "./token";
 //
 // __Host- prefix: the browser only accepts it over HTTPS, with Path=/ and no Domain,
 // which pins it to this exact origin. It is HttpOnly (JS cannot read it).
-export const IDENTITY_COOKIE = "__Host-identity";
+const IDENTITY_COOKIE = "__Host-identity";
 
 // A non-authorization, JS-readable hint of the selected group, used only by client-side
 // UI (e.g. the org switcher). It is NEVER trusted for authorization — the server reads
 // the group id from the signed cookie above. Forging it only affects the caller's own UI.
-export const GROUP_HINT_COOKIE = "identity_group_id";
+const GROUP_HINT_COOKIE = "identity_group_id";
 
 // Legacy plaintext cookies that this replaces; cleared on logout for a clean migration.
 const LEGACY_COOKIES = ["identity_user_id", "org_user_id"];
