@@ -14,8 +14,10 @@ type Person = { id: string; label: string | null };
 type Prefill = { label?: string | null; date?: string; time?: string; place?: string; lat?: number; lng?: number; tz?: string };
 type Placement = { planet: string; sign: string; degree: number; retrograde?: boolean };
 type Aspect = { a: string; b: string; type: string; orb: number };
+type Cusp = { system: string; index: number; longitude: number };
 type Chart = {
   ascendant: number; midheaven: number;
+  house_system?: string; cusps?: Cusp[];
   placements: Placement[]; aspects: Aspect[];
   dignities: Array<{ planet: string; dignity: string }>;
   elements: Array<{ element: string; count: number }>;
@@ -75,6 +77,27 @@ function drawWheel(chart: Chart): SVGSVGElement {
   // ハウス円（内側）
   s.append(svg("circle", { cx, cy, r: rHouse, fill: "none", stroke: "#0003" }));
   s.append(svg("circle", { cx, cy, r: rPlanet + 14, fill: "none", stroke: "#0001" }));
+
+  // ハウスのカスプ線（12本）＋ハウス番号。流派のハウスシステムのカスプを使う。
+  const cusps = (chart.cusps ?? [])
+    .filter((c) => c.system === (chart.house_system ?? "whole_sign"))
+    .sort((a, b) => a.index - b.index);
+  if (cusps.length === 12) {
+    const rCuspIn = 34;
+    for (let i = 0; i < 12; i++) {
+      const lon = cusps[i].longitude;
+      const [x1, y1] = pt(lon, rCuspIn), [x2, y2] = pt(lon, rZodiacIn);
+      // アングル（1・4・7・10室）は少し濃く。他は薄い破線。
+      const angular = i % 3 === 0;
+      s.append(svg("line", { x1, y1, x2, y2, stroke: angular ? "#0004" : "#0002", "stroke-width": angular ? 0.9 : 0.6, "stroke-dasharray": angular ? "0" : "3 3" }));
+      // ハウス番号: このカスプと次のカスプの中点角、外側ハウス帯に配置。
+      const span = ((cusps[(i + 1) % 12].longitude - lon) % 360 + 360) % 360;
+      const [nx, ny] = pt(lon + span / 2, rHouse + 12);
+      const t = svg("text", { x: nx, y: ny, "text-anchor": "middle", "dominant-baseline": "central", "font-size": 9, fill: "#aaa" });
+      t.textContent = String(i + 1);
+      s.append(t);
+    }
+  }
 
   // ASC/MC 軸（太線＋ラベル）
   for (const [lon, label, color] of [[asc, "Asc", "#c0392b"], [chart.midheaven, "MC", "#2c3e50"]] as [number, string, string][]) {
