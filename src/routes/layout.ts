@@ -571,7 +571,15 @@ export const handleApiRequest = async (request: Request, env: Env): Promise<Resp
     try {
       const res = await fetch(nomi.toString(), { headers: { 'User-Agent': 'uranai.tachiiri.com/1.0 (astro chart)' } });
       const arr = res.ok ? ((await res.json()) as Array<{ display_name: string; lat: string; lon: string }>) : [];
-      return Response.json({ results: arr.map((r) => ({ name: r.display_name, lat: Number(r.lat), lng: Number(r.lon) })) }, { status: 200 });
+      // Nominatim の display_name は「最も詳細, …, 国」の順（コンマ区切り）。
+      // 国と郵便番号を除き逆順に連結して日本語の住所順（例: 東京都渋谷区…）にする。
+      const jpAddr = (displayName: string): string => {
+        const parts = String(displayName ?? '')
+          .split(',').map((s) => s.trim())
+          .filter((s) => s && s !== '日本' && s !== 'Japan' && !/^〒?\d{3}-?\d{0,4}$/.test(s));
+        return parts.reverse().join('');
+      };
+      return Response.json({ results: arr.map((r) => ({ name: jpAddr(r.display_name) || r.display_name, lat: Number(r.lat), lng: Number(r.lon) })) }, { status: 200 });
     } catch {
       return Response.json({ results: [] }, { status: 200 });
     }

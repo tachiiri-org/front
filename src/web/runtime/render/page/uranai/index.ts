@@ -116,8 +116,9 @@ function birthForm(personId: string, onDone: (chart: Chart) => void, prefill?: P
   const label = el("input", { type: "text", placeholder: "表示名（例: 自分）", value: prefill?.label ?? "" });
   const date = el("input", { type: "date", value: prefill?.date ?? "" });
   const time = el("input", { type: "time", value: prefill?.time ?? "" });
-  const placeInput = el("input", { type: "text", placeholder: "出生地を検索（例: 松本市）", value: prefill?.place ? prefill.place.split(",")[0] : "" });
+  const placeInput = el("input", { type: "text", placeholder: "出生地を検索（例: 松本市）", value: prefill?.place ?? "" });
   const results = el("div", { className: "u-geo-results" });
+  const geoWrap = el("div", { className: "u-geo-wrap" }, [placeInput, results]);
   const tz = el("input", { type: "text", placeholder: "UTCオフセット（例: +09:00）", value: prefill?.tz ?? "+09:00" });
   const picked = el("div", { className: "u-picked" });
   let lat: number | null = prefill?.lat ?? null, lng: number | null = prefill?.lng ?? null, placeName = prefill?.place ?? "";
@@ -137,7 +138,7 @@ function birthForm(personId: string, onDone: (chart: Chart) => void, prefill?: P
           item.addEventListener("click", () => {
             lat = r.lat; lng = r.lng; placeName = r.name;
             picked.textContent = `📍 ${r.name}（${r.lat.toFixed(3)}, ${r.lng.toFixed(3)}）`;
-            results.innerHTML = ""; placeInput.value = r.name.split(",")[0];
+            results.innerHTML = ""; placeInput.value = r.name;
           });
           results.append(item);
         }
@@ -164,8 +165,8 @@ function birthForm(personId: string, onDone: (chart: Chart) => void, prefill?: P
   wrap.append(
     el("div", { className: "u-row" }, [el("label", { textContent: "表示名" }), label]),
     el("div", { className: "u-row" }, [el("label", { textContent: "生年月日" }), date, time]),
-    el("div", { className: "u-row" }, [el("label", { textContent: "出生地" }), placeInput]),
-    results, picked,
+    el("div", { className: "u-row" }, [el("label", { textContent: "出生地" }), geoWrap]),
+    picked,
     el("div", { className: "u-row" }, [el("label", { textContent: "UTC offset" }), tz]),
     submit, status,
   );
@@ -197,8 +198,12 @@ export async function renderUranai(container: HTMLElement): Promise<void> {
     .u-btn{background:#4A90C2;color:#fff;border:0;border-radius:6px;padding:8px 14px;cursor:pointer;margin-top:8px}
     .u-row{display:flex;align-items:center;gap:8px;margin:6px 0}.u-row label{width:80px;flex:none;color:#666;font-size:13px}
     .u-row input{flex:1;padding:6px;border:1px solid #0002;border-radius:5px}
-    .u-geo-results{max-height:160px;overflow:auto}.u-geo-item{padding:6px;border-bottom:1px solid #0001;cursor:pointer;font-size:13px}.u-geo-item:hover{background:#4A90C214}
-    .u-picked{color:#2a7;font-size:13px;margin:4px 0}.u-status{color:#c0392b;font-size:13px;margin-top:6px}
+    .u-geo-wrap{flex:1;min-width:0;position:relative}
+    .u-geo-wrap input{width:100%;box-sizing:border-box}
+    .u-geo-results{position:absolute;left:0;right:0;top:100%;z-index:10;background:#fff;border:1px solid #0002;border-top:0;border-radius:0 0 5px 5px;box-shadow:0 6px 14px #0002;max-height:200px;overflow:auto}
+    .u-geo-results:empty{display:none}
+    .u-geo-item{padding:6px 8px;border-bottom:1px solid #0001;cursor:pointer;font-size:12px;color:#999;line-height:1.4}.u-geo-item:hover{background:#4A90C214;color:#555}
+    .u-picked{color:#aaa;font-weight:400;font-size:12px;margin:4px 0}.u-status{color:#c0392b;font-size:13px;margin-top:6px}
     .u-warn{color:#c82;font-size:13px;margin:8px 0}.u-counts{margin-top:8px;font-size:13px;color:#444}
     .u-title{font-weight:700;font-size:18px;margin-bottom:8px}
     .u-chart-head{display:flex;align-items:center;justify-content:space-between;gap:12px;margin-bottom:4px}
