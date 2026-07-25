@@ -144,7 +144,7 @@ function drawWheel(chart: Chart, enabledAspects: Set<string>, name: boolean): SV
   const order = bodies.map((p) => ({ p, lon: lonOf(p) })).sort((a, b) => a.lon - b.lon);
   const disp = order.map((o) => o.lon);
   const n = disp.length;
-  const minGap = name ? 15 : 9; // 度。名前枠は幅があるので広め（度数は枠外に出すので枠は小さい）
+  const minGap = name ? 17 : 9; // 度。名前枠は幅があるので広め（度数は枠外に出すので枠は小さい）
   if (n > 1 && n * minGap < 360) {
     // 円環上で隣接ペアを対称に押し広げる緩和を反復（真位置の重心を保ちつつ分離）。
     for (let iter = 0; iter < 80; iter++) {
