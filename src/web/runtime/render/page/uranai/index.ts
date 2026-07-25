@@ -65,7 +65,7 @@ const svg = (tag: string, attrs: Record<string, string | number>): SVGElement =>
 // ───────────────────────── ホイール図 ─────────────────────────
 function drawWheel(chart: Chart, enabledAspects: Set<string>, name: boolean): SVGSVGElement {
   const size = 560, cx = size / 2, cy = size / 2, R = 250;
-  const rZodiacIn = R - 34, rHouse = R - 54, rPlanet = R - 100;
+  const rZodiacIn = R - 34, rHouse = R - 54, rPlanet = R - 80;
   const rHouseNum = (rZodiacIn + rHouse) / 2; // ハウス番号は外円(黄道内縁)と内円(rHouse)の径方向中央に
   const s = document.createElementNS(NS, "svg") as SVGSVGElement;
   s.setAttribute("viewBox", `0 0 ${size} ${size}`);
@@ -95,9 +95,8 @@ function drawWheel(chart: Chart, enabledAspects: Set<string>, name: boolean): SV
   // 30°ごとの区切り＋度目盛（内側）
   for (let a = 0; a < 360; a += 30) { const [x0, y0] = pt(a, rZodiacIn), [x1, y1] = pt(a, R); s.append(svg("line", { x1: x0, y1: y0, x2: x1, y2: y1, stroke: "#0003", "stroke-width": 0.5 })); }
 
-  // ハウス円（内側）
+  // ハウス円（内側＝番号帯の内縁）
   s.append(svg("circle", { cx, cy, r: rHouse, fill: "none", stroke: "#0003" }));
-  s.append(svg("circle", { cx, cy, r: rPlanet + 14, fill: "none", stroke: "#0001" }));
 
   // ハウス境界（12分割線）＋ハウス番号。カスプ保存があれば流派のハウスシステム、
   // 無ければ whole-sign 等分（ASC のサイン先頭から 30°刻み）でフォールバックし必ず描く。
@@ -135,7 +134,7 @@ function drawWheel(chart: Chart, enabledAspects: Set<string>, name: boolean): SV
     if (!enabledAspects.has(asp.type)) continue;
     const la = lonMap.get(asp.a), lb = lonMap.get(asp.b);
     if (la === undefined || lb === undefined) continue;
-    const [ax, ay] = pt(la, rPlanet - 18), [bx, by] = pt(lb, rPlanet - 18);
+    const [ax, ay] = pt(la, rPlanet - 8), [bx, by] = pt(lb, rPlanet - 8);
     s.append(svg("line", { x1: ax, y1: ay, x2: bx, y2: by, stroke: ASPECT_COLOR[asp.type] ?? "#999", "stroke-width": 0.8, opacity: 0.6 }));
   }
 
@@ -145,7 +144,7 @@ function drawWheel(chart: Chart, enabledAspects: Set<string>, name: boolean): SV
   const order = bodies.map((p) => ({ p, lon: lonOf(p) })).sort((a, b) => a.lon - b.lon);
   const disp = order.map((o) => o.lon);
   const n = disp.length;
-  const minGap = name ? 18 : 9; // 度。名前枠は幅があるので広め
+  const minGap = name ? 15 : 9; // 度。名前枠は幅があるので広め（度数は枠外に出すので枠は小さい）
   if (n > 1 && n * minGap < 360) {
     // 円環上で隣接ペアを対称に押し広げる緩和を反復（真位置の重心を保ちつつ分離）。
     for (let iter = 0; iter < 80; iter++) {
@@ -165,24 +164,18 @@ function drawWheel(chart: Chart, enabledAspects: Set<string>, name: boolean): SV
   }
   order.forEach((o, i) => {
     const a = disp[i];
-    // 名前モードは枠が大きいので、扇角に加えて半径を3段（0/14/28px内側）でずらし、
-    // 同一黄経に近い密集でも隣接枠が必ず別半径になるようにして非重複を保証。
-    const rBody = name ? rPlanet - (i % 3) * 14 : rPlanet;
-    const [gx, gy] = pt(a, rBody);
+    const [gx, gy] = pt(a, rPlanet);
     if (name) {
-      // フルネームを小さめの文字で四角枠に。長い名前は改行、度数は枠内最下段に薄く。
+      // フルネームを小さめの文字で四角枠に。長い名前は改行。度数は枠外（記号モードと同様）。
       const lines = PLANET_NAME_LINES[o.p.planet] ?? [PLANET_GLYPH[o.p.planet] ?? "?"];
-      const degText = `${Math.floor(o.p.degree)}°${o.p.retrograde ? "℞" : ""}`;
-      const rows = [...lines, degText];
-      const fs = 7.5, degFs = 6.5, lh = 8.5, padX = 3, padY = 2.5;
-      const maxLen = Math.max(...rows.map((t) => [...t].length));
-      const w = maxLen * fs + padX * 2, h = rows.length * lh + padY * 2;
+      const fs = 7.5, lh = 8.5, padX = 3, padY = 2.5;
+      const maxLen = Math.max(...lines.map((t) => [...t].length));
+      const w = maxLen * fs + padX * 2, h = lines.length * lh + padY * 2;
       const grp = svg("g", {});
       grp.append(svg("rect", { x: gx - w / 2, y: gy - h / 2, width: w, height: h, rx: 2, fill: "#fff", stroke: "#bbb", "stroke-width": 0.7, opacity: 0.95 }));
-      rows.forEach((line, k) => {
-        const isDeg = k >= lines.length;
+      lines.forEach((line, k) => {
         const ty = gy - h / 2 + padY + lh * (k + 0.5);
-        const tx = svg("text", { x: gx, y: ty, "text-anchor": "middle", "dominant-baseline": "central", "font-size": isDeg ? degFs : fs, fill: isDeg ? "#999" : "#111" });
+        const tx = svg("text", { x: gx, y: ty, "text-anchor": "middle", "dominant-baseline": "central", "font-size": fs, fill: "#111" });
         tx.textContent = line;
         grp.append(tx);
       });
@@ -191,12 +184,12 @@ function drawWheel(chart: Chart, enabledAspects: Set<string>, name: boolean): SV
       const g = svg("text", { x: gx, y: gy, "text-anchor": "middle", "dominant-baseline": "central", "font-size": 16, fill: "#111" });
       g.textContent = PLANET_GLYPH[o.p.planet] ?? "?";
       s.append(g);
-      // 度数はグリフの外側（リング側）に、グリフと同じ表示角で。アスペクト線は中心寄りなので非重複。
-      const [dx, dy] = pt(a, rPlanet + 16);
-      const d = svg("text", { x: dx, y: dy, "text-anchor": "middle", "dominant-baseline": "central", "font-size": 8, fill: "#666" });
-      d.textContent = `${Math.floor(o.p.degree)}°${o.p.retrograde ? "℞" : ""}`;
-      s.append(d);
     }
+    // 度数は記号／枠の外側（リング寄り）に、同じ表示角で（両モード共通）。
+    const [dx, dy] = pt(a, rPlanet + 15);
+    const d = svg("text", { x: dx, y: dy, "text-anchor": "middle", "dominant-baseline": "central", "font-size": 8, fill: "#666" });
+    d.textContent = `${Math.floor(o.p.degree)}°${o.p.retrograde ? "℞" : ""}`;
+    s.append(d);
   });
   return s;
 }
