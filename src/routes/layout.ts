@@ -757,7 +757,7 @@ export const handleApiRequest = async (request: Request, env: Env): Promise<Resp
   }
 
   if (isNavigationRequest(request)) {
-    return new Response('<!doctype html><script type="module" src="/client.js"></script>', {
+    return new Response('<!doctype html><html lang="ja"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1"></head><body><script type="module" src="/client.js"></script></body></html>', {
       headers: { 'Content-Type': 'text/html; charset=UTF-8' },
     });
   }
