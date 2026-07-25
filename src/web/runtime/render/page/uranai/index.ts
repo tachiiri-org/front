@@ -31,6 +31,16 @@ const NS = "http://www.w3.org/2000/svg";
 
 type Person = { id: string; label: string | null };
 type Prefill = { label?: string | null; date?: string; time?: string; place?: string; lat?: number; lng?: number; tz?: string };
+type Settings = { zodiac: string; house_system_id: string; ephemeris: string; node_type: string; lilith_type: string; ayanamsha: string };
+// 流派設定（マスタ）の選択肢。[key, ラベル, 選択肢[[値,表示]]]。
+const SETTING_FIELDS: Array<{ key: keyof Settings; label: string; options: Array<[string, string]> }> = [
+  { key: "house_system_id", label: "ハウス", options: [["whole_sign", "ホールサイン"], ["placidus", "プラシダス"]] },
+  { key: "zodiac", label: "黄道帯", options: [["tropical", "トロピカル（回帰）"], ["sidereal", "サイデリアル（恒星）"]] },
+  { key: "ephemeris", label: "天体暦", options: [["vsop87", "VSOP87（高精度）"], ["standard", "簡易（Standard）"]] },
+  { key: "node_type", label: "ノード", options: [["mean", "平均（Mean）"], ["true", "真（True）"]] },
+  { key: "lilith_type", label: "リリス", options: [["mean", "平均（Mean）"], ["true", "真（True）"]] },
+  { key: "ayanamsha", label: "アヤナムシャ", options: [["lahiri", "ラヒリ"], ["fagan_bradley", "フェイガン/ブラッドレー"]] },
+];
 type Placement = { planet: string; sign: string; degree: number; retrograde?: boolean };
 type Aspect = { a: string; b: string; type: string; orb: number };
 type Cusp = { system: string; index: number; longitude: number };
@@ -61,6 +71,24 @@ const svg = (tag: string, attrs: Record<string, string | number>): SVGElement =>
   for (const [k, v] of Object.entries(attrs)) e.setAttribute(k, String(v));
   return e;
 };
+const selectEl = (options: Array<[string, string]>, value: string): HTMLSelectElement => {
+  const sel = el("select", { className: "u-set-sel" });
+  for (const [v, lbl] of options) sel.append(el("option", { value: v, textContent: lbl }));
+  sel.value = value;
+  return sel;
+};
+async function loadSettings(): Promise<Settings> {
+  const d: Settings = { zodiac: "tropical", house_system_id: "whole_sign", ephemeris: "vsop87", node_type: "mean", lilith_type: "mean", ayanamsha: "lahiri" };
+  try {
+    const ref = await api<{ rulesets: Array<Record<string, string>>; ruleset: string }>(`/api/v1/uranai/astrology/reference`);
+    const r = ref.rulesets.find((x) => x.id === ref.ruleset) ?? ref.rulesets[0] ?? {};
+    return {
+      zodiac: r.zodiac ?? d.zodiac, house_system_id: r.house_system_id ?? d.house_system_id,
+      ephemeris: r.ephemeris ?? d.ephemeris, node_type: r.node_type ?? d.node_type,
+      lilith_type: r.lilith_type ?? d.lilith_type, ayanamsha: r.ayanamsha ?? d.ayanamsha,
+    };
+  } catch { return d; }
+}
 
 // ───────────────────────── ホイール図 ─────────────────────────
 function drawWheel(chart: Chart, enabledAspects: Set<string>, name: boolean): SVGSVGElement {
@@ -116,7 +144,7 @@ function drawWheel(chart: Chart, enabledAspects: Set<string>, name: boolean): SV
     // ハウス番号: このカスプと次のカスプの中点角、番号帯の中央に配置。
     const span = ((cuspLons[(i + 1) % 12] - lon) % 360 + 360) % 360;
     const [nx, ny] = pt(lon + span / 2, rHouseNum);
-    const t = svg("text", { x: nx, y: ny, "text-anchor": "middle", "dominant-baseline": "central", "font-size": 9, fill: "#999" });
+    const t = svg("text", { x: nx, y: ny, "text-anchor": "middle", "dominant-baseline": "central", "font-size": 10, fill: "#555", "font-weight": "700" });
     t.textContent = String(i + 1);
     s.append(t);
   }
@@ -170,20 +198,45 @@ function drawWheel(chart: Chart, enabledAspects: Set<string>, name: boolean): SV
     s.append(svg("line", { x1: ax, y1: ay, x2: bx, y2: by, stroke: ASPECT_COLOR[asp.type] ?? "#999", "stroke-width": 0.8, opacity: 0.6 }));
   }
 
+  // 名前モードの枠寸法を先に算出。度数ぶんの高さも予約して重なり判定に使う。
+  const NAME_FS = 8.5, NAME_LH = 10.5, NAME_PADX = 3, NAME_PADY = 2.5, DEG_RESERVE = 12;
+  const labelLines = order.map((o) => PLANET_NAME_LINES[o.p.planet] ?? [PLANET_GLYPH[o.p.planet] ?? "?"]);
+  const boxDim = labelLines.map((lines) => {
+    const maxLen = Math.max(...lines.map((t) => [...t].length));
+    return { w: maxLen * NAME_FS + NAME_PADX * 2, h: lines.length * NAME_LH + NAME_PADY * 2 };
+  });
+  // 各天体の描画半径。名前モードは、扇状に広げてなお枠が重なる天体を、中心からの距離
+  // （半径）を内側へずらして必ず見えるようにする（度数枠込みの 2D 重なり判定で貪欲割当）。
+  const rOf = new Array<number>(n).fill(rPlanet);
+  if (name) {
+    const levelStep = 22;
+    const placed: Array<{ x: number; y: number; w: number; h: number }> = [];
+    for (let i = 0; i < n; i++) {
+      const w = boxDim[i].w, h = boxDim[i].h + DEG_RESERVE;
+      let x = 0, y = 0;
+      for (let lane = 0; lane < 8; lane++) {
+        const r = rPlanet - lane * levelStep;
+        [x, y] = pt(disp[i], r);
+        rOf[i] = r;
+        const hit = placed.some((p) => Math.abs(p.x - x) < (p.w + w) / 2 && Math.abs(p.y - y) < (p.h + h) / 2);
+        if (!hit) break;
+      }
+      placed.push({ x, y, w, h });
+    }
+  }
   order.forEach((o, i) => {
     const a = disp[i];
-    const [gx, gy] = pt(a, rPlanet);
+    const r = rOf[i];
+    const [gx, gy] = pt(a, r);
     if (name) {
-      // フルネームを小さめの文字で四角枠に。長い名前は改行。度数は枠外（記号モードと同様）。
-      const lines = PLANET_NAME_LINES[o.p.planet] ?? [PLANET_GLYPH[o.p.planet] ?? "?"];
-      const fs = 7.5, lh = 8.5, padX = 3, padY = 2.5;
-      const maxLen = Math.max(...lines.map((t) => [...t].length));
-      const w = maxLen * fs + padX * 2, h = lines.length * lh + padY * 2;
+      // フルネームを四角枠に。長い名前は改行。度数は枠外（記号モードと同様）。
+      const lines = labelLines[i];
+      const { w, h } = boxDim[i];
       const grp = svg("g", {});
       grp.append(svg("rect", { x: gx - w / 2, y: gy - h / 2, width: w, height: h, rx: 2, fill: "#fff", stroke: "#bbb", "stroke-width": 0.7, opacity: 0.95 }));
       lines.forEach((line, k) => {
-        const ty = gy - h / 2 + padY + lh * (k + 0.5);
-        const tx = svg("text", { x: gx, y: ty, "text-anchor": "middle", "dominant-baseline": "central", "font-size": fs, fill: "#111" });
+        const ty = gy - h / 2 + NAME_PADY + NAME_LH * (k + 0.5);
+        const tx = svg("text", { x: gx, y: ty, "text-anchor": "middle", "dominant-baseline": "central", "font-size": NAME_FS, fill: "#111" });
         tx.textContent = line;
         grp.append(tx);
       });
@@ -193,8 +246,8 @@ function drawWheel(chart: Chart, enabledAspects: Set<string>, name: boolean): SV
       g.textContent = PLANET_GLYPH[o.p.planet] ?? "?";
       s.append(g);
     }
-    // 度数は記号／枠の外側（リング寄り）に、同じ表示角で（両モード共通）。
-    const [dx, dy] = pt(a, rPlanet + 15);
+    // 度数は記号／枠の外側（リング寄り）に、同じ表示角・同じレーン半径で。
+    const [dx, dy] = pt(a, r + 15);
     const d = svg("text", { x: dx, y: dy, "text-anchor": "middle", "dominant-baseline": "central", "font-size": 8, fill: "#666" });
     d.textContent = `${Math.floor(o.p.degree)}°${o.p.retrograde ? "℞" : ""}`;
     s.append(d);
@@ -203,8 +256,21 @@ function drawWheel(chart: Chart, enabledAspects: Set<string>, name: boolean): SV
 }
 
 // ───────────────────────── 出生フォーム ─────────────────────────
-function birthForm(personId: string, onDone: (chart: Chart) => void, prefill?: Prefill): HTMLElement {
+function birthForm(personId: string, onDone: (chart: Chart) => void, prefill?: Prefill, settings?: Settings): HTMLElement {
   const wrap = el("div", { className: "u-form" });
+  // 流派設定（マスタ）の選択 UI。全体（全人物のチャート）に適用される。
+  const setSels: Partial<Record<keyof Settings, HTMLSelectElement>> = {};
+  const setSection = el("div", { className: "u-settings" });
+  if (settings) {
+    setSection.append(el("div", { className: "u-set-title", textContent: "流派設定（全体に適用）" }));
+    const grid = el("div", { className: "u-set-grid" });
+    for (const f of SETTING_FIELDS) {
+      const sel = selectEl(f.options, settings[f.key]);
+      setSels[f.key] = sel;
+      grid.append(el("div", { className: "u-set-row" }, [el("label", { textContent: f.label }), sel]));
+    }
+    setSection.append(grid);
+  }
   const label = el("input", { type: "text", placeholder: "表示名（例: 自分）", value: prefill?.label ?? "" });
   const date = el("input", { type: "date", value: prefill?.date ?? "" });
   const time = el("input", { type: "time", value: prefill?.time ?? "" });
@@ -249,6 +315,12 @@ function birthForm(personId: string, onDone: (chart: Chart) => void, prefill?: P
     status.textContent = "計算中…";
     try {
       if (label.value.trim()) await api(`/api/v1/uranai/person/${personId}`, { method: "PATCH", body: JSON.stringify({ label: label.value.trim() }) }).catch(() => {});
+      // 流派設定（マスタ）を更新してから計算。settings オブジェクトも更新して次回フォームに反映。
+      if (settings) {
+        const payload: Record<string, string> = {};
+        for (const f of SETTING_FIELDS) { const v = setSels[f.key]?.value; if (v) { payload[f.key as string] = v; (settings as Record<string, string>)[f.key as string] = v; } }
+        await api(`/api/v1/uranai/astrology/ruleset`, { method: "PUT", body: JSON.stringify(payload) }).catch(() => {});
+      }
       const born_at = `${date.value}T${time.value}:00${tz.value.trim() || "+00:00"}`;
       await api(`/api/v1/uranai/person/${personId}/birth`, { method: "PUT", body: JSON.stringify({ born_at, lat: String(lat), lng: String(lng), place: placeName, timezone: tz.value.trim() }) });
       const chart = await api<Chart>(`/api/v1/uranai/astrology/person/${personId}/compute`, { method: "POST", body: "{}" });
@@ -263,6 +335,7 @@ function birthForm(personId: string, onDone: (chart: Chart) => void, prefill?: P
     el("div", { className: "u-row" }, [el("label", { textContent: "出生地" }), geoWrap]),
     picked,
     el("div", { className: "u-row" }, [el("label", { textContent: "UTC offset" }), tz]),
+    setSection,
     submit, status,
   );
   return wrap;
@@ -339,17 +412,26 @@ export async function renderUranai(container: HTMLElement): Promise<void> {
     .u-chart-head .u-title{margin-bottom:0}
     .u-btn-sm{padding:5px 10px;margin-top:0;font-size:13px;background:#0000000d;color:#333}
     .u-btn-sm:hover{background:#00000014}
+    .u-settings{margin:12px 0 4px;padding:10px 12px;border:1px solid #0001;border-radius:8px;background:#0000000a;max-width:520px}
+    .u-set-title{font-size:13px;font-weight:600;color:#555;margin-bottom:8px}
+    .u-set-grid{display:grid;grid-template-columns:1fr 1fr;gap:6px 14px}
+    .u-set-row{display:flex;align-items:center;gap:8px}
+    .u-set-row label{width:88px;flex:none;color:#666;font-size:12px}
+    .u-set-sel{flex:1;min-width:0;padding:4px 6px;border:1px solid #0002;border-radius:5px;font-size:12px;background:#fff}
   </style>`;
   const wrap = el("div", { className: "u-wrap" });
   const side = el("div", { className: "u-side" });
   const main = el("div", { className: "u-main" });
   wrap.append(side, main); container.append(wrap);
 
+  // 流派設定（マスタ）。編集フォームで表示・変更する。全人物のチャートに適用。
+  const settings = await loadSettings();
+
   const showForm = (personId: string, prefill?: Prefill) => {
     main.innerHTML = "";
     main.append(
       el("div", { className: "u-title", textContent: prefill?.date ? "出生データを編集" : "出生データを登録" }),
-      birthForm(personId, async () => { await refreshList(personId); }, prefill),
+      birthForm(personId, async () => { await refreshList(personId); }, prefill, settings),
     );
   };
   // 既存人物の出生データを取得して編集フォームを事前入力で開く。
