@@ -418,6 +418,21 @@ export async function renderUranai(container: HTMLElement): Promise<void> {
     .u-set-row{display:flex;align-items:center;gap:8px}
     .u-set-row label{width:88px;flex:none;color:#666;font-size:12px}
     .u-set-sel{flex:1;min-width:0;padding:4px 6px;border:1px solid #0002;border-radius:5px;font-size:12px;background:#fff}
+    /* モバイル: 縦積み＋人物リストを横スクロールのチップ化 */
+    @media (max-width: 640px){
+      .u-wrap{flex-direction:column;gap:10px;padding:10px}
+      .u-side{width:auto;border-right:0;border-bottom:1px solid #0001;padding:0 0 8px 0;display:flex;gap:6px;overflow-x:auto;align-items:center;-webkit-overflow-scrolling:touch}
+      .u-side>.u-title{font-size:14px;margin:0 4px 0 0;flex:none}
+      .u-person{flex:none;white-space:nowrap;padding:6px 10px;border:1px solid #0001}
+      .u-side>.u-btn{flex:none;margin-top:0;white-space:nowrap;padding:6px 10px}
+      .u-main{width:100%}
+      .u-set-grid{grid-template-columns:1fr}
+      .u-set-row label{width:84px}
+      .u-row label{width:64px;font-size:12px}
+      .u-settings,.u-glyph-toggle,.u-aspect-toggles{max-width:100%}
+      .u-chart-head{flex-wrap:wrap;gap:6px}
+      .u-title{font-size:16px}
+    }
   </style>`;
   const wrap = el("div", { className: "u-wrap" });
   const side = el("div", { className: "u-side" });
