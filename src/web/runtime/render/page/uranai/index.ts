@@ -12,7 +12,7 @@ const PLANET_NAME_LINES: Record<string, string[]> = {
   sun: ["太陽"], moon: ["月"], mercury: ["水星"], venus: ["金星"], mars: ["火星"],
   jupiter: ["木星"], saturn: ["土星"], uranus: ["天王星"], neptune: ["海王星"], pluto: ["冥王星"],
   chiron: ["キロン"], ceres: ["ケレス"], pallas: ["パラス"], juno: ["ジュノー"], vesta: ["ベスタ"],
-  pholus: ["フォルス"], lilith: ["リリス"], dragon_head: ["ドラゴン", "ヘッド"], dragon_tail: ["ドラゴン", "テイル"],
+  pholus: ["フォルス"], lilith: ["リリス"], dragon_head: ["ヘッド"], dragon_tail: ["テイル"],
   fortune: ["フォー", "チュン"],
 };
 const ASPECT_COLOR: Record<string, string> = { conjunction: "#888", opposition: "#D33", trine: "#2A7", square: "#D33", sextile: "#2A7", semisextile: "#AAA", quincunx: "#C82" };
@@ -106,7 +106,7 @@ function drawWheel(chart: Chart, enabledAspects: Set<string>, name: boolean): SV
   const cuspLons = storedCusps.length === 12
     ? storedCusps.map((c) => c.longitude)
     : Array.from({ length: 12 }, (_, i) => ((Math.floor(asc / 30) * 30) + i * 30) % 360);
-  const rCuspIn = 34;
+  const rCuspIn = 0; // 中心まで伸ばして 12 分割線が中心で交わるように
   for (let i = 0; i < 12; i++) {
     const lon = cuspLons[i];
     const [x1, y1] = pt(lon, rCuspIn), [x2, y2] = pt(lon, rZodiacIn);
@@ -128,17 +128,8 @@ function drawWheel(chart: Chart, enabledAspects: Set<string>, name: boolean): SV
     const [lx, ly] = pt(lon, rZodiacIn + 12); const t = svg("text", { x: lx, y: ly, "text-anchor": "middle", "dominant-baseline": "central", "font-size": 11, fill: color, "font-weight": "bold" }); t.textContent = label; s.append(t);
   }
 
-  // アスペクト線（中心寄り）。カテゴリ・トグルで有効な種別のみ描画。
-  const lonMap = new Map(chart.placements.map((p) => [p.planet, lonOf(p)]));
-  for (const asp of chart.aspects) {
-    if (!enabledAspects.has(asp.type)) continue;
-    const la = lonMap.get(asp.a), lb = lonMap.get(asp.b);
-    if (la === undefined || lb === undefined) continue;
-    const [ax, ay] = pt(la, rPlanet - 8), [bx, by] = pt(lb, rPlanet - 8);
-    s.append(svg("line", { x1: ax, y1: ay, x2: bx, y2: by, stroke: ASPECT_COLOR[asp.type] ?? "#999", "stroke-width": 0.8, opacity: 0.6 }));
-  }
-
-  // 天体。密集時は表示角を扇状に広げて重なりを回避する（真の黄経は度数表示で担保）。
+  // 天体の表示角を先に確定する（密集時は扇状に広げて重なり回避）。アスペクト線も
+  // この表示角＝「天体と中心を結ぶ半径」上で各天体につなぐので、接点は天体ごとに1つ。
   // アングルは軸で描くのでグリフからは除外。名前モードは枠が大きいので間隔も広げる。
   const bodies = chart.placements.filter((p) => !["asc", "mc", "dsc", "ic"].includes(p.planet));
   const order = bodies.map((p) => ({ p, lon: lonOf(p) })).sort((a, b) => a.lon - b.lon);
@@ -162,6 +153,23 @@ function drawWheel(chart: Chart, enabledAspects: Set<string>, name: boolean): SV
       if (!moved) break;
     }
   }
+  // 天体→接続角。天体は表示角（扇の後の角度）、アングル(asc/mc)は真黄経を使う。
+  const angleOf = new Map<string, number>();
+  order.forEach((o, i) => angleOf.set(o.p.planet, disp[i]));
+  const lonMap = new Map(chart.placements.map((p) => [p.planet, lonOf(p)]));
+
+  // アスペクト線。カテゴリ・トグルで有効な種別のみ。各天体の接点は表示角×半径(rPlanet-9)＝
+  // その天体と中心を結ぶ半径上の1点。これで密集天体でも接点が1つに揃う。
+  const rAspect = rPlanet - 9;
+  for (const asp of chart.aspects) {
+    if (!enabledAspects.has(asp.type)) continue;
+    const aa = angleOf.get(asp.a) ?? lonMap.get(asp.a);
+    const ab = angleOf.get(asp.b) ?? lonMap.get(asp.b);
+    if (aa === undefined || ab === undefined) continue;
+    const [ax, ay] = pt(aa, rAspect), [bx, by] = pt(ab, rAspect);
+    s.append(svg("line", { x1: ax, y1: ay, x2: bx, y2: by, stroke: ASPECT_COLOR[asp.type] ?? "#999", "stroke-width": 0.8, opacity: 0.6 }));
+  }
+
   order.forEach((o, i) => {
     const a = disp[i];
     const [gx, gy] = pt(a, rPlanet);
