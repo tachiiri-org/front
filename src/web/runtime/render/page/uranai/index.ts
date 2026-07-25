@@ -7,8 +7,14 @@ const SIGN_GLYPH: Record<string, string> = { aries: "♈", taurus: "♉", gemini
 const SIGN_ELEMENT: Record<string, string> = { aries: "fire", leo: "fire", sagittarius: "fire", taurus: "earth", virgo: "earth", capricorn: "earth", gemini: "air", libra: "air", aquarius: "air", cancer: "water", scorpio: "water", pisces: "water" };
 const ELEMENT_COLOR: Record<string, string> = { fire: "#E8663050", earth: "#7C9A4550", air: "#E0B84550", water: "#4A90C250" };
 const PLANET_GLYPH: Record<string, string> = { sun: "☉", moon: "☽", mercury: "☿", venus: "♀", mars: "♂", jupiter: "♃", saturn: "♄", uranus: "♅", neptune: "♆", pluto: "♇", chiron: "⚷", ceres: "⚳", pallas: "⚴", juno: "⚵", vesta: "⚶", pholus: "⯛", lilith: "⚸", dragon_head: "☊", dragon_tail: "☋", fortune: "⊗", asc: "Asc", mc: "MC", dsc: "Dsc", ic: "IC" };
-// 漢字一文字表記。七曜（日月火水木金土）＋外惑星は天海冥。小惑星等はテーマから充当。
-const PLANET_KANJI: Record<string, string> = { sun: "日", moon: "月", mercury: "水", venus: "金", mars: "火", jupiter: "木", saturn: "土", uranus: "天", neptune: "海", pluto: "冥", chiron: "傷", ceres: "穀", pallas: "知", juno: "婚", vesta: "炉", pholus: "馬", lilith: "闇", dragon_head: "首", dragon_tail: "尾", fortune: "福" };
+// フルネーム表記（複数行）。長い名前は改行して枠に収める。
+const PLANET_NAME_LINES: Record<string, string[]> = {
+  sun: ["太陽"], moon: ["月"], mercury: ["水星"], venus: ["金星"], mars: ["火星"],
+  jupiter: ["木星"], saturn: ["土星"], uranus: ["天王星"], neptune: ["海王星"], pluto: ["冥王星"],
+  chiron: ["キロン"], ceres: ["ケレス"], pallas: ["パラス"], juno: ["ジュノー"], vesta: ["ベスタ"],
+  pholus: ["フォルス"], lilith: ["リリス"], dragon_head: ["ドラゴン", "ヘッド"], dragon_tail: ["ドラゴン", "テイル"],
+  fortune: ["フォー", "チュン"],
+};
 const ASPECT_COLOR: Record<string, string> = { conjunction: "#888", opposition: "#D33", trine: "#2A7", square: "#D33", sextile: "#2A7", semisextile: "#AAA", quincunx: "#C82" };
 // アスペクトの日本語名と角度。トグル表示順（主要角→マイナー角）。
 const ASPECT_INFO: Record<string, { label: string; angle: number }> = {
@@ -57,7 +63,7 @@ const svg = (tag: string, attrs: Record<string, string | number>): SVGElement =>
 };
 
 // ───────────────────────── ホイール図 ─────────────────────────
-function drawWheel(chart: Chart, enabledAspects: Set<string>, kanji: boolean): SVGSVGElement {
+function drawWheel(chart: Chart, enabledAspects: Set<string>, name: boolean): SVGSVGElement {
   const size = 560, cx = size / 2, cy = size / 2, R = 250;
   const rZodiacIn = R - 34, rHouse = R - 54, rPlanet = R - 100;
   const rHouseNum = (rZodiacIn + rHouse) / 2; // ハウス番号は外円(黄道内縁)と内円(rHouse)の径方向中央に
@@ -82,7 +88,8 @@ function drawWheel(chart: Chart, enabledAspects: Set<string>, kanji: boolean): S
     const path = svg("path", { d: `M${x0o},${y0o} A${R},${R} 0 ${large} 0 ${x1o},${y1o} L${x1i},${y1i} A${rZodiacIn},${rZodiacIn} 0 ${large} 1 ${x0i},${y0i} Z`, fill: ELEMENT_COLOR[SIGN_ELEMENT[signId]], stroke: "#0002", "stroke-width": 0.5 });
     s.append(path);
     const [gx, gy] = pt(a0 + 15, (R + rZodiacIn) / 2);
-    const g = svg("text", { x: gx, y: gy, "text-anchor": "middle", "dominant-baseline": "central", "font-size": 18, fill: "#333" }); g.textContent = SIGN_GLYPH[signId];
+    // U+FE0E（テキスト表示セレクタ）を付けて絵文字化（紫の四角）を防ぎ、記号として描画。
+    const g = svg("text", { x: gx, y: gy, "text-anchor": "middle", "dominant-baseline": "central", "font-size": 18, fill: "#333" }); g.textContent = SIGN_GLYPH[signId] + "\uFE0E";
     s.append(g);
   }
   // 30°ごとの区切り＋度目盛（内側）
@@ -92,25 +99,27 @@ function drawWheel(chart: Chart, enabledAspects: Set<string>, kanji: boolean): S
   s.append(svg("circle", { cx, cy, r: rHouse, fill: "none", stroke: "#0003" }));
   s.append(svg("circle", { cx, cy, r: rPlanet + 14, fill: "none", stroke: "#0001" }));
 
-  // ハウスのカスプ線（12本）＋ハウス番号。流派のハウスシステムのカスプを使う。
-  const cusps = (chart.cusps ?? [])
+  // ハウス境界（12分割線）＋ハウス番号。カスプ保存があれば流派のハウスシステム、
+  // 無ければ whole-sign 等分（ASC のサイン先頭から 30°刻み）でフォールバックし必ず描く。
+  const storedCusps = (chart.cusps ?? [])
     .filter((c) => c.system === (chart.house_system ?? "whole_sign"))
     .sort((a, b) => a.index - b.index);
-  if (cusps.length === 12) {
-    const rCuspIn = 34;
-    for (let i = 0; i < 12; i++) {
-      const lon = cusps[i].longitude;
-      const [x1, y1] = pt(lon, rCuspIn), [x2, y2] = pt(lon, rZodiacIn);
-      // アングル（1・4・7・10室）は少し濃く。他は薄い破線。
-      const angular = i % 3 === 0;
-      s.append(svg("line", { x1, y1, x2, y2, stroke: angular ? "#0004" : "#0002", "stroke-width": angular ? 0.9 : 0.6, "stroke-dasharray": angular ? "0" : "3 3" }));
-      // ハウス番号: このカスプと次のカスプの中点角、黄道リング内縁の細い帯に配置。
-      const span = ((cusps[(i + 1) % 12].longitude - lon) % 360 + 360) % 360;
-      const [nx, ny] = pt(lon + span / 2, rHouseNum);
-      const t = svg("text", { x: nx, y: ny, "text-anchor": "middle", "dominant-baseline": "central", "font-size": 9, fill: "#aaa" });
-      t.textContent = String(i + 1);
-      s.append(t);
-    }
+  const cuspLons = storedCusps.length === 12
+    ? storedCusps.map((c) => c.longitude)
+    : Array.from({ length: 12 }, (_, i) => ((Math.floor(asc / 30) * 30) + i * 30) % 360);
+  const rCuspIn = 34;
+  for (let i = 0; i < 12; i++) {
+    const lon = cuspLons[i];
+    const [x1, y1] = pt(lon, rCuspIn), [x2, y2] = pt(lon, rZodiacIn);
+    // アングル（1・4・7・10室）は濃く実線、他ハウスは細い実線。
+    const angular = i % 3 === 0;
+    s.append(svg("line", { x1, y1, x2, y2, stroke: angular ? "#0006" : "#0003", "stroke-width": angular ? 1 : 0.7 }));
+    // ハウス番号: このカスプと次のカスプの中点角、番号帯の中央に配置。
+    const span = ((cuspLons[(i + 1) % 12] - lon) % 360 + 360) % 360;
+    const [nx, ny] = pt(lon + span / 2, rHouseNum);
+    const t = svg("text", { x: nx, y: ny, "text-anchor": "middle", "dominant-baseline": "central", "font-size": 9, fill: "#999" });
+    t.textContent = String(i + 1);
+    s.append(t);
   }
 
   // ASC/MC 軸（太線＋ラベル）
@@ -130,16 +139,16 @@ function drawWheel(chart: Chart, enabledAspects: Set<string>, kanji: boolean): S
     s.append(svg("line", { x1: ax, y1: ay, x2: bx, y2: by, stroke: ASPECT_COLOR[asp.type] ?? "#999", "stroke-width": 0.8, opacity: 0.6 }));
   }
 
-  // 天体グリフ。密集時は表示角を扇状に広げてグリフ・度数の重なりを回避する
-  // （真の黄経は度数表示で担保）。アングルは軸で描くのでグリフからは除外。
+  // 天体。密集時は表示角を扇状に広げて重なりを回避する（真の黄経は度数表示で担保）。
+  // アングルは軸で描くのでグリフからは除外。名前モードは枠が大きいので間隔も広げる。
   const bodies = chart.placements.filter((p) => !["asc", "mc", "dsc", "ic"].includes(p.planet));
   const order = bodies.map((p) => ({ p, lon: lonOf(p) })).sort((a, b) => a.lon - b.lon);
   const disp = order.map((o) => o.lon);
   const n = disp.length;
-  const minGap = 9; // 度。グリフ＋度数がぶつからない最小角間隔
+  const minGap = name ? 18 : 9; // 度。名前枠は幅があるので広め
   if (n > 1 && n * minGap < 360) {
     // 円環上で隣接ペアを対称に押し広げる緩和を反復（真位置の重心を保ちつつ分離）。
-    for (let iter = 0; iter < 60; iter++) {
+    for (let iter = 0; iter < 80; iter++) {
       let moved = false;
       for (let i = 0; i < n; i++) {
         const j = (i + 1) % n;
@@ -157,14 +166,34 @@ function drawWheel(chart: Chart, enabledAspects: Set<string>, kanji: boolean): S
   order.forEach((o, i) => {
     const a = disp[i];
     const [gx, gy] = pt(a, rPlanet);
-    const g = svg("text", { x: gx, y: gy, "text-anchor": "middle", "dominant-baseline": "central", "font-size": kanji ? 13 : 16, fill: "#111" });
-    g.textContent = kanji ? (PLANET_KANJI[o.p.planet] ?? PLANET_GLYPH[o.p.planet] ?? "?") : (PLANET_GLYPH[o.p.planet] ?? "?");
-    s.append(g);
-    // 度数はグリフの外側（リング側）に、グリフと同じ表示角で。アスペクト線は中心寄りなので非重複。
-    const [dx, dy] = pt(a, rPlanet + 16);
-    const d = svg("text", { x: dx, y: dy, "text-anchor": "middle", "dominant-baseline": "central", "font-size": 8, fill: "#666" });
-    d.textContent = `${Math.floor(o.p.degree)}°${o.p.retrograde ? "℞" : ""}`;
-    s.append(d);
+    if (name) {
+      // フルネームを小さめの文字で四角枠に。長い名前は改行、度数は枠内最下段に薄く。
+      const lines = PLANET_NAME_LINES[o.p.planet] ?? [PLANET_GLYPH[o.p.planet] ?? "?"];
+      const degText = `${Math.floor(o.p.degree)}°${o.p.retrograde ? "℞" : ""}`;
+      const rows = [...lines, degText];
+      const fs = 7.5, degFs = 6.5, lh = 8.5, padX = 3, padY = 2.5;
+      const maxLen = Math.max(...rows.map((t) => [...t].length));
+      const w = maxLen * fs + padX * 2, h = rows.length * lh + padY * 2;
+      const grp = svg("g", {});
+      grp.append(svg("rect", { x: gx - w / 2, y: gy - h / 2, width: w, height: h, rx: 2, fill: "#fff", stroke: "#bbb", "stroke-width": 0.7, opacity: 0.95 }));
+      rows.forEach((line, k) => {
+        const isDeg = k >= lines.length;
+        const ty = gy - h / 2 + padY + lh * (k + 0.5);
+        const tx = svg("text", { x: gx, y: ty, "text-anchor": "middle", "dominant-baseline": "central", "font-size": isDeg ? degFs : fs, fill: isDeg ? "#999" : "#111" });
+        tx.textContent = line;
+        grp.append(tx);
+      });
+      s.append(grp);
+    } else {
+      const g = svg("text", { x: gx, y: gy, "text-anchor": "middle", "dominant-baseline": "central", "font-size": 16, fill: "#111" });
+      g.textContent = PLANET_GLYPH[o.p.planet] ?? "?";
+      s.append(g);
+      // 度数はグリフの外側（リング側）に、グリフと同じ表示角で。アスペクト線は中心寄りなので非重複。
+      const [dx, dy] = pt(a, rPlanet + 16);
+      const d = svg("text", { x: dx, y: dy, "text-anchor": "middle", "dominant-baseline": "central", "font-size": 8, fill: "#666" });
+      d.textContent = `${Math.floor(o.p.degree)}°${o.p.retrograde ? "℞" : ""}`;
+      s.append(d);
+    }
   });
   return s;
 }
@@ -242,15 +271,15 @@ function chartView(chart: Chart): HTMLElement {
   // アスペクトのカテゴリ・トグル（チャートに存在する種別のみ、既定は全オン）。
   const present = ASPECT_ORDER.filter((t) => chart.aspects.some((a) => a.type === t));
   const enabled = new Set(present);
-  let kanjiMode = false;
+  let nameMode = false;
   const host = el("div", { className: "u-wheel" });
-  const redraw = () => { host.innerHTML = ""; host.append(drawWheel(chart, enabled, kanjiMode)); };
+  const redraw = () => { host.innerHTML = ""; host.append(drawWheel(chart, enabled, nameMode)); };
 
-  // 天体の表記切替（占星術グリフ ⇄ 漢字一文字）。
-  const kanjiCb = el("input", { type: "checkbox", checked: false });
-  kanjiCb.addEventListener("change", () => { kanjiMode = kanjiCb.checked; redraw(); });
+  // 天体の表記切替（占星術グリフ ⇄ 日本語フルネーム）。
+  const nameCb = el("input", { type: "checkbox", checked: false });
+  nameCb.addEventListener("change", () => { nameMode = nameCb.checked; redraw(); });
   const glyphToggle = el("div", { className: "u-glyph-toggle" }, [
-    el("label", { className: "u-tg-chip" }, [kanjiCb, el("span", { textContent: "天体を漢字一文字で表示（例: 金星→金）" })]),
+    el("label", { className: "u-tg-chip" }, [nameCb, el("span", { textContent: "天体を名前（フルネーム）で表示" })]),
   ]);
 
   const toggles = el("div", { className: "u-aspect-toggles" });
