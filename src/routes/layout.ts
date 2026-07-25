@@ -558,6 +558,39 @@ export const handleApiRequest = async (request: Request, env: Env): Promise<Resp
     }
   }
 
+  // Uranai: 地名→緯度経度のジオコーディング（外部 Nominatim）。バックエンドではなく front で完結。
+  // 注: Nominatim は利用ポリシー/レート制限あり。将来は自前ジオコーダ/キャッシュに置換する。
+  if (url.pathname === '/api/v1/uranai/geocode' && request.method === 'GET') {
+    const q = (url.searchParams.get('q') ?? '').trim();
+    if (!q) return Response.json({ results: [] }, { status: 200 });
+    const nomi = new URL('https://nominatim.openstreetmap.org/search');
+    nomi.searchParams.set('q', q);
+    nomi.searchParams.set('format', 'json');
+    nomi.searchParams.set('limit', '6');
+    nomi.searchParams.set('accept-language', 'ja');
+    try {
+      const res = await fetch(nomi.toString(), { headers: { 'User-Agent': 'uranai.tachiiri.com/1.0 (astro chart)' } });
+      const arr = res.ok ? ((await res.json()) as Array<{ display_name: string; lat: string; lon: string }>) : [];
+      return Response.json({ results: arr.map((r) => ({ name: r.display_name, lat: Number(r.lat), lng: Number(r.lon) })) }, { status: 200 });
+    } catch {
+      return Response.json({ results: [] }, { status: 200 });
+    }
+  }
+
+  // Uranai per-tenant API — proxy to backend /api/v1/uranai/* (graph と同型)。
+  const uranaiApiMatch = url.pathname.match(/^\/api\/v1\/uranai(\/.*)?$/);
+  if (uranaiApiMatch) {
+    const suffix = uranaiApiMatch[1] ?? '/';
+    const backendPath = `/api/v1/uranai${suffix}${url.search}`;
+    const body = request.method !== 'GET' && request.method !== 'HEAD' ? await request.text() : undefined;
+    const identity = await readIdentity(env, request);
+    const tenantContext = { tenantId: identity?.groupId, subjectId: identity?.userId };
+    if (!tenantContext.tenantId || !tenantContext.subjectId) {
+      return Response.json({ error: 'unauthenticated' }, { status: 401 });
+    }
+    return authorizeFetch(env, { path: backendPath, method: request.method, body, tenantContext });
+  }
+
   const treesMatch = url.pathname.match(/^\/api\/v1\/trees\/(.+)$/);
   if (treesMatch) {
     const treeId = decodeURIComponent(treesMatch[1]);
