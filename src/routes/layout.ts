@@ -568,18 +568,32 @@ export const handleApiRequest = async (request: Request, env: Env): Promise<Resp
     nomi.searchParams.set('format', 'json');
     nomi.searchParams.set('limit', '6');
     nomi.searchParams.set('accept-language', 'ja');
+    nomi.searchParams.set('addressdetails', '1');
+    type NomiAddr = Record<string, string>;
     try {
       const res = await fetch(nomi.toString(), { headers: { 'User-Agent': 'uranai.tachiiri.com/1.0 (astro chart)' } });
-      const arr = res.ok ? ((await res.json()) as Array<{ display_name: string; lat: string; lon: string }>) : [];
-      // Nominatim の display_name は「最も詳細, …, 国」の順（コンマ区切り）。
-      // 国と郵便番号を除き逆順に連結して日本語の住所順（例: 東京都渋谷区…）にする。
-      const jpAddr = (displayName: string): string => {
-        const parts = String(displayName ?? '')
-          .split(',').map((s) => s.trim())
-          .filter((s) => s && s !== '日本' && s !== 'Japan' && !/^〒?\d{3}-?\d{0,4}$/.test(s));
-        return parts.reverse().join('');
+      const arr = res.ok ? ((await res.json()) as Array<{ display_name: string; lat: string; lon: string; address?: NomiAddr }>) : [];
+      // 構造化住所から「都道府県＋（郡）＋市区町村＋以下」を日本語順（例: 東京都渋谷区…）で組み立てる。
+      // 「北海道地方」等の region、「石狩振興局」等の振興局/支庁（county だが末尾が郡でない）は住所に書かないので除外。
+      const jpAddr = (a: NomiAddr | undefined): string => {
+        if (!a) return '';
+        const seen = new Set<string>(), out: string[] = [];
+        const push = (v?: string) => { if (v && !seen.has(v)) { seen.add(v); out.push(v); } };
+        push(a.state || a.province);
+        if (a.county && /郡$/.test(a.county)) push(a.county);
+        push(a.city || a.town || a.village || a.municipality);
+        push(a.city_district || a.borough || a.ward);
+        push(a.suburb); push(a.quarter); push(a.neighbourhood);
+        push(a.road);
+        if (a.house_number) push(a.house_number);
+        return out.join('');
       };
-      return Response.json({ results: arr.map((r) => ({ name: jpAddr(r.display_name) || r.display_name, lat: Number(r.lat), lng: Number(r.lon) })) }, { status: 200 });
+      // 構造化住所が空なら display_name（「詳細,…,国」順）を逆順連結でフォールバック。
+      const fromDisplay = (displayName: string): string =>
+        String(displayName ?? '').split(',').map((s) => s.trim())
+          .filter((s) => s && s !== '日本' && s !== 'Japan' && !/^〒?\d{3}-?\d{0,4}$/.test(s))
+          .reverse().join('');
+      return Response.json({ results: arr.map((r) => ({ name: jpAddr(r.address) || fromDisplay(r.display_name) || r.display_name, lat: Number(r.lat), lng: Number(r.lon) })) }, { status: 200 });
     } catch {
       return Response.json({ results: [] }, { status: 200 });
     }
