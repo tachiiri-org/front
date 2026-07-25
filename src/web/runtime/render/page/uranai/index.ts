@@ -7,6 +7,8 @@ const SIGN_GLYPH: Record<string, string> = { aries: "♈", taurus: "♉", gemini
 const SIGN_ELEMENT: Record<string, string> = { aries: "fire", leo: "fire", sagittarius: "fire", taurus: "earth", virgo: "earth", capricorn: "earth", gemini: "air", libra: "air", aquarius: "air", cancer: "water", scorpio: "water", pisces: "water" };
 const ELEMENT_COLOR: Record<string, string> = { fire: "#E8663050", earth: "#7C9A4550", air: "#E0B84550", water: "#4A90C250" };
 const PLANET_GLYPH: Record<string, string> = { sun: "☉", moon: "☽", mercury: "☿", venus: "♀", mars: "♂", jupiter: "♃", saturn: "♄", uranus: "♅", neptune: "♆", pluto: "♇", chiron: "⚷", ceres: "⚳", pallas: "⚴", juno: "⚵", vesta: "⚶", pholus: "⯛", lilith: "⚸", dragon_head: "☊", dragon_tail: "☋", fortune: "⊗", asc: "Asc", mc: "MC", dsc: "Dsc", ic: "IC" };
+// 漢字一文字表記。七曜（日月火水木金土）＋外惑星は天海冥。小惑星等はテーマから充当。
+const PLANET_KANJI: Record<string, string> = { sun: "日", moon: "月", mercury: "水", venus: "金", mars: "火", jupiter: "木", saturn: "土", uranus: "天", neptune: "海", pluto: "冥", chiron: "傷", ceres: "穀", pallas: "知", juno: "婚", vesta: "炉", pholus: "馬", lilith: "闇", dragon_head: "首", dragon_tail: "尾", fortune: "福" };
 const ASPECT_COLOR: Record<string, string> = { conjunction: "#888", opposition: "#D33", trine: "#2A7", square: "#D33", sextile: "#2A7", semisextile: "#AAA", quincunx: "#C82" };
 // アスペクトの日本語名と角度。トグル表示順（主要角→マイナー角）。
 const ASPECT_INFO: Record<string, { label: string; angle: number }> = {
@@ -55,9 +57,9 @@ const svg = (tag: string, attrs: Record<string, string | number>): SVGElement =>
 };
 
 // ───────────────────────── ホイール図 ─────────────────────────
-function drawWheel(chart: Chart, enabledAspects: Set<string>): SVGSVGElement {
+function drawWheel(chart: Chart, enabledAspects: Set<string>, kanji: boolean): SVGSVGElement {
   const size = 560, cx = size / 2, cy = size / 2, R = 250;
-  const rZodiacIn = R - 34, rHouse = R - 70, rPlanet = R - 100;
+  const rZodiacIn = R - 34, rHouse = R - 54, rPlanet = R - 100;
   const rHouseNum = (rZodiacIn + rHouse) / 2; // ハウス番号は外円(黄道内縁)と内円(rHouse)の径方向中央に
   const s = document.createElementNS(NS, "svg") as SVGSVGElement;
   s.setAttribute("viewBox", `0 0 ${size} ${size}`);
@@ -155,8 +157,8 @@ function drawWheel(chart: Chart, enabledAspects: Set<string>): SVGSVGElement {
   order.forEach((o, i) => {
     const a = disp[i];
     const [gx, gy] = pt(a, rPlanet);
-    const g = svg("text", { x: gx, y: gy, "text-anchor": "middle", "dominant-baseline": "central", "font-size": 16, fill: "#111" });
-    g.textContent = PLANET_GLYPH[o.p.planet] ?? "?";
+    const g = svg("text", { x: gx, y: gy, "text-anchor": "middle", "dominant-baseline": "central", "font-size": kanji ? 13 : 16, fill: "#111" });
+    g.textContent = kanji ? (PLANET_KANJI[o.p.planet] ?? PLANET_GLYPH[o.p.planet] ?? "?") : (PLANET_GLYPH[o.p.planet] ?? "?");
     s.append(g);
     // 度数はグリフの外側（リング側）に、グリフと同じ表示角で。アスペクト線は中心寄りなので非重複。
     const [dx, dy] = pt(a, rPlanet + 16);
@@ -240,8 +242,16 @@ function chartView(chart: Chart): HTMLElement {
   // アスペクトのカテゴリ・トグル（チャートに存在する種別のみ、既定は全オン）。
   const present = ASPECT_ORDER.filter((t) => chart.aspects.some((a) => a.type === t));
   const enabled = new Set(present);
+  let kanjiMode = false;
   const host = el("div", { className: "u-wheel" });
-  const redraw = () => { host.innerHTML = ""; host.append(drawWheel(chart, enabled)); };
+  const redraw = () => { host.innerHTML = ""; host.append(drawWheel(chart, enabled, kanjiMode)); };
+
+  // 天体の表記切替（占星術グリフ ⇄ 漢字一文字）。
+  const kanjiCb = el("input", { type: "checkbox", checked: false });
+  kanjiCb.addEventListener("change", () => { kanjiMode = kanjiCb.checked; redraw(); });
+  const glyphToggle = el("div", { className: "u-glyph-toggle" }, [
+    el("label", { className: "u-tg-chip" }, [kanjiCb, el("span", { textContent: "天体を漢字一文字で表示（例: 金星→金）" })]),
+  ]);
 
   const toggles = el("div", { className: "u-aspect-toggles" });
   if (present.length) {
@@ -255,7 +265,7 @@ function chartView(chart: Chart): HTMLElement {
   }
 
   redraw();
-  wrap.append(host, toggles);
+  wrap.append(host, glyphToggle, toggles);
   if (chart.range_warnings?.length) {
     wrap.append(el("div", { className: "u-warn", textContent: `⚠️ 有効範囲外の天体: ${chart.range_warnings.join(", ")}` }));
   }
@@ -284,7 +294,8 @@ export async function renderUranai(container: HTMLElement): Promise<void> {
     .u-geo-item{display:flex;flex-direction:column;gap:1px;padding:6px 8px;border-bottom:1px solid #0001;cursor:pointer;line-height:1.35}.u-geo-item:hover{background:#4A90C214}
     .u-geo-name{font-size:13px;color:#444}.u-geo-addr{font-size:11px;color:#aaa}
     .u-picked{color:#aaa;font-weight:400;font-size:12px;margin:4px 0}.u-status{color:#c0392b;font-size:13px;margin-top:6px}
-    .u-aspect-toggles{display:flex;flex-wrap:wrap;align-items:center;gap:6px 10px;margin:10px 0;max-width:560px}
+    .u-glyph-toggle{margin:10px 0 2px;max-width:560px}
+    .u-aspect-toggles{display:flex;flex-wrap:wrap;align-items:center;gap:6px 10px;margin:6px 0 10px;max-width:560px}
     .u-tg-title{font-size:12px;color:#666;margin-right:2px}
     .u-tg-chip{display:inline-flex;align-items:center;gap:5px;font-size:12px;color:#444;cursor:pointer;user-select:none}
     .u-tg-chip input{cursor:pointer;margin:0}
