@@ -13,7 +13,7 @@ const PLANET_NAME_LINES: Record<string, string[]> = {
   jupiter: ["木星"], saturn: ["土星"], uranus: ["天王星"], neptune: ["海王星"], pluto: ["冥王星"],
   chiron: ["キロン"], ceres: ["ケレス"], pallas: ["パラス"], juno: ["ジュノー"], vesta: ["ベスタ"],
   pholus: ["フォルス"], lilith: ["リリス"], dragon_head: ["ヘッド"], dragon_tail: ["テイル"],
-  fortune: ["フォー", "チュン"],
+  fortune: ["POF"],
 };
 const ASPECT_COLOR: Record<string, string> = { conjunction: "#888", opposition: "#D33", trine: "#2A7", square: "#D33", sextile: "#2A7", semisextile: "#AAA", quincunx: "#C82" };
 // アスペクトの日本語名と角度。トグル表示順（主要角→マイナー角）。
@@ -64,12 +64,12 @@ const svg = (tag: string, attrs: Record<string, string | number>): SVGElement =>
 
 // ───────────────────────── ホイール図 ─────────────────────────
 function drawWheel(chart: Chart, enabledAspects: Set<string>, name: boolean): SVGSVGElement {
-  const size = 560, cx = size / 2, cy = size / 2, R = 250;
+  const size = 680, cx = size / 2, cy = size / 2, R = 310;
   const rZodiacIn = R - 34, rHouse = R - 54, rPlanet = R - 80;
   const rHouseNum = (rZodiacIn + rHouse) / 2; // ハウス番号は外円(黄道内縁)と内円(rHouse)の径方向中央に
   const s = document.createElementNS(NS, "svg") as SVGSVGElement;
   s.setAttribute("viewBox", `0 0 ${size} ${size}`);
-  s.setAttribute("width", "100%"); s.style.maxWidth = "560px";
+  s.setAttribute("width", "100%"); s.style.maxWidth = "680px";
   const asc = chart.ascendant;
   // 黄経 → 画面角(度, CCW, ASC=左=180°)
   const scr = (lon: number): number => 180 + (lon - asc);
