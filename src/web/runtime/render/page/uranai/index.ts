@@ -8,6 +8,17 @@ const SIGN_ELEMENT: Record<string, string> = { aries: "fire", leo: "fire", sagit
 const ELEMENT_COLOR: Record<string, string> = { fire: "#E8663050", earth: "#7C9A4550", air: "#E0B84550", water: "#4A90C250" };
 const PLANET_GLYPH: Record<string, string> = { sun: "☉", moon: "☽", mercury: "☿", venus: "♀", mars: "♂", jupiter: "♃", saturn: "♄", uranus: "♅", neptune: "♆", pluto: "♇", chiron: "⚷", ceres: "⚳", pallas: "⚴", juno: "⚵", vesta: "⚶", pholus: "⯛", lilith: "⚸", dragon_head: "☊", dragon_tail: "☋", fortune: "⊗", asc: "Asc", mc: "MC", dsc: "Dsc", ic: "IC" };
 const ASPECT_COLOR: Record<string, string> = { conjunction: "#888", opposition: "#D33", trine: "#2A7", square: "#D33", sextile: "#2A7", semisextile: "#AAA", quincunx: "#C82" };
+// アスペクトの日本語名と角度。トグル表示順（主要角→マイナー角）。
+const ASPECT_INFO: Record<string, { label: string; angle: number }> = {
+  conjunction: { label: "コンジャンクション", angle: 0 },
+  sextile: { label: "セクスタイル", angle: 60 },
+  square: { label: "スクエア", angle: 90 },
+  trine: { label: "トライン", angle: 120 },
+  opposition: { label: "オポジション", angle: 180 },
+  quincunx: { label: "クインカンクス", angle: 150 },
+  semisextile: { label: "セミセクスタイル", angle: 30 },
+};
+const ASPECT_ORDER = ["conjunction", "sextile", "square", "trine", "opposition", "quincunx", "semisextile"];
 const NS = "http://www.w3.org/2000/svg";
 
 type Person = { id: string; label: string | null };
@@ -44,9 +55,10 @@ const svg = (tag: string, attrs: Record<string, string | number>): SVGElement =>
 };
 
 // ───────────────────────── ホイール図 ─────────────────────────
-function drawWheel(chart: Chart): SVGSVGElement {
+function drawWheel(chart: Chart, enabledAspects: Set<string>): SVGSVGElement {
   const size = 560, cx = size / 2, cy = size / 2, R = 250;
   const rZodiacIn = R - 34, rHouse = R - 70, rPlanet = R - 100;
+  const rHouseNum = rZodiacIn - 10; // ハウス番号は黄道リング内縁に寄せて帯を細く
   const s = document.createElementNS(NS, "svg") as SVGSVGElement;
   s.setAttribute("viewBox", `0 0 ${size} ${size}`);
   s.setAttribute("width", "100%"); s.style.maxWidth = "560px";
@@ -90,9 +102,9 @@ function drawWheel(chart: Chart): SVGSVGElement {
       // アングル（1・4・7・10室）は少し濃く。他は薄い破線。
       const angular = i % 3 === 0;
       s.append(svg("line", { x1, y1, x2, y2, stroke: angular ? "#0004" : "#0002", "stroke-width": angular ? 0.9 : 0.6, "stroke-dasharray": angular ? "0" : "3 3" }));
-      // ハウス番号: このカスプと次のカスプの中点角、外側ハウス帯に配置。
+      // ハウス番号: このカスプと次のカスプの中点角、黄道リング内縁の細い帯に配置。
       const span = ((cusps[(i + 1) % 12].longitude - lon) % 360 + 360) % 360;
-      const [nx, ny] = pt(lon + span / 2, rHouse + 12);
+      const [nx, ny] = pt(lon + span / 2, rHouseNum);
       const t = svg("text", { x: nx, y: ny, "text-anchor": "middle", "dominant-baseline": "central", "font-size": 9, fill: "#aaa" });
       t.textContent = String(i + 1);
       s.append(t);
@@ -106,26 +118,27 @@ function drawWheel(chart: Chart): SVGSVGElement {
     const [lx, ly] = pt(lon, rZodiacIn + 12); const t = svg("text", { x: lx, y: ly, "text-anchor": "middle", "dominant-baseline": "central", "font-size": 11, fill: color, "font-weight": "bold" }); t.textContent = label; s.append(t);
   }
 
-  // アスペクト線（中心寄り）
+  // アスペクト線（中心寄り）。カテゴリ・トグルで有効な種別のみ描画。
   const lonMap = new Map(chart.placements.map((p) => [p.planet, lonOf(p)]));
   for (const asp of chart.aspects) {
+    if (!enabledAspects.has(asp.type)) continue;
     const la = lonMap.get(asp.a), lb = lonMap.get(asp.b);
     if (la === undefined || lb === undefined) continue;
     const [ax, ay] = pt(la, rPlanet - 18), [bx, by] = pt(lb, rPlanet - 18);
     s.append(svg("line", { x1: ax, y1: ay, x2: bx, y2: by, stroke: ASPECT_COLOR[asp.type] ?? "#999", "stroke-width": 0.8, opacity: 0.6 }));
   }
 
-  // 天体グリフ（黄道側に目盛、内側にグリフ）。アングルは軸で描くのでグリフからは除外。
+  // 天体グリフ（内側にグリフ、度数は外側＝リング寄りでアスペクト線と重ねない）。
+  // アングルは軸で描くのでグリフからは除外。位置の目盛線は視認性のため省略。
   const bodies = chart.placements.filter((p) => !["asc", "mc", "dsc", "ic"].includes(p.planet));
   for (const p of bodies) {
     const lon = lonOf(p);
-    const [tx, ty] = pt(lon, rZodiacIn), [tx2, ty2] = pt(lon, rZodiacIn - 8);
-    s.append(svg("line", { x1: tx, y1: ty, x2: tx2, y2: ty2, stroke: "#555", "stroke-width": 1 }));
     const [gx, gy] = pt(lon, rPlanet);
     const g = svg("text", { x: gx, y: gy, "text-anchor": "middle", "dominant-baseline": "central", "font-size": 16, fill: "#111" });
-    g.textContent = (PLANET_GLYPH[p.planet] ?? "?") + (p.retrograde ? "" : "");
+    g.textContent = PLANET_GLYPH[p.planet] ?? "?";
     s.append(g);
-    const [dx, dy] = pt(lon, rPlanet - 16);
+    // 度数はグリフの外側（リング側）に。アスペクト線は中心寄りなので重ならない。
+    const [dx, dy] = pt(lon, rPlanet + 15);
     const d = svg("text", { x: dx, y: dy, "text-anchor": "middle", "dominant-baseline": "central", "font-size": 8, fill: "#666" });
     d.textContent = `${Math.floor(p.degree)}°${p.retrograde ? "℞" : ""}`;
     s.append(d);
@@ -202,7 +215,26 @@ function birthForm(personId: string, onDone: (chart: Chart) => void, prefill?: P
 // ───────────────────────── チャート表示 ─────────────────────────
 function chartView(chart: Chart): HTMLElement {
   const wrap = el("div", { className: "u-chart" });
-  wrap.append(drawWheel(chart));
+
+  // アスペクトのカテゴリ・トグル（チャートに存在する種別のみ、既定は全オン）。
+  const present = ASPECT_ORDER.filter((t) => chart.aspects.some((a) => a.type === t));
+  const enabled = new Set(present);
+  const host = el("div", { className: "u-wheel" });
+  const redraw = () => { host.innerHTML = ""; host.append(drawWheel(chart, enabled)); };
+
+  const toggles = el("div", { className: "u-aspect-toggles" });
+  if (present.length) {
+    toggles.append(el("span", { className: "u-tg-title", textContent: "アスペクト:" }));
+    for (const t of present) {
+      const cb = el("input", { type: "checkbox", checked: true });
+      cb.addEventListener("change", () => { if (cb.checked) enabled.add(t); else enabled.delete(t); redraw(); });
+      const sw = el("span", { className: "u-tg-sw" }); sw.style.background = ASPECT_COLOR[t] ?? "#999";
+      toggles.append(el("label", { className: "u-tg-chip" }, [cb, sw, el("span", { textContent: `${ASPECT_INFO[t].label} ${ASPECT_INFO[t].angle}°` })]));
+    }
+  }
+
+  redraw();
+  wrap.append(host, toggles);
   if (chart.range_warnings?.length) {
     wrap.append(el("div", { className: "u-warn", textContent: `⚠️ 有効範囲外の天体: ${chart.range_warnings.join(", ")}` }));
   }
@@ -231,6 +263,11 @@ export async function renderUranai(container: HTMLElement): Promise<void> {
     .u-geo-item{display:flex;flex-direction:column;gap:1px;padding:6px 8px;border-bottom:1px solid #0001;cursor:pointer;line-height:1.35}.u-geo-item:hover{background:#4A90C214}
     .u-geo-name{font-size:13px;color:#444}.u-geo-addr{font-size:11px;color:#aaa}
     .u-picked{color:#aaa;font-weight:400;font-size:12px;margin:4px 0}.u-status{color:#c0392b;font-size:13px;margin-top:6px}
+    .u-aspect-toggles{display:flex;flex-wrap:wrap;align-items:center;gap:6px 10px;margin:10px 0;max-width:560px}
+    .u-tg-title{font-size:12px;color:#666;margin-right:2px}
+    .u-tg-chip{display:inline-flex;align-items:center;gap:5px;font-size:12px;color:#444;cursor:pointer;user-select:none}
+    .u-tg-chip input{cursor:pointer;margin:0}
+    .u-tg-sw{width:14px;height:3px;border-radius:2px;display:inline-block}
     .u-warn{color:#c82;font-size:13px;margin:8px 0}.u-counts{margin-top:8px;font-size:13px;color:#444}
     .u-title{font-weight:700;font-size:18px;margin-bottom:8px}
     .u-chart-head{display:flex;align-items:center;justify-content:space-between;gap:12px;margin-bottom:4px}
