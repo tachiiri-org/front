@@ -572,7 +572,7 @@ export const handleApiRequest = async (request: Request, env: Env): Promise<Resp
     type NomiAddr = Record<string, string>;
     try {
       const res = await fetch(nomi.toString(), { headers: { 'User-Agent': 'uranai.tachiiri.com/1.0 (astro chart)' } });
-      const arr = res.ok ? ((await res.json()) as Array<{ display_name: string; lat: string; lon: string; address?: NomiAddr }>) : [];
+      const arr = res.ok ? ((await res.json()) as Array<{ display_name: string; lat: string; lon: string; address?: NomiAddr; name?: string; addresstype?: string }>) : [];
       // 構造化住所から「都道府県＋（郡）＋市区町村＋以下」を日本語順（例: 東京都渋谷区…）で組み立てる。
       // 「北海道地方」等の region、「石狩振興局」等の振興局/支庁（county だが末尾が郡でない）は住所に書かないので除外。
       // 特別区（例: 渋谷区）は state が入らず ISO3166-2-lvl4="JP-13" で都道府県が示される。ISO から補完する。
@@ -607,7 +607,19 @@ export const handleApiRequest = async (request: Request, env: Env): Promise<Resp
         String(displayName ?? '').split(',').map((s) => s.trim())
           .filter((s) => s && s !== '日本' && s !== 'Japan' && !/^〒?\d{3}-?\d{0,4}$/.test(s))
           .reverse().join('');
-      return Response.json({ results: arr.map((r) => ({ name: jpAddr(r.address) || fromDisplay(r.display_name) || r.display_name, lat: Number(r.lat), lng: Number(r.lon) })) }, { status: 200 });
+      // 行政地名（市区町村）は住所に含まれるので地名を別出ししない。ランドマーク/駅等の POI 名は
+      // 住所に出てこないので「地名」として別に載せる（例: 松本城（長野県松本市丸の内））。
+      const ADMIN_TYPES = new Set(['country', 'state', 'province', 'county', 'city', 'town', 'village', 'municipality', 'city_district', 'borough', 'suburb', 'ward', 'district', 'administrative', 'postcode']);
+      return Response.json({
+        results: arr.map((r) => {
+          const addr = jpAddr(r.address) || fromDisplay(r.display_name) || r.display_name;
+          const nm = String(r.name ?? '').trim();
+          // POI（非行政）で、かつ住所文字列にまだ含まれていない地名だけを別出しする。
+          const place = nm && !ADMIN_TYPES.has(String(r.addresstype ?? '')) && !addr.includes(nm) ? nm : '';
+          const name = place ? `${place}（${addr}）` : addr;
+          return { name, place, addr, lat: Number(r.lat), lng: Number(r.lon) };
+        }),
+      }, { status: 200 });
     } catch {
       return Response.json({ results: [] }, { status: 200 });
     }

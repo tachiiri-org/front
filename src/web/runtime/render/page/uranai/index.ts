@@ -131,10 +131,13 @@ function birthForm(personId: string, onDone: (chart: Chart) => void, prefill?: P
     if (q.length < 2) { results.innerHTML = ""; return; }
     timer = setTimeout(async () => {
       try {
-        const { results: rs } = await api<{ results: Array<{ name: string; lat: number; lng: number }> }>(`/api/v1/uranai/geocode?q=${encodeURIComponent(q)}`);
+        const { results: rs } = await api<{ results: Array<{ name: string; place?: string; addr?: string; lat: number; lng: number }> }>(`/api/v1/uranai/geocode?q=${encodeURIComponent(q)}`);
         results.innerHTML = "";
         for (const r of rs) {
-          const item = el("div", { className: "u-geo-item", textContent: r.name });
+          // 地名（POI）があれば地名＋住所（住所は薄く）、無ければ住所のみ。
+          const item = r.place
+            ? el("div", { className: "u-geo-item" }, [el("span", { className: "u-geo-name", textContent: r.place }), el("span", { className: "u-geo-addr", textContent: r.addr ?? "" })])
+            : el("div", { className: "u-geo-item" }, [el("span", { className: "u-geo-addr", textContent: r.addr ?? r.name })]);
           item.addEventListener("click", () => {
             lat = r.lat; lng = r.lng; placeName = r.name;
             picked.textContent = `📍 ${r.name}（${r.lat.toFixed(3)}, ${r.lng.toFixed(3)}）`;
@@ -202,7 +205,8 @@ export async function renderUranai(container: HTMLElement): Promise<void> {
     .u-geo-wrap input{width:100%;box-sizing:border-box}
     .u-geo-results{position:absolute;left:0;right:0;top:100%;z-index:10;background:#fff;border:1px solid #0002;border-top:0;border-radius:0 0 5px 5px;box-shadow:0 6px 14px #0002;max-height:200px;overflow:auto}
     .u-geo-results:empty{display:none}
-    .u-geo-item{padding:6px 8px;border-bottom:1px solid #0001;cursor:pointer;font-size:12px;color:#999;line-height:1.4}.u-geo-item:hover{background:#4A90C214;color:#555}
+    .u-geo-item{display:flex;flex-direction:column;gap:1px;padding:6px 8px;border-bottom:1px solid #0001;cursor:pointer;line-height:1.35}.u-geo-item:hover{background:#4A90C214}
+    .u-geo-name{font-size:13px;color:#444}.u-geo-addr{font-size:11px;color:#aaa}
     .u-picked{color:#aaa;font-weight:400;font-size:12px;margin:4px 0}.u-status{color:#c0392b;font-size:13px;margin-top:6px}
     .u-warn{color:#c82;font-size:13px;margin:8px 0}.u-counts{margin-top:8px;font-size:13px;color:#444}
     .u-title{font-weight:700;font-size:18px;margin-bottom:8px}
