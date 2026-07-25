@@ -58,7 +58,7 @@ const svg = (tag: string, attrs: Record<string, string | number>): SVGElement =>
 function drawWheel(chart: Chart, enabledAspects: Set<string>): SVGSVGElement {
   const size = 560, cx = size / 2, cy = size / 2, R = 250;
   const rZodiacIn = R - 34, rHouse = R - 70, rPlanet = R - 100;
-  const rHouseNum = rZodiacIn - 10; // ハウス番号は黄道リング内縁に寄せて帯を細く
+  const rHouseNum = (rZodiacIn + rHouse) / 2; // ハウス番号は外円(黄道内縁)と内円(rHouse)の径方向中央に
   const s = document.createElementNS(NS, "svg") as SVGSVGElement;
   s.setAttribute("viewBox", `0 0 ${size} ${size}`);
   s.setAttribute("width", "100%"); s.style.maxWidth = "560px";
@@ -128,21 +128,42 @@ function drawWheel(chart: Chart, enabledAspects: Set<string>): SVGSVGElement {
     s.append(svg("line", { x1: ax, y1: ay, x2: bx, y2: by, stroke: ASPECT_COLOR[asp.type] ?? "#999", "stroke-width": 0.8, opacity: 0.6 }));
   }
 
-  // 天体グリフ（内側にグリフ、度数は外側＝リング寄りでアスペクト線と重ねない）。
-  // アングルは軸で描くのでグリフからは除外。位置の目盛線は視認性のため省略。
+  // 天体グリフ。密集時は表示角を扇状に広げてグリフ・度数の重なりを回避する
+  // （真の黄経は度数表示で担保）。アングルは軸で描くのでグリフからは除外。
   const bodies = chart.placements.filter((p) => !["asc", "mc", "dsc", "ic"].includes(p.planet));
-  for (const p of bodies) {
-    const lon = lonOf(p);
-    const [gx, gy] = pt(lon, rPlanet);
-    const g = svg("text", { x: gx, y: gy, "text-anchor": "middle", "dominant-baseline": "central", "font-size": 16, fill: "#111" });
-    g.textContent = PLANET_GLYPH[p.planet] ?? "?";
-    s.append(g);
-    // 度数はグリフの外側（リング側）に。アスペクト線は中心寄りなので重ならない。
-    const [dx, dy] = pt(lon, rPlanet + 15);
-    const d = svg("text", { x: dx, y: dy, "text-anchor": "middle", "dominant-baseline": "central", "font-size": 8, fill: "#666" });
-    d.textContent = `${Math.floor(p.degree)}°${p.retrograde ? "℞" : ""}`;
-    s.append(d);
+  const order = bodies.map((p) => ({ p, lon: lonOf(p) })).sort((a, b) => a.lon - b.lon);
+  const disp = order.map((o) => o.lon);
+  const n = disp.length;
+  const minGap = 9; // 度。グリフ＋度数がぶつからない最小角間隔
+  if (n > 1 && n * minGap < 360) {
+    // 円環上で隣接ペアを対称に押し広げる緩和を反復（真位置の重心を保ちつつ分離）。
+    for (let iter = 0; iter < 60; iter++) {
+      let moved = false;
+      for (let i = 0; i < n; i++) {
+        const j = (i + 1) % n;
+        const gap = ((disp[j] - disp[i]) % 360 + 360) % 360;
+        if (gap < minGap - 1e-6) {
+          const push = (minGap - gap) / 2;
+          disp[i] = ((disp[i] - push) % 360 + 360) % 360;
+          disp[j] = (disp[j] + push) % 360;
+          moved = true;
+        }
+      }
+      if (!moved) break;
+    }
   }
+  order.forEach((o, i) => {
+    const a = disp[i];
+    const [gx, gy] = pt(a, rPlanet);
+    const g = svg("text", { x: gx, y: gy, "text-anchor": "middle", "dominant-baseline": "central", "font-size": 16, fill: "#111" });
+    g.textContent = PLANET_GLYPH[o.p.planet] ?? "?";
+    s.append(g);
+    // 度数はグリフの外側（リング側）に、グリフと同じ表示角で。アスペクト線は中心寄りなので非重複。
+    const [dx, dy] = pt(a, rPlanet + 16);
+    const d = svg("text", { x: dx, y: dy, "text-anchor": "middle", "dominant-baseline": "central", "font-size": 8, fill: "#666" });
+    d.textContent = `${Math.floor(o.p.degree)}°${o.p.retrograde ? "℞" : ""}`;
+    s.append(d);
+  });
   return s;
 }
 
