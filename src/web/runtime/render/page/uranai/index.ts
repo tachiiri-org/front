@@ -165,7 +165,9 @@ function drawWheel(chart: Chart, enabledAspects: Set<string>, name: boolean): SV
   }
   order.forEach((o, i) => {
     const a = disp[i];
-    const [gx, gy] = pt(a, rPlanet);
+    // 名前モードは枠が大きいので、扇角に加えて 1 つおきに半径を内側へずらして確実に非重複に。
+    const rBody = name ? rPlanet - (i % 2) * 16 : rPlanet;
+    const [gx, gy] = pt(a, rBody);
     if (name) {
       // フルネームを小さめの文字で四角枠に。長い名前は改行、度数は枠内最下段に薄く。
       const lines = PLANET_NAME_LINES[o.p.planet] ?? [PLANET_GLYPH[o.p.planet] ?? "?"];
