@@ -11,6 +11,7 @@ const ASPECT_COLOR: Record<string, string> = { conjunction: "#888", opposition: 
 const NS = "http://www.w3.org/2000/svg";
 
 type Person = { id: string; label: string | null };
+type Prefill = { label?: string | null; date?: string; time?: string; place?: string; lat?: number; lng?: number; tz?: string };
 type Placement = { planet: string; sign: string; degree: number; retrograde?: boolean };
 type Aspect = { a: string; b: string; type: string; orb: number };
 type Chart = {
@@ -110,16 +111,17 @@ function drawWheel(chart: Chart): SVGSVGElement {
 }
 
 // ───────────────────────── 出生フォーム ─────────────────────────
-function birthForm(personId: string, onDone: (chart: Chart) => void): HTMLElement {
+function birthForm(personId: string, onDone: (chart: Chart) => void, prefill?: Prefill): HTMLElement {
   const wrap = el("div", { className: "u-form" });
-  const label = el("input", { type: "text", placeholder: "表示名（例: 自分）" });
-  const date = el("input", { type: "date" });
-  const time = el("input", { type: "time" });
-  const placeInput = el("input", { type: "text", placeholder: "出生地を検索（例: 松本市）" });
+  const label = el("input", { type: "text", placeholder: "表示名（例: 自分）", value: prefill?.label ?? "" });
+  const date = el("input", { type: "date", value: prefill?.date ?? "" });
+  const time = el("input", { type: "time", value: prefill?.time ?? "" });
+  const placeInput = el("input", { type: "text", placeholder: "出生地を検索（例: 松本市）", value: prefill?.place ? prefill.place.split(",")[0] : "" });
   const results = el("div", { className: "u-geo-results" });
-  const tz = el("input", { type: "text", placeholder: "UTCオフセット（例: +09:00）", value: "+09:00" });
+  const tz = el("input", { type: "text", placeholder: "UTCオフセット（例: +09:00）", value: prefill?.tz ?? "+09:00" });
   const picked = el("div", { className: "u-picked" });
-  let lat: number | null = null, lng: number | null = null, placeName = "";
+  let lat: number | null = prefill?.lat ?? null, lng: number | null = prefill?.lng ?? null, placeName = prefill?.place ?? "";
+  if (lat !== null && lng !== null) picked.textContent = `📍 ${placeName}（${lat.toFixed(3)}, ${lng.toFixed(3)}）`;
 
   let timer: ReturnType<typeof setTimeout> | undefined;
   placeInput.addEventListener("input", () => {
@@ -144,13 +146,13 @@ function birthForm(personId: string, onDone: (chart: Chart) => void): HTMLElemen
   });
 
   const status = el("div", { className: "u-status" });
-  const submit = el("button", { className: "u-btn", textContent: "チャートを計算" });
+  const submit = el("button", { className: "u-btn", textContent: prefill?.date ? "更新して再計算" : "チャートを計算" });
   submit.addEventListener("click", async () => {
     if (!date.value || !time.value) { status.textContent = "生年月日と時刻を入力してください"; return; }
     if (lat === null || lng === null) { status.textContent = "出生地を検索して選んでください"; return; }
     status.textContent = "計算中…";
     try {
-      if (label.value.trim()) await api(`/api/v1/uranai/person/${personId}`, {}).catch(() => {});
+      if (label.value.trim()) await api(`/api/v1/uranai/person/${personId}`, { method: "PATCH", body: JSON.stringify({ label: label.value.trim() }) }).catch(() => {});
       const born_at = `${date.value}T${time.value}:00${tz.value.trim() || "+00:00"}`;
       await api(`/api/v1/uranai/person/${personId}/birth`, { method: "PUT", body: JSON.stringify({ born_at, lat: String(lat), lng: String(lng), place: placeName, timezone: tz.value.trim() }) });
       const chart = await api<Chart>(`/api/v1/uranai/astrology/person/${personId}/compute`, { method: "POST", body: "{}" });
@@ -199,19 +201,48 @@ export async function renderUranai(container: HTMLElement): Promise<void> {
     .u-picked{color:#2a7;font-size:13px;margin:4px 0}.u-status{color:#c0392b;font-size:13px;margin-top:6px}
     .u-warn{color:#c82;font-size:13px;margin:8px 0}.u-counts{margin-top:8px;font-size:13px;color:#444}
     .u-title{font-weight:700;font-size:18px;margin-bottom:8px}
+    .u-chart-head{display:flex;align-items:center;justify-content:space-between;gap:12px;margin-bottom:4px}
+    .u-chart-head .u-title{margin-bottom:0}
+    .u-btn-sm{padding:5px 10px;margin-top:0;font-size:13px;background:#0000000d;color:#333}
+    .u-btn-sm:hover{background:#00000014}
   </style>`;
   const wrap = el("div", { className: "u-wrap" });
   const side = el("div", { className: "u-side" });
   const main = el("div", { className: "u-main" });
   wrap.append(side, main); container.append(wrap);
 
-  const showForm = (personId: string) => { main.innerHTML = ""; main.append(el("div", { className: "u-title", textContent: "出生データを登録" }), birthForm(personId, (chart) => { main.innerHTML = ""; main.append(chartView(chart)); })); };
-  const showChart = async (personId: string) => {
+  const showForm = (personId: string, prefill?: Prefill) => {
+    main.innerHTML = "";
+    main.append(
+      el("div", { className: "u-title", textContent: prefill?.date ? "出生データを編集" : "出生データを登録" }),
+      birthForm(personId, async () => { await refreshList(personId); }, prefill),
+    );
+  };
+  // 既存人物の出生データを取得して編集フォームを事前入力で開く。
+  const openEdit = async (personId: string, label?: string | null) => {
+    main.innerHTML = ""; main.append(el("div", { textContent: "読み込み中…" }));
+    let prefill: Prefill = { label };
+    try {
+      const b = await api<{ born_at: string | null; lat: string | null; lng: string | null; place: string | null; timezone: string | null }>(`/api/v1/uranai/person/${personId}/birth`);
+      const m = (b.born_at ?? "").match(/^(\d{4}-\d{2}-\d{2})T(\d{2}:\d{2})(?::\d{2})?([+-]\d{2}:\d{2})?/);
+      prefill = {
+        label, date: m?.[1], time: m?.[2],
+        tz: b.timezone || m?.[3] || "+09:00",
+        place: b.place ?? undefined,
+        lat: b.lat != null && b.lat !== "" ? Number(b.lat) : undefined,
+        lng: b.lng != null && b.lng !== "" ? Number(b.lng) : undefined,
+      };
+    } catch { /* 出生データ未登録なら空フォーム */ }
+    showForm(personId, prefill);
+  };
+  const showChart = async (personId: string, label?: string | null) => {
     main.innerHTML = ""; main.append(el("div", { textContent: "読み込み中…" }));
     const chart = await api<Chart>(`/api/v1/uranai/astrology/person/${personId}/chart`);
     main.innerHTML = "";
-    if (chart.placements.length === 0) showForm(personId);
-    else main.append(chartView(chart));
+    if (chart.placements.length === 0) { showForm(personId, { label }); return; }
+    const editBtn = el("button", { className: "u-btn u-btn-sm", textContent: "✎ 出生データを編集" });
+    editBtn.addEventListener("click", () => void openEdit(personId, label));
+    main.append(el("div", { className: "u-chart-head" }, [el("div", { className: "u-title", textContent: label ?? "" }), editBtn]), chartView(chart));
   };
 
   const refreshList = async (selectId?: string) => {
@@ -220,13 +251,13 @@ export async function renderUranai(container: HTMLElement): Promise<void> {
     const { persons } = await api<{ persons: Person[] }>(`/api/v1/uranai/person`);
     for (const p of persons) {
       const item = el("div", { className: "u-person" + (p.id === selectId ? " sel" : ""), textContent: p.label ?? "(名称未設定)" });
-      item.addEventListener("click", () => { refreshList(p.id); showChart(p.id); });
+      item.addEventListener("click", () => { void refreshList(p.id); void showChart(p.id, p.label); });
       side.append(item);
     }
     const add = el("button", { className: "u-btn", textContent: "＋ 人物を追加" });
-    add.addEventListener("click", async () => { const { id } = await api<{ id: string }>(`/api/v1/uranai/person`, { method: "POST", body: JSON.stringify({ label: "新しい人物" }) }); await refreshList(id); showForm(id); });
+    add.addEventListener("click", async () => { const { id } = await api<{ id: string }>(`/api/v1/uranai/person`, { method: "POST", body: JSON.stringify({ label: "新しい人物" }) }); await refreshList(id); showForm(id, { label: "新しい人物" }); });
     side.append(add);
-    if (selectId) { const sel = persons.find((p) => p.id === selectId); if (sel) void showChart(selectId); }
+    if (selectId) { const sel = persons.find((p) => p.id === selectId); if (sel) void showChart(selectId, sel.label); }
     else if (persons.length === 0) main.append(el("div", { textContent: "「人物を追加」から始めてください。" }));
   };
   await refreshList();
