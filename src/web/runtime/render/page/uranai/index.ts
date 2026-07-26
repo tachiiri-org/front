@@ -103,10 +103,12 @@ async function loadSettings(): Promise<Settings> {
 // ───────────────────────── ホイール図 ─────────────────────────
 function drawWheel(chart: Chart, enabledAspects: Set<string>, name: boolean): SVGSVGElement {
   const size = 680, cx = size / 2, cy = size / 2, R = 310;
-  const rZodiacIn = R - 34, rHouse = R - 54, rPlanet = R - 80;
-  // 帯の配置を入れ替え: ハウス番号を外側の帯(R〜rZodiacIn)、サイン記号を内側の帯(rZodiacIn〜rHouse)に。
-  const rHouseBand = (R + rZodiacIn) / 2;  // 外側の帯の径方向中央（ハウス番号）
-  const rSignBand = (rZodiacIn + rHouse) / 2; // 内側の帯の径方向中央（サイン記号）
+  // 外→内: ハウス番号帯 → 天体 → 中心のサイン円。
+  const rHouseIn = R - 34;                // 276: ハウス番号帯の内縁
+  const rHouseBand = (R + rHouseIn) / 2;  // 293: ハウス番号の配置半径
+  const rSignCircle = 96;                 // 中心のサイン円（全体直径の約3割: 2R*0.31≈192, r≈96）
+  const rSignLabel = 74;                  // サイン記号/文字の配置半径（中心円の内側）
+  const rPlanet = 200;                    // 天体（ハウス番号帯内縁〜サイン円 の中間帯）
   const s = document.createElementNS(NS, "svg") as SVGSVGElement;
   s.setAttribute("viewBox", `0 0 ${size} ${size}`);
   s.setAttribute("width", "100%"); s.style.maxWidth = "680px";
@@ -118,17 +120,18 @@ function drawWheel(chart: Chart, enabledAspects: Set<string>, name: boolean): SV
     return [cx + r * Math.cos(t), cy - r * Math.sin(t)];
   };
 
-  // 背景: 各サインの30°扇形を中心まで薄く塗る（元素=色相, クオリティ=トーン）。
+  // 背景: 各サインの30°扇形をハウス番号帯の内縁(rHouseIn)まで薄く塗る（元素=色相, クオリティ=トーン）。
+  // ハウス番号帯(rHouseIn〜R)は塗らず白のまま。
   for (let i = 0; i < 12; i++) {
     const a0 = i * 30;
-    const [x0o, y0o] = pt(a0, R), [x1o, y1o] = pt(a0 + 30, R);
-    s.append(svg("path", { d: `M${cx},${cy} L${x0o},${y0o} A${R},${R} 0 0 0 ${x1o},${y1o} Z`, fill: signFill(SIGN_ORDER[i]), stroke: "none" }));
+    const [x0o, y0o] = pt(a0, rHouseIn), [x1o, y1o] = pt(a0 + 30, rHouseIn);
+    s.append(svg("path", { d: `M${cx},${cy} L${x0o},${y0o} A${rHouseIn},${rHouseIn} 0 0 0 ${x1o},${y1o} Z`, fill: signFill(SIGN_ORDER[i]), stroke: "none" }));
   }
 
   // サイン記号・ハウス番号は、線・円を描いた後（最下部）に白い下地付きで重ねて描く
   // （先に描くと後続の線が上に乗ってしまうため）。
-  // サインの区切り線（各サイン境界＝絶対黄経の30°刻み）を白の実線で最外周(R)まで。
-  for (let a = 0; a < 360; a += 30) { const [x0, y0] = pt(a, 0), [x1, y1] = pt(a, R); s.append(svg("line", { x1: x0, y1: y0, x2: x1, y2: y1, stroke: "#fff", "stroke-width": 1 })); }
+  // サインの区切り線（各サイン境界＝絶対黄経の30°刻み）を白の実線で中心のサイン円内だけに。
+  for (let a = 0; a < 360; a += 30) { const [x0, y0] = pt(a, 0), [x1, y1] = pt(a, rSignCircle); s.append(svg("line", { x1: x0, y1: y0, x2: x1, y2: y1, stroke: "#fff", "stroke-width": 1 })); }
 
   // ハウス境界（12分割線）＋ハウス番号。カスプ保存があれば流派のハウスシステム、
   // 無ければ whole-sign 等分（ASC のサイン先頭から 30°刻み）でフォールバックし必ず描く。
@@ -138,33 +141,33 @@ function drawWheel(chart: Chart, enabledAspects: Set<string>, name: boolean): SV
   const cuspLons = storedCusps.length === 12
     ? storedCusps.map((c) => c.longitude)
     : Array.from({ length: 12 }, (_, i) => ((Math.floor(asc / 30) * 30) + i * 30) % 360);
-  const rCuspIn = 0; // 中心まで伸ばして 12 分割線が中心で交わるように
+  const rCuspIn = rSignCircle; // ハウス線は中心のサイン円の外から最外周まで（中心円には入れない）
   for (let i = 0; i < 12; i++) {
     const lon = cuspLons[i];
     const [x1, y1] = pt(lon, rCuspIn), [x2, y2] = pt(lon, R);
-    // ハウス区切り線は黒。ASC/MC 軸とも区別しない。最外周まで伸ばす。（番号は後で重ねる）
+    // ハウス区切り線は黒。ASC/MC 軸とも区別しない。（番号は後で重ねる）
     s.append(svg("line", { x1, y1, x2, y2, stroke: "#222", "stroke-width": 1 }));
   }
 
-  // ASC/MC/DSC/IC 軸。線はハウス区切り線と区別せず黒で最外周まで。ラベルは円の外側（両端）に表示。
+  // ASC/MC/DSC/IC 軸。ハウス区切り線と区別せず黒で、サイン円の外〜最外周に。ラベルは円の外側（両端）。
   for (const [lon, label, opp] of [[asc, "Asc", "Dsc"], [chart.midheaven, "MC", "IC"]] as [number, string, string][]) {
-    const [x1, y1] = pt(lon, R), [x2, y2] = pt(lon + 180, R);
-    s.append(svg("line", { x1: x2, y1: y2, x2: x1, y2: y1, stroke: "#222", "stroke-width": 1 }));
     for (const [l, txt] of [[lon, label], [lon + 180, opp]] as [number, string][]) {
+      const [ax, ay] = pt(l, rSignCircle), [bx, by] = pt(l, R);
+      s.append(svg("line", { x1: ax, y1: ay, x2: bx, y2: by, stroke: "#222", "stroke-width": 1 }));
       const [lx, ly] = pt(l, R + 11); const t = svg("text", { x: lx, y: ly, "text-anchor": "middle", "dominant-baseline": "central", "font-size": 11, fill: "#222", "font-weight": "bold" }); t.textContent = txt; s.append(t);
     }
   }
 
-  // 円（最外周＋ハウス番号帯を囲む2円）は白い放射線の上に描いて黒いリングを途切れさせない。
+  // 円: 最外周(R)、ハウス番号帯の内縁(rHouseIn)、中心のサイン円(rSignCircle)。線の上に描く。
   s.append(svg("circle", { cx, cy, r: R, fill: "none", stroke: "#222", "stroke-width": 1 }));
-  s.append(svg("circle", { cx, cy, r: rZodiacIn, fill: "none", stroke: "#222", "stroke-width": 1 }));
-  s.append(svg("circle", { cx, cy, r: rHouse, fill: "none", stroke: "#222", "stroke-width": 1 }));
+  s.append(svg("circle", { cx, cy, r: rHouseIn, fill: "none", stroke: "#222", "stroke-width": 1 }));
+  s.append(svg("circle", { cx, cy, r: rSignCircle, fill: "none", stroke: "#222", "stroke-width": 1 }));
 
   // サイン記号／文字を線・円の上に重ねて描く。線が透けないよう白い下地（円）を敷く。
   // 文字表示モード(name)はサイン正式名を円に沿って（接線方向に回転）小フォントで、
   // 記号モードは占星術グリフを白い下地の上に。
   for (let i = 0; i < 12; i++) {
-    const [gx, gy] = pt(i * 30 + 15, rSignBand);
+    const [gx, gy] = pt(i * 30 + 15, rSignLabel);
     if (name) {
       // 接線方向へ回転。下半分は上下反転して常に正立させる。白ハローで色地でも読める。
       let rot = Math.atan2(gy - cy, gx - cx) * 180 / Math.PI + 90;
