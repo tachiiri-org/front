@@ -4,6 +4,8 @@
 
 const SIGN_ORDER = ["aries", "taurus", "gemini", "cancer", "leo", "virgo", "libra", "scorpio", "sagittarius", "capricorn", "aquarius", "pisces"] as const;
 const SIGN_GLYPH: Record<string, string> = { aries: "♈", taurus: "♉", gemini: "♊", cancer: "♋", leo: "♌", virgo: "♍", libra: "♎", scorpio: "♏", sagittarius: "♐", capricorn: "♑", aquarius: "♒", pisces: "♓" };
+// 文字表示モードでのサインの1文字表記（射手座→射 など）。
+const SIGN_CHAR: Record<string, string> = { aries: "羊", taurus: "牛", gemini: "双", cancer: "蟹", leo: "獅", virgo: "乙", libra: "秤", scorpio: "蠍", sagittarius: "射", capricorn: "山", aquarius: "瓶", pisces: "魚" };
 const PLANET_GLYPH: Record<string, string> = { sun: "☉", moon: "☽", mercury: "☿", venus: "♀", mars: "♂", jupiter: "♃", saturn: "♄", uranus: "♅", neptune: "♆", pluto: "♇", chiron: "⚷", ceres: "⚳", pallas: "⚴", juno: "⚵", vesta: "⚶", pholus: "⯛", lilith: "⚸", dragon_head: "☊", dragon_tail: "☋", fortune: "⊗", asc: "Asc", mc: "MC", dsc: "Dsc", ic: "IC" };
 // フルネーム表記（複数行）。長い名前は改行して枠に収める。
 const PLANET_NAME_LINES: Record<string, string[]> = {
@@ -108,15 +110,8 @@ function drawWheel(chart: Chart, enabledAspects: Set<string>, name: boolean): SV
     return [cx + r * Math.cos(t), cy - r * Math.sin(t)];
   };
 
-  // 12サインの記号（色は塗らない）。記号は内側の帯の中央に配置。
-  for (let i = 0; i < 12; i++) {
-    const signId = SIGN_ORDER[i];
-    const a0 = i * 30;
-    const [gx, gy] = pt(a0 + 15, rSignBand);
-    // U+FE0E（テキスト表示セレクタ）を付けて絵文字化（紫の四角）を防ぎ、記号として描画。
-    const g = svg("text", { x: gx, y: gy, "text-anchor": "middle", "dominant-baseline": "central", "font-size": 18, fill: "#333", stroke: "#fff", "stroke-width": 3, "paint-order": "stroke" }); g.textContent = SIGN_GLYPH[signId] + "\uFE0E";
-    s.append(g);
-  }
+  // サイン記号・ハウス番号は、線・円を描いた後（最下部）に白い下地付きで重ねて描く
+  // （先に描くと後続の線が上に乗ってしまうため）。
   // サインの区切り線（各サイン境界＝絶対黄経の30°刻み）を黒の点線でサイン帯の外縁(rZodiacIn)まで。
   // ハウス番号帯(rZodiacIn〜R)には伸ばさない。
   for (let a = 0; a < 360; a += 30) { const [x0, y0] = pt(a, 0), [x1, y1] = pt(a, rZodiacIn); s.append(svg("line", { x1: x0, y1: y0, x2: x1, y2: y1, stroke: "#222", "stroke-width": 1, "stroke-dasharray": "4 3" })); }
@@ -133,14 +128,8 @@ function drawWheel(chart: Chart, enabledAspects: Set<string>, name: boolean): SV
   for (let i = 0; i < 12; i++) {
     const lon = cuspLons[i];
     const [x1, y1] = pt(lon, rCuspIn), [x2, y2] = pt(lon, R);
-    // ハウス区切り線は黒。ASC/MC 軸とも区別しない。最外周まで伸ばす。
+    // ハウス区切り線は黒。ASC/MC 軸とも区別しない。最外周まで伸ばす。（番号は後で重ねる）
     s.append(svg("line", { x1, y1, x2, y2, stroke: "#222", "stroke-width": 1 }));
-    // ハウス番号: このカスプと次のカスプの中点角、番号帯の中央に配置。
-    const span = ((cuspLons[(i + 1) % 12] - lon) % 360 + 360) % 360;
-    const [nx, ny] = pt(lon + span / 2, rHouseBand);
-    const t = svg("text", { x: nx, y: ny, "text-anchor": "middle", "dominant-baseline": "central", "font-size": 10, fill: "#555", "font-weight": "700", stroke: "#fff", "stroke-width": 2.5, "paint-order": "stroke" });
-    t.textContent = String(i + 1);
-    s.append(t);
   }
 
   // ASC/MC/DSC/IC 軸。線はハウス区切り線と区別せず黒で最外周まで。ラベルは円の外側（両端）に表示。
@@ -156,6 +145,25 @@ function drawWheel(chart: Chart, enabledAspects: Set<string>, name: boolean): SV
   s.append(svg("circle", { cx, cy, r: R, fill: "none", stroke: "#222", "stroke-width": 1 }));
   s.append(svg("circle", { cx, cy, r: rZodiacIn, fill: "none", stroke: "#222", "stroke-width": 1 }));
   s.append(svg("circle", { cx, cy, r: rHouse, fill: "none", stroke: "#222", "stroke-width": 1 }));
+
+  // サイン記号／文字を線・円の上に重ねて描く。線が透けないよう白い下地（円）を敷く。
+  // 文字表示モード(name)は1文字漢字、記号モードは占星術グリフ。
+  for (let i = 0; i < 12; i++) {
+    const [gx, gy] = pt(i * 30 + 15, rSignBand);
+    s.append(svg("circle", { cx: gx, cy: gy, r: 10, fill: "#fff", stroke: "none" }));
+    const g = svg("text", { x: gx, y: gy, "text-anchor": "middle", "dominant-baseline": "central", "font-size": name ? 15 : 18, fill: "#333" });
+    g.textContent = name ? SIGN_CHAR[SIGN_ORDER[i]] : SIGN_GLYPH[SIGN_ORDER[i]] + "\uFE0E";
+    s.append(g);
+  }
+  // ハウス番号を線・円の上に重ねて描く（白いハローで下地確保）。
+  for (let i = 0; i < 12; i++) {
+    const lon = cuspLons[i];
+    const span = ((cuspLons[(i + 1) % 12] - lon) % 360 + 360) % 360;
+    const [nx, ny] = pt(lon + span / 2, rHouseBand);
+    const t = svg("text", { x: nx, y: ny, "text-anchor": "middle", "dominant-baseline": "central", "font-size": 10, fill: "#555", "font-weight": "700", stroke: "#fff", "stroke-width": 2.5, "paint-order": "stroke" });
+    t.textContent = String(i + 1);
+    s.append(t);
+  }
 
   // 天体の表示角を先に確定する（密集時は扇状に広げて重なり回避）。アスペクト線も
   // この表示角＝「天体と中心を結ぶ半径」上で各天体につなぐので、接点は天体ごとに1つ。
