@@ -108,14 +108,14 @@ function drawWheel(chart: Chart, enabledAspects: Set<string>, name: boolean): SV
     return [cx + r * Math.cos(t), cy - r * Math.sin(t)];
   };
 
-  // 黄道リング（12サイン、エレメント色、グリフ）
+  // 黄道の12サインを、各サインの30°扇形として円の中心まで塗る（エレメント色）。グリフは外周帯に。
   for (let i = 0; i < 12; i++) {
     const signId = SIGN_ORDER[i];
     const a0 = i * 30, a1 = a0 + 30;
     const [x0o, y0o] = pt(a0, R), [x1o, y1o] = pt(a1, R);
-    const [x0i, y0i] = pt(a0, rZodiacIn), [x1i, y1i] = pt(a1, rZodiacIn);
     const large = 0;
-    const path = svg("path", { d: `M${x0o},${y0o} A${R},${R} 0 ${large} 0 ${x1o},${y1o} L${x1i},${y1i} A${rZodiacIn},${rZodiacIn} 0 ${large} 1 ${x0i},${y0i} Z`, fill: ELEMENT_COLOR[SIGN_ELEMENT[signId]], stroke: "#0002", "stroke-width": 0.5 });
+    // 中心 → a0(外周) → 弧 → a1(外周) → 中心 の扇形（パイ）で中心まで塗る。
+    const path = svg("path", { d: `M${cx},${cy} L${x0o},${y0o} A${R},${R} 0 ${large} 0 ${x1o},${y1o} Z`, fill: ELEMENT_COLOR[SIGN_ELEMENT[signId]], stroke: "none" });
     s.append(path);
     const [gx, gy] = pt(a0 + 15, (R + rZodiacIn) / 2);
     // U+FE0E（テキスト表示セレクタ）を付けて絵文字化（紫の四角）を防ぎ、記号として描画。
@@ -140,9 +140,9 @@ function drawWheel(chart: Chart, enabledAspects: Set<string>, name: boolean): SV
   for (let i = 0; i < 12; i++) {
     const lon = cuspLons[i];
     const [x1, y1] = pt(lon, rCuspIn), [x2, y2] = pt(lon, rZodiacIn);
-    // アングル（1・4・7・10室）は濃く実線、他ハウスは細い実線。
+    // ハウス区切り線は太めの白。アングル（1・4・7・10室）はさらに太く。
     const angular = i % 3 === 0;
-    s.append(svg("line", { x1, y1, x2, y2, stroke: angular ? "#0006" : "#0003", "stroke-width": angular ? 1 : 0.7 }));
+    s.append(svg("line", { x1, y1, x2, y2, stroke: "#fff", "stroke-width": angular ? 3 : 2 }));
     // ハウス番号: このカスプと次のカスプの中点角、番号帯の中央に配置。
     const span = ((cuspLons[(i + 1) % 12] - lon) % 360 + 360) % 360;
     const [nx, ny] = pt(lon + span / 2, rHouseNum);
