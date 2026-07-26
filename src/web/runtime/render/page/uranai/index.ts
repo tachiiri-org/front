@@ -201,8 +201,9 @@ function drawWheel(chart: Chart, enabledAspects: Set<string>, name: boolean): SV
   }
 
   // 名前モードの枠寸法を先に算出。度数ぶんの高さも予約して重なり判定に使う。
-  // 度数は枠の上角に小さく載せるだけなので、重なり判定での予約高さは控えめに（過剰な内側寄せを防ぐ）。
-  const NAME_FS = 11, NAME_LH = 13.5, NAME_PADX = 3.5, NAME_PADY = 3, DEG_RESERVE = 5;
+  // 度数は枠の上角に小さく載せるだけで枠外へほぼはみ出さないため、重なり判定に度数ぶんの
+  // 予約高さは足さない（DEG_RESERVE=0）。足すと近接天体を不要に内側へ寄せてしまう。
+  const NAME_FS = 11, NAME_LH = 13.5, NAME_PADX = 3.5, NAME_PADY = 3, DEG_RESERVE = 0;
   const labelLines = order.map((o) => PLANET_NAME_LINES[o.p.planet] ?? [PLANET_GLYPH[o.p.planet] ?? "?"]);
   const boxDim = labelLines.map((lines) => {
     const maxLen = Math.max(...lines.map((t) => [...t].length));
@@ -253,10 +254,9 @@ function drawWheel(chart: Chart, enabledAspects: Set<string>, name: boolean): SV
     const degText = `${Math.floor(o.p.degree)}°${o.p.retrograde ? "℞" : ""}`;
     if (name) {
       // 度数は枠の「上側」の角に置く（下側だと下段の枠と干渉。上なら隙間なく2段並べられる）。
-      // 左右は中心から見た象限で決める: 左下→左上, 左上→右上, 右上→左上, 右下→右上
-      // （= leftCorner: (左か) と (上か) が異なるとき左角）。
+      // 左右は天体と同じ側: 中心より左の天体は左上、右の天体は右上。
       const { w, h } = boxDim[i];
-      const leftCorner = (gx < cx) !== (gy < cy);
+      const leftCorner = gx < cx;
       const dgx = leftCorner ? gx - w / 2 : gx + w / 2;
       const dgy = gy - h / 2 - 5;
       const d = svg("text", { x: dgx, y: dgy, "text-anchor": leftCorner ? "start" : "end", "dominant-baseline": "central", "font-size": 8, fill: "#666" });
