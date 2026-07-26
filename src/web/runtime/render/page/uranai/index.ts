@@ -4,8 +4,6 @@
 
 const SIGN_ORDER = ["aries", "taurus", "gemini", "cancer", "leo", "virgo", "libra", "scorpio", "sagittarius", "capricorn", "aquarius", "pisces"] as const;
 const SIGN_GLYPH: Record<string, string> = { aries: "♈", taurus: "♉", gemini: "♊", cancer: "♋", leo: "♌", virgo: "♍", libra: "♎", scorpio: "♏", sagittarius: "♐", capricorn: "♑", aquarius: "♒", pisces: "♓" };
-const SIGN_ELEMENT: Record<string, string> = { aries: "fire", leo: "fire", sagittarius: "fire", taurus: "earth", virgo: "earth", capricorn: "earth", gemini: "air", libra: "air", aquarius: "air", cancer: "water", scorpio: "water", pisces: "water" };
-const ELEMENT_COLOR: Record<string, string> = { fire: "#E8663050", earth: "#7C9A4550", air: "#E0B84550", water: "#4A90C250" };
 const PLANET_GLYPH: Record<string, string> = { sun: "☉", moon: "☽", mercury: "☿", venus: "♀", mars: "♂", jupiter: "♃", saturn: "♄", uranus: "♅", neptune: "♆", pluto: "♇", chiron: "⚷", ceres: "⚳", pallas: "⚴", juno: "⚵", vesta: "⚶", pholus: "⯛", lilith: "⚸", dragon_head: "☊", dragon_tail: "☋", fortune: "⊗", asc: "Asc", mc: "MC", dsc: "Dsc", ic: "IC" };
 // フルネーム表記（複数行）。長い名前は改行して枠に収める。
 const PLANET_NAME_LINES: Record<string, string[]> = {
@@ -110,22 +108,17 @@ function drawWheel(chart: Chart, enabledAspects: Set<string>, name: boolean): SV
     return [cx + r * Math.cos(t), cy - r * Math.sin(t)];
   };
 
-  // 黄道の12サインを、各サインの30°扇形として円の中心まで塗る（エレメント色）。グリフは外周帯に。
+  // 12サインの記号（色は塗らない）。記号は内側の帯の中央に配置。
   for (let i = 0; i < 12; i++) {
     const signId = SIGN_ORDER[i];
-    const a0 = i * 30, a1 = a0 + 30;
-    const [x0o, y0o] = pt(a0, R), [x1o, y1o] = pt(a1, R);
-    const large = 0;
-    // 中心 → a0(外周) → 弧 → a1(外周) → 中心 の扇形（パイ）で中心まで塗る。
-    const path = svg("path", { d: `M${cx},${cy} L${x0o},${y0o} A${R},${R} 0 ${large} 0 ${x1o},${y1o} Z`, fill: ELEMENT_COLOR[SIGN_ELEMENT[signId]], stroke: "none" });
-    s.append(path);
+    const a0 = i * 30;
     const [gx, gy] = pt(a0 + 15, rSignBand);
     // U+FE0E（テキスト表示セレクタ）を付けて絵文字化（紫の四角）を防ぎ、記号として描画。
     const g = svg("text", { x: gx, y: gy, "text-anchor": "middle", "dominant-baseline": "central", "font-size": 18, fill: "#333" }); g.textContent = SIGN_GLYPH[signId] + "\uFE0E";
     s.append(g);
   }
-  // サインの区切り線（各サイン境界＝絶対黄経の30°刻み）を白で中心まで。
-  for (let a = 0; a < 360; a += 30) { const [x0, y0] = pt(a, 0), [x1, y1] = pt(a, R); s.append(svg("line", { x1: x0, y1: y0, x2: x1, y2: y1, stroke: "#fff", "stroke-width": 1 })); }
+  // サインの区切り線（各サイン境界＝絶対黄経の30°刻み）を黒の点線で最外周(R)まで。
+  for (let a = 0; a < 360; a += 30) { const [x0, y0] = pt(a, 0), [x1, y1] = pt(a, R); s.append(svg("line", { x1: x0, y1: y0, x2: x1, y2: y1, stroke: "#222", "stroke-width": 1, "stroke-dasharray": "4 3" })); }
 
   // ハウス境界（12分割線）＋ハウス番号。カスプ保存があれば流派のハウスシステム、
   // 無ければ whole-sign 等分（ASC のサイン先頭から 30°刻み）でフォールバックし必ず描く。
@@ -149,11 +142,13 @@ function drawWheel(chart: Chart, enabledAspects: Set<string>, name: boolean): SV
     s.append(t);
   }
 
-  // ASC/MC 軸。線はハウス区切り線と区別せず黒で最外周まで。ラベルは円の外側に表示。
-  for (const [lon, label] of [[asc, "Asc"], [chart.midheaven, "MC"]] as [number, string][]) {
+  // ASC/MC/DSC/IC 軸。線はハウス区切り線と区別せず黒で最外周まで。ラベルは円の外側（両端）に表示。
+  for (const [lon, label, opp] of [[asc, "Asc", "Dsc"], [chart.midheaven, "MC", "IC"]] as [number, string, string][]) {
     const [x1, y1] = pt(lon, R), [x2, y2] = pt(lon + 180, R);
     s.append(svg("line", { x1: x2, y1: y2, x2: x1, y2: y1, stroke: "#222", "stroke-width": 1 }));
-    const [lx, ly] = pt(lon, R + 11); const t = svg("text", { x: lx, y: ly, "text-anchor": "middle", "dominant-baseline": "central", "font-size": 11, fill: "#222", "font-weight": "bold" }); t.textContent = label; s.append(t);
+    for (const [l, txt] of [[lon, label], [lon + 180, opp]] as [number, string][]) {
+      const [lx, ly] = pt(l, R + 11); const t = svg("text", { x: lx, y: ly, "text-anchor": "middle", "dominant-baseline": "central", "font-size": 11, fill: "#222", "font-weight": "bold" }); t.textContent = txt; s.append(t);
+    }
   }
 
   // 円（最外周＋ハウス番号帯を囲む2円）は白い放射線の上に描いて黒いリングを途切れさせない。
