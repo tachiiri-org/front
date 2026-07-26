@@ -4,8 +4,16 @@
 
 const SIGN_ORDER = ["aries", "taurus", "gemini", "cancer", "leo", "virgo", "libra", "scorpio", "sagittarius", "capricorn", "aquarius", "pisces"] as const;
 const SIGN_GLYPH: Record<string, string> = { aries: "♈", taurus: "♉", gemini: "♊", cancer: "♋", leo: "♌", virgo: "♍", libra: "♎", scorpio: "♏", sagittarius: "♐", capricorn: "♑", aquarius: "♒", pisces: "♓" };
-// 文字表示モードでのサインの1文字表記（射手座→射 など）。
-const SIGN_CHAR: Record<string, string> = { aries: "羊", taurus: "牛", gemini: "双", cancer: "蟹", leo: "獅", virgo: "乙", libra: "秤", scorpio: "蠍", sagittarius: "射", capricorn: "山", aquarius: "瓶", pisces: "魚" };
+// 文字表示モードでのサインの正式名（円に沿って表示）。
+const SIGN_NAME: Record<string, string> = { aries: "牡羊座", taurus: "牡牛座", gemini: "双子座", cancer: "蟹座", leo: "獅子座", virgo: "乙女座", libra: "天秤座", scorpio: "蠍座", sagittarius: "射手座", capricorn: "山羊座", aquarius: "水瓶座", pisces: "魚座" };
+// サインの元素（色相）とクオリティ（トーン=不透明度）。
+const SIGN_ELEMENT: Record<string, string> = { aries: "fire", leo: "fire", sagittarius: "fire", taurus: "earth", virgo: "earth", capricorn: "earth", gemini: "air", libra: "air", aquarius: "air", cancer: "water", scorpio: "water", pisces: "water" };
+const SIGN_QUALITY: Record<string, string> = { aries: "cardinal", cancer: "cardinal", libra: "cardinal", capricorn: "cardinal", taurus: "fixed", leo: "fixed", scorpio: "fixed", aquarius: "fixed", gemini: "mutable", virgo: "mutable", sagittarius: "mutable", pisces: "mutable" };
+const ELEMENT_HUE: Record<string, number> = { fire: 12, earth: 95, air: 50, water: 205 };
+const ELEMENT_SAT: Record<string, number> = { fire: 75, earth: 45, air: 75, water: 55 };
+const QUALITY_ALPHA: Record<string, number> = { cardinal: 0.24, fixed: 0.15, mutable: 0.08 };
+// 元素=色相/彩度・クオリティ=不透明度（トーン）で薄めに塗る。
+const signFill = (id: string): string => `hsla(${ELEMENT_HUE[SIGN_ELEMENT[id]]}, ${ELEMENT_SAT[SIGN_ELEMENT[id]]}%, 52%, ${QUALITY_ALPHA[SIGN_QUALITY[id]]})`;
 const PLANET_GLYPH: Record<string, string> = { sun: "☉", moon: "☽", mercury: "☿", venus: "♀", mars: "♂", jupiter: "♃", saturn: "♄", uranus: "♅", neptune: "♆", pluto: "♇", chiron: "⚷", ceres: "⚳", pallas: "⚴", juno: "⚵", vesta: "⚶", pholus: "⯛", lilith: "⚸", dragon_head: "☊", dragon_tail: "☋", fortune: "⊗", asc: "Asc", mc: "MC", dsc: "Dsc", ic: "IC" };
 // フルネーム表記（複数行）。長い名前は改行して枠に収める。
 const PLANET_NAME_LINES: Record<string, string[]> = {
@@ -110,6 +118,13 @@ function drawWheel(chart: Chart, enabledAspects: Set<string>, name: boolean): SV
     return [cx + r * Math.cos(t), cy - r * Math.sin(t)];
   };
 
+  // 背景: 各サインの30°扇形を中心まで薄く塗る（元素=色相, クオリティ=トーン）。
+  for (let i = 0; i < 12; i++) {
+    const a0 = i * 30;
+    const [x0o, y0o] = pt(a0, R), [x1o, y1o] = pt(a0 + 30, R);
+    s.append(svg("path", { d: `M${cx},${cy} L${x0o},${y0o} A${R},${R} 0 0 0 ${x1o},${y1o} Z`, fill: signFill(SIGN_ORDER[i]), stroke: "none" }));
+  }
+
   // サイン記号・ハウス番号は、線・円を描いた後（最下部）に白い下地付きで重ねて描く
   // （先に描くと後続の線が上に乗ってしまうため）。
   // サインの区切り線（各サイン境界＝絶対黄経の30°刻み）を黒の点線でサイン帯の外縁(rZodiacIn)まで。
@@ -147,13 +162,23 @@ function drawWheel(chart: Chart, enabledAspects: Set<string>, name: boolean): SV
   s.append(svg("circle", { cx, cy, r: rHouse, fill: "none", stroke: "#222", "stroke-width": 1 }));
 
   // サイン記号／文字を線・円の上に重ねて描く。線が透けないよう白い下地（円）を敷く。
-  // 文字表示モード(name)は1文字漢字、記号モードは占星術グリフ。
+  // 文字表示モード(name)はサイン正式名を円に沿って（接線方向に回転）小フォントで、
+  // 記号モードは占星術グリフを白い下地の上に。
   for (let i = 0; i < 12; i++) {
     const [gx, gy] = pt(i * 30 + 15, rSignBand);
-    s.append(svg("circle", { cx: gx, cy: gy, r: 10, fill: "#fff", stroke: "none" }));
-    const g = svg("text", { x: gx, y: gy, "text-anchor": "middle", "dominant-baseline": "central", "font-size": name ? 15 : 18, fill: "#333" });
-    g.textContent = name ? SIGN_CHAR[SIGN_ORDER[i]] : SIGN_GLYPH[SIGN_ORDER[i]] + "\uFE0E";
-    s.append(g);
+    if (name) {
+      // 接線方向へ回転。下半分は上下反転して常に正立させる。白ハローで色地でも読める。
+      let rot = Math.atan2(gy - cy, gx - cx) * 180 / Math.PI + 90;
+      if (rot > 90 && rot < 270) rot -= 180;
+      const t = svg("text", { x: gx, y: gy, "text-anchor": "middle", "dominant-baseline": "central", "font-size": 10, fill: "#333", stroke: "#fff", "stroke-width": 2.5, "paint-order": "stroke", transform: `rotate(${rot.toFixed(1)} ${gx.toFixed(1)} ${gy.toFixed(1)})` });
+      t.textContent = SIGN_NAME[SIGN_ORDER[i]];
+      s.append(t);
+    } else {
+      s.append(svg("circle", { cx: gx, cy: gy, r: 10, fill: "#fff", stroke: "none" }));
+      const g = svg("text", { x: gx, y: gy, "text-anchor": "middle", "dominant-baseline": "central", "font-size": 18, fill: "#333" });
+      g.textContent = SIGN_GLYPH[SIGN_ORDER[i]] + "\uFE0E";
+      s.append(g);
+    }
   }
   // ハウス番号を線・円の上に重ねて描く（白いハローで下地確保）。
   for (let i = 0; i < 12; i++) {
