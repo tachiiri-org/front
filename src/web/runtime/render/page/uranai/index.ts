@@ -201,7 +201,8 @@ function drawWheel(chart: Chart, enabledAspects: Set<string>, name: boolean): SV
   }
 
   // 名前モードの枠寸法を先に算出。度数ぶんの高さも予約して重なり判定に使う。
-  const NAME_FS = 11, NAME_LH = 13.5, NAME_PADX = 3.5, NAME_PADY = 3, DEG_RESERVE = 14;
+  // 度数は枠の上角に小さく載せるだけなので、重なり判定での予約高さは控えめに（過剰な内側寄せを防ぐ）。
+  const NAME_FS = 11, NAME_LH = 13.5, NAME_PADX = 3.5, NAME_PADY = 3, DEG_RESERVE = 5;
   const labelLines = order.map((o) => PLANET_NAME_LINES[o.p.planet] ?? [PLANET_GLYPH[o.p.planet] ?? "?"]);
   const boxDim = labelLines.map((lines) => {
     const maxLen = Math.max(...lines.map((t) => [...t].length));
@@ -249,11 +250,25 @@ function drawWheel(chart: Chart, enabledAspects: Set<string>, name: boolean): SV
       g.textContent = PLANET_GLYPH[o.p.planet] ?? "?";
       s.append(g);
     }
-    // 度数は記号／枠の外側（リング寄り）に、同じ表示角・同じレーン半径で。
-    const [dx, dy] = pt(a, r + 15);
-    const d = svg("text", { x: dx, y: dy, "text-anchor": "middle", "dominant-baseline": "central", "font-size": 8, fill: "#666" });
-    d.textContent = `${Math.floor(o.p.degree)}°${o.p.retrograde ? "℞" : ""}`;
-    s.append(d);
+    const degText = `${Math.floor(o.p.degree)}°${o.p.retrograde ? "℞" : ""}`;
+    if (name) {
+      // 度数は枠の「上側」の角に置く（下側だと下段の枠と干渉。上なら隙間なく2段並べられる）。
+      // 左右は中心から見た象限で決める: 左下→左上, 左上→右上, 右上→左上, 右下→右上
+      // （= leftCorner: (左か) と (上か) が異なるとき左角）。
+      const { w, h } = boxDim[i];
+      const leftCorner = (gx < cx) !== (gy < cy);
+      const dgx = leftCorner ? gx - w / 2 : gx + w / 2;
+      const dgy = gy - h / 2 - 5;
+      const d = svg("text", { x: dgx, y: dgy, "text-anchor": leftCorner ? "start" : "end", "dominant-baseline": "central", "font-size": 8, fill: "#666" });
+      d.textContent = degText;
+      s.append(d);
+    } else {
+      // 記号モードは従来どおり記号の外側（リング寄り）に。
+      const [dx, dy] = pt(a, r + 15);
+      const d = svg("text", { x: dx, y: dy, "text-anchor": "middle", "dominant-baseline": "central", "font-size": 8, fill: "#666" });
+      d.textContent = degText;
+      s.append(d);
+    }
   });
   return s;
 }
@@ -364,9 +379,10 @@ function settingsView(settings: Settings, onSaved: () => void | Promise<void>): 
 function chartView(chart: Chart): HTMLElement {
   const wrap = el("div", { className: "u-chart" });
 
-  // アスペクトのカテゴリ・トグル（チャートに存在する種別のみ、既定は全オフ）。
+  // アスペクトのオン/オフ（1ボタンで全種まとめて。既定オフ）。
   const present = ASPECT_ORDER.filter((t) => chart.aspects.some((a) => a.type === t));
-  const enabled = new Set<string>();
+  const enabled = new Set<string>(); // 空=オフ。オン時に present を全投入。
+  let aspectsOn = false;
   let nameMode = false;
   const host = el("div", { className: "u-wheel" });
   const redraw = () => { host.innerHTML = ""; host.append(drawWheel(chart, enabled, nameMode)); };
@@ -380,17 +396,17 @@ function chartView(chart: Chart): HTMLElement {
 
   const toggles = el("div", { className: "u-aspect-toggles" });
   if (present.length) {
-    toggles.append(el("span", { className: "u-tg-title", textContent: "アスペクト:" }));
-    for (const t of present) {
-      // チェックボックスではなくボタン風トグル。オン時に .on を付けて塗り分ける。
-      const btn = el("button", { className: "u-tg-btn", type: "button" });
-      const sw = el("span", { className: "u-tg-sw" }); sw.style.background = ASPECT_COLOR[t] ?? "#999";
-      btn.append(sw, el("span", { textContent: `${ASPECT_INFO[t].label} ${ASPECT_INFO[t].angle}°` }));
-      const sync = () => btn.classList.toggle("on", enabled.has(t));
-      btn.addEventListener("click", () => { if (enabled.has(t)) enabled.delete(t); else enabled.add(t); sync(); redraw(); });
-      sync();
-      toggles.append(btn);
-    }
+    // アスペクトは1ボタンでまとめて表示切替（既定オフ）。
+    const btn = el("button", { className: "u-tg-btn", type: "button", textContent: "アスペクト" });
+    const sync = () => btn.classList.toggle("on", aspectsOn);
+    btn.addEventListener("click", () => {
+      aspectsOn = !aspectsOn;
+      enabled.clear();
+      if (aspectsOn) present.forEach((t) => enabled.add(t));
+      sync(); redraw();
+    });
+    sync();
+    toggles.append(btn);
   }
 
   redraw();
