@@ -114,11 +114,12 @@ function drawWheel(chart: Chart, enabledAspects: Set<string>, name: boolean): SV
     const a0 = i * 30;
     const [gx, gy] = pt(a0 + 15, rSignBand);
     // U+FE0E（テキスト表示セレクタ）を付けて絵文字化（紫の四角）を防ぎ、記号として描画。
-    const g = svg("text", { x: gx, y: gy, "text-anchor": "middle", "dominant-baseline": "central", "font-size": 18, fill: "#333" }); g.textContent = SIGN_GLYPH[signId] + "\uFE0E";
+    const g = svg("text", { x: gx, y: gy, "text-anchor": "middle", "dominant-baseline": "central", "font-size": 18, fill: "#333", stroke: "#fff", "stroke-width": 3, "paint-order": "stroke" }); g.textContent = SIGN_GLYPH[signId] + "\uFE0E";
     s.append(g);
   }
-  // サインの区切り線（各サイン境界＝絶対黄経の30°刻み）を黒の点線で最外周(R)まで。
-  for (let a = 0; a < 360; a += 30) { const [x0, y0] = pt(a, 0), [x1, y1] = pt(a, R); s.append(svg("line", { x1: x0, y1: y0, x2: x1, y2: y1, stroke: "#222", "stroke-width": 1, "stroke-dasharray": "4 3" })); }
+  // サインの区切り線（各サイン境界＝絶対黄経の30°刻み）を黒の点線でサイン帯の外縁(rZodiacIn)まで。
+  // ハウス番号帯(rZodiacIn〜R)には伸ばさない。
+  for (let a = 0; a < 360; a += 30) { const [x0, y0] = pt(a, 0), [x1, y1] = pt(a, rZodiacIn); s.append(svg("line", { x1: x0, y1: y0, x2: x1, y2: y1, stroke: "#222", "stroke-width": 1, "stroke-dasharray": "4 3" })); }
 
   // ハウス境界（12分割線）＋ハウス番号。カスプ保存があれば流派のハウスシステム、
   // 無ければ whole-sign 等分（ASC のサイン先頭から 30°刻み）でフォールバックし必ず描く。
@@ -137,7 +138,7 @@ function drawWheel(chart: Chart, enabledAspects: Set<string>, name: boolean): SV
     // ハウス番号: このカスプと次のカスプの中点角、番号帯の中央に配置。
     const span = ((cuspLons[(i + 1) % 12] - lon) % 360 + 360) % 360;
     const [nx, ny] = pt(lon + span / 2, rHouseBand);
-    const t = svg("text", { x: nx, y: ny, "text-anchor": "middle", "dominant-baseline": "central", "font-size": 10, fill: "#555", "font-weight": "700" });
+    const t = svg("text", { x: nx, y: ny, "text-anchor": "middle", "dominant-baseline": "central", "font-size": 10, fill: "#555", "font-weight": "700", stroke: "#fff", "stroke-width": 2.5, "paint-order": "stroke" });
     t.textContent = String(i + 1);
     s.append(t);
   }
@@ -236,7 +237,7 @@ function drawWheel(chart: Chart, enabledAspects: Set<string>, name: boolean): SV
       const lines = labelLines[i];
       const { w, h } = boxDim[i];
       const grp = svg("g", {});
-      grp.append(svg("rect", { x: gx - w / 2, y: gy - h / 2, width: w, height: h, rx: 2, fill: "none", stroke: "#bbb", "stroke-width": 0.7 }));
+      grp.append(svg("rect", { x: gx - w / 2, y: gy - h / 2, width: w, height: h, rx: 2, fill: "#fff", stroke: "#bbb", "stroke-width": 0.7 }));
       lines.forEach((line, k) => {
         const ty = gy - h / 2 + NAME_PADY + NAME_LH * (k + 0.5);
         const tx = svg("text", { x: gx, y: ty, "text-anchor": "middle", "dominant-baseline": "central", "font-size": NAME_FS, fill: "#111" });
@@ -245,7 +246,7 @@ function drawWheel(chart: Chart, enabledAspects: Set<string>, name: boolean): SV
       });
       s.append(grp);
     } else {
-      const g = svg("text", { x: gx, y: gy, "text-anchor": "middle", "dominant-baseline": "central", "font-size": 22, fill: "#111" });
+      const g = svg("text", { x: gx, y: gy, "text-anchor": "middle", "dominant-baseline": "central", "font-size": 22, fill: "#111", stroke: "#fff", "stroke-width": 3.5, "paint-order": "stroke" });
       g.textContent = PLANET_GLYPH[o.p.planet] ?? "?";
       s.append(g);
     }
@@ -257,13 +258,13 @@ function drawWheel(chart: Chart, enabledAspects: Set<string>, name: boolean): SV
       const leftCorner = gx < cx;
       const dgx = leftCorner ? gx - w / 2 : gx + w / 2;
       const dgy = gy - h / 2 - 5;
-      const d = svg("text", { x: dgx, y: dgy, "text-anchor": leftCorner ? "start" : "end", "dominant-baseline": "central", "font-size": 8, fill: "#666" });
+      const d = svg("text", { x: dgx, y: dgy, "text-anchor": leftCorner ? "start" : "end", "dominant-baseline": "central", "font-size": 8, fill: "#666", stroke: "#fff", "stroke-width": 2, "paint-order": "stroke" });
       d.textContent = degText;
       s.append(d);
     } else {
       // 記号モードは従来どおり記号の外側（リング寄り）に。
       const [dx, dy] = pt(a, r + 15);
-      const d = svg("text", { x: dx, y: dy, "text-anchor": "middle", "dominant-baseline": "central", "font-size": 8, fill: "#666" });
+      const d = svg("text", { x: dx, y: dy, "text-anchor": "middle", "dominant-baseline": "central", "font-size": 8, fill: "#666", stroke: "#fff", "stroke-width": 2, "paint-order": "stroke" });
       d.textContent = degText;
       s.append(d);
     }
