@@ -31,14 +31,12 @@ const NS = "http://www.w3.org/2000/svg";
 
 type Person = { id: string; label: string | null };
 type Prefill = { label?: string | null; date?: string; time?: string; place?: string; lat?: number; lng?: number; tz?: string };
-type Settings = { zodiac: string; house_system_id: string; ephemeris: string; node_type: string; lilith_type: string; ayanamsha: string };
-// 流派設定（マスタ）の選択肢。[key, ラベル, 選択肢[[値,表示]]]。
+type Settings = { zodiac: string; house_system_id: string; ephemeris: string; ayanamsha: string };
+// ユーザーごとの方式デフォルト（設定画面）の選択肢。[key, ラベル, 選択肢[[値,表示]]]。
 const SETTING_FIELDS: Array<{ key: keyof Settings; label: string; options: Array<[string, string]> }> = [
   { key: "house_system_id", label: "ハウス", options: [["whole_sign", "ホールサイン"], ["placidus", "プラシダス"]] },
   { key: "zodiac", label: "黄道帯", options: [["tropical", "トロピカル（回帰）"], ["sidereal", "サイデリアル（恒星）"]] },
   { key: "ephemeris", label: "天体暦", options: [["vsop87", "VSOP87（高精度）"], ["standard", "簡易（Standard）"]] },
-  { key: "node_type", label: "ノード", options: [["mean", "平均（Mean）"], ["true", "真（True）"]] },
-  { key: "lilith_type", label: "リリス", options: [["mean", "平均（Mean）"], ["true", "真（True）"]] },
   { key: "ayanamsha", label: "アヤナムシャ", options: [["lahiri", "ラヒリ"], ["fagan_bradley", "フェイガン/ブラッドレー"]] },
 ];
 type Placement = { planet: string; sign: string; degree: number; retrograde?: boolean };
@@ -78,15 +76,10 @@ const selectEl = (options: Array<[string, string]>, value: string): HTMLSelectEl
   return sel;
 };
 async function loadSettings(): Promise<Settings> {
-  const d: Settings = { zodiac: "tropical", house_system_id: "whole_sign", ephemeris: "vsop87", node_type: "mean", lilith_type: "mean", ayanamsha: "lahiri" };
+  const d: Settings = { zodiac: "tropical", house_system_id: "whole_sign", ephemeris: "vsop87", ayanamsha: "lahiri" };
   try {
-    const ref = await api<{ rulesets: Array<Record<string, string>>; ruleset: string }>(`/api/v1/uranai/astrology/reference`);
-    const r = ref.rulesets.find((x) => x.id === ref.ruleset) ?? ref.rulesets[0] ?? {};
-    return {
-      zodiac: r.zodiac ?? d.zodiac, house_system_id: r.house_system_id ?? d.house_system_id,
-      ephemeris: r.ephemeris ?? d.ephemeris, node_type: r.node_type ?? d.node_type,
-      lilith_type: r.lilith_type ?? d.lilith_type, ayanamsha: r.ayanamsha ?? d.ayanamsha,
-    };
+    const s = await api<Partial<Settings>>(`/api/v1/uranai/astrology/settings`);
+    return { zodiac: s.zodiac ?? d.zodiac, house_system_id: s.house_system_id ?? d.house_system_id, ephemeris: s.ephemeris ?? d.ephemeris, ayanamsha: s.ayanamsha ?? d.ayanamsha };
   } catch { return d; }
 }
 
@@ -256,21 +249,8 @@ function drawWheel(chart: Chart, enabledAspects: Set<string>, name: boolean): SV
 }
 
 // ───────────────────────── 出生フォーム ─────────────────────────
-function birthForm(personId: string, onDone: (chart: Chart) => void, prefill?: Prefill, settings?: Settings): HTMLElement {
+function birthForm(personId: string, onDone: (chart: Chart) => void, prefill?: Prefill): HTMLElement {
   const wrap = el("div", { className: "u-form" });
-  // 流派設定（マスタ）の選択 UI。全体（全人物のチャート）に適用される。
-  const setSels: Partial<Record<keyof Settings, HTMLSelectElement>> = {};
-  const setSection = el("div", { className: "u-settings" });
-  if (settings) {
-    setSection.append(el("div", { className: "u-set-title", textContent: "流派設定（全体に適用）" }));
-    const grid = el("div", { className: "u-set-grid" });
-    for (const f of SETTING_FIELDS) {
-      const sel = selectEl(f.options, settings[f.key]);
-      setSels[f.key] = sel;
-      grid.append(el("div", { className: "u-set-row" }, [el("label", { textContent: f.label }), sel]));
-    }
-    setSection.append(grid);
-  }
   const label = el("input", { type: "text", placeholder: "表示名（例: 自分）", value: prefill?.label ?? "" });
   const date = el("input", { type: "date", value: prefill?.date ?? "" });
   const time = el("input", { type: "time", value: prefill?.time ?? "" });
@@ -315,12 +295,6 @@ function birthForm(personId: string, onDone: (chart: Chart) => void, prefill?: P
     status.textContent = "計算中…";
     try {
       if (label.value.trim()) await api(`/api/v1/uranai/person/${personId}`, { method: "PATCH", body: JSON.stringify({ label: label.value.trim() }) }).catch(() => {});
-      // 流派設定（マスタ）を更新してから計算。settings オブジェクトも更新して次回フォームに反映。
-      if (settings) {
-        const payload: Record<string, string> = {};
-        for (const f of SETTING_FIELDS) { const v = setSels[f.key]?.value; if (v) { payload[f.key as string] = v; (settings as Record<string, string>)[f.key as string] = v; } }
-        await api(`/api/v1/uranai/astrology/ruleset`, { method: "PUT", body: JSON.stringify(payload) }).catch(() => {});
-      }
       const born_at = `${date.value}T${time.value}:00${tz.value.trim() || "+00:00"}`;
       await api(`/api/v1/uranai/person/${personId}/birth`, { method: "PUT", body: JSON.stringify({ born_at, lat: String(lat), lng: String(lng), place: placeName, timezone: tz.value.trim() }) });
       const chart = await api<Chart>(`/api/v1/uranai/astrology/person/${personId}/compute`, { method: "POST", body: "{}" });
@@ -335,8 +309,43 @@ function birthForm(personId: string, onDone: (chart: Chart) => void, prefill?: P
     el("div", { className: "u-row" }, [el("label", { textContent: "出生地" }), geoWrap]),
     picked,
     el("div", { className: "u-row" }, [el("label", { textContent: "UTC offset" }), tz]),
-    setSection,
     submit, status,
+  );
+  return wrap;
+}
+
+// ───────────────────────── 設定画面（ユーザーごとの方式デフォルト） ─────────────────────────
+function settingsView(settings: Settings, onSaved: () => void | Promise<void>): HTMLElement {
+  const wrap = el("div", { className: "u-form" });
+  const sels: Partial<Record<keyof Settings, HTMLSelectElement>> = {};
+  const grid = el("div", { className: "u-set-grid" });
+  for (const f of SETTING_FIELDS) {
+    const sel = selectEl(f.options, settings[f.key]);
+    sels[f.key] = sel;
+    grid.append(el("div", { className: "u-set-row" }, [el("label", { textContent: f.label }), sel]));
+  }
+  const status = el("div", { className: "u-status" });
+  const save = el("button", { className: "u-btn", textContent: "保存して全チャート再計算" });
+  save.addEventListener("click", async () => {
+    status.textContent = "保存中…";
+    try {
+      const payload: Record<string, string> = {};
+      for (const f of SETTING_FIELDS) { const v = sels[f.key]?.value; if (v) { payload[f.key as string] = v; (settings as Record<string, string>)[f.key as string] = v; } }
+      await api(`/api/v1/uranai/astrology/settings`, { method: "PUT", body: JSON.stringify(payload) });
+      // 設定は全人物のチャートに影響するため、保存済みの全チャートを再計算して反映。
+      const { persons } = await api<{ persons: Person[] }>(`/api/v1/uranai/person`);
+      let done = 0;
+      for (const p of persons) {
+        status.textContent = `再計算中… (${++done}/${persons.length})`;
+        await api(`/api/v1/uranai/astrology/person/${p.id}/compute`, { method: "POST", body: "{}" }).catch(() => {});
+      }
+      status.textContent = "";
+      await onSaved();
+    } catch (e) { status.textContent = `エラー: ${(e as Error).message}`; }
+  });
+  wrap.append(
+    el("div", { className: "u-settings-note", textContent: "この設定はあなた（ユーザー）の既定として保存され、全チャートに適用されます。" }),
+    el("div", { className: "u-set-title", textContent: "計算方式" }), grid, save, status,
   );
   return wrap;
 }
@@ -418,6 +427,8 @@ export async function renderUranai(container: HTMLElement): Promise<void> {
     .u-set-row{display:flex;align-items:center;gap:8px}
     .u-set-row label{width:88px;flex:none;color:#666;font-size:12px}
     .u-set-sel{flex:1;min-width:0;padding:4px 6px;border:1px solid #0002;border-radius:5px;font-size:12px;background:#fff}
+    .u-settings-note{font-size:12px;color:#888;margin-bottom:12px;max-width:520px}
+    .u-set-btn{margin-top:6px}
     /* モバイル: 縦積み＋人物リストを横スクロールのチップ化 */
     @media (max-width: 640px){
       .u-wrap{flex-direction:column;gap:10px;padding:10px}
@@ -446,7 +457,14 @@ export async function renderUranai(container: HTMLElement): Promise<void> {
     main.innerHTML = "";
     main.append(
       el("div", { className: "u-title", textContent: prefill?.date ? "出生データを編集" : "出生データを登録" }),
-      birthForm(personId, async () => { await refreshList(personId); }, prefill, settings),
+      birthForm(personId, async () => { await refreshList(personId); }, prefill),
+    );
+  };
+  const showSettings = () => {
+    main.innerHTML = "";
+    main.append(
+      el("div", { className: "u-title", textContent: "設定（計算方式）" }),
+      settingsView(settings, async () => { await refreshList(); main.append(el("div", { className: "u-picked", textContent: "設定を保存し、全チャートを再計算しました。" })); }),
     );
   };
   // 既存人物の出生データを取得して編集フォームを事前入力で開く。
@@ -488,6 +506,9 @@ export async function renderUranai(container: HTMLElement): Promise<void> {
     const add = el("button", { className: "u-btn", textContent: "＋ 人物を追加" });
     add.addEventListener("click", async () => { const { id } = await api<{ id: string }>(`/api/v1/uranai/person`, { method: "POST", body: JSON.stringify({ label: "新しい人物" }) }); await refreshList(id); showForm(id, { label: "新しい人物" }); });
     side.append(add);
+    const setBtn = el("button", { className: "u-btn u-btn-sm u-set-btn", textContent: "⚙ 設定" });
+    setBtn.addEventListener("click", () => showSettings());
+    side.append(setBtn);
     if (selectId) { const sel = persons.find((p) => p.id === selectId); if (sel) void showChart(selectId, sel.label); }
     else if (persons.length === 0) main.append(el("div", { textContent: "「人物を追加」から始めてください。" }));
   };
