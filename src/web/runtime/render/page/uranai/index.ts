@@ -127,11 +127,6 @@ function drawWheel(chart: Chart, enabledAspects: Set<string>, name: boolean): SV
   // 30°ごとの区切り＋度目盛（内側）
   for (let a = 0; a < 360; a += 30) { const [x0, y0] = pt(a, rZodiacIn), [x1, y1] = pt(a, R); s.append(svg("line", { x1: x0, y1: y0, x2: x1, y2: y1, stroke: "#0003", "stroke-width": 0.5 })); }
 
-  // 最外周の枠線＋ハウス番号帯を囲む2円（サインとの区切りrZodiacIn / 内縁rHouse）。いずれも黒。
-  s.append(svg("circle", { cx, cy, r: R, fill: "none", stroke: "#222", "stroke-width": 1 }));
-  s.append(svg("circle", { cx, cy, r: rZodiacIn, fill: "none", stroke: "#222", "stroke-width": 1 }));
-  s.append(svg("circle", { cx, cy, r: rHouse, fill: "none", stroke: "#222", "stroke-width": 1 }));
-
   // ハウス境界（12分割線）＋ハウス番号。カスプ保存があれば流派のハウスシステム、
   // 無ければ whole-sign 等分（ASC のサイン先頭から 30°刻み）でフォールバックし必ず描く。
   const storedCusps = (chart.cusps ?? [])
@@ -144,8 +139,8 @@ function drawWheel(chart: Chart, enabledAspects: Set<string>, name: boolean): SV
   for (let i = 0; i < 12; i++) {
     const lon = cuspLons[i];
     const [x1, y1] = pt(lon, rCuspIn), [x2, y2] = pt(lon, R);
-    // ハウス区切り線は一律の黒（ASC/MC 軸とも区別しない）。最外周まで伸ばす。
-    s.append(svg("line", { x1, y1, x2, y2, stroke: "#222", "stroke-width": 1 }));
+    // ハウス（色）の区切り線は白。ASC/MC 軸とも区別しない。最外周まで伸ばす。
+    s.append(svg("line", { x1, y1, x2, y2, stroke: "#fff", "stroke-width": 2 }));
     // ハウス番号: このカスプと次のカスプの中点角、番号帯の中央に配置。
     const span = ((cuspLons[(i + 1) % 12] - lon) % 360 + 360) % 360;
     const [nx, ny] = pt(lon + span / 2, rHouseBand);
@@ -154,12 +149,17 @@ function drawWheel(chart: Chart, enabledAspects: Set<string>, name: boolean): SV
     s.append(t);
   }
 
-  // ASC/MC 軸。線はハウス区切り線と区別せず同じ黒で最外周まで。ラベルのみ残す。
+  // ASC/MC 軸。線はハウス区切り線と区別せず白で最外周まで。ラベルは円の外側に表示。
   for (const [lon, label] of [[asc, "Asc"], [chart.midheaven, "MC"]] as [number, string][]) {
     const [x1, y1] = pt(lon, R), [x2, y2] = pt(lon + 180, R);
-    s.append(svg("line", { x1: x2, y1: y2, x2: x1, y2: y1, stroke: "#222", "stroke-width": 1 }));
-    const [lx, ly] = pt(lon, rZodiacIn + 12); const t = svg("text", { x: lx, y: ly, "text-anchor": "middle", "dominant-baseline": "central", "font-size": 11, fill: "#222", "font-weight": "bold" }); t.textContent = label; s.append(t);
+    s.append(svg("line", { x1: x2, y1: y2, x2: x1, y2: y1, stroke: "#fff", "stroke-width": 2 }));
+    const [lx, ly] = pt(lon, R + 11); const t = svg("text", { x: lx, y: ly, "text-anchor": "middle", "dominant-baseline": "central", "font-size": 11, fill: "#222", "font-weight": "bold" }); t.textContent = label; s.append(t);
   }
+
+  // 円（最外周＋ハウス番号帯を囲む2円）は白い放射線の上に描いて黒いリングを途切れさせない。
+  s.append(svg("circle", { cx, cy, r: R, fill: "none", stroke: "#222", "stroke-width": 1 }));
+  s.append(svg("circle", { cx, cy, r: rZodiacIn, fill: "none", stroke: "#222", "stroke-width": 1 }));
+  s.append(svg("circle", { cx, cy, r: rHouse, fill: "none", stroke: "#222", "stroke-width": 1 }));
 
   // 天体の表示角を先に確定する（密集時は扇状に広げて重なり回避）。アスペクト線も
   // この表示角＝「天体と中心を結ぶ半径」上で各天体につなぐので、接点は天体ごとに1つ。
