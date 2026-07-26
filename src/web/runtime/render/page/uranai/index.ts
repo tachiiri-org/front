@@ -201,15 +201,32 @@ function drawWheel(chart: Chart, enabledAspects: Set<string>, name: boolean): SV
   }
 
   // 名前モードの枠寸法を先に算出。度数ぶんの高さも予約して重なり判定に使う。
-  const NAME_FS = 11, NAME_LH = 13.5, NAME_PADX = 3.5, NAME_PADY = 3;
+  const NAME_FS = 11, NAME_LH = 13.5, NAME_PADX = 3.5, NAME_PADY = 3, DEG_RESERVE = 14;
   const labelLines = order.map((o) => PLANET_NAME_LINES[o.p.planet] ?? [PLANET_GLYPH[o.p.planet] ?? "?"]);
   const boxDim = labelLines.map((lines) => {
     const maxLen = Math.max(...lines.map((t) => [...t].length));
     return { w: maxLen * NAME_FS + NAME_PADX * 2, h: lines.length * NAME_LH + NAME_PADY * 2 };
   });
-  // 各天体の描画半径は全天体で一定（rPlanet）。重なりは扇状の角度分散（minGap）のみで
-  // 解消し、名前モードでも中心方向へは寄せない（半径ずらしはしない）。
+  // 各天体の描画半径。名前モードは、扇状に広げてなお枠が重なる天体を、中心と天体を結ぶ
+  // 線（＝表示角の半径）上で中心側へずらして必ず見えるようにする（度数枠込みの 2D 重なり
+  // 判定で貪欲割当）。文字拡大に合わせ段差(levelStep)も拡大。
   const rOf = new Array<number>(n).fill(rPlanet);
+  if (name) {
+    const levelStep = 26;
+    const placed: Array<{ x: number; y: number; w: number; h: number }> = [];
+    for (let i = 0; i < n; i++) {
+      const w = boxDim[i].w, h = boxDim[i].h + DEG_RESERVE;
+      let x = 0, y = 0;
+      for (let lane = 0; lane < 8; lane++) {
+        const r = rPlanet - lane * levelStep;
+        [x, y] = pt(disp[i], r);
+        rOf[i] = r;
+        const hit = placed.some((p) => Math.abs(p.x - x) < (p.w + w) / 2 && Math.abs(p.y - y) < (p.h + h) / 2);
+        if (!hit) break;
+      }
+      placed.push({ x, y, w, h });
+    }
+  }
   order.forEach((o, i) => {
     const a = disp[i];
     const r = rOf[i];
@@ -347,9 +364,9 @@ function settingsView(settings: Settings, onSaved: () => void | Promise<void>): 
 function chartView(chart: Chart): HTMLElement {
   const wrap = el("div", { className: "u-chart" });
 
-  // アスペクトのカテゴリ・トグル（チャートに存在する種別のみ、既定は全オン）。
+  // アスペクトのカテゴリ・トグル（チャートに存在する種別のみ、既定は全オフ）。
   const present = ASPECT_ORDER.filter((t) => chart.aspects.some((a) => a.type === t));
-  const enabled = new Set(present);
+  const enabled = new Set<string>();
   let nameMode = false;
   const host = el("div", { className: "u-wheel" });
   const redraw = () => { host.innerHTML = ""; host.append(drawWheel(chart, enabled, nameMode)); };
@@ -365,10 +382,14 @@ function chartView(chart: Chart): HTMLElement {
   if (present.length) {
     toggles.append(el("span", { className: "u-tg-title", textContent: "アスペクト:" }));
     for (const t of present) {
-      const cb = el("input", { type: "checkbox", checked: true });
-      cb.addEventListener("change", () => { if (cb.checked) enabled.add(t); else enabled.delete(t); redraw(); });
+      // チェックボックスではなくボタン風トグル。オン時に .on を付けて塗り分ける。
+      const btn = el("button", { className: "u-tg-btn", type: "button" });
       const sw = el("span", { className: "u-tg-sw" }); sw.style.background = ASPECT_COLOR[t] ?? "#999";
-      toggles.append(el("label", { className: "u-tg-chip" }, [cb, sw, el("span", { textContent: `${ASPECT_INFO[t].label} ${ASPECT_INFO[t].angle}°` })]));
+      btn.append(sw, el("span", { textContent: `${ASPECT_INFO[t].label} ${ASPECT_INFO[t].angle}°` }));
+      const sync = () => btn.classList.toggle("on", enabled.has(t));
+      btn.addEventListener("click", () => { if (enabled.has(t)) enabled.delete(t); else enabled.add(t); sync(); redraw(); });
+      sync();
+      toggles.append(btn);
     }
   }
 
@@ -377,11 +398,6 @@ function chartView(chart: Chart): HTMLElement {
   if (chart.range_warnings?.length) {
     wrap.append(el("div", { className: "u-warn", textContent: `⚠️ 有効範囲外の天体: ${chart.range_warnings.join(", ")}` }));
   }
-  // 集計
-  const ecount = Object.fromEntries(chart.elements.map((e) => [e.element, e.count]));
-  const qcount = Object.fromEntries(chart.qualities.map((q) => [q.quality, q.count]));
-  wrap.append(el("div", { className: "u-counts", textContent:
-    `エレメント 火${ecount.fire ?? 0}地${ecount.earth ?? 0}風${ecount.air ?? 0}水${ecount.water ?? 0}　クオリティ 活動${qcount.cardinal ?? 0}不動${qcount.fixed ?? 0}柔軟${qcount.mutable ?? 0}` }));
   return wrap;
 }
 
@@ -408,7 +424,14 @@ export async function renderUranai(container: HTMLElement): Promise<void> {
     .u-tg-chip{display:inline-flex;align-items:center;gap:5px;font-size:12px;color:#444;cursor:pointer;user-select:none}
     .u-tg-chip input{cursor:pointer;margin:0}
     .u-tg-sw{width:14px;height:3px;border-radius:2px;display:inline-block}
-    .u-warn{color:#c82;font-size:13px;margin:8px 0}.u-counts{margin-top:8px;font-size:13px;color:#444}
+    /* アスペクトはボタン風トグル。既定オフ（薄い枠）、オンで塗り。 */
+    .u-tg-btn{display:inline-flex;align-items:center;gap:5px;font-size:12px;color:#888;cursor:pointer;user-select:none;
+      background:#fff;border:1px solid #0002;border-radius:999px;padding:5px 11px;line-height:1;transition:background .12s,border-color .12s,color .12s}
+    .u-tg-btn:hover{border-color:#0004}
+    .u-tg-btn .u-tg-sw{opacity:.35}
+    .u-tg-btn.on{color:#1f2937;background:#4A90C218;border-color:#4A90C2aa;font-weight:600}
+    .u-tg-btn.on .u-tg-sw{opacity:1}
+    .u-warn{color:#c82;font-size:13px;margin:8px 0}
     .u-title{font-weight:700;font-size:18px;margin-bottom:8px}
     .u-chart-head{display:flex;align-items:center;justify-content:space-between;gap:12px;margin-bottom:4px}
     .u-chart-head .u-title{margin-bottom:0}
