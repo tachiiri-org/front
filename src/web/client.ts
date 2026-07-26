@@ -522,7 +522,10 @@ const loadEditorBootstrap = async (): Promise<void> => {
   await loadEditor(screenId);
 };
 
-window.addEventListener('popstate', () => {
+window.addEventListener('popstate', (e) => {
+  // uranai の内部ナビゲーション（history.state.uranai を持つ）は uranai 側の
+  // popstate ハンドラが復元するため、ここでの全体再ブートストラップはスキップ。
+  if ((e.state as { uranai?: unknown } | null)?.uranai) return;
   void loadEditorBootstrap();
 });
 

@@ -52,6 +52,15 @@ type Chart = {
   range_warnings?: string[];
 };
 
+// ウラナイ内部の画面状態。history.state に載せてブラウザバックで内部遷移を復元する。
+type UranaiView =
+  | { kind: "base" }
+  | { kind: "chart"; personId: string; label: string | null }
+  | { kind: "form"; personId: string; prefill: Prefill | null }
+  | { kind: "settings" };
+// renderUranai が再実行されても popstate リスナが多重登録されないよう、現行ハンドラを保持。
+let uranaiPopHandler: ((e: PopStateEvent) => void) | null = null;
+
 async function api<T>(path: string, init?: RequestInit): Promise<T> {
   const res = await fetch(path, { headers: { "Content-Type": "application/json" }, ...init });
   if (!res.ok) throw new Error(`${res.status} ${path}`);
@@ -156,7 +165,7 @@ function drawWheel(chart: Chart, enabledAspects: Set<string>, name: boolean): SV
   const order = bodies.map((p) => ({ p, lon: lonOf(p) })).sort((a, b) => a.lon - b.lon);
   const disp = order.map((o) => o.lon);
   const n = disp.length;
-  const minGap = name ? 17 : 9; // 度。名前枠は幅があるので広め（度数は枠外に出すので枠は小さい）
+  const minGap = name ? 22 : 11; // 度。名前枠は幅があるので広め（度数は枠外に出すので枠は小さい）。文字/記号拡大に合わせ間隔も拡大。
   if (n > 1 && n * minGap < 360) {
     // 円環上で隣接ペアを対称に押し広げる緩和を反復（真位置の重心を保ちつつ分離）。
     for (let iter = 0; iter < 80; iter++) {
@@ -192,31 +201,15 @@ function drawWheel(chart: Chart, enabledAspects: Set<string>, name: boolean): SV
   }
 
   // 名前モードの枠寸法を先に算出。度数ぶんの高さも予約して重なり判定に使う。
-  const NAME_FS = 8.5, NAME_LH = 10.5, NAME_PADX = 3, NAME_PADY = 2.5, DEG_RESERVE = 12;
+  const NAME_FS = 11, NAME_LH = 13.5, NAME_PADX = 3.5, NAME_PADY = 3;
   const labelLines = order.map((o) => PLANET_NAME_LINES[o.p.planet] ?? [PLANET_GLYPH[o.p.planet] ?? "?"]);
   const boxDim = labelLines.map((lines) => {
     const maxLen = Math.max(...lines.map((t) => [...t].length));
     return { w: maxLen * NAME_FS + NAME_PADX * 2, h: lines.length * NAME_LH + NAME_PADY * 2 };
   });
-  // 各天体の描画半径。名前モードは、扇状に広げてなお枠が重なる天体を、中心からの距離
-  // （半径）を内側へずらして必ず見えるようにする（度数枠込みの 2D 重なり判定で貪欲割当）。
+  // 各天体の描画半径は全天体で一定（rPlanet）。重なりは扇状の角度分散（minGap）のみで
+  // 解消し、名前モードでも中心方向へは寄せない（半径ずらしはしない）。
   const rOf = new Array<number>(n).fill(rPlanet);
-  if (name) {
-    const levelStep = 22;
-    const placed: Array<{ x: number; y: number; w: number; h: number }> = [];
-    for (let i = 0; i < n; i++) {
-      const w = boxDim[i].w, h = boxDim[i].h + DEG_RESERVE;
-      let x = 0, y = 0;
-      for (let lane = 0; lane < 8; lane++) {
-        const r = rPlanet - lane * levelStep;
-        [x, y] = pt(disp[i], r);
-        rOf[i] = r;
-        const hit = placed.some((p) => Math.abs(p.x - x) < (p.w + w) / 2 && Math.abs(p.y - y) < (p.h + h) / 2);
-        if (!hit) break;
-      }
-      placed.push({ x, y, w, h });
-    }
-  }
   order.forEach((o, i) => {
     const a = disp[i];
     const r = rOf[i];
@@ -235,7 +228,7 @@ function drawWheel(chart: Chart, enabledAspects: Set<string>, name: boolean): SV
       });
       s.append(grp);
     } else {
-      const g = svg("text", { x: gx, y: gy, "text-anchor": "middle", "dominant-baseline": "central", "font-size": 16, fill: "#111" });
+      const g = svg("text", { x: gx, y: gy, "text-anchor": "middle", "dominant-baseline": "central", "font-size": 22, fill: "#111" });
       g.textContent = PLANET_GLYPH[o.p.planet] ?? "?";
       s.append(g);
     }
@@ -453,14 +446,17 @@ export async function renderUranai(container: HTMLElement): Promise<void> {
   // 流派設定（マスタ）。編集フォームで表示・変更する。全人物のチャートに適用。
   const settings = await loadSettings();
 
-  const showForm = (personId: string, prefill?: Prefill) => {
+  // 内部遷移を履歴に積む（push=true）。popstate からの復元時は push=false で再描画のみ。
+  const showForm = (personId: string, prefill?: Prefill, push = true) => {
+    if (push) history.pushState({ uranai: { kind: "form", personId, prefill: prefill ?? null } as UranaiView }, "");
     main.innerHTML = "";
     main.append(
       el("div", { className: "u-title", textContent: prefill?.date ? "出生データを編集" : "出生データを登録" }),
-      birthForm(personId, async () => { await refreshList(personId); }, prefill),
+      birthForm(personId, async () => { await refreshList(personId); void showChart(personId, prefill?.label ?? null); }, prefill),
     );
   };
-  const showSettings = () => {
+  const showSettings = (push = true) => {
+    if (push) history.pushState({ uranai: { kind: "settings" } as UranaiView }, "");
     main.innerHTML = "";
     main.append(
       el("div", { className: "u-title", textContent: "設定（計算方式）" }),
@@ -484,16 +480,18 @@ export async function renderUranai(container: HTMLElement): Promise<void> {
     } catch { /* 出生データ未登録なら空フォーム */ }
     showForm(personId, prefill);
   };
-  const showChart = async (personId: string, label?: string | null) => {
+  const showChart = async (personId: string, label?: string | null, push = true) => {
     main.innerHTML = ""; main.append(el("div", { textContent: "読み込み中…" }));
     const chart = await api<Chart>(`/api/v1/uranai/astrology/person/${personId}/chart`);
     main.innerHTML = "";
-    if (chart.placements.length === 0) { showForm(personId, { label }); return; }
+    if (chart.placements.length === 0) { showForm(personId, { label }, push); return; }
+    if (push) history.pushState({ uranai: { kind: "chart", personId, label: label ?? null } as UranaiView }, "");
     const editBtn = el("button", { className: "u-btn u-btn-sm", textContent: "✎ 出生データを編集" });
     editBtn.addEventListener("click", () => void openEdit(personId, label));
     main.append(el("div", { className: "u-chart-head" }, [el("div", { className: "u-title", textContent: label ?? "" }), editBtn]), chartView(chart));
   };
 
+  // 人物リスト（サイド）を再構築し selectId をハイライトするだけ。画面遷移はしない。
   const refreshList = async (selectId?: string) => {
     side.innerHTML = "";
     side.append(el("div", { className: "u-title", textContent: "人物" }));
@@ -509,8 +507,23 @@ export async function renderUranai(container: HTMLElement): Promise<void> {
     const setBtn = el("button", { className: "u-btn u-btn-sm u-set-btn", textContent: "⚙ 設定" });
     setBtn.addEventListener("click", () => showSettings());
     side.append(setBtn);
-    if (selectId) { const sel = persons.find((p) => p.id === selectId); if (sel) void showChart(selectId, sel.label); }
-    else if (persons.length === 0) main.append(el("div", { textContent: "「人物を追加」から始めてください。" }));
+    if (!selectId && persons.length === 0) main.append(el("div", { textContent: "「人物を追加」から始めてください。" }));
   };
+
+  // ブラウザバック対応。base を土台に据え（replace）、以降の内部遷移は pushState で積む。
+  // 内部状態を持つ popstate はここで復元し、状態を持たない（uranai 外の）バックは
+  // client.ts のグローバル popstate に委ねてアプリを離脱させる。
+  history.replaceState({ uranai: { kind: "base" } as UranaiView }, "");
+  if (uranaiPopHandler) window.removeEventListener("popstate", uranaiPopHandler);
+  uranaiPopHandler = (e: PopStateEvent) => {
+    const v = (e.state as { uranai?: UranaiView } | null)?.uranai;
+    if (!v) return; // uranai 外へ戻る → グローバル側が担当
+    if (v.kind === "chart") { void refreshList(v.personId); void showChart(v.personId, v.label, false); }
+    else if (v.kind === "form") { void refreshList(v.personId); showForm(v.personId, v.prefill ?? undefined, false); }
+    else if (v.kind === "settings") { void refreshList(); showSettings(false); }
+    else { void refreshList(); main.innerHTML = ""; }
+  };
+  window.addEventListener("popstate", uranaiPopHandler);
+
   await refreshList();
 }
