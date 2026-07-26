@@ -96,7 +96,9 @@ async function loadSettings(): Promise<Settings> {
 function drawWheel(chart: Chart, enabledAspects: Set<string>, name: boolean): SVGSVGElement {
   const size = 680, cx = size / 2, cy = size / 2, R = 310;
   const rZodiacIn = R - 34, rHouse = R - 54, rPlanet = R - 80;
-  const rHouseNum = (rZodiacIn + rHouse) / 2; // ハウス番号は外円(黄道内縁)と内円(rHouse)の径方向中央に
+  // 帯の配置を入れ替え: ハウス番号を外側の帯(R〜rZodiacIn)、サイン記号を内側の帯(rZodiacIn〜rHouse)に。
+  const rHouseBand = (R + rZodiacIn) / 2;  // 外側の帯の径方向中央（ハウス番号）
+  const rSignBand = (rZodiacIn + rHouse) / 2; // 内側の帯の径方向中央（サイン記号）
   const s = document.createElementNS(NS, "svg") as SVGSVGElement;
   s.setAttribute("viewBox", `0 0 ${size} ${size}`);
   s.setAttribute("width", "100%"); s.style.maxWidth = "680px";
@@ -117,7 +119,7 @@ function drawWheel(chart: Chart, enabledAspects: Set<string>, name: boolean): SV
     // 中心 → a0(外周) → 弧 → a1(外周) → 中心 の扇形（パイ）で中心まで塗る。
     const path = svg("path", { d: `M${cx},${cy} L${x0o},${y0o} A${R},${R} 0 ${large} 0 ${x1o},${y1o} Z`, fill: ELEMENT_COLOR[SIGN_ELEMENT[signId]], stroke: "none" });
     s.append(path);
-    const [gx, gy] = pt(a0 + 15, (R + rZodiacIn) / 2);
+    const [gx, gy] = pt(a0 + 15, rSignBand);
     // U+FE0E（テキスト表示セレクタ）を付けて絵文字化（紫の四角）を防ぎ、記号として描画。
     const g = svg("text", { x: gx, y: gy, "text-anchor": "middle", "dominant-baseline": "central", "font-size": 18, fill: "#333" }); g.textContent = SIGN_GLYPH[signId] + "\uFE0E";
     s.append(g);
@@ -145,7 +147,7 @@ function drawWheel(chart: Chart, enabledAspects: Set<string>, name: boolean): SV
     s.append(svg("line", { x1, y1, x2, y2, stroke: "#222", "stroke-width": 1 }));
     // ハウス番号: このカスプと次のカスプの中点角、番号帯の中央に配置。
     const span = ((cuspLons[(i + 1) % 12] - lon) % 360 + 360) % 360;
-    const [nx, ny] = pt(lon + span / 2, rHouseNum);
+    const [nx, ny] = pt(lon + span / 2, rHouseBand);
     const t = svg("text", { x: nx, y: ny, "text-anchor": "middle", "dominant-baseline": "central", "font-size": 10, fill: "#555", "font-weight": "700" });
     t.textContent = String(i + 1);
     s.append(t);
@@ -238,7 +240,7 @@ function drawWheel(chart: Chart, enabledAspects: Set<string>, name: boolean): SV
       const lines = labelLines[i];
       const { w, h } = boxDim[i];
       const grp = svg("g", {});
-      grp.append(svg("rect", { x: gx - w / 2, y: gy - h / 2, width: w, height: h, rx: 2, fill: "#fff", stroke: "#bbb", "stroke-width": 0.7, opacity: 0.95 }));
+      grp.append(svg("rect", { x: gx - w / 2, y: gy - h / 2, width: w, height: h, rx: 2, fill: "none", stroke: "#bbb", "stroke-width": 0.7 }));
       lines.forEach((line, k) => {
         const ty = gy - h / 2 + NAME_PADY + NAME_LH * (k + 0.5);
         const tx = svg("text", { x: gx, y: ty, "text-anchor": "middle", "dominant-baseline": "central", "font-size": NAME_FS, fill: "#111" });
