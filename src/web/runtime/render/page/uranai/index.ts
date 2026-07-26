@@ -127,9 +127,8 @@ function drawWheel(chart: Chart, enabledAspects: Set<string>, name: boolean): SV
 
   // サイン記号・ハウス番号は、線・円を描いた後（最下部）に白い下地付きで重ねて描く
   // （先に描くと後続の線が上に乗ってしまうため）。
-  // サインの区切り線（各サイン境界＝絶対黄経の30°刻み）を黒の点線でサイン帯の外縁(rZodiacIn)まで。
-  // ハウス番号帯(rZodiacIn〜R)には伸ばさない。
-  for (let a = 0; a < 360; a += 30) { const [x0, y0] = pt(a, 0), [x1, y1] = pt(a, rZodiacIn); s.append(svg("line", { x1: x0, y1: y0, x2: x1, y2: y1, stroke: "#222", "stroke-width": 1, "stroke-dasharray": "4 3" })); }
+  // サインの区切り線（各サイン境界＝絶対黄経の30°刻み）を白の実線で最外周(R)まで。
+  for (let a = 0; a < 360; a += 30) { const [x0, y0] = pt(a, 0), [x1, y1] = pt(a, R); s.append(svg("line", { x1: x0, y1: y0, x2: x1, y2: y1, stroke: "#fff", "stroke-width": 1 })); }
 
   // ハウス境界（12分割線）＋ハウス番号。カスプ保存があれば流派のハウスシステム、
   // 無ければ whole-sign 等分（ASC のサイン先頭から 30°刻み）でフォールバックし必ず描く。
