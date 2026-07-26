@@ -124,12 +124,13 @@ function drawWheel(chart: Chart, enabledAspects: Set<string>, name: boolean): SV
   // 背景: ハウス番号帯(rHouseIn〜R)はグレー、天体リングは白。
   s.append(svg("circle", { cx, cy, r: R, fill: "#ececec", stroke: "none" }));
   s.append(svg("circle", { cx, cy, r: rHouseIn, fill: "#fff", stroke: "none" }));
-  // 中心のサイン輪（空円rSignInner〜サイン円rSignCircle）を、各サインの色（元素=色相/クオリティ=トーン）で塗る。
+  // 空円(rSignInner)〜天体リング外縁(rHouseIn)を、各サインの色（元素=色相/クオリティ=トーン）で塗る。
+  // これで中心のサイン輪も天体リングもサインの色になる（ハウス番号帯は塗らない）。
   for (let i = 0; i < 12; i++) {
     const a0 = i * 30, a1 = a0 + 30;
-    const [xoo, yoo] = pt(a0, rSignCircle), [xo1, yo1] = pt(a1, rSignCircle);
+    const [xoo, yoo] = pt(a0, rHouseIn), [xo1, yo1] = pt(a1, rHouseIn);
     const [xio, yio] = pt(a0, rSignInner), [xi1, yi1] = pt(a1, rSignInner);
-    s.append(svg("path", { d: `M${xoo},${yoo} A${rSignCircle},${rSignCircle} 0 0 0 ${xo1},${yo1} L${xi1},${yi1} A${rSignInner},${rSignInner} 0 0 1 ${xio},${yio} Z`, fill: signFill(SIGN_ORDER[i]), stroke: "none" }));
+    s.append(svg("path", { d: `M${xoo},${yoo} A${rHouseIn},${rHouseIn} 0 0 0 ${xo1},${yo1} L${xi1},${yi1} A${rSignInner},${rSignInner} 0 0 1 ${xio},${yio} Z`, fill: signFill(SIGN_ORDER[i]), stroke: "none" }));
   }
 
   // サイン記号・ハウス番号は、線・円を描いた後（最下部）に白い下地付きで重ねて描く
