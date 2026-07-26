@@ -6,14 +6,6 @@ const SIGN_ORDER = ["aries", "taurus", "gemini", "cancer", "leo", "virgo", "libr
 const SIGN_GLYPH: Record<string, string> = { aries: "♈", taurus: "♉", gemini: "♊", cancer: "♋", leo: "♌", virgo: "♍", libra: "♎", scorpio: "♏", sagittarius: "♐", capricorn: "♑", aquarius: "♒", pisces: "♓" };
 // 文字表示モードでのサインの正式名（円に沿って表示）。
 const SIGN_NAME: Record<string, string> = { aries: "牡羊座", taurus: "牡牛座", gemini: "双子座", cancer: "蟹座", leo: "獅子座", virgo: "乙女座", libra: "天秤座", scorpio: "蠍座", sagittarius: "射手座", capricorn: "山羊座", aquarius: "水瓶座", pisces: "魚座" };
-// サインの元素（色相）とクオリティ（トーン=不透明度）。
-const SIGN_ELEMENT: Record<string, string> = { aries: "fire", leo: "fire", sagittarius: "fire", taurus: "earth", virgo: "earth", capricorn: "earth", gemini: "air", libra: "air", aquarius: "air", cancer: "water", scorpio: "water", pisces: "water" };
-const SIGN_QUALITY: Record<string, string> = { aries: "cardinal", cancer: "cardinal", libra: "cardinal", capricorn: "cardinal", taurus: "fixed", leo: "fixed", scorpio: "fixed", aquarius: "fixed", gemini: "mutable", virgo: "mutable", sagittarius: "mutable", pisces: "mutable" };
-const ELEMENT_HUE: Record<string, number> = { fire: 12, earth: 95, air: 50, water: 205 };
-const ELEMENT_SAT: Record<string, number> = { fire: 75, earth: 45, air: 75, water: 55 };
-const QUALITY_ALPHA: Record<string, number> = { cardinal: 0.24, fixed: 0.15, mutable: 0.08 };
-// 元素=色相/彩度・クオリティ=不透明度（トーン）で薄めに塗る。
-const signFill = (id: string): string => `hsla(${ELEMENT_HUE[SIGN_ELEMENT[id]]}, ${ELEMENT_SAT[SIGN_ELEMENT[id]]}%, 52%, ${QUALITY_ALPHA[SIGN_QUALITY[id]]})`;
 const PLANET_GLYPH: Record<string, string> = { sun: "☉", moon: "☽", mercury: "☿", venus: "♀", mars: "♂", jupiter: "♃", saturn: "♄", uranus: "♅", neptune: "♆", pluto: "♇", chiron: "⚷", ceres: "⚳", pallas: "⚴", juno: "⚵", vesta: "⚶", pholus: "⯛", lilith: "⚸", dragon_head: "☊", dragon_tail: "☋", fortune: "⊗", asc: "Asc", mc: "MC", dsc: "Dsc", ic: "IC" };
 // フルネーム表記（複数行）。長い名前は改行して枠に収める。
 const PLANET_NAME_LINES: Record<string, string[]> = {
@@ -107,6 +99,7 @@ function drawWheel(chart: Chart, enabledAspects: Set<string>, name: boolean): SV
   const rHouseIn = R - 34;                // 276: ハウス番号帯の内縁
   const rHouseBand = (R + rHouseIn) / 2;  // 293: ハウス番号の配置半径
   const rSignCircle = 96;                 // 中心のサイン円（全体直径の約3割: 2R*0.31≈192, r≈96）
+  const rSignInner = 42;                  // サイン円の内側にある「何もない円」
   const rSignLabel = 74;                  // サイン記号/文字の配置半径（中心円の内側）
   const rPlanet = 200;                    // 天体（ハウス番号帯内縁〜サイン円 の中間帯）
   const s = document.createElementNS(NS, "svg") as SVGSVGElement;
@@ -120,18 +113,14 @@ function drawWheel(chart: Chart, enabledAspects: Set<string>, name: boolean): SV
     return [cx + r * Math.cos(t), cy - r * Math.sin(t)];
   };
 
-  // 背景: 各サインの30°扇形をハウス番号帯の内縁(rHouseIn)まで薄く塗る（元素=色相, クオリティ=トーン）。
-  // ハウス番号帯(rHouseIn〜R)は塗らず白のまま。
-  for (let i = 0; i < 12; i++) {
-    const a0 = i * 30;
-    const [x0o, y0o] = pt(a0, rHouseIn), [x1o, y1o] = pt(a0 + 30, rHouseIn);
-    s.append(svg("path", { d: `M${cx},${cy} L${x0o},${y0o} A${rHouseIn},${rHouseIn} 0 0 0 ${x1o},${y1o} Z`, fill: signFill(SIGN_ORDER[i]), stroke: "none" }));
-  }
+  // 背景: ハウス番号帯(rHouseIn〜R)はグレー、内側（天体リング＋中心のサイン円）は白（=透過相当）。
+  s.append(svg("circle", { cx, cy, r: R, fill: "#ececec", stroke: "none" }));
+  s.append(svg("circle", { cx, cy, r: rHouseIn, fill: "#fff", stroke: "none" }));
 
   // サイン記号・ハウス番号は、線・円を描いた後（最下部）に白い下地付きで重ねて描く
   // （先に描くと後続の線が上に乗ってしまうため）。
-  // サインの区切り線（各サイン境界＝絶対黄経の30°刻み）を白の実線で中心のサイン円内だけに。
-  for (let a = 0; a < 360; a += 30) { const [x0, y0] = pt(a, 0), [x1, y1] = pt(a, rSignCircle); s.append(svg("line", { x1: x0, y1: y0, x2: x1, y2: y1, stroke: "#fff", "stroke-width": 1 })); }
+  // サインの区切り線（各サイン境界＝絶対黄経の30°刻み）を、中心の空円(rSignInner)〜サイン円(rSignCircle)に。
+  for (let a = 0; a < 360; a += 30) { const [x0, y0] = pt(a, rSignInner), [x1, y1] = pt(a, rSignCircle); s.append(svg("line", { x1: x0, y1: y0, x2: x1, y2: y1, stroke: "#222", "stroke-width": 1 })); }
 
   // ハウス境界（12分割線）＋ハウス番号。カスプ保存があれば流派のハウスシステム、
   // 無ければ whole-sign 等分（ASC のサイン先頭から 30°刻み）でフォールバックし必ず描く。
@@ -158,10 +147,11 @@ function drawWheel(chart: Chart, enabledAspects: Set<string>, name: boolean): SV
     }
   }
 
-  // 円: 最外周(R)、ハウス番号帯の内縁(rHouseIn)、中心のサイン円(rSignCircle)。線の上に描く。
+  // 円: 最外周(R)、ハウス番号帯の内縁(rHouseIn)、中心のサイン円(rSignCircle)、中心の空円(rSignInner)。
   s.append(svg("circle", { cx, cy, r: R, fill: "none", stroke: "#222", "stroke-width": 1 }));
   s.append(svg("circle", { cx, cy, r: rHouseIn, fill: "none", stroke: "#222", "stroke-width": 1 }));
   s.append(svg("circle", { cx, cy, r: rSignCircle, fill: "none", stroke: "#222", "stroke-width": 1 }));
+  s.append(svg("circle", { cx, cy, r: rSignInner, fill: "none", stroke: "#222", "stroke-width": 1 }));
 
   // サイン記号／文字を線・円の上に重ねて描く。線が透けないよう白い下地（円）を敷く。
   // 文字表示モード(name)はサイン正式名を円に沿って（接線方向に回転）小フォントで、
