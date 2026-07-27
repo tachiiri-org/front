@@ -363,22 +363,24 @@ function drawWheel(chart: Chart, enabledAspects: Set<string>, name: boolean): SV
 }
 
 // ───────────────────────── ホイール図（本格表示・標準チャート） ─────────────────────────
-// 外周: サイン帯(グリフ+度目盛) → ハウス帯(番号+カスプ度数) → 天体(真位置ティック付) → 中央: アスペクト線。
+// 外周: サイン帯(グリフ+度目盛) → ハウス帯(番号+カスプ度数) → 天体 → 中央: アスペクト線。
+// 天体はハウス(角度)を保持し、混雑時は半径方向へずらす。内円には入れず、度数も含めて重なり判定。
 function drawWheelPro(chart: Chart, enabledAspects: Set<string>, name: boolean): SVGSVGElement {
-  const size = 680, cx = size / 2, cy = size / 2, R = 310;
-  const rSignIn = R - 30;            // サイン帯の内縁
+  const size = 720, cx = size / 2, cy = size / 2, R = 310; // 外周に余白(50px)を確保
+  const rSignIn = R - 28;            // サイン帯の内縁
   const rHouseIn = rSignIn - 26;     // ハウス帯の内縁
-  const rPlanet = rHouseIn - 42;     // 天体グリフの既定半径
-  const rAsp = 118;                  // アスペクトのハブ（内円）
+  const rPlanet = rHouseIn - 30;     // 天体の既定半径
+  const rAsp = 100;                  // アスペクトのハブ（内円）
+  const rMin = rAsp + 22;            // 天体はこれ以上内側に入れない
   const s = document.createElementNS(NS, "svg") as SVGSVGElement;
   s.setAttribute("viewBox", `0 0 ${size} ${size}`);
-  s.setAttribute("width", "100%"); s.style.maxWidth = "680px";
+  s.setAttribute("width", "100%"); s.style.maxWidth = "700px";
   const asc = chart.ascendant;
   const scr = (lon: number): number => 180 + (lon - asc);
   const pt = (lon: number, r: number): [number, number] => { const t = scr(lon) * Math.PI / 180; return [cx + r * Math.cos(t), cy - r * Math.sin(t)]; };
   const placeByPlanet = new Map(chart.placements.map((p) => [p.planet, p]));
 
-  // サイン帯: 各サインを薄い元素色で塗り、グリフを配置。
+  // サイン帯（薄い元素色 + グリフ）
   for (let i = 0; i < 12; i++) {
     const a0 = i * 30;
     const [x0o, y0o] = pt(a0, R), [x1o, y1o] = pt(a0 + 30, R);
@@ -389,34 +391,32 @@ function drawWheelPro(chart: Chart, enabledAspects: Set<string>, name: boolean):
     g.textContent = SIGN_GLYPH[SIGN_ORDER[i]] + "︎";
     s.append(g);
   }
-  // 度目盛（サイン帯内縁から内向き）: 1°小 / 5°中 / 10°大。
+  // 度目盛（1°小 / 5°中 / 10°大）
   for (let d = 0; d < 360; d++) {
     const len = d % 10 === 0 ? 7 : d % 5 === 0 ? 4.5 : 2.5;
     const [x0, y0] = pt(d, rSignIn), [x1, y1] = pt(d, rSignIn - len);
     s.append(svg("line", { x1: x0, y1: y0, x2: x1, y2: y1, stroke: "#0007", "stroke-width": d % 10 === 0 ? 0.7 : 0.4 }));
   }
-  // サイン境界線（濃いめ、サイン帯のみ）。
   for (let a = 0; a < 360; a += 30) { const [x0, y0] = pt(a, rSignIn), [x1, y1] = pt(a, R); s.append(svg("line", { x1: x0, y1: y0, x2: x1, y2: y1, stroke: "#0005", "stroke-width": 0.7 })); }
 
-  // ハウス（カスプ）。保存カスプ優先、無ければ whole-sign 等分。
+  // ハウス（カスプ）
   const storedCusps = (chart.cusps ?? []).filter((c) => c.system === (chart.house_system ?? "whole_sign")).sort((a, b) => a.index - b.index);
   const cuspLons = storedCusps.length === 12 ? storedCusps.map((c) => c.longitude) : Array.from({ length: 12 }, (_, i) => ((Math.floor(asc / 30) * 30) + i * 30) % 360);
   for (let i = 0; i < 12; i++) {
     const lon = cuspLons[i];
-    const angular = i % 3 === 0; // 1/4/7/10室(アングル)は太線。
+    const angular = i % 3 === 0;
     const [x1, y1] = pt(lon, rAsp), [x2, y2] = pt(lon, rSignIn);
     s.append(svg("line", { x1, y1, x2, y2, stroke: angular ? "#333" : "#0007", "stroke-width": angular ? 1.4 : 0.7 }));
     const span = ((cuspLons[(i + 1) % 12] - lon) % 360 + 360) % 360;
     const [nx, ny] = pt(lon + span / 2, (rSignIn + rHouseIn) / 2);
     const t = svg("text", { x: nx, y: ny, "text-anchor": "middle", "dominant-baseline": "central", "font-size": 11, fill: "#555", "font-weight": "700" });
     t.textContent = String(i + 1); s.append(t);
-    // カスプ度数（サイン内度数）をカスプ線の内側に小さく。
     const [cdx, cdy] = pt(lon + 2, rHouseIn + 7);
     const ct = svg("text", { x: cdx, y: cdy, "text-anchor": "start", "dominant-baseline": "central", "font-size": 7, fill: "#999" });
     ct.textContent = fmtDeg(((lon % 30) + 30) % 30); s.append(ct);
   }
 
-  // アスペクト線（真黄経の点をハブ半径 rAsp で結ぶ）。
+  // アスペクト線（真黄経の点をハブ半径で結ぶ）
   for (const aspt of chart.aspects) {
     if (!enabledAspects.has(aspt.type)) continue;
     const pa = placeByPlanet.get(aspt.a), pb = placeByPlanet.get(aspt.b);
@@ -425,38 +425,57 @@ function drawWheelPro(chart: Chart, enabledAspects: Set<string>, name: boolean):
     s.append(svg("line", { x1: axx, y1: ayy, x2: bxx, y2: byy, stroke: ASPECT_COLOR[aspt.type] ?? "#999", "stroke-width": 0.9, opacity: 0.75 }));
   }
 
-  // 天体（アングル除く）。ハウス（角度）は保持し、混雑時は半径方向（中心側）へずらす。
-  // 真位置(角度)は不変なので、ハウスが変わらない。ハウス帯内縁に真位置マーカーを付ける。
+  // 天体（アングル除く）。角度=ハウス保持、混雑は半径方向。度数（枠上角）も含めて重なり判定。
   const bodies = chart.placements.filter((p) => !["asc", "mc", "dsc", "ic"].includes(p.planet));
   const order = bodies.map((p) => ({ p, lon: lonOf(p) })).sort((a, b) => a.lon - b.lon);
   const n = order.length;
-  const boxW = name ? 34 : 22, boxH = 24, levelStep = 24;
+  const NAME_FS = 11, NAME_LH = 13.5, NAME_PADX = 3.5, NAME_PADY = 3, DEG_RESERVE = 12;
+  const labelLines = order.map((o) => PLANET_NAME_LINES[o.p.planet] ?? [PLANET_GLYPH[o.p.planet] ?? "?"]);
+  const boxDim = name
+    ? labelLines.map((lines) => { const maxLen = Math.max(...lines.map((t) => [...t].length)); return { w: maxLen * NAME_FS + NAME_PADX * 2, h: lines.length * NAME_LH + NAME_PADY * 2 }; })
+    : order.map(() => ({ w: 22, h: 22 }));
+  const levelStep = 22;
   const rOf = new Array<number>(n).fill(rPlanet);
-  const placed: Array<{ x: number; y: number }> = [];
+  const placed: Array<{ x: number; y: number; w: number; h: number }> = [];
   for (let i = 0; i < n; i++) {
-    const lon = order[i].lon;
+    const lon = order[i].lon, w = boxDim[i].w, h = boxDim[i].h + DEG_RESERVE;
     let x = 0, y = 0;
-    for (let lane = 0; lane < 9; lane++) {
-      const r = rPlanet - lane * levelStep;
+    for (let lane = 0; lane < 12; lane++) {
+      const r = Math.max(rPlanet - lane * levelStep, rMin);
       [x, y] = pt(lon, r); rOf[i] = r;
-      const hit = placed.some((p) => Math.abs(p.x - x) < boxW && Math.abs(p.y - y) < boxH);
-      if (!hit) break;
+      const hit = placed.some((p) => Math.abs(p.x - x) < (p.w + w) / 2 && Math.abs(p.y - y) < (p.h + h) / 2);
+      if (!hit || r <= rMin) break;
     }
-    placed.push({ x, y });
+    placed.push({ x, y, w, h });
   }
   order.forEach((o, i) => {
     const lon = o.lon, r = rOf[i];
     const [gx, gy] = pt(lon, r);
-    // 真位置マーカー（ハウス帯内縁の短い放射ティック）。角度は不変なのでハウスは変わらない。
+    // 真位置マーカー（ハウス帯内縁）＋内側にずれた場合のリーダー線。
     const [m0x, m0y] = pt(lon, rHouseIn), [m1x, m1y] = pt(lon, rHouseIn - 5);
     s.append(svg("line", { x1: m0x, y1: m0y, x2: m1x, y2: m1y, stroke: "#0008", "stroke-width": 0.8 }));
-    // 内側へずれた場合はグリフまでの細いリーダー線（同一角度なので放射方向）。
-    if (r < rPlanet - 1) { const [l0x, l0y] = pt(lon, rHouseIn - 5), [l1x, l1y] = pt(lon, r + 11); s.append(svg("line", { x1: l0x, y1: l0y, x2: l1x, y2: l1y, stroke: "#0004", "stroke-width": 0.4 })); }
-    const g = svg("text", { x: gx, y: gy, "text-anchor": "middle", "dominant-baseline": "central", "font-size": name ? 10 : 18, fill: "#111" });
-    g.textContent = name ? (PLANET_NAME_LINES[o.p.planet]?.[0] ?? "?") : (PLANET_GLYPH[o.p.planet] ?? "?") + "︎";
-    s.append(g);
-    const [dx, dy] = pt(lon, r - 14);
-    const d = svg("text", { x: dx, y: dy, "text-anchor": "middle", "dominant-baseline": "central", "font-size": 8, fill: "#444" });
+    if (r < rPlanet - 1) { const [l1x, l1y] = pt(lon, r + 11); s.append(svg("line", { x1: m1x, y1: m1y, x2: l1x, y2: l1y, stroke: "#0004", "stroke-width": 0.4 })); }
+    const { w, h } = boxDim[i];
+    if (name) {
+      // 名前は四角で囲う（通常表示と同じ。色地と同色でリング色に馴染ませ線を隠す）。
+      const grp = svg("g", {});
+      grp.append(svg("rect", { x: gx - w / 2, y: gy - h / 2, width: w, height: h, rx: 2, fill: "#fff", stroke: "none" }));
+      grp.append(svg("rect", { x: gx - w / 2, y: gy - h / 2, width: w, height: h, rx: 2, fill: signFill(o.p.sign), stroke: "#222", "stroke-width": 0.8 }));
+      (labelLines[i]).forEach((line, k) => { const ty = gy - h / 2 + NAME_PADY + NAME_LH * (k + 0.5); const tx = svg("text", { x: gx, y: ty, "text-anchor": "middle", "dominant-baseline": "central", "font-size": NAME_FS, fill: "#111" }); tx.textContent = line; grp.append(tx); });
+      s.append(grp);
+    } else {
+      // 記号はサイン色の下地で線を隠して直接描く。
+      s.append(svg("circle", { cx: gx, cy: gy, r: 12, fill: "#fff", stroke: "none" }));
+      s.append(svg("circle", { cx: gx, cy: gy, r: 12, fill: signFill(o.p.sign), stroke: "none" }));
+      const g = svg("text", { x: gx, y: gy, "text-anchor": "middle", "dominant-baseline": "central", "font-size": 18, fill: "#111" });
+      g.textContent = (PLANET_GLYPH[o.p.planet] ?? "?") + "︎";
+      s.append(g);
+    }
+    // 度数は通常表示と同じく枠の上角（天体と同じ左右）。
+    const leftCorner = gx < cx;
+    const dgx = leftCorner ? gx - w / 2 : gx + w / 2;
+    const dgy = gy - h / 2 - 5;
+    const d = svg("text", { x: dgx, y: dgy, "text-anchor": leftCorner ? "start" : "end", "dominant-baseline": "central", "font-size": 8, fill: "#222" });
     d.textContent = `${fmtDeg(o.p.degree)}${o.p.retrograde ? "℞" : ""}`;
     s.append(d);
   });
@@ -464,7 +483,7 @@ function drawWheelPro(chart: Chart, enabledAspects: Set<string>, name: boolean):
   // 円: 最外周 / サイン帯内縁 / ハウス帯内縁 / アスペクトハブ。
   for (const r of [R, rSignIn, rHouseIn, rAsp]) s.append(svg("circle", { cx, cy, r, fill: "none", stroke: "#333", "stroke-width": 0.8 }));
 
-  // ASC/MC/DSC/IC 軸。ASC-DSC は赤系、MC-IC は青系で強調。水平軸はラベルと度数を上下に分ける。
+  // ASC/MC/DSC/IC 軸。水平軸は外向きアンカーで余白側へ、ラベル(上)/度数(下)に分けて円と被らない。
   const axes: [number, string, string, string][] = [
     [asc, "Asc", "asc", "#c0392b"], [asc + 180, "Dsc", "dsc", "#c0392b"],
     [chart.midheaven, "MC", "mc", "#2c3e50"], [chart.midheaven + 180, "IC", "ic", "#2c3e50"],
@@ -477,14 +496,13 @@ function drawWheelPro(chart: Chart, enabledAspects: Set<string>, name: boolean):
     const pl = placeByPlanet.get(key);
     const degStr = pl ? `${SIGN_GLYPH[pl.sign]}︎${fmtDeg(pl.degree)}` : "";
     if (horizontal) {
-      // ASC/DSC: 外周すぐ外で、ラベル(上)と度数(下)を上下に分けて重なり回避。
-      const [bx, by] = pt(lon, R + 7);
-      const t = svg("text", { x: bx, y: by - 8, "text-anchor": "middle", "dominant-baseline": "central", "font-size": 11, fill: col, "font-weight": "bold" }); t.textContent = txt; s.append(t);
-      if (degStr) { const dd = svg("text", { x: bx, y: by + 7, "text-anchor": "middle", "dominant-baseline": "central", "font-size": 8, fill: col }); dd.textContent = degStr; s.append(dd); }
+      const anchor = Math.cos(th) < 0 ? "end" : "start";
+      const [px, py] = pt(lon, R + 5);
+      const t = svg("text", { x: px, y: py - 8, "text-anchor": anchor, "dominant-baseline": "central", "font-size": 11, fill: col, "font-weight": "bold" }); t.textContent = txt; s.append(t);
+      if (degStr) { const dd = svg("text", { x: px, y: py + 7, "text-anchor": anchor, "dominant-baseline": "central", "font-size": 8, fill: col }); dd.textContent = degStr; s.append(dd); }
     } else {
-      // MC/IC: 径方向に ラベル→度数。
-      const [lx, ly] = pt(lon, R + 11); const t = svg("text", { x: lx, y: ly, "text-anchor": "middle", "dominant-baseline": "central", "font-size": 11, fill: col, "font-weight": "bold" }); t.textContent = txt; s.append(t);
-      if (degStr) { const [ddx, ddy] = pt(lon, R + 23); const dd = svg("text", { x: ddx, y: ddy, "text-anchor": "middle", "dominant-baseline": "central", "font-size": 8, fill: col }); dd.textContent = degStr; s.append(dd); }
+      const [lx, ly] = pt(lon, R + 12); const t = svg("text", { x: lx, y: ly, "text-anchor": "middle", "dominant-baseline": "central", "font-size": 11, fill: col, "font-weight": "bold" }); t.textContent = txt; s.append(t);
+      if (degStr) { const [ddx, ddy] = pt(lon, R + 24); const dd = svg("text", { x: ddx, y: ddy, "text-anchor": "middle", "dominant-baseline": "central", "font-size": 8, fill: col }); dd.textContent = degStr; s.append(dd); }
     }
   }
   return s;
@@ -614,18 +632,20 @@ function chartView(chart: Chart, birth?: Birth | null): HTMLElement {
 
   // アスペクトのオン/オフ（1ボタンで全種まとめて。既定オフ）。
   const present = ASPECT_ORDER.filter((t) => chart.aspects.some((a) => a.type === t));
-  const enabled = new Set<string>(); // 空=オフ。オン時に present を全投入。
-  let aspectsOn = false;
+  const enabled = new Set<string>();
+  let proMode = true; // 既定は本格表示（標準チャート）
+  let aspectsOn = proMode; // 本格表示ではアスペクト既定オン
   let nameMode = false;
-  let proMode = false; // 本格表示（標準チャート）
+  const applyAspects0 = () => { enabled.clear(); if (aspectsOn) present.forEach((t) => enabled.add(t)); };
+  applyAspects0();
   const host = el("div", { className: "u-wheel" });
   const redraw = () => { host.innerHTML = ""; host.append((proMode ? drawWheelPro : drawWheel)(chart, enabled, nameMode)); };
 
   // 天体の表記切替（占星術グリフ ⇄ 日本語フルネーム）。
   const nameCb = el("input", { type: "checkbox", checked: false });
   nameCb.addEventListener("change", () => { nameMode = nameCb.checked; redraw(); });
-  // 本格表示（標準チャート）切替。ONでアスペクトも既定表示。
-  const proCb = el("input", { type: "checkbox", checked: false });
+  // 本格表示（標準チャート）切替。ONでアスペクトも既定表示。既定オン。
+  const proCb = el("input", { type: "checkbox", checked: true });
   const aspectBtn = el("button", { className: "u-tg-btn", type: "button", textContent: "アスペクト" });
   const syncAspect = () => aspectBtn.classList.toggle("on", aspectsOn);
   const applyAspects = () => { enabled.clear(); if (aspectsOn) present.forEach((t) => enabled.add(t)); };
