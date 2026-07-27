@@ -621,13 +621,14 @@ function settingsView(settings: Settings, onSaved: () => void | Promise<void>): 
   return wrap;
 }
 
-// ───────────────────────── データ表（タブ切替・全幅） ─────────────────────────
-function dataTables(chart: Chart): HTMLElement {
+// ───────────────────────── チャート表示（タブ: チャート/表/基本情報） ─────────────────────────
+function chartView(chart: Chart, birth?: Birth | null): HTMLElement {
+  const wrap = el("div", { className: "u-chart" });
+  // データ準備
   const storedCusps = (chart.cusps ?? []).filter((c) => c.system === (chart.house_system ?? "whole_sign")).sort((a, b) => a.index - b.index);
   const cuspLons = storedCusps.length === 12 ? storedCusps.map((c) => c.longitude) : Array.from({ length: 12 }, (_, i) => ((Math.floor(chart.ascendant / 30) * 30) + i * 30) % 360);
   const houseOf = (lon: number): number => { for (let i = 0; i < 12; i++) { const a = cuspLons[i], b = cuspLons[(i + 1) % 12]; const span = ((b - a) % 360 + 360) % 360; const off = ((lon - a) % 360 + 360) % 360; if (off < span) return i + 1; } return 12; };
   const place = new Map(chart.placements.map((p) => [p.planet, p]));
-  // アングル(asc/mc/dsc/ic)は名前が無いのでグリフのみ（"Asc Asc"の重複を防ぐ）。
   const bodyLabel = (k: string): string => { const nm = PLANET_NAME_LINES[k]?.[0]; return nm ? `${PLANET_GLYPH[k] ?? ""} ${nm}`.trim() : (PLANET_GLYPH[k] ?? k); };
   const mkTable = (headers: string[], rows: string[][]): HTMLElement => {
     const tbl = el("table", { className: "u-tbl" });
@@ -635,109 +636,79 @@ function dataTables(chart: Chart): HTMLElement {
     for (const r of rows) { const tr = el("tr", {}); for (const c of r) tr.append(el("td", { textContent: c })); tbl.append(tr); }
     return tbl;
   };
-  // 各タブの中身。
-  const planetTbl = mkTable(["天体", "サイン", "度数", "逆行", "室"], PLANET_ORDER.filter((k) => place.has(k)).map((k) => {
-    const p = place.get(k)!; return [bodyLabel(k), SIGN_NAME[p.sign] ?? p.sign, fmtDeg(p.degree), p.retrograde ? "℞" : "", String(houseOf(lonOf(p)))];
-  }));
+
+  // チャート（本格表示のみ）。アスペクトは常に全表示。天体名トグルのみ。
+  const present = ASPECT_ORDER.filter((t) => chart.aspects.some((a) => a.type === t));
+  const enabled = new Set<string>(present);
+  let nameMode = false;
+  const host = el("div", { className: "u-wheel" });
+  const drawChart = () => { host.innerHTML = ""; host.append(drawWheelPro(chart, enabled, nameMode)); };
+  const nameCb = el("input", { type: "checkbox", checked: false });
+  nameCb.addEventListener("change", () => { nameMode = nameCb.checked; drawChart(); });
+  const chartNode = el("div", {}, [
+    el("div", { className: "u-glyph-toggle" }, [el("label", { className: "u-tg-chip" }, [nameCb, el("span", { textContent: "天体を名前（フルネーム）で表示" })])]),
+    host,
+  ]);
+  drawChart();
+  if (chart.range_warnings?.length) chartNode.append(el("div", { className: "u-warn", textContent: `⚠️ 有効範囲外の天体: ${chart.range_warnings.join(", ")}` }));
+
+  // 天体 / アングル / カスプ
+  const planetTbl = mkTable(["天体", "サイン", "度数", "逆行", "室"], PLANET_ORDER.filter((k) => place.has(k)).map((k) => { const p = place.get(k)!; return [bodyLabel(k), SIGN_NAME[p.sign] ?? p.sign, fmtDeg(p.degree), p.retrograde ? "℞" : "", String(houseOf(lonOf(p)))]; }));
   const angleTbl = mkTable(["点", "サイン", "度数"], ["asc", "mc", "dsc", "ic"].filter((k) => place.has(k)).map((k) => { const p = place.get(k)!; return [PLANET_GLYPH[k] ?? k, SIGN_NAME[p.sign] ?? p.sign, fmtDeg(p.degree)]; }));
   const cuspTbl = mkTable(["室", "サイン", "度数"], cuspLons.map((lon, i) => { const sign = SIGN_ORDER[Math.floor((((lon % 360) + 360) % 360) / 30) % 12]; return [String(i + 1), SIGN_NAME[sign], fmtDeg(((lon % 30) + 30) % 30)]; }));
-  const aspectTbl = mkTable(["天体", "天体", "アスペクト", "オーブ"], [...chart.aspects].sort((a, b) => a.orb - b.orb).map((a) => [bodyLabel(a.a), bodyLabel(a.b), ASPECT_INFO[a.type]?.label ?? a.type, `${a.orb.toFixed(2)}°`]));
+
+  // アスペクト（種類ごとにグループ化）
+  const aspectNode = el("div", {});
+  for (const t of ASPECT_ORDER) {
+    const rows = chart.aspects.filter((a) => a.type === t).sort((a, b) => a.orb - b.orb);
+    if (!rows.length) continue;
+    aspectNode.append(el("div", { className: "u-tbl-title", textContent: `${ASPECT_INFO[t]?.label ?? t}（${rows.length}）` }));
+    aspectNode.append(mkTable(["天体", "天体", "オーブ"], rows.map((a) => [bodyLabel(a.a), bodyLabel(a.b), `${a.orb.toFixed(2)}°`])));
+  }
+
+  // 基本情報（出生データ＋集計）
+  const m = (birth?.born_at ?? "").match(/^(\d{4}-\d{2}-\d{2})T(\d{2}:\d{2})/);
+  const latlng = (birth?.lat && birth?.lng) ? `${Number(birth.lat).toFixed(4)}, ${Number(birth.lng).toFixed(4)}` : "-";
   const ec = Object.fromEntries(chart.elements.map((e) => [e.element, e.count]));
   const qc = Object.fromEntries(chart.qualities.map((q) => [q.quality, q.count]));
-  const sumNode = el("div", { className: "u-sum-wrap" }, [
-    mkTable(["エレメント", "数"], [["火", String(ec.fire ?? 0)], ["地", String(ec.earth ?? 0)], ["風", String(ec.air ?? 0)], ["水", String(ec.water ?? 0)]]),
-    mkTable(["クオリティ", "数"], [["活動", String(qc.cardinal ?? 0)], ["不動", String(qc.fixed ?? 0)], ["柔軟", String(qc.mutable ?? 0)]]),
-  ]);
+  const basicNode = el("div", {});
+  basicNode.append(mkTable(["項目", "値"], [
+    ["生年月日", m?.[1] ?? "-"], ["時刻", m?.[2] ?? "-"], ["出生地", birth?.place ?? "-"], ["緯度経度", latlng],
+    ["TZ", birth?.timezone ?? "-"], ["ハウス", HOUSE_SYSTEM_JA[chart.house_system ?? ""] ?? chart.house_system ?? "-"], ["ノード/リリス", "平均"],
+  ]));
+  basicNode.append(el("div", { className: "u-tbl-title", textContent: "集計" }));
+  basicNode.append(mkTable(["火", "地", "風", "水"], [[String(ec.fire ?? 0), String(ec.earth ?? 0), String(ec.air ?? 0), String(ec.water ?? 0)]]));
+  basicNode.append(mkTable(["活動", "不動", "柔軟"], [[String(qc.cardinal ?? 0), String(qc.fixed ?? 0), String(qc.mutable ?? 0)]]));
 
-  const tabs: Array<{ label: string; node: HTMLElement }> = [
+  // タブ（可視切替）＋全表示
+  const sections: Array<{ label: string; node: HTMLElement }> = [
+    { label: "チャート", node: chartNode },
     { label: "天体", node: planetTbl },
     { label: "アングル", node: angleTbl },
     { label: "カスプ", node: cuspTbl },
-    { label: `アスペクト(${chart.aspects.length})`, node: aspectTbl },
-    { label: "集計", node: sumNode },
+    { label: `アスペクト(${chart.aspects.length})`, node: aspectNode },
+    { label: "基本情報", node: basicNode },
   ];
-  const wrap = el("div", { className: "u-tables" });
-  const bar = el("div", { className: "u-tabs" });
   const content = el("div", { className: "u-tab-content" });
-  const btns = tabs.map((t) => el("button", { className: "u-tab-btn", type: "button", textContent: t.label }));
-  const show = (i: number) => { content.innerHTML = ""; content.append(tabs[i].node); btns.forEach((b, j) => b.classList.toggle("on", j === i)); };
-  btns.forEach((b, i) => b.addEventListener("click", () => show(i)));
-  bar.append(...btns);
+  const secWraps = sections.map((s) => el("div", { className: "u-section" }, [s.node]));
+  for (const w of secWraps) content.append(w);
+  const bar = el("div", { className: "u-tabs" });
+  const secBtns = sections.map((s) => el("button", { className: "u-tab-btn", type: "button", textContent: s.label }));
+  const allBtn = el("button", { className: "u-tab-btn u-tab-all", type: "button", textContent: "全表示" });
+  const select = (idx: number | null) => {
+    secWraps.forEach((w, i) => { w.style.display = (idx === null || i === idx) ? "" : "none"; });
+    secBtns.forEach((b, j) => b.classList.toggle("on", j === idx));
+    allBtn.classList.toggle("on", idx === null);
+  };
+  secBtns.forEach((b, i) => b.addEventListener("click", () => select(i)));
+  allBtn.addEventListener("click", () => select(null));
+  for (const b of secBtns) bar.append(b);
+  bar.append(allBtn);
   wrap.append(bar, content);
-  show(0);
+  select(0);
   return wrap;
 }
 
-
-
-// ───────────────────────── チャート表示 ─────────────────────────
-function chartView(chart: Chart, birth?: Birth | null): HTMLElement {
-  const wrap = el("div", { className: "u-chart" });
-
-  // 出生データ・計算方式の表（チャート上部）。
-  const info = el("div", { className: "u-data" });
-  const m = (birth?.born_at ?? "").match(/^(\d{4}-\d{2}-\d{2})T(\d{2}:\d{2})/);
-  const latlng = (birth?.lat && birth?.lng) ? `${Number(birth.lat).toFixed(4)}, ${Number(birth.lng).toFixed(4)}` : "-";
-  const rows: [string, string][] = [
-    ["生年月日", m?.[1] ?? "-"],
-    ["時刻", m?.[2] ?? "-"],
-    ["出生地", birth?.place ?? "-"],
-    ["緯度経度", latlng],
-    ["TZ", birth?.timezone ?? "-"],
-    ["ハウス", HOUSE_SYSTEM_JA[chart.house_system ?? ""] ?? chart.house_system ?? "-"],
-    ["ノード/リリス", "平均"],
-  ];
-  for (const [k, v] of rows) info.append(el("div", { className: "u-data-row" }, [el("span", { className: "u-data-k", textContent: k }), el("span", { className: "u-data-v", textContent: v })]));
-
-  // アスペクトのオン/オフ（1ボタンで全種まとめて。既定オフ）。
-  const present = ASPECT_ORDER.filter((t) => chart.aspects.some((a) => a.type === t));
-  const enabled = new Set<string>();
-  let proMode = true; // 既定は本格表示（標準チャート）
-  let aspectsOn = proMode; // 本格表示ではアスペクト既定オン
-  let nameMode = false;
-  const applyAspects0 = () => { enabled.clear(); if (aspectsOn) present.forEach((t) => enabled.add(t)); };
-  applyAspects0();
-  const host = el("div", { className: "u-wheel" });
-  const redraw = () => { host.innerHTML = ""; host.append((proMode ? drawWheelPro : drawWheel)(chart, enabled, nameMode)); };
-
-  // 天体の表記切替（占星術グリフ ⇄ 日本語フルネーム）。
-  const nameCb = el("input", { type: "checkbox", checked: false });
-  nameCb.addEventListener("change", () => { nameMode = nameCb.checked; redraw(); });
-  // 本格表示（標準チャート）切替。ONでアスペクトも既定表示。既定オン。
-  const proCb = el("input", { type: "checkbox", checked: true });
-  const aspectBtn = el("button", { className: "u-tg-btn", type: "button", textContent: "アスペクト" });
-  const syncAspect = () => aspectBtn.classList.toggle("on", aspectsOn);
-  const applyAspects = () => { enabled.clear(); if (aspectsOn) present.forEach((t) => enabled.add(t)); };
-  proCb.addEventListener("change", () => {
-    proMode = proCb.checked;
-    if (proMode) { aspectsOn = true; applyAspects(); syncAspect(); } // 本格表示はアスペクト既定オン
-    redraw();
-  });
-  const glyphToggle = el("div", { className: "u-glyph-toggle" }, [
-    el("label", { className: "u-tg-chip" }, [nameCb, el("span", { textContent: "天体を名前（フルネーム）で表示" })]),
-    el("label", { className: "u-tg-chip" }, [proCb, el("span", { textContent: "本格表示（標準チャート）" })]),
-  ]);
-
-  const toggles = el("div", { className: "u-aspect-toggles" });
-  if (present.length) {
-    // アスペクトは1ボタンでまとめて表示切替（既定オフ、本格表示ではオン）。
-    aspectBtn.addEventListener("click", () => {
-      aspectsOn = !aspectsOn;
-      applyAspects();
-      syncAspect(); redraw();
-    });
-    syncAspect();
-    toggles.append(aspectBtn);
-  }
-
-  redraw();
-  wrap.append(info, host, glyphToggle, toggles);
-  if (chart.range_warnings?.length) {
-    wrap.append(el("div", { className: "u-warn", textContent: `⚠️ 有効範囲外の天体: ${chart.range_warnings.join(", ")}` }));
-  }
-  wrap.append(dataTables(chart));
-  return wrap;
-}
 
 // ───────────────────────── ルート描画 ─────────────────────────
 export async function renderUranai(container: HTMLElement): Promise<void> {
@@ -774,18 +745,18 @@ export async function renderUranai(container: HTMLElement): Promise<void> {
     .u-data{display:flex;flex-wrap:wrap;gap:2px 14px;margin:0 0 8px;max-width:600px;font-size:12px}
     .u-data-row{display:inline-flex;gap:5px;align-items:baseline}
     .u-data-k{color:#999}.u-data-v{color:#333;font-weight:600}
-    /* データ表（タブ切替・全幅） */
-    .u-tables{margin:14px 0 4px;max-width:640px}
-    .u-tabs{display:flex;flex-wrap:wrap;gap:6px;margin:0 0 8px}
+    /* タブ（チャート/表/基本情報）＋全表示 */
+    .u-tabs{display:flex;flex-wrap:wrap;gap:6px;margin:6px 0 10px}
     .u-tab-btn{font-size:12px;color:#666;cursor:pointer;background:#fff;border:1px solid #0002;border-radius:999px;padding:5px 12px;line-height:1}
     .u-tab-btn:hover{border-color:#0004}
     .u-tab-btn.on{color:#1f2937;background:#4A90C218;border-color:#4A90C2aa;font-weight:600}
-    .u-tbl{width:100%;border-collapse:collapse;font-size:12.5px}
-    .u-tbl th{color:#999;font-weight:600;text-align:left;padding:3px 8px;border-bottom:1px solid #0002;white-space:nowrap}
-    .u-tbl td{color:#333;padding:3px 8px;border-bottom:1px solid #0001}
-    .u-tbl tr td:last-child,.u-tbl tr th:last-child{text-align:right}
-    .u-sum-wrap{display:flex;gap:24px;flex-wrap:wrap}
-    .u-sum-wrap .u-tbl{width:auto;min-width:120px}
+    .u-tab-all.on{background:#2A7A;border-color:#2A7;color:#fff}
+    .u-section{margin-bottom:16px}
+    /* 表: 列を等分・中央ぞろえ */
+    .u-tbl{width:100%;table-layout:fixed;border-collapse:collapse;font-size:12.5px;margin-bottom:8px}
+    .u-tbl th{color:#999;font-weight:600;text-align:center;padding:5px 4px;border-bottom:1px solid #0002}
+    .u-tbl td{color:#333;text-align:center;padding:5px 4px;border-bottom:1px solid #0001;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+    .u-tbl-title{font-size:12px;font-weight:700;color:#555;margin:10px 0 4px}
     .u-title{font-weight:700;font-size:18px;margin-bottom:8px}
     .u-chart-head{display:flex;align-items:center;justify-content:space-between;gap:12px;margin-bottom:4px}
     .u-chart-head .u-title{margin-bottom:0}
