@@ -122,7 +122,7 @@ function drawWheel(chart: Chart, enabledAspects: Set<string>, name: boolean): SV
   };
 
   // 背景: ハウス番号帯(rHouseIn〜R)はグレー、天体リングは白。
-  s.append(svg("circle", { cx, cy, r: R, fill: "#ececec", stroke: "none" }));
+  s.append(svg("circle", { cx, cy, r: R, fill: "hsl(40, 12%, 90%)", stroke: "none" }));
   s.append(svg("circle", { cx, cy, r: rHouseIn, fill: "#fff", stroke: "none" }));
   // 空円(rSignInner)〜天体リング外縁(rHouseIn)を、各サインの色（元素=色相/クオリティ=トーン）で塗る。
   // これで中心のサイン輪も天体リングもサインの色になる（ハウス番号帯は塗らない）。
@@ -136,7 +136,7 @@ function drawWheel(chart: Chart, enabledAspects: Set<string>, name: boolean): SV
   // サイン記号・ハウス番号は、線・円を描いた後（最下部）に白い下地付きで重ねて描く
   // （先に描くと後続の線が上に乗ってしまうため）。
   // サインの区切り線（各サイン境界＝絶対黄経の30°刻み）を白で、空円(rSignInner)〜天体表示領域外縁(rHouseIn)まで。
-  for (let a = 0; a < 360; a += 30) { const [x0, y0] = pt(a, rSignInner), [x1, y1] = pt(a, rHouseIn); s.append(svg("line", { x1: x0, y1: y0, x2: x1, y2: y1, stroke: "#fff", "stroke-width": 3.5 })); }
+  for (let a = 0; a < 360; a += 30) { const [x0, y0] = pt(a, rSignInner), [x1, y1] = pt(a, rHouseIn); s.append(svg("line", { x1: x0, y1: y0, x2: x1, y2: y1, stroke: "#fff", "stroke-width": 3 })); }
 
   // ハウス境界（12分割線）＋ハウス番号。カスプ保存があれば流派のハウスシステム、
   // 無ければ whole-sign 等分（ASC のサイン先頭から 30°刻み）でフォールバックし必ず描く。
@@ -245,16 +245,18 @@ function drawWheel(chart: Chart, enabledAspects: Set<string>, name: boolean): SV
   // 予約高さは足さない（DEG_RESERVE=0）。足すと近接天体を不要に内側へ寄せてしまう。
   const NAME_FS = 11, NAME_LH = 13.5, NAME_PADX = 3.5, NAME_PADY = 3, DEG_RESERVE = 0;
   const labelLines = order.map((o) => PLANET_NAME_LINES[o.p.planet] ?? [PLANET_GLYPH[o.p.planet] ?? "?"]);
-  const boxDim = labelLines.map((lines) => {
-    const maxLen = Math.max(...lines.map((t) => [...t].length));
-    return { w: maxLen * NAME_FS + NAME_PADX * 2, h: lines.length * NAME_LH + NAME_PADY * 2 };
-  });
-  // 各天体の描画半径。名前モードは、扇状に広げてなお枠が重なる天体を、中心と天体を結ぶ
-  // 線（＝表示角の半径）上で中心側へずらして必ず見えるようにする（度数枠込みの 2D 重なり
-  // 判定で貪欲割当）。文字拡大に合わせ段差(levelStep)も拡大。
+  // 重なり判定用の寸法。名前モードは枠寸法、記号モードはグリフのおおよその寸法。
+  const boxDim = name
+    ? labelLines.map((lines) => {
+        const maxLen = Math.max(...lines.map((t) => [...t].length));
+        return { w: maxLen * NAME_FS + NAME_PADX * 2, h: lines.length * NAME_LH + NAME_PADY * 2 };
+      })
+    : order.map(() => ({ w: 22, h: 22 }));
+  // 各天体の描画半径。名前・記号どちらも、扇状に広げてなお重なる天体を、中心と天体を結ぶ
+  // 線（＝表示角の半径）上で中心側へずらして必ず見えるようにする（2D 重なり判定で貪欲割当）。
   const rOf = new Array<number>(n).fill(rPlanet);
-  if (name) {
-    const levelStep = 26;
+  {
+    const levelStep = name ? 26 : 22;
     const placed: Array<{ x: number; y: number; w: number; h: number }> = [];
     for (let i = 0; i < n; i++) {
       const w = boxDim[i].w, h = boxDim[i].h + DEG_RESERVE;
@@ -278,7 +280,10 @@ function drawWheel(chart: Chart, enabledAspects: Set<string>, name: boolean): SV
       const lines = labelLines[i];
       const { w, h } = boxDim[i];
       const grp = svg("g", {});
-      grp.append(svg("rect", { x: gx - w / 2, y: gy - h / 2, width: w, height: h, rx: 2, fill: "#fff", stroke: "#bbb", "stroke-width": 0.7 }));
+      // 背景は「白マスク＋サイン色」の二枚重ねで、色付きリングと同色（＝透明に見える）にしつつ
+      // 下の線を隠す。枠線は残す。
+      grp.append(svg("rect", { x: gx - w / 2, y: gy - h / 2, width: w, height: h, rx: 2, fill: "#fff", stroke: "none" }));
+      grp.append(svg("rect", { x: gx - w / 2, y: gy - h / 2, width: w, height: h, rx: 2, fill: signFill(o.p.sign), stroke: "#bbb", "stroke-width": 0.7 }));
       lines.forEach((line, k) => {
         const ty = gy - h / 2 + NAME_PADY + NAME_LH * (k + 0.5);
         const tx = svg("text", { x: gx, y: ty, "text-anchor": "middle", "dominant-baseline": "central", "font-size": NAME_FS, fill: "#111" });
