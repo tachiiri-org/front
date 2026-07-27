@@ -352,6 +352,121 @@ function drawWheel(chart: Chart, enabledAspects: Set<string>, name: boolean): SV
   return s;
 }
 
+// ───────────────────────── ホイール図（本格表示・標準チャート） ─────────────────────────
+// 外周: サイン帯(グリフ+度目盛) → ハウス帯(番号+カスプ度数) → 天体(真位置ティック付) → 中央: アスペクト線。
+function drawWheelPro(chart: Chart, enabledAspects: Set<string>, name: boolean): SVGSVGElement {
+  const size = 680, cx = size / 2, cy = size / 2, R = 310;
+  const rSignIn = R - 30;            // サイン帯の内縁
+  const rHouseIn = rSignIn - 26;     // ハウス帯の内縁
+  const rPlanet = rHouseIn - 42;     // 天体グリフの既定半径
+  const rAsp = 118;                  // アスペクトのハブ（内円）
+  const s = document.createElementNS(NS, "svg") as SVGSVGElement;
+  s.setAttribute("viewBox", `0 0 ${size} ${size}`);
+  s.setAttribute("width", "100%"); s.style.maxWidth = "680px";
+  const asc = chart.ascendant;
+  const scr = (lon: number): number => 180 + (lon - asc);
+  const pt = (lon: number, r: number): [number, number] => { const t = scr(lon) * Math.PI / 180; return [cx + r * Math.cos(t), cy - r * Math.sin(t)]; };
+  const placeByPlanet = new Map(chart.placements.map((p) => [p.planet, p]));
+
+  // サイン帯: 各サインを薄い元素色で塗り、グリフを配置。
+  for (let i = 0; i < 12; i++) {
+    const a0 = i * 30;
+    const [x0o, y0o] = pt(a0, R), [x1o, y1o] = pt(a0 + 30, R);
+    const [x0i, y0i] = pt(a0, rSignIn), [x1i, y1i] = pt(a0 + 30, rSignIn);
+    s.append(svg("path", { d: `M${x0o},${y0o} A${R},${R} 0 0 0 ${x1o},${y1o} L${x1i},${y1i} A${rSignIn},${rSignIn} 0 0 1 ${x0i},${y0i} Z`, fill: signFill(SIGN_ORDER[i]), stroke: "none" }));
+    const [gx, gy] = pt(a0 + 15, (R + rSignIn) / 2);
+    const g = svg("text", { x: gx, y: gy, "text-anchor": "middle", "dominant-baseline": "central", "font-size": 16, fill: "#333" });
+    g.textContent = SIGN_GLYPH[SIGN_ORDER[i]] + "︎";
+    s.append(g);
+  }
+  // 度目盛（サイン帯内縁から内向き）: 1°小 / 5°中 / 10°大。
+  for (let d = 0; d < 360; d++) {
+    const len = d % 10 === 0 ? 7 : d % 5 === 0 ? 4.5 : 2.5;
+    const [x0, y0] = pt(d, rSignIn), [x1, y1] = pt(d, rSignIn - len);
+    s.append(svg("line", { x1: x0, y1: y0, x2: x1, y2: y1, stroke: "#0007", "stroke-width": d % 10 === 0 ? 0.7 : 0.4 }));
+  }
+  // サイン境界線（濃いめ、サイン帯のみ）。
+  for (let a = 0; a < 360; a += 30) { const [x0, y0] = pt(a, rSignIn), [x1, y1] = pt(a, R); s.append(svg("line", { x1: x0, y1: y0, x2: x1, y2: y1, stroke: "#0005", "stroke-width": 0.7 })); }
+
+  // ハウス（カスプ）。保存カスプ優先、無ければ whole-sign 等分。
+  const storedCusps = (chart.cusps ?? []).filter((c) => c.system === (chart.house_system ?? "whole_sign")).sort((a, b) => a.index - b.index);
+  const cuspLons = storedCusps.length === 12 ? storedCusps.map((c) => c.longitude) : Array.from({ length: 12 }, (_, i) => ((Math.floor(asc / 30) * 30) + i * 30) % 360);
+  for (let i = 0; i < 12; i++) {
+    const lon = cuspLons[i];
+    const angular = i % 3 === 0; // 1/4/7/10室(アングル)は太線。
+    const [x1, y1] = pt(lon, rAsp), [x2, y2] = pt(lon, rSignIn);
+    s.append(svg("line", { x1, y1, x2, y2, stroke: angular ? "#333" : "#0007", "stroke-width": angular ? 1.4 : 0.7 }));
+    const span = ((cuspLons[(i + 1) % 12] - lon) % 360 + 360) % 360;
+    const [nx, ny] = pt(lon + span / 2, (rSignIn + rHouseIn) / 2);
+    const t = svg("text", { x: nx, y: ny, "text-anchor": "middle", "dominant-baseline": "central", "font-size": 11, fill: "#555", "font-weight": "700" });
+    t.textContent = String(i + 1); s.append(t);
+    // カスプ度数（サイン内度数）をカスプ線の内側に小さく。
+    const [cdx, cdy] = pt(lon + 2, rHouseIn + 7);
+    const ct = svg("text", { x: cdx, y: cdy, "text-anchor": "start", "dominant-baseline": "central", "font-size": 7, fill: "#999" });
+    ct.textContent = fmtDeg(((lon % 30) + 30) % 30); s.append(ct);
+  }
+
+  // アスペクト線（真黄経の点をハブ半径 rAsp で結ぶ）。
+  for (const aspt of chart.aspects) {
+    if (!enabledAspects.has(aspt.type)) continue;
+    const pa = placeByPlanet.get(aspt.a), pb = placeByPlanet.get(aspt.b);
+    if (!pa || !pb) continue;
+    const [axx, ayy] = pt(lonOf(pa), rAsp), [bxx, byy] = pt(lonOf(pb), rAsp);
+    s.append(svg("line", { x1: axx, y1: ayy, x2: bxx, y2: byy, stroke: ASPECT_COLOR[aspt.type] ?? "#999", "stroke-width": 0.9, opacity: 0.75 }));
+  }
+
+  // 天体（アングル除く）。密集時は角度分散し、真位置は細いティックで示す。
+  const bodies = chart.placements.filter((p) => !["asc", "mc", "dsc", "ic"].includes(p.planet));
+  const order = bodies.map((p) => ({ p, lon: lonOf(p) })).sort((a, b) => a.lon - b.lon);
+  const disp = order.map((o) => o.lon);
+  const n = disp.length;
+  const minGap = name ? 12 : 8;
+  if (n > 1 && n * minGap < 360) {
+    for (let it = 0; it < 80; it++) {
+      let moved = false;
+      for (let i = 0; i < n; i++) {
+        const j = (i + 1) % n;
+        const gap = ((disp[j] - disp[i]) % 360 + 360) % 360;
+        if (gap < minGap - 1e-6) { const push = (minGap - gap) / 2; disp[i] = ((disp[i] - push) % 360 + 360) % 360; disp[j] = (disp[j] + push) % 360; moved = true; }
+      }
+      if (!moved) break;
+    }
+  }
+  order.forEach((o, i) => {
+    const a = disp[i];
+    const [gx, gy] = pt(a, rPlanet);
+    // 真位置ティック: 真黄経(ハウス帯内縁)→表示角(グリフ外側)。表示角がずれても実位置が分かる。
+    const [tx0, ty0] = pt(o.lon, rHouseIn);
+    const [tx1, ty1] = pt(a, rPlanet + 13);
+    s.append(svg("line", { x1: tx0, y1: ty0, x2: tx1, y2: ty1, stroke: "#0006", "stroke-width": 0.5 }));
+    const g = svg("text", { x: gx, y: gy, "text-anchor": "middle", "dominant-baseline": "central", "font-size": name ? 10 : 18, fill: "#111" });
+    g.textContent = name ? (PLANET_NAME_LINES[o.p.planet]?.[0] ?? "?") : (PLANET_GLYPH[o.p.planet] ?? "?") + "︎";
+    s.append(g);
+    const [dx, dy] = pt(a, rPlanet - 15);
+    const d = svg("text", { x: dx, y: dy, "text-anchor": "middle", "dominant-baseline": "central", "font-size": 8, fill: "#444" });
+    d.textContent = `${fmtDeg(o.p.degree)}${o.p.retrograde ? "℞" : ""}`;
+    s.append(d);
+  });
+
+  // 円: 最外周 / サイン帯内縁 / ハウス帯内縁 / アスペクトハブ。
+  for (const r of [R, rSignIn, rHouseIn, rAsp]) s.append(svg("circle", { cx, cy, r, fill: "none", stroke: "#333", "stroke-width": 0.8 }));
+
+  // ASC/MC/DSC/IC 軸。ASC-DSC は赤系、MC-IC は青系で強調。ラベル＋サイン記号＋度分を外側に。
+  const axes: [number, string, string, string][] = [
+    [asc, "Asc", "asc", "#c0392b"], [asc + 180, "Dsc", "dsc", "#c0392b"],
+    [chart.midheaven, "MC", "mc", "#2c3e50"], [chart.midheaven + 180, "IC", "ic", "#2c3e50"],
+  ];
+  for (const [lon, txt, key, col] of axes) {
+    const [x1, y1] = pt(lon, rAsp), [x2, y2] = pt(lon, R);
+    s.append(svg("line", { x1, y1, x2, y2, stroke: col, "stroke-width": 1.4 }));
+    const [lx, ly] = pt(lon, R + 11); const t = svg("text", { x: lx, y: ly, "text-anchor": "middle", "dominant-baseline": "central", "font-size": 11, fill: col, "font-weight": "bold" }); t.textContent = txt; s.append(t);
+    const pl = placeByPlanet.get(key);
+    if (pl) { const [ddx, ddy] = pt(lon, R + 23); const dd = svg("text", { x: ddx, y: ddy, "text-anchor": "middle", "dominant-baseline": "central", "font-size": 8, fill: col }); dd.textContent = `${SIGN_GLYPH[pl.sign]}︎${fmtDeg(pl.degree)}`; s.append(dd); }
+  }
+  return s;
+}
+
+
 // ───────────────────────── 出生フォーム ─────────────────────────
 function birthForm(personId: string, onDone: (chart: Chart) => void, prefill?: Prefill): HTMLElement {
   const wrap = el("div", { className: "u-form" });
@@ -478,29 +593,38 @@ function chartView(chart: Chart, birth?: Birth | null): HTMLElement {
   const enabled = new Set<string>(); // 空=オフ。オン時に present を全投入。
   let aspectsOn = false;
   let nameMode = false;
+  let proMode = false; // 本格表示（標準チャート）
   const host = el("div", { className: "u-wheel" });
-  const redraw = () => { host.innerHTML = ""; host.append(drawWheel(chart, enabled, nameMode)); };
+  const redraw = () => { host.innerHTML = ""; host.append((proMode ? drawWheelPro : drawWheel)(chart, enabled, nameMode)); };
 
   // 天体の表記切替（占星術グリフ ⇄ 日本語フルネーム）。
   const nameCb = el("input", { type: "checkbox", checked: false });
   nameCb.addEventListener("change", () => { nameMode = nameCb.checked; redraw(); });
+  // 本格表示（標準チャート）切替。ONでアスペクトも既定表示。
+  const proCb = el("input", { type: "checkbox", checked: false });
+  const aspectBtn = el("button", { className: "u-tg-btn", type: "button", textContent: "アスペクト" });
+  const syncAspect = () => aspectBtn.classList.toggle("on", aspectsOn);
+  const applyAspects = () => { enabled.clear(); if (aspectsOn) present.forEach((t) => enabled.add(t)); };
+  proCb.addEventListener("change", () => {
+    proMode = proCb.checked;
+    if (proMode) { aspectsOn = true; applyAspects(); syncAspect(); } // 本格表示はアスペクト既定オン
+    redraw();
+  });
   const glyphToggle = el("div", { className: "u-glyph-toggle" }, [
     el("label", { className: "u-tg-chip" }, [nameCb, el("span", { textContent: "天体を名前（フルネーム）で表示" })]),
+    el("label", { className: "u-tg-chip" }, [proCb, el("span", { textContent: "本格表示（標準チャート）" })]),
   ]);
 
   const toggles = el("div", { className: "u-aspect-toggles" });
   if (present.length) {
-    // アスペクトは1ボタンでまとめて表示切替（既定オフ）。
-    const btn = el("button", { className: "u-tg-btn", type: "button", textContent: "アスペクト" });
-    const sync = () => btn.classList.toggle("on", aspectsOn);
-    btn.addEventListener("click", () => {
+    // アスペクトは1ボタンでまとめて表示切替（既定オフ、本格表示ではオン）。
+    aspectBtn.addEventListener("click", () => {
       aspectsOn = !aspectsOn;
-      enabled.clear();
-      if (aspectsOn) present.forEach((t) => enabled.add(t));
-      sync(); redraw();
+      applyAspects();
+      syncAspect(); redraw();
     });
-    sync();
-    toggles.append(btn);
+    syncAspect();
+    toggles.append(aspectBtn);
   }
 
   redraw();
@@ -528,7 +652,7 @@ export async function renderUranai(container: HTMLElement): Promise<void> {
     .u-geo-item{display:flex;flex-direction:column;gap:1px;padding:6px 8px;border-bottom:1px solid #0001;cursor:pointer;line-height:1.35}.u-geo-item:hover{background:#4A90C214}
     .u-geo-name{font-size:13px;color:#444}.u-geo-addr{font-size:11px;color:#aaa}
     .u-picked{color:#aaa;font-weight:400;font-size:12px;margin:4px 0}.u-status{color:#c0392b;font-size:13px;margin-top:6px}
-    .u-glyph-toggle{margin:10px 0 2px;max-width:560px}
+    .u-glyph-toggle{display:flex;flex-wrap:wrap;gap:6px 16px;margin:10px 0 2px;max-width:560px}
     .u-aspect-toggles{display:flex;flex-wrap:wrap;align-items:center;gap:6px 10px;margin:6px 0 10px;max-width:560px}
     .u-tg-title{font-size:12px;color:#666;margin-right:2px}
     .u-tg-chip{display:inline-flex;align-items:center;gap:5px;font-size:12px;color:#444;cursor:pointer;user-select:none}
