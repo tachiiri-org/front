@@ -621,49 +621,53 @@ function settingsView(settings: Settings, onSaved: () => void | Promise<void>): 
   return wrap;
 }
 
-// ───────────────────────── データ表（一通り） ─────────────────────────
+// ───────────────────────── データ表（タブ切替・全幅） ─────────────────────────
 function dataTables(chart: Chart): HTMLElement {
-  const wrap = el("div", { className: "u-tables" });
   const storedCusps = (chart.cusps ?? []).filter((c) => c.system === (chart.house_system ?? "whole_sign")).sort((a, b) => a.index - b.index);
   const cuspLons = storedCusps.length === 12 ? storedCusps.map((c) => c.longitude) : Array.from({ length: 12 }, (_, i) => ((Math.floor(chart.ascendant / 30) * 30) + i * 30) % 360);
-  const houseOf = (lon: number): number => {
-    for (let i = 0; i < 12; i++) { const a = cuspLons[i], b = cuspLons[(i + 1) % 12]; const span = ((b - a) % 360 + 360) % 360; const off = ((lon - a) % 360 + 360) % 360; if (off < span) return i + 1; }
-    return 12;
-  };
+  const houseOf = (lon: number): number => { for (let i = 0; i < 12; i++) { const a = cuspLons[i], b = cuspLons[(i + 1) % 12]; const span = ((b - a) % 360 + 360) % 360; const off = ((lon - a) % 360 + 360) % 360; if (off < span) return i + 1; } return 12; };
   const place = new Map(chart.placements.map((p) => [p.planet, p]));
-  const mkTable = (title: string, headers: string[], rows: string[][]): HTMLElement => {
-    const sec = el("div", { className: "u-tbl-sec" });
-    sec.append(el("div", { className: "u-tbl-title", textContent: title }));
+  const bodyName = (k: string): string => PLANET_NAME_LINES[k]?.[0] ?? PLANET_GLYPH[k] ?? k;
+  const bodyLabel = (k: string): string => `${PLANET_GLYPH[k] ?? ""} ${bodyName(k)}`.trim();
+  const mkTable = (headers: string[], rows: string[][]): HTMLElement => {
     const tbl = el("table", { className: "u-tbl" });
     const htr = el("tr", {}); for (const h of headers) htr.append(el("th", { textContent: h })); tbl.append(htr);
     for (const r of rows) { const tr = el("tr", {}); for (const c of r) tr.append(el("td", { textContent: c })); tbl.append(tr); }
-    sec.append(tbl); return sec;
+    return tbl;
   };
-  // 天体
-  const planetRows = PLANET_ORDER.filter((k) => place.has(k)).map((k) => {
-    const p = place.get(k)!;
-    return [`${PLANET_GLYPH[k] ?? ""} ${PLANET_NAME_LINES[k]?.[0] ?? k}`, SIGN_NAME[p.sign] ?? p.sign, fmtDeg(p.degree), p.retrograde ? "℞" : "", String(houseOf(lonOf(p)))];
-  });
-  wrap.append(mkTable("天体", ["天体", "サイン", "度数", "逆行", "ハウス"], planetRows));
-  // アングル
-  const angleRows = ["asc", "mc", "dsc", "ic"].filter((k) => place.has(k)).map((k) => { const p = place.get(k)!; return [PLANET_GLYPH[k] ?? k, SIGN_NAME[p.sign] ?? p.sign, fmtDeg(p.degree)]; });
-  wrap.append(mkTable("アングル", ["点", "サイン", "度数"], angleRows));
-  // ハウスカスプ
-  const cuspRows = cuspLons.map((lon, i) => { const sign = SIGN_ORDER[Math.floor((((lon % 360) + 360) % 360) / 30) % 12]; return [String(i + 1), SIGN_NAME[sign], fmtDeg(((lon % 30) + 30) % 30)]; });
-  wrap.append(mkTable("ハウスカスプ", ["ハウス", "サイン", "度数"], cuspRows));
-  // アスペクト（オーブの小さい順）
-  const aspRows = [...chart.aspects].sort((a, b) => a.orb - b.orb).map((a) => [`${PLANET_GLYPH[a.a] ?? a.a}–${PLANET_GLYPH[a.b] ?? a.b}`, ASPECT_INFO[a.type]?.label ?? a.type, `${a.orb.toFixed(2)}°`]);
-  wrap.append(mkTable(`アスペクト（${chart.aspects.length}）`, ["天体", "種別", "オーブ"], aspRows));
-  // 集計
+  // 各タブの中身。
+  const planetTbl = mkTable(["天体", "サイン", "度数", "逆行", "室"], PLANET_ORDER.filter((k) => place.has(k)).map((k) => {
+    const p = place.get(k)!; return [bodyLabel(k), SIGN_NAME[p.sign] ?? p.sign, fmtDeg(p.degree), p.retrograde ? "℞" : "", String(houseOf(lonOf(p)))];
+  }));
+  const angleTbl = mkTable(["点", "サイン", "度数"], ["asc", "mc", "dsc", "ic"].filter((k) => place.has(k)).map((k) => { const p = place.get(k)!; return [PLANET_GLYPH[k] ?? k, SIGN_NAME[p.sign] ?? p.sign, fmtDeg(p.degree)]; }));
+  const cuspTbl = mkTable(["室", "サイン", "度数"], cuspLons.map((lon, i) => { const sign = SIGN_ORDER[Math.floor((((lon % 360) + 360) % 360) / 30) % 12]; return [String(i + 1), SIGN_NAME[sign], fmtDeg(((lon % 30) + 30) % 30)]; }));
+  const aspectTbl = mkTable(["天体", "天体", "アスペクト", "オーブ"], [...chart.aspects].sort((a, b) => a.orb - b.orb).map((a) => [bodyLabel(a.a), bodyLabel(a.b), ASPECT_INFO[a.type]?.label ?? a.type, `${a.orb.toFixed(2)}°`]));
   const ec = Object.fromEntries(chart.elements.map((e) => [e.element, e.count]));
   const qc = Object.fromEntries(chart.qualities.map((q) => [q.quality, q.count]));
-  const sec = el("div", { className: "u-tbl-sec" });
-  sec.append(el("div", { className: "u-tbl-title", textContent: "集計" }));
-  sec.append(el("div", { className: "u-sum", textContent: `エレメント　火 ${ec.fire ?? 0} ／ 地 ${ec.earth ?? 0} ／ 風 ${ec.air ?? 0} ／ 水 ${ec.water ?? 0}` }));
-  sec.append(el("div", { className: "u-sum", textContent: `クオリティ　活動 ${qc.cardinal ?? 0} ／ 不動 ${qc.fixed ?? 0} ／ 柔軟 ${qc.mutable ?? 0}` }));
-  wrap.append(sec);
+  const sumNode = el("div", { className: "u-sum-wrap" }, [
+    mkTable(["エレメント", "数"], [["火", String(ec.fire ?? 0)], ["地", String(ec.earth ?? 0)], ["風", String(ec.air ?? 0)], ["水", String(ec.water ?? 0)]]),
+    mkTable(["クオリティ", "数"], [["活動", String(qc.cardinal ?? 0)], ["不動", String(qc.fixed ?? 0)], ["柔軟", String(qc.mutable ?? 0)]]),
+  ]);
+
+  const tabs: Array<{ label: string; node: HTMLElement }> = [
+    { label: "天体", node: planetTbl },
+    { label: "アングル", node: angleTbl },
+    { label: "カスプ", node: cuspTbl },
+    { label: `アスペクト(${chart.aspects.length})`, node: aspectTbl },
+    { label: "集計", node: sumNode },
+  ];
+  const wrap = el("div", { className: "u-tables" });
+  const bar = el("div", { className: "u-tabs" });
+  const content = el("div", { className: "u-tab-content" });
+  const btns = tabs.map((t) => el("button", { className: "u-tab-btn", type: "button", textContent: t.label }));
+  const show = (i: number) => { content.innerHTML = ""; content.append(tabs[i].node); btns.forEach((b, j) => b.classList.toggle("on", j === i)); };
+  btns.forEach((b, i) => b.addEventListener("click", () => show(i)));
+  bar.append(...btns);
+  wrap.append(bar, content);
+  show(0);
   return wrap;
 }
+
 
 
 // ───────────────────────── チャート表示 ─────────────────────────
@@ -770,14 +774,18 @@ export async function renderUranai(container: HTMLElement): Promise<void> {
     .u-data{display:flex;flex-wrap:wrap;gap:2px 14px;margin:0 0 8px;max-width:600px;font-size:12px}
     .u-data-row{display:inline-flex;gap:5px;align-items:baseline}
     .u-data-k{color:#999}.u-data-v{color:#333;font-weight:600}
-    /* データ表（一通り） */
-    .u-tables{display:flex;flex-wrap:wrap;gap:14px 22px;margin:14px 0 4px;max-width:640px}
-    .u-tbl-sec{min-width:150px}
-    .u-tbl-title{font-size:12px;font-weight:700;color:#555;margin:0 0 4px}
-    .u-tbl{border-collapse:collapse;font-size:11px}
-    .u-tbl th{color:#999;font-weight:600;text-align:left;padding:1px 8px 3px 0;border-bottom:1px solid #0002}
-    .u-tbl td{color:#333;padding:1px 8px 1px 0;white-space:nowrap}
-    .u-sum{font-size:12px;color:#333;margin:2px 0}
+    /* データ表（タブ切替・全幅） */
+    .u-tables{margin:14px 0 4px;max-width:640px}
+    .u-tabs{display:flex;flex-wrap:wrap;gap:6px;margin:0 0 8px}
+    .u-tab-btn{font-size:12px;color:#666;cursor:pointer;background:#fff;border:1px solid #0002;border-radius:999px;padding:5px 12px;line-height:1}
+    .u-tab-btn:hover{border-color:#0004}
+    .u-tab-btn.on{color:#1f2937;background:#4A90C218;border-color:#4A90C2aa;font-weight:600}
+    .u-tbl{width:100%;border-collapse:collapse;font-size:12.5px}
+    .u-tbl th{color:#999;font-weight:600;text-align:left;padding:3px 8px;border-bottom:1px solid #0002;white-space:nowrap}
+    .u-tbl td{color:#333;padding:3px 8px;border-bottom:1px solid #0001}
+    .u-tbl tr td:last-child,.u-tbl tr th:last-child{text-align:right}
+    .u-sum-wrap{display:flex;gap:24px;flex-wrap:wrap}
+    .u-sum-wrap .u-tbl{width:auto;min-width:120px}
     .u-title{font-weight:700;font-size:18px;margin-bottom:8px}
     .u-chart-head{display:flex;align-items:center;justify-content:space-between;gap:12px;margin-bottom:4px}
     .u-chart-head .u-title{margin-bottom:0}
