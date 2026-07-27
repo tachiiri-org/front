@@ -685,9 +685,9 @@ function chartView(chart: Chart, birth?: Birth | null): HTMLElement {
   // タブ（可視切替）＋全表示
   const sections: Array<{ label: string; node: HTMLElement }> = [
     { label: "基本情報", node: basicNode },
+    { label: "チャート", node: chartNode },
     { label: "元素", node: elemNode },
     { label: "クオリティ", node: qualNode },
-    { label: "チャート", node: chartNode },
     { label: "天体", node: planetTbl },
     { label: "カスプ", node: cuspTbl },
     { label: `アスペクト(${chart.aspects.length})`, node: aspectNode },
@@ -711,7 +711,7 @@ function chartView(chart: Chart, birth?: Birth | null): HTMLElement {
   for (const b of secBtns) bar.append(b);
   bar.append(allBtn);
   wrap.append(bar, content);
-  select(0);
+  select(null); // 既定は全表示
   return wrap;
 }
 
@@ -722,7 +722,14 @@ export async function renderUranai(container: HTMLElement): Promise<void> {
     .u-wrap{display:flex;gap:16px;padding:16px;font-family:system-ui;color:#222}
     .u-side{width:220px;flex:none;border-right:1px solid #0001;padding-right:12px}
     .u-main{flex:1;min-width:0}
-    .u-person{padding:8px;border-radius:6px;cursor:pointer}.u-person:hover{background:#0000000a}.u-person.sel{background:#4A90C222;font-weight:600}
+    .u-person{position:relative;display:flex;align-items:center;gap:4px;padding:6px 8px;border-radius:6px}.u-person:hover{background:#0000000a}.u-person.sel{background:#4A90C222;font-weight:600}
+    .u-person-name{flex:1;min-width:0;cursor:pointer;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+    .u-person-menu{flex:none;border:0;background:transparent;color:#888;cursor:pointer;font-size:16px;line-height:1;padding:2px 6px;border-radius:4px}
+    .u-person-menu:hover{background:#0000000f;color:#333}
+    .u-person-pop{display:none;position:absolute;right:6px;top:100%;z-index:30;background:#fff;border:1px solid #0002;border-radius:6px;box-shadow:0 6px 16px #0003;padding:4px;min-width:96px}
+    .u-person-pop.open{display:block}
+    .u-pop-item{display:block;width:100%;text-align:left;border:0;background:transparent;color:#c0392b;cursor:pointer;font-size:13px;padding:6px 10px;border-radius:4px;white-space:nowrap}
+    .u-pop-item:hover{background:#c0392b14}
     .u-btn{background:#4A90C2;color:#fff;border:0;border-radius:6px;padding:8px 14px;cursor:pointer;margin-top:8px}
     .u-row{display:flex;align-items:center;gap:8px;margin:6px 0}.u-row label{width:80px;flex:none;color:#666;font-size:13px}
     .u-row input{flex:1;padding:6px;border:1px solid #0002;border-radius:5px}
@@ -856,8 +863,19 @@ export async function renderUranai(container: HTMLElement): Promise<void> {
     side.append(el("div", { className: "u-title", textContent: "人物" }));
     const { persons } = await api<{ persons: Person[] }>(`/api/v1/uranai/person`);
     for (const p of persons) {
-      const item = el("div", { className: "u-person" + (p.id === selectId ? " sel" : ""), textContent: p.label ?? "(名称未設定)" });
-      item.addEventListener("click", () => { void refreshList(p.id); void showChart(p.id, p.label); });
+      const nameSpan = el("span", { className: "u-person-name", textContent: p.label ?? "(名称未設定)" });
+      nameSpan.addEventListener("click", () => { void refreshList(p.id); void showChart(p.id, p.label); });
+      const del = el("button", { className: "u-pop-item", type: "button", textContent: "🗑 削除" });
+      del.addEventListener("click", async (e) => {
+        e.stopPropagation();
+        if (!confirm(`「${p.label ?? "この人物"}」を削除しますか？（元に戻せません）`)) return;
+        await api(`/api/v1/uranai/person/${p.id}`, { method: "DELETE" }).catch(() => {});
+        main.innerHTML = ""; await refreshList();
+      });
+      const pop = el("div", { className: "u-person-pop" }, [del]);
+      const menuBtn = el("button", { className: "u-person-menu", type: "button", textContent: "⋮", title: "メニュー" });
+      menuBtn.addEventListener("click", (e) => { e.stopPropagation(); const open = pop.classList.contains("open"); side.querySelectorAll(".u-person-pop.open").forEach((n) => n.classList.remove("open")); if (!open) pop.classList.add("open"); });
+      const item = el("div", { className: "u-person" + (p.id === selectId ? " sel" : "") }, [nameSpan, menuBtn, pop]);
       side.append(item);
     }
     const add = el("button", { className: "u-btn", textContent: "＋ 人物を追加" });
