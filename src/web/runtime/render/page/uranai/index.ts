@@ -652,9 +652,10 @@ function chartView(chart: Chart, birth?: Birth | null): HTMLElement {
   drawChart();
   if (chart.range_warnings?.length) chartNode.append(el("div", { className: "u-warn", textContent: `⚠️ 有効範囲外の天体: ${chart.range_warnings.join(", ")}` }));
 
-  // 天体 / アングル / カスプ
-  const planetTbl = mkTable(["天体", "サイン", "度数", "逆行", "室"], PLANET_ORDER.filter((k) => place.has(k)).map((k) => { const p = place.get(k)!; return [bodyLabel(k), SIGN_NAME[p.sign] ?? p.sign, fmtDeg(p.degree), p.retrograde ? "℞" : "", String(houseOf(lonOf(p)))]; }));
-  const angleTbl = mkTable(["点", "サイン", "度数"], ["asc", "mc", "dsc", "ic"].filter((k) => place.has(k)).map((k) => { const p = place.get(k)!; return [PLANET_GLYPH[k] ?? k, SIGN_NAME[p.sign] ?? p.sign, fmtDeg(p.degree)]; }));
+  // 天体（アングルも同じ表に。逆行・室はアングルでは空欄）
+  const planetRows = PLANET_ORDER.filter((k) => place.has(k)).map((k) => { const p = place.get(k)!; return [bodyLabel(k), SIGN_NAME[p.sign] ?? p.sign, fmtDeg(p.degree), p.retrograde ? "℞" : "", String(houseOf(lonOf(p)))]; });
+  const angleRows = ["asc", "mc", "dsc", "ic"].filter((k) => place.has(k)).map((k) => { const p = place.get(k)!; return [PLANET_GLYPH[k] ?? k, SIGN_NAME[p.sign] ?? p.sign, fmtDeg(p.degree), "", ""]; });
+  const planetTbl = mkTable(["天体", "サイン", "度数", "逆行", "室"], [...planetRows, ...angleRows]);
   const cuspTbl = mkTable(["室", "サイン", "度数"], cuspLons.map((lon, i) => { const sign = SIGN_ORDER[Math.floor((((lon % 360) + 360) % 360) / 30) % 12]; return [String(i + 1), SIGN_NAME[sign], fmtDeg(((lon % 30) + 30) % 30)]; }));
 
   // アスペクト（種類ごとにグループ化）
@@ -676,27 +677,30 @@ function chartView(chart: Chart, birth?: Birth | null): HTMLElement {
     ["生年月日", m?.[1] ?? "-"], ["時刻", m?.[2] ?? "-"], ["出生地", birth?.place ?? "-"], ["緯度経度", latlng],
     ["TZ", birth?.timezone ?? "-"], ["ハウス", HOUSE_SYSTEM_JA[chart.house_system ?? ""] ?? chart.house_system ?? "-"], ["ノード/リリス", "平均"],
   ]));
-  basicNode.append(el("div", { className: "u-tbl-title", textContent: "集計" }));
+  basicNode.append(el("div", { className: "u-tbl-title", textContent: "元素" }));
   basicNode.append(mkTable(["火", "地", "風", "水"], [[String(ec.fire ?? 0), String(ec.earth ?? 0), String(ec.air ?? 0), String(ec.water ?? 0)]]));
+  basicNode.append(el("div", { className: "u-tbl-title", textContent: "クオリティ" }));
   basicNode.append(mkTable(["活動", "不動", "柔軟"], [[String(qc.cardinal ?? 0), String(qc.fixed ?? 0), String(qc.mutable ?? 0)]]));
 
   // タブ（可視切替）＋全表示
   const sections: Array<{ label: string; node: HTMLElement }> = [
     { label: "チャート", node: chartNode },
     { label: "天体", node: planetTbl },
-    { label: "アングル", node: angleTbl },
     { label: "カスプ", node: cuspTbl },
     { label: `アスペクト(${chart.aspects.length})`, node: aspectNode },
     { label: "基本情報", node: basicNode },
   ];
   const content = el("div", { className: "u-tab-content" });
-  const secWraps = sections.map((s) => el("div", { className: "u-section" }, [s.node]));
+  const secHeads = sections.map((s) => el("div", { className: "u-sec-head", textContent: s.label }));
+  const secWraps = sections.map((s, i) => el("div", { className: "u-section" }, [secHeads[i], s.node]));
   for (const w of secWraps) content.append(w);
   const bar = el("div", { className: "u-tabs" });
   const secBtns = sections.map((s) => el("button", { className: "u-tab-btn", type: "button", textContent: s.label }));
   const allBtn = el("button", { className: "u-tab-btn u-tab-all", type: "button", textContent: "全表示" });
   const select = (idx: number | null) => {
     secWraps.forEach((w, i) => { w.style.display = (idx === null || i === idx) ? "" : "none"; });
+    // 見出しは全表示のときだけ表示（単一タブ時はタブ名で分かるので隠す）。
+    secHeads.forEach((h) => { h.style.display = idx === null ? "" : "none"; });
     secBtns.forEach((b, j) => b.classList.toggle("on", j === idx));
     allBtn.classList.toggle("on", idx === null);
   };
@@ -752,6 +756,9 @@ export async function renderUranai(container: HTMLElement): Promise<void> {
     .u-tab-btn.on{color:#1f2937;background:#4A90C218;border-color:#4A90C2aa;font-weight:600}
     .u-tab-all.on{background:#2A7A;border-color:#2A7;color:#fff}
     .u-section{margin-bottom:16px}
+    .u-sec-head{font-size:14px;font-weight:700;color:#333;margin:14px 0 6px;padding-bottom:3px;border-bottom:2px solid #4A90C2}
+    /* PC ではチャート・表の幅を 40vw に。モバイルは全幅。 */
+    .u-chart{max-width:40vw}
     /* 表: 列を等分・中央ぞろえ */
     .u-tbl{width:100%;table-layout:fixed;border-collapse:collapse;font-size:12.5px;margin-bottom:8px}
     .u-tbl th{color:#999;font-weight:600;text-align:center;padding:5px 4px;border-bottom:1px solid #0002}
@@ -782,6 +789,7 @@ export async function renderUranai(container: HTMLElement): Promise<void> {
       .u-set-row label{width:84px}
       .u-row label{width:64px;font-size:12px}
       .u-settings,.u-glyph-toggle,.u-aspect-toggles{max-width:100%}
+      .u-chart{max-width:100%}
       .u-chart-head{flex-wrap:wrap;gap:6px}
       .u-title{font-size:16px}
     }
