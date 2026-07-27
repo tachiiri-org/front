@@ -305,7 +305,7 @@ function drawWheel(chart: Chart, enabledAspects: Set<string>, name: boolean): SV
       // 背景は「白マスク＋サイン色」の二枚重ねで、色付きリングと同色（＝透明に見える）にしつつ
       // 下の線を隠す。枠線は残す。
       grp.append(svg("rect", { x: gx - w / 2, y: gy - h / 2, width: w, height: h, rx: 2, fill: "#fff", stroke: "none" }));
-      grp.append(svg("rect", { x: gx - w / 2, y: gy - h / 2, width: w, height: h, rx: 2, fill: signFill(o.p.sign), stroke: "#bbb", "stroke-width": 0.7 }));
+      grp.append(svg("rect", { x: gx - w / 2, y: gy - h / 2, width: w, height: h, rx: 2, fill: signFill(o.p.sign), stroke: "#222", "stroke-width": 0.8 }));
       lines.forEach((line, k) => {
         const ty = gy - h / 2 + NAME_PADY + NAME_LH * (k + 0.5);
         const tx = svg("text", { x: gx, y: ty, "text-anchor": "middle", "dominant-baseline": "central", "font-size": NAME_FS, fill: "#111" });
@@ -323,20 +323,14 @@ function drawWheel(chart: Chart, enabledAspects: Set<string>, name: boolean): SV
       s.append(g);
     }
     const degText = `${Math.floor(o.p.degree)}°${o.p.retrograde ? "℞" : ""}`;
-    if (name) {
-      // 度数は枠の「上側」の角に置く（下側だと下段の枠と干渉。上なら隙間なく2段並べられる）。
-      // 左右は天体と同じ側: 中心より左の天体は左上、右の天体は右上。
+    // 度数は名前・記号どちらも枠（記号は擬似枠 boxDim）の「上側」の角に置く。
+    // 左右は天体と同じ側: 中心より左の天体は左上、右の天体は右上。
+    {
       const { w, h } = boxDim[i];
       const leftCorner = gx < cx;
       const dgx = leftCorner ? gx - w / 2 : gx + w / 2;
       const dgy = gy - h / 2 - 5;
       const d = svg("text", { x: dgx, y: dgy, "text-anchor": leftCorner ? "start" : "end", "dominant-baseline": "central", "font-size": 10, fill: "#222" });
-      d.textContent = degText;
-      s.append(d);
-    } else {
-      // 記号モードは従来どおり記号の外側（リング寄り）に。
-      const [dx, dy] = pt(a, r + 15);
-      const d = svg("text", { x: dx, y: dy, "text-anchor": "middle", "dominant-baseline": "central", "font-size": 10, fill: "#222" });
       d.textContent = degText;
       s.append(d);
     }
