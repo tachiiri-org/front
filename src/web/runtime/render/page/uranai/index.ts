@@ -667,28 +667,30 @@ function chartView(chart: Chart, birth?: Birth | null): HTMLElement {
     aspectNode.append(mkTable(["天体", "天体", "オーブ"], rows.map((a) => [bodyLabel(a.a), bodyLabel(a.b), `${a.orb.toFixed(2)}°`])));
   }
 
-  // 基本情報（出生データ＋集計）
+  // 基本情報（出生データ）。UTCオフセットは born_at に含むので項目としては出さない。緯度・経度は別行。
   const m = (birth?.born_at ?? "").match(/^(\d{4}-\d{2}-\d{2})T(\d{2}:\d{2})/);
-  const latlng = (birth?.lat && birth?.lng) ? `${Number(birth.lat).toFixed(4)}, ${Number(birth.lng).toFixed(4)}` : "-";
+  const latStr = birth?.lat ? Number(birth.lat).toFixed(4) : "-";
+  const lngStr = birth?.lng ? Number(birth.lng).toFixed(4) : "-";
+  const basicNode = mkTable(["項目", "値"], [
+    ["生年月日", m?.[1] ?? "-"], ["時刻", m?.[2] ?? "-"], ["出生地", birth?.place ?? "-"],
+    ["緯度", latStr], ["経度", lngStr],
+    ["ハウス", HOUSE_SYSTEM_JA[chart.house_system ?? ""] ?? chart.house_system ?? "-"], ["ノード/リリス", "平均"],
+  ]);
+  // 元素・クオリティ（それぞれ独立タブ）。
   const ec = Object.fromEntries(chart.elements.map((e) => [e.element, e.count]));
   const qc = Object.fromEntries(chart.qualities.map((q) => [q.quality, q.count]));
-  const basicNode = el("div", {});
-  basicNode.append(mkTable(["項目", "値"], [
-    ["生年月日", m?.[1] ?? "-"], ["時刻", m?.[2] ?? "-"], ["出生地", birth?.place ?? "-"], ["緯度経度", latlng],
-    ["TZ", birth?.timezone ?? "-"], ["ハウス", HOUSE_SYSTEM_JA[chart.house_system ?? ""] ?? chart.house_system ?? "-"], ["ノード/リリス", "平均"],
-  ]));
-  basicNode.append(el("div", { className: "u-tbl-title", textContent: "元素" }));
-  basicNode.append(mkTable(["火", "地", "風", "水"], [[String(ec.fire ?? 0), String(ec.earth ?? 0), String(ec.air ?? 0), String(ec.water ?? 0)]]));
-  basicNode.append(el("div", { className: "u-tbl-title", textContent: "クオリティ" }));
-  basicNode.append(mkTable(["活動", "不動", "柔軟"], [[String(qc.cardinal ?? 0), String(qc.fixed ?? 0), String(qc.mutable ?? 0)]]));
+  const elemNode = mkTable(["火", "地", "風", "水"], [[String(ec.fire ?? 0), String(ec.earth ?? 0), String(ec.air ?? 0), String(ec.water ?? 0)]]);
+  const qualNode = mkTable(["活動", "不動", "柔軟"], [[String(qc.cardinal ?? 0), String(qc.fixed ?? 0), String(qc.mutable ?? 0)]]);
 
   // タブ（可視切替）＋全表示
   const sections: Array<{ label: string; node: HTMLElement }> = [
+    { label: "基本情報", node: basicNode },
+    { label: "元素", node: elemNode },
+    { label: "クオリティ", node: qualNode },
     { label: "チャート", node: chartNode },
     { label: "天体", node: planetTbl },
     { label: "カスプ", node: cuspTbl },
     { label: `アスペクト(${chart.aspects.length})`, node: aspectNode },
-    { label: "基本情報", node: basicNode },
   ];
   const content = el("div", { className: "u-tab-content" });
   const secHeads = sections.map((s) => el("div", { className: "u-sec-head", textContent: s.label }));
