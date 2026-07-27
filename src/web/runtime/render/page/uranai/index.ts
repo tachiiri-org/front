@@ -9,6 +9,9 @@ const SIGN_NAME: Record<string, string> = { aries: "牡羊座", taurus: "牡牛�
 // サインの元素（色相）とクオリティ（トーン=不透明度）。
 const SIGN_ELEMENT: Record<string, string> = { aries: "fire", leo: "fire", sagittarius: "fire", taurus: "earth", virgo: "earth", capricorn: "earth", gemini: "air", libra: "air", aquarius: "air", cancer: "water", scorpio: "water", pisces: "water" };
 const SIGN_QUALITY: Record<string, string> = { aries: "cardinal", cancer: "cardinal", libra: "cardinal", capricorn: "cardinal", taurus: "fixed", leo: "fixed", scorpio: "fixed", aquarius: "fixed", gemini: "mutable", virgo: "mutable", sagittarius: "mutable", pisces: "mutable" };
+// 元素・クオリティの1文字表記（中心の元素輪・クオリティ輪に表示）。
+const ELEMENT_CHAR: Record<string, string> = { fire: "火", earth: "地", air: "風", water: "水" };
+const QUALITY_CHAR: Record<string, string> = { cardinal: "活", fixed: "不", mutable: "柔" };
 const ELEMENT_HUE: Record<string, number> = { fire: 12, earth: 95, air: 50, water: 205 };
 const ELEMENT_SAT: Record<string, number> = { fire: 75, earth: 45, air: 75, water: 55 };
 const QUALITY_ALPHA: Record<string, number> = { cardinal: 0.24, fixed: 0.15, mutable: 0.08 };
@@ -106,9 +109,13 @@ function drawWheel(chart: Chart, enabledAspects: Set<string>, name: boolean): SV
   // 外→内: ハウス番号帯 → 天体 → 中心のサイン円。
   const rHouseIn = R - 34;                // 276: ハウス番号帯の内縁
   const rHouseBand = (R + rHouseIn) / 2;  // 293: ハウス番号の配置半径
-  const rSignCircle = 96;                 // 中心のサイン円（全体直径の約3割: 2R*0.31≈192, r≈96）
-  const rSignInner = 42;                  // サイン円の内側にある「何もない円」
-  const rSignLabel = 74;                  // サイン記号/文字の配置半径（中心円の内側）
+  const rSignCircle = 96;                 // 中心の同心リング群の外縁（＝サイン輪の外縁）
+  const rElemCircle = 74;                 // サイン輪 / 元素輪 の境界
+  const rQualCircle = 52;                 // 元素輪 / クオリティ輪 の境界
+  const rHole = 30;                       // クオリティ輪の内縁（中心の空円）
+  const rSignLabel = (rSignCircle + rElemCircle) / 2; // サイン記号/文字
+  const rElemLabel = (rElemCircle + rQualCircle) / 2; // 元素
+  const rQualLabel = (rQualCircle + rHole) / 2;       // クオリティ
   const rPlanet = 200;                    // 天体（ハウス番号帯内縁〜サイン円 の中間帯）
   const s = document.createElementNS(NS, "svg") as SVGSVGElement;
   s.setAttribute("viewBox", `0 0 ${size} ${size}`);
@@ -124,19 +131,19 @@ function drawWheel(chart: Chart, enabledAspects: Set<string>, name: boolean): SV
   // 背景: ハウス番号帯(rHouseIn〜R)はグレー、天体リングは白。
   s.append(svg("circle", { cx, cy, r: R, fill: "hsl(40, 12%, 90%)", stroke: "none" }));
   s.append(svg("circle", { cx, cy, r: rHouseIn, fill: "#fff", stroke: "none" }));
-  // 空円(rSignInner)〜天体リング外縁(rHouseIn)を、各サインの色（元素=色相/クオリティ=トーン）で塗る。
+  // 中心の空円(rHole)〜天体リング外縁(rHouseIn)を、各サインの色（元素=色相/クオリティ=トーン）で塗る。
   // これで中心のサイン輪も天体リングもサインの色になる（ハウス番号帯は塗らない）。
   for (let i = 0; i < 12; i++) {
     const a0 = i * 30, a1 = a0 + 30;
     const [xoo, yoo] = pt(a0, rHouseIn), [xo1, yo1] = pt(a1, rHouseIn);
-    const [xio, yio] = pt(a0, rSignInner), [xi1, yi1] = pt(a1, rSignInner);
-    s.append(svg("path", { d: `M${xoo},${yoo} A${rHouseIn},${rHouseIn} 0 0 0 ${xo1},${yo1} L${xi1},${yi1} A${rSignInner},${rSignInner} 0 0 1 ${xio},${yio} Z`, fill: signFill(SIGN_ORDER[i]), stroke: "none" }));
+    const [xio, yio] = pt(a0, rHole), [xi1, yi1] = pt(a1, rHole);
+    s.append(svg("path", { d: `M${xoo},${yoo} A${rHouseIn},${rHouseIn} 0 0 0 ${xo1},${yo1} L${xi1},${yi1} A${rHole},${rHole} 0 0 1 ${xio},${yio} Z`, fill: signFill(SIGN_ORDER[i]), stroke: "none" }));
   }
 
   // サイン記号・ハウス番号は、線・円を描いた後（最下部）に白い下地付きで重ねて描く
   // （先に描くと後続の線が上に乗ってしまうため）。
-  // サインの区切り線（各サイン境界＝絶対黄経の30°刻み）を白で、空円(rSignInner)〜天体表示領域外縁(rHouseIn)まで。
-  for (let a = 0; a < 360; a += 30) { const [x0, y0] = pt(a, rSignInner), [x1, y1] = pt(a, rHouseIn); s.append(svg("line", { x1: x0, y1: y0, x2: x1, y2: y1, stroke: "#fff", "stroke-width": 3 })); }
+  // サインの区切り線（各サイン境界＝絶対黄経の30°刻み）を白で、中心の空円(rHole)〜天体表示領域外縁(rHouseIn)まで。
+  for (let a = 0; a < 360; a += 30) { const [x0, y0] = pt(a, rHole), [x1, y1] = pt(a, rHouseIn); s.append(svg("line", { x1: x0, y1: y0, x2: x1, y2: y1, stroke: "#fff", "stroke-width": 3 })); }
 
   // ハウス境界（12分割線）＋ハウス番号。カスプ保存があれば流派のハウスシステム、
   // 無ければ whole-sign 等分（ASC のサイン先頭から 30°刻み）でフォールバックし必ず描く。
@@ -163,11 +170,13 @@ function drawWheel(chart: Chart, enabledAspects: Set<string>, name: boolean): SV
     }
   }
 
-  // 円: 最外周(R)、ハウス番号帯の内縁(rHouseIn)、中心のサイン円(rSignCircle)、中心の空円(rSignInner)。
+  // 円: 最外周(R)、ハウス番号帯の内縁(rHouseIn)、中心の同心リング境界(サイン/元素/クオリティ)、中心の空円(rHole)。
   s.append(svg("circle", { cx, cy, r: R, fill: "none", stroke: "#222", "stroke-width": 1 }));
   s.append(svg("circle", { cx, cy, r: rHouseIn, fill: "none", stroke: "#222", "stroke-width": 1 }));
   s.append(svg("circle", { cx, cy, r: rSignCircle, fill: "none", stroke: "#222", "stroke-width": 1 }));
-  s.append(svg("circle", { cx, cy, r: rSignInner, fill: "none", stroke: "#222", "stroke-width": 1 }));
+  s.append(svg("circle", { cx, cy, r: rElemCircle, fill: "none", stroke: "#222", "stroke-width": 1 }));
+  s.append(svg("circle", { cx, cy, r: rQualCircle, fill: "none", stroke: "#222", "stroke-width": 1 }));
+  s.append(svg("circle", { cx, cy, r: rHole, fill: "none", stroke: "#222", "stroke-width": 1 }));
 
   // サイン記号／文字を線・円の上に重ねて描く。線が透けないよう白い下地（円）を敷く。
   // 文字表示モード(name)はサイン正式名を円に沿って（接線方向に回転）小フォントで、
@@ -188,6 +197,18 @@ function drawWheel(chart: Chart, enabledAspects: Set<string>, name: boolean): SV
       s.append(g);
     }
   }
+  // 元素輪・クオリティ輪: 各サインの元素(火地風水)・クオリティ(活不柔)を、サインと同じ角で1文字表示。
+  for (let i = 0; i < 12; i++) {
+    const sign = SIGN_ORDER[i];
+    const [ex, ey] = pt(i * 30 + 15, rElemLabel);
+    const et = svg("text", { x: ex, y: ey, "text-anchor": "middle", "dominant-baseline": "central", "font-size": 11, fill: "#333" });
+    et.textContent = ELEMENT_CHAR[SIGN_ELEMENT[sign]];
+    s.append(et);
+    const [qx, qy] = pt(i * 30 + 15, rQualLabel);
+    const qt = svg("text", { x: qx, y: qy, "text-anchor": "middle", "dominant-baseline": "central", "font-size": 10, fill: "#333" });
+    qt.textContent = QUALITY_CHAR[SIGN_QUALITY[sign]];
+    s.append(qt);
+  }
   // ハウス番号を線・円の上に重ねて描く（白いハローで下地確保）。
   for (let i = 0; i < 12; i++) {
     const lon = cuspLons[i];
@@ -205,7 +226,8 @@ function drawWheel(chart: Chart, enabledAspects: Set<string>, name: boolean): SV
   const order = bodies.map((p) => ({ p, lon: lonOf(p) })).sort((a, b) => a.lon - b.lon);
   const disp = order.map((o) => o.lon);
   const n = disp.length;
-  const minGap = name ? 22 : 11; // 度。名前枠は幅があるので広め（度数は枠外に出すので枠は小さい）。文字/記号拡大に合わせ間隔も拡大。
+  // 名前・記号で共通。密集時は角度分散(fan)より半径方向（中心線上）のずらしを優先させる。
+  const minGap = 22;
   if (n > 1 && n * minGap < 360) {
     // 円環上で隣接ペアを対称に押し広げる緩和を反復（真位置の重心を保ちつつ分離）。
     for (let iter = 0; iter < 80; iter++) {
