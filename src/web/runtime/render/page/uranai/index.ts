@@ -627,8 +627,8 @@ function dataTables(chart: Chart): HTMLElement {
   const cuspLons = storedCusps.length === 12 ? storedCusps.map((c) => c.longitude) : Array.from({ length: 12 }, (_, i) => ((Math.floor(chart.ascendant / 30) * 30) + i * 30) % 360);
   const houseOf = (lon: number): number => { for (let i = 0; i < 12; i++) { const a = cuspLons[i], b = cuspLons[(i + 1) % 12]; const span = ((b - a) % 360 + 360) % 360; const off = ((lon - a) % 360 + 360) % 360; if (off < span) return i + 1; } return 12; };
   const place = new Map(chart.placements.map((p) => [p.planet, p]));
-  const bodyName = (k: string): string => PLANET_NAME_LINES[k]?.[0] ?? PLANET_GLYPH[k] ?? k;
-  const bodyLabel = (k: string): string => `${PLANET_GLYPH[k] ?? ""} ${bodyName(k)}`.trim();
+  // アングル(asc/mc/dsc/ic)は名前が無いのでグリフのみ（"Asc Asc"の重複を防ぐ）。
+  const bodyLabel = (k: string): string => { const nm = PLANET_NAME_LINES[k]?.[0]; return nm ? `${PLANET_GLYPH[k] ?? ""} ${nm}`.trim() : (PLANET_GLYPH[k] ?? k); };
   const mkTable = (headers: string[], rows: string[][]): HTMLElement => {
     const tbl = el("table", { className: "u-tbl" });
     const htr = el("tr", {}); for (const h of headers) htr.append(el("th", { textContent: h })); tbl.append(htr);
