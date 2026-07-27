@@ -446,6 +446,29 @@ function drawWheelPro(chart: Chart, enabledAspects: Set<string>, name: boolean):
     s.append(svg("line", { x1: axx, y1: ayy, x2: bxx, y2: byy, stroke: ASPECT_COLOR[aspt.type] ?? "#999", "stroke-width": 0.9, opacity: 0.75 }));
   }
 
+  // ASC/MC/DSC/IC 軸。水平軸は外向きアンカーで余白側へ、ラベル(上)/度数(下)に分けて円と被らない。
+  const axes: [number, string, string, string][] = [
+    [asc, "Asc", "asc", "#c0392b"], [asc + 180, "Dsc", "dsc", "#c0392b"],
+    [chart.midheaven, "MC", "mc", "#2c3e50"], [chart.midheaven + 180, "IC", "ic", "#2c3e50"],
+  ];
+  for (const [lon, txt, key, col] of axes) {
+    const [x1, y1] = pt(lon, rAsp), [x2, y2] = pt(lon, R);
+    s.append(svg("line", { x1, y1, x2, y2, stroke: col, "stroke-width": 1.4 }));
+    const th = scr(lon) * Math.PI / 180;
+    const horizontal = Math.abs(Math.cos(th)) > Math.abs(Math.sin(th));
+    const pl = placeByPlanet.get(key);
+    const degStr = pl ? `${SIGN_GLYPH[pl.sign]}︎${fmtDeg(pl.degree)}` : "";
+    if (horizontal) {
+      const anchor = Math.cos(th) < 0 ? "end" : "start";
+      const [px, py] = pt(lon, R + 5);
+      const t = svg("text", { x: px, y: py - 8, "text-anchor": anchor, "dominant-baseline": "central", "font-size": 11, fill: col, "font-weight": "bold" }); t.textContent = txt; s.append(t);
+      if (degStr) { const dd = svg("text", { x: px, y: py + 7, "text-anchor": anchor, "dominant-baseline": "central", "font-size": 8, fill: col }); dd.textContent = degStr; s.append(dd); }
+    } else {
+      const [lx, ly] = pt(lon, R + 12); const t = svg("text", { x: lx, y: ly, "text-anchor": "middle", "dominant-baseline": "central", "font-size": 11, fill: col, "font-weight": "bold" }); t.textContent = txt; s.append(t);
+      if (degStr) { const [ddx, ddy] = pt(lon, R + 24); const dd = svg("text", { x: ddx, y: ddy, "text-anchor": "middle", "dominant-baseline": "central", "font-size": 8, fill: col }); dd.textContent = degStr; s.append(dd); }
+    }
+  }
+
   // 天体（アングル除く）。角度=ハウス保持、混雑は半径方向。度数（枠上角）も含めて重なり判定。
   const bodies = chart.placements.filter((p) => !["asc", "mc", "dsc", "ic"].includes(p.planet));
   const order = bodies.map((p) => ({ p, lon: lonOf(p) })).sort((a, b) => a.lon - b.lon);
@@ -504,28 +527,6 @@ function drawWheelPro(chart: Chart, enabledAspects: Set<string>, name: boolean):
   // 円: 最外周 / サイン帯内縁 / ハウス帯内縁 / アスペクトハブ。
   for (const r of [R, rSignIn, rHouseIn, rAsp]) s.append(svg("circle", { cx, cy, r, fill: "none", stroke: "#333", "stroke-width": 0.8 }));
 
-  // ASC/MC/DSC/IC 軸。水平軸は外向きアンカーで余白側へ、ラベル(上)/度数(下)に分けて円と被らない。
-  const axes: [number, string, string, string][] = [
-    [asc, "Asc", "asc", "#c0392b"], [asc + 180, "Dsc", "dsc", "#c0392b"],
-    [chart.midheaven, "MC", "mc", "#2c3e50"], [chart.midheaven + 180, "IC", "ic", "#2c3e50"],
-  ];
-  for (const [lon, txt, key, col] of axes) {
-    const [x1, y1] = pt(lon, rAsp), [x2, y2] = pt(lon, R);
-    s.append(svg("line", { x1, y1, x2, y2, stroke: col, "stroke-width": 1.4 }));
-    const th = scr(lon) * Math.PI / 180;
-    const horizontal = Math.abs(Math.cos(th)) > Math.abs(Math.sin(th));
-    const pl = placeByPlanet.get(key);
-    const degStr = pl ? `${SIGN_GLYPH[pl.sign]}︎${fmtDeg(pl.degree)}` : "";
-    if (horizontal) {
-      const anchor = Math.cos(th) < 0 ? "end" : "start";
-      const [px, py] = pt(lon, R + 5);
-      const t = svg("text", { x: px, y: py - 8, "text-anchor": anchor, "dominant-baseline": "central", "font-size": 11, fill: col, "font-weight": "bold" }); t.textContent = txt; s.append(t);
-      if (degStr) { const dd = svg("text", { x: px, y: py + 7, "text-anchor": anchor, "dominant-baseline": "central", "font-size": 8, fill: col }); dd.textContent = degStr; s.append(dd); }
-    } else {
-      const [lx, ly] = pt(lon, R + 12); const t = svg("text", { x: lx, y: ly, "text-anchor": "middle", "dominant-baseline": "central", "font-size": 11, fill: col, "font-weight": "bold" }); t.textContent = txt; s.append(t);
-      if (degStr) { const [ddx, ddy] = pt(lon, R + 24); const dd = svg("text", { x: ddx, y: ddy, "text-anchor": "middle", "dominant-baseline": "central", "font-size": 8, fill: col }); dd.textContent = degStr; s.append(dd); }
-    }
-  }
   return s;
 }
 
@@ -788,9 +789,13 @@ function chartView(chart: Chart, birth: Birth | null | undefined, personId: stri
 // ───────────────────────── ルート描画 ─────────────────────────
 export async function renderUranai(container: HTMLElement): Promise<void> {
   container.innerHTML = `<style>
-    .u-wrap{display:flex;gap:16px;padding:16px;font-family:system-ui;color:#222}
-    .u-side{width:220px;flex:none;border-right:1px solid #0001;padding-right:12px}
-    .u-main{flex:1;min-width:0}
+    /* PC: サイド/メイン/レポートを独立スクロール（画面高に収める）。 */
+    .u-wrap{display:flex;gap:16px;padding:16px;font-family:system-ui;color:#222;height:calc(100dvh - 36px);box-sizing:border-box}
+    .u-side{width:220px;flex:none;border-right:1px solid #0001;padding-right:12px;overflow-y:auto}
+    .u-main{flex:1;min-width:0;overflow-y:auto}
+    .u-report{flex:1;min-width:0;overflow-y:auto;border-left:1px solid #0001;padding-left:14px}
+    .u-report-head{font-weight:700;font-size:15px;margin-bottom:8px;color:#333;border-bottom:2px solid #4A90C2;padding-bottom:4px}
+    .u-report-body{color:#888;font-size:13px}
     .u-person{position:relative;display:flex;align-items:center;gap:4px;padding:6px 8px;border-radius:6px}.u-person:hover{background:#0000000a}.u-person.sel{background:#4A90C222;font-weight:600}
     .u-person-name{flex:1;min-width:0;cursor:pointer;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
     .u-person-menu{flex:none;border:0;background:transparent;color:#888;cursor:pointer;font-size:16px;line-height:1;padding:2px 6px;border-radius:4px}
@@ -857,8 +862,11 @@ export async function renderUranai(container: HTMLElement): Promise<void> {
     .u-set-btn{margin-top:6px}
     /* モバイル: 縦積み＋人物リストを横スクロールのチップ化 */
     @media (max-width: 640px){
-      .u-wrap{flex-direction:column;gap:10px;padding:10px}
-      .u-side{width:auto;border-right:0;border-bottom:1px solid #0001;padding:0 0 8px 0;display:flex;gap:6px;overflow-x:auto;align-items:center;-webkit-overflow-scrolling:touch}
+      /* モバイル: 縦積み・自然高（body スクロール=pull-to-refresh 有効）。空のレポートは隠す。 */
+      .u-wrap{flex-direction:column;gap:10px;padding:10px;height:auto}
+      .u-side{width:auto;flex:none;border-right:0;border-bottom:1px solid #0001;padding:0 0 8px 0;display:flex;gap:6px;overflow-x:auto;overflow-y:visible;align-items:center;-webkit-overflow-scrolling:touch}
+      .u-main{overflow-y:visible}
+      .u-report{display:none}
       .u-side>.u-title{font-size:14px;margin:0 4px 0 0;flex:none}
       .u-person{flex:none;white-space:nowrap;padding:6px 10px;border:1px solid #0001}
       .u-side>.u-btn{flex:none;margin-top:0;white-space:nowrap;padding:6px 10px}
@@ -875,7 +883,12 @@ export async function renderUranai(container: HTMLElement): Promise<void> {
   const wrap = el("div", { className: "u-wrap" });
   const side = el("div", { className: "u-side" });
   const main = el("div", { className: "u-main" });
-  wrap.append(side, main); container.append(wrap);
+  // 右側: 鑑定レポート枠（今は空。独立スクロール）。
+  const report = el("div", { className: "u-report" }, [
+    el("div", { className: "u-report-head", textContent: "鑑定レポート" }),
+    el("div", { className: "u-report-body" }),
+  ]);
+  wrap.append(side, main, report); container.append(wrap);
 
   // 流派設定（マスタ）。編集フォームで表示・変更する。全人物のチャートに適用。
   const settings = await loadSettings();
