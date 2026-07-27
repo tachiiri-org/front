@@ -617,7 +617,8 @@ export const handleApiRequest = async (request: Request, env: Env): Promise<Resp
           // POI（非行政）で、かつ住所文字列にまだ含まれていない地名だけを別出しする。
           const place = nm && !ADMIN_TYPES.has(String(r.addresstype ?? '')) && !addr.includes(nm) ? nm : '';
           const name = place ? `${place}（${addr}）` : addr;
-          return { name, place, addr, lat: Number(r.lat), lng: Number(r.lon) };
+          const cc = String(r.address?.country_code ?? '').toLowerCase(); // 国コード（タイムゾーン既定推定用）
+          return { name, place, addr, lat: Number(r.lat), lng: Number(r.lon), cc };
         }),
       }, { status: 200 });
     } catch {

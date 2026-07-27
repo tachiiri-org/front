@@ -88,6 +88,17 @@ const fmtDeg = (d: number): string => {
 };
 type Birth = { born_at: string | null; lat: string | null; lng: string | null; place: string | null; timezone: string | null };
 const HOUSE_SYSTEM_JA: Record<string, string> = { placidus: "プラシダス", whole_sign: "ホールサイン", koch: "コッホ", equal: "イコール", campanus: "カンパヌス", regiomontanus: "レギオモンタヌス" };
+// タイムゾーン: IANA一覧（Intl組込みの既定データセット。tokyo/osaka等を選べる）と、国コード→既定ゾーン、ゾーン→UTCオフセット。
+const IANA_ZONES: string[] = (() => { try { const v = (Intl as unknown as { supportedValuesOf?: (k: string) => string[] }).supportedValuesOf?.("timeZone"); return v && v.length ? v : []; } catch { return []; } })();
+const FALLBACK_ZONES = ["Asia/Tokyo", "Asia/Seoul", "Asia/Shanghai", "Asia/Taipei", "Asia/Hong_Kong", "Asia/Singapore", "Asia/Bangkok", "Asia/Kolkata", "Europe/London", "Europe/Paris", "Europe/Berlin", "Europe/Moscow", "America/New_York", "America/Chicago", "America/Denver", "America/Los_Angeles", "Australia/Sydney", "UTC"];
+const CC_ZONE: Record<string, string> = { jp: "Asia/Tokyo", kr: "Asia/Seoul", cn: "Asia/Shanghai", tw: "Asia/Taipei", hk: "Asia/Hong_Kong", sg: "Asia/Singapore", th: "Asia/Bangkok", in: "Asia/Kolkata", gb: "Europe/London", fr: "Europe/Paris", de: "Europe/Berlin", it: "Europe/Rome", es: "Europe/Madrid", ru: "Europe/Moscow", us: "America/New_York", ca: "America/Toronto", br: "America/Sao_Paulo", au: "Australia/Sydney" };
+const offsetFromZone = (zone: string, date: Date): string => {
+  try {
+    const s = new Intl.DateTimeFormat("en-US", { timeZone: zone, timeZoneName: "longOffset" }).formatToParts(date).find((p) => p.type === "timeZoneName")?.value ?? "";
+    const m = /([+-]\d{2}:\d{2})/.exec(s.replace(/GMT|UTC/g, ""));
+    return m ? m[1] : "+00:00";
+  } catch { return "+00:00"; }
+};
 const el = <K extends keyof HTMLElementTagNameMap>(tag: K, props: Partial<HTMLElementTagNameMap[K]> = {}, children: (Node | string)[] = []): HTMLElementTagNameMap[K] => {
   const e = document.createElement(tag);
   Object.assign(e, props);
@@ -622,7 +633,7 @@ function settingsView(settings: Settings, onSaved: () => void | Promise<void>): 
 }
 
 // ───────────────────────── チャート表示（タブ: チャート/表/基本情報） ─────────────────────────
-function chartView(chart: Chart, birth?: Birth | null): HTMLElement {
+function chartView(chart: Chart, birth: Birth | null | undefined, personId: string, label: string | null, onSaved: (newLabel: string | null) => void | Promise<void>): HTMLElement {
   const wrap = el("div", { className: "u-chart" });
   // データ準備
   const storedCusps = (chart.cusps ?? []).filter((c) => c.system === (chart.house_system ?? "whole_sign")).sort((a, b) => a.index - b.index);
@@ -667,14 +678,72 @@ function chartView(chart: Chart, birth?: Birth | null): HTMLElement {
     aspectNode.append(mkTable(["天体", "天体", "オーブ"], rows.map((a) => [bodyLabel(a.a), bodyLabel(a.b), `${a.orb.toFixed(2)}°`])));
   }
 
-  // 基本情報（出生データ）。UTCオフセットは born_at に含むので項目としては出さない。緯度・経度は別行。
+  // 基本情報（インライン編集）。表示名・生年月日・時刻・出生地・タイムゾーンをその場で編集して保存。
   const m = (birth?.born_at ?? "").match(/^(\d{4}-\d{2}-\d{2})T(\d{2}:\d{2})/);
-  const latStr = birth?.lat ? Number(birth.lat).toFixed(4) : "-";
-  const lngStr = birth?.lng ? Number(birth.lng).toFixed(4) : "-";
-  const basicNode = mkTable(["項目", "値"], [
-    ["生年月日", m?.[1] ?? "-"], ["時刻", m?.[2] ?? "-"], ["出生地", birth?.place ?? "-"],
-    ["緯度", latStr], ["経度", lngStr],
-    ["ハウス", HOUSE_SYSTEM_JA[chart.house_system ?? ""] ?? chart.house_system ?? "-"], ["ノード/リリス", "平均"],
+  let plat: number | null = birth?.lat ? Number(birth.lat) : null;
+  let plng: number | null = birth?.lng ? Number(birth.lng) : null;
+  let pplace = birth?.place ?? "";
+  const nameInp = el("input", { type: "text", className: "u-fi", value: label ?? "", placeholder: "表示名" });
+  const dateInp = el("input", { type: "date", className: "u-fi", value: m?.[1] ?? "" });
+  const timeInp = el("input", { type: "time", className: "u-fi", value: m?.[2] ?? "" });
+  const placeInp = el("input", { type: "text", className: "u-fi", value: pplace, placeholder: "出生地を検索（例: 松本市）" });
+  const geoRes = el("div", { className: "u-geo-results" });
+  const picked = el("div", { className: "u-picked" });
+  const setPicked = () => { picked.textContent = (plat !== null && plng !== null) ? `📍 ${pplace}（${plat.toFixed(3)}, ${plng.toFixed(3)}）` : ""; };
+  setPicked();
+  // タイムゾーン選択（IANA）。保存済みが IANA 名ならそれ、無ければ Asia/Tokyo を既定に。
+  const tzSel = el("select", { className: "u-fi" });
+  const zones = IANA_ZONES.length ? IANA_ZONES : FALLBACK_ZONES;
+  for (const z of zones) tzSel.append(el("option", { value: z, textContent: z }));
+  const initZone = (birth?.timezone && birth.timezone.includes("/")) ? birth.timezone : "Asia/Tokyo";
+  if (zones.includes(initZone)) tzSel.value = initZone;
+  // 出生地サジェスト（cc からタイムゾーンを自動セット）。
+  let geoTimer: ReturnType<typeof setTimeout> | undefined;
+  placeInp.addEventListener("input", () => {
+    clearTimeout(geoTimer);
+    const q = placeInp.value.trim();
+    if (q.length < 2) { geoRes.innerHTML = ""; return; }
+    geoTimer = setTimeout(async () => {
+      try {
+        const { results: rs } = await api<{ results: Array<{ name: string; place?: string; addr?: string; lat: number; lng: number; cc?: string }> }>(`/api/v1/uranai/geocode?q=${encodeURIComponent(q)}`);
+        geoRes.innerHTML = "";
+        for (const r of rs) {
+          const it = el("div", { className: "u-geo-item" }, [el("span", { className: "u-geo-addr", textContent: r.name })]);
+          it.addEventListener("click", () => {
+            plat = r.lat; plng = r.lng; pplace = r.name; placeInp.value = r.name; geoRes.innerHTML = ""; setPicked();
+            const z = r.cc ? CC_ZONE[r.cc] : undefined; if (z && zones.includes(z)) tzSel.value = z;
+          });
+          geoRes.append(it);
+        }
+      } catch { /* ignore */ }
+    }, 400);
+  });
+  const bStatus = el("div", { className: "u-status" });
+  const saveBtn = el("button", { className: "u-btn u-btn-sm", textContent: "保存して再計算" });
+  saveBtn.addEventListener("click", async () => {
+    if (!dateInp.value || !timeInp.value) { bStatus.textContent = "生年月日と時刻を入力してください"; return; }
+    if (plat === null || plng === null) { bStatus.textContent = "出生地を検索して選んでください"; return; }
+    bStatus.textContent = "保存中…";
+    try {
+      const nm = nameInp.value.trim();
+      if (nm) await api(`/api/v1/uranai/person/${personId}`, { method: "PATCH", body: JSON.stringify({ label: nm }) }).catch(() => {});
+      const off = offsetFromZone(tzSel.value, new Date(`${dateInp.value}T${timeInp.value}:00`));
+      const born_at = `${dateInp.value}T${timeInp.value}:00${off}`;
+      await api(`/api/v1/uranai/person/${personId}/birth`, { method: "PUT", body: JSON.stringify({ born_at, lat: String(plat), lng: String(plng), place: pplace, timezone: tzSel.value }) });
+      await api(`/api/v1/uranai/astrology/person/${personId}/compute`, { method: "POST", body: "{}" });
+      bStatus.textContent = "";
+      await onSaved(nm || label);
+    } catch (e) { bStatus.textContent = `エラー: ${(e as Error).message}`; }
+  });
+  const row = (lbl: string, ...ctrl: (Node | string)[]) => el("div", { className: "u-row" }, [el("label", { textContent: lbl }), ...ctrl]);
+  const basicNode = el("div", { className: "u-form" }, [
+    row("表示名", nameInp),
+    row("生年月日", dateInp, timeInp),
+    row("出生地", el("div", { className: "u-geo-wrap" }, [placeInp, geoRes])),
+    picked,
+    row("TZ", tzSel),
+    saveBtn, bStatus,
+    el("div", { className: "u-picked", textContent: `ハウス: ${HOUSE_SYSTEM_JA[chart.house_system ?? ""] ?? chart.house_system ?? "-"}　ノード/リリス: 平均（方式は⚙設定）` }),
   ]);
   // 元素・クオリティ（それぞれ独立タブ）。
   const ec = Object.fromEntries(chart.elements.map((e) => [e.element, e.count]));
@@ -829,22 +898,6 @@ export async function renderUranai(container: HTMLElement): Promise<void> {
     );
   };
   // 既存人物の出生データを取得して編集フォームを事前入力で開く。
-  const openEdit = async (personId: string, label?: string | null) => {
-    main.innerHTML = ""; main.append(el("div", { textContent: "読み込み中…" }));
-    let prefill: Prefill = { label };
-    try {
-      const b = await api<{ born_at: string | null; lat: string | null; lng: string | null; place: string | null; timezone: string | null }>(`/api/v1/uranai/person/${personId}/birth`);
-      const m = (b.born_at ?? "").match(/^(\d{4}-\d{2}-\d{2})T(\d{2}:\d{2})(?::\d{2})?([+-]\d{2}:\d{2})?/);
-      prefill = {
-        label, date: m?.[1], time: m?.[2],
-        tz: b.timezone || m?.[3] || "+09:00",
-        place: b.place ?? undefined,
-        lat: b.lat != null && b.lat !== "" ? Number(b.lat) : undefined,
-        lng: b.lng != null && b.lng !== "" ? Number(b.lng) : undefined,
-      };
-    } catch { /* 出生データ未登録なら空フォーム */ }
-    showForm(personId, prefill);
-  };
   const showChart = async (personId: string, label?: string | null, push = true) => {
     main.innerHTML = ""; main.append(el("div", { textContent: "読み込み中…" }));
     const chart = await api<Chart>(`/api/v1/uranai/astrology/person/${personId}/chart`);
@@ -852,9 +905,9 @@ export async function renderUranai(container: HTMLElement): Promise<void> {
     main.innerHTML = "";
     if (chart.placements.length === 0) { showForm(personId, { label }, push); return; }
     if (push) history.pushState({ uranai: { kind: "chart", personId, label: label ?? null } as UranaiView }, "");
-    const editBtn = el("button", { className: "u-btn u-btn-sm", textContent: "✎ 出生データを編集" });
-    editBtn.addEventListener("click", () => void openEdit(personId, label));
-    main.append(el("div", { className: "u-chart-head" }, [el("div", { className: "u-title", textContent: label ?? "" }), editBtn]), chartView(chart, birth));
+    // 保存後は一覧のラベル更新＋再描画（画面遷移せず反映）。
+    const onSaved = async (newLabel: string | null) => { await refreshList(personId); void showChart(personId, newLabel ?? label, false); };
+    main.append(el("div", { className: "u-chart-head" }, [el("div", { className: "u-title", textContent: label ?? "" })]), chartView(chart, birth, personId, label ?? null, onSaved));
   };
 
   // 人物リスト（サイド）を再構築し selectId をハイライトするだけ。画面遷移はしない。
