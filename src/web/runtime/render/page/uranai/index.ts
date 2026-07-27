@@ -18,6 +18,8 @@ const QUALITY_ALPHA: Record<string, number> = { cardinal: 0.24, fixed: 0.15, mut
 // 元素=色相/彩度・クオリティ=不透明度（トーン）で薄めに塗る。
 const signFill = (id: string): string => `hsla(${ELEMENT_HUE[SIGN_ELEMENT[id]]}, ${ELEMENT_SAT[SIGN_ELEMENT[id]]}%, 52%, ${QUALITY_ALPHA[SIGN_QUALITY[id]]})`;
 const PLANET_GLYPH: Record<string, string> = { sun: "☉", moon: "☽", mercury: "☿", venus: "♀", mars: "♂", jupiter: "♃", saturn: "♄", uranus: "♅", neptune: "♆", pluto: "♇", chiron: "⚷", ceres: "⚳", pallas: "⚴", juno: "⚵", vesta: "⚶", pholus: "⯛", lilith: "⚸", dragon_head: "☊", dragon_tail: "☋", fortune: "⊗", asc: "Asc", mc: "MC", dsc: "Dsc", ic: "IC" };
+// データ表での天体の並び順。
+const PLANET_ORDER = ["sun", "moon", "mercury", "venus", "mars", "jupiter", "saturn", "uranus", "neptune", "pluto", "chiron", "ceres", "pallas", "juno", "vesta", "pholus", "lilith", "dragon_head", "dragon_tail", "fortune"];
 // フルネーム表記（複数行）。長い名前は改行して枠に収める。
 const PLANET_NAME_LINES: Record<string, string[]> = {
   sun: ["太陽"], moon: ["月"], mercury: ["水星"], venus: ["金星"], mars: ["火星"],
@@ -387,9 +389,17 @@ function drawWheelPro(chart: Chart, enabledAspects: Set<string>, name: boolean):
     const [x0i, y0i] = pt(a0, rSignIn), [x1i, y1i] = pt(a0 + 30, rSignIn);
     s.append(svg("path", { d: `M${x0o},${y0o} A${R},${R} 0 0 0 ${x1o},${y1o} L${x1i},${y1i} A${rSignIn},${rSignIn} 0 0 1 ${x0i},${y0i} Z`, fill: signFill(SIGN_ORDER[i]), stroke: "none" }));
     const [gx, gy] = pt(a0 + 15, (R + rSignIn) / 2);
-    const g = svg("text", { x: gx, y: gy, "text-anchor": "middle", "dominant-baseline": "central", "font-size": 16, fill: "#333" });
-    g.textContent = SIGN_GLYPH[SIGN_ORDER[i]] + "︎";
-    s.append(g);
+    if (name) {
+      let rot = Math.atan2(gy - cy, gx - cx) * 180 / Math.PI + 90;
+      if (rot > 90 && rot < 270) rot -= 180;
+      const t = svg("text", { x: gx, y: gy, "text-anchor": "middle", "dominant-baseline": "central", "font-size": 11, fill: "#333", transform: `rotate(${rot.toFixed(1)} ${gx.toFixed(1)} ${gy.toFixed(1)})` });
+      t.textContent = SIGN_NAME[SIGN_ORDER[i]];
+      s.append(t);
+    } else {
+      const g = svg("text", { x: gx, y: gy, "text-anchor": "middle", "dominant-baseline": "central", "font-size": 16, fill: "#333" });
+      g.textContent = SIGN_GLYPH[SIGN_ORDER[i]] + "︎";
+      s.append(g);
+    }
   }
   // 度目盛（1°小 / 5°中 / 10°大）
   for (let d = 0; d < 360; d++) {
@@ -611,6 +621,51 @@ function settingsView(settings: Settings, onSaved: () => void | Promise<void>): 
   return wrap;
 }
 
+// ───────────────────────── データ表（一通り） ─────────────────────────
+function dataTables(chart: Chart): HTMLElement {
+  const wrap = el("div", { className: "u-tables" });
+  const storedCusps = (chart.cusps ?? []).filter((c) => c.system === (chart.house_system ?? "whole_sign")).sort((a, b) => a.index - b.index);
+  const cuspLons = storedCusps.length === 12 ? storedCusps.map((c) => c.longitude) : Array.from({ length: 12 }, (_, i) => ((Math.floor(chart.ascendant / 30) * 30) + i * 30) % 360);
+  const houseOf = (lon: number): number => {
+    for (let i = 0; i < 12; i++) { const a = cuspLons[i], b = cuspLons[(i + 1) % 12]; const span = ((b - a) % 360 + 360) % 360; const off = ((lon - a) % 360 + 360) % 360; if (off < span) return i + 1; }
+    return 12;
+  };
+  const place = new Map(chart.placements.map((p) => [p.planet, p]));
+  const mkTable = (title: string, headers: string[], rows: string[][]): HTMLElement => {
+    const sec = el("div", { className: "u-tbl-sec" });
+    sec.append(el("div", { className: "u-tbl-title", textContent: title }));
+    const tbl = el("table", { className: "u-tbl" });
+    const htr = el("tr", {}); for (const h of headers) htr.append(el("th", { textContent: h })); tbl.append(htr);
+    for (const r of rows) { const tr = el("tr", {}); for (const c of r) tr.append(el("td", { textContent: c })); tbl.append(tr); }
+    sec.append(tbl); return sec;
+  };
+  // 天体
+  const planetRows = PLANET_ORDER.filter((k) => place.has(k)).map((k) => {
+    const p = place.get(k)!;
+    return [`${PLANET_GLYPH[k] ?? ""} ${PLANET_NAME_LINES[k]?.[0] ?? k}`, SIGN_NAME[p.sign] ?? p.sign, fmtDeg(p.degree), p.retrograde ? "℞" : "", String(houseOf(lonOf(p)))];
+  });
+  wrap.append(mkTable("天体", ["天体", "サイン", "度数", "逆行", "ハウス"], planetRows));
+  // アングル
+  const angleRows = ["asc", "mc", "dsc", "ic"].filter((k) => place.has(k)).map((k) => { const p = place.get(k)!; return [PLANET_GLYPH[k] ?? k, SIGN_NAME[p.sign] ?? p.sign, fmtDeg(p.degree)]; });
+  wrap.append(mkTable("アングル", ["点", "サイン", "度数"], angleRows));
+  // ハウスカスプ
+  const cuspRows = cuspLons.map((lon, i) => { const sign = SIGN_ORDER[Math.floor((((lon % 360) + 360) % 360) / 30) % 12]; return [String(i + 1), SIGN_NAME[sign], fmtDeg(((lon % 30) + 30) % 30)]; });
+  wrap.append(mkTable("ハウスカスプ", ["ハウス", "サイン", "度数"], cuspRows));
+  // アスペクト（オーブの小さい順）
+  const aspRows = [...chart.aspects].sort((a, b) => a.orb - b.orb).map((a) => [`${PLANET_GLYPH[a.a] ?? a.a}–${PLANET_GLYPH[a.b] ?? a.b}`, ASPECT_INFO[a.type]?.label ?? a.type, `${a.orb.toFixed(2)}°`]);
+  wrap.append(mkTable(`アスペクト（${chart.aspects.length}）`, ["天体", "種別", "オーブ"], aspRows));
+  // 集計
+  const ec = Object.fromEntries(chart.elements.map((e) => [e.element, e.count]));
+  const qc = Object.fromEntries(chart.qualities.map((q) => [q.quality, q.count]));
+  const sec = el("div", { className: "u-tbl-sec" });
+  sec.append(el("div", { className: "u-tbl-title", textContent: "集計" }));
+  sec.append(el("div", { className: "u-sum", textContent: `エレメント　火 ${ec.fire ?? 0} ／ 地 ${ec.earth ?? 0} ／ 風 ${ec.air ?? 0} ／ 水 ${ec.water ?? 0}` }));
+  sec.append(el("div", { className: "u-sum", textContent: `クオリティ　活動 ${qc.cardinal ?? 0} ／ 不動 ${qc.fixed ?? 0} ／ 柔軟 ${qc.mutable ?? 0}` }));
+  wrap.append(sec);
+  return wrap;
+}
+
+
 // ───────────────────────── チャート表示 ─────────────────────────
 function chartView(chart: Chart, birth?: Birth | null): HTMLElement {
   const wrap = el("div", { className: "u-chart" });
@@ -676,6 +731,7 @@ function chartView(chart: Chart, birth?: Birth | null): HTMLElement {
   if (chart.range_warnings?.length) {
     wrap.append(el("div", { className: "u-warn", textContent: `⚠️ 有効範囲外の天体: ${chart.range_warnings.join(", ")}` }));
   }
+  wrap.append(dataTables(chart));
   return wrap;
 }
 
@@ -714,6 +770,14 @@ export async function renderUranai(container: HTMLElement): Promise<void> {
     .u-data{display:flex;flex-wrap:wrap;gap:2px 14px;margin:0 0 8px;max-width:600px;font-size:12px}
     .u-data-row{display:inline-flex;gap:5px;align-items:baseline}
     .u-data-k{color:#999}.u-data-v{color:#333;font-weight:600}
+    /* データ表（一通り） */
+    .u-tables{display:flex;flex-wrap:wrap;gap:14px 22px;margin:14px 0 4px;max-width:640px}
+    .u-tbl-sec{min-width:150px}
+    .u-tbl-title{font-size:12px;font-weight:700;color:#555;margin:0 0 4px}
+    .u-tbl{border-collapse:collapse;font-size:11px}
+    .u-tbl th{color:#999;font-weight:600;text-align:left;padding:1px 8px 3px 0;border-bottom:1px solid #0002}
+    .u-tbl td{color:#333;padding:1px 8px 1px 0;white-space:nowrap}
+    .u-sum{font-size:12px;color:#333;margin:2px 0}
     .u-title{font-weight:700;font-size:18px;margin-bottom:8px}
     .u-chart-head{display:flex;align-items:center;justify-content:space-between;gap:12px;margin-bottom:4px}
     .u-chart-head .u-title{margin-bottom:0}
