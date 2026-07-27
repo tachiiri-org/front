@@ -136,7 +136,7 @@ function drawWheel(chart: Chart, enabledAspects: Set<string>, name: boolean): SV
   // サイン記号・ハウス番号は、線・円を描いた後（最下部）に白い下地付きで重ねて描く
   // （先に描くと後続の線が上に乗ってしまうため）。
   // サインの区切り線（各サイン境界＝絶対黄経の30°刻み）を白で、空円(rSignInner)〜天体表示領域外縁(rHouseIn)まで。
-  for (let a = 0; a < 360; a += 30) { const [x0, y0] = pt(a, rSignInner), [x1, y1] = pt(a, rHouseIn); s.append(svg("line", { x1: x0, y1: y0, x2: x1, y2: y1, stroke: "#fff", "stroke-width": 1 })); }
+  for (let a = 0; a < 360; a += 30) { const [x0, y0] = pt(a, rSignInner), [x1, y1] = pt(a, rHouseIn); s.append(svg("line", { x1: x0, y1: y0, x2: x1, y2: y1, stroke: "#fff", "stroke-width": 3.5 })); }
 
   // ハウス境界（12分割線）＋ハウス番号。カスプ保存があれば流派のハウスシステム、
   // 無ければ whole-sign 等分（ASC のサイン先頭から 30°刻み）でフォールバックし必ず描く。
@@ -287,7 +287,7 @@ function drawWheel(chart: Chart, enabledAspects: Set<string>, name: boolean): SV
       });
       s.append(grp);
     } else {
-      const g = svg("text", { x: gx, y: gy, "text-anchor": "middle", "dominant-baseline": "central", "font-size": 22, fill: "#111" });
+      const g = svg("text", { x: gx, y: gy, "text-anchor": "middle", "dominant-baseline": "central", "font-size": 26, fill: "#111" });
       g.textContent = PLANET_GLYPH[o.p.planet] ?? "?";
       s.append(g);
     }
@@ -299,13 +299,13 @@ function drawWheel(chart: Chart, enabledAspects: Set<string>, name: boolean): SV
       const leftCorner = gx < cx;
       const dgx = leftCorner ? gx - w / 2 : gx + w / 2;
       const dgy = gy - h / 2 - 5;
-      const d = svg("text", { x: dgx, y: dgy, "text-anchor": leftCorner ? "start" : "end", "dominant-baseline": "central", "font-size": 8, fill: "#666", stroke: "#fff", "stroke-width": 2, "paint-order": "stroke" });
+      const d = svg("text", { x: dgx, y: dgy, "text-anchor": leftCorner ? "start" : "end", "dominant-baseline": "central", "font-size": 10, fill: "#666" });
       d.textContent = degText;
       s.append(d);
     } else {
       // 記号モードは従来どおり記号の外側（リング寄り）に。
       const [dx, dy] = pt(a, r + 15);
-      const d = svg("text", { x: dx, y: dy, "text-anchor": "middle", "dominant-baseline": "central", "font-size": 8, fill: "#666", stroke: "#fff", "stroke-width": 2, "paint-order": "stroke" });
+      const d = svg("text", { x: dx, y: dy, "text-anchor": "middle", "dominant-baseline": "central", "font-size": 10, fill: "#666" });
       d.textContent = degText;
       s.append(d);
     }
