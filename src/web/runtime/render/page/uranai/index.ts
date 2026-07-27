@@ -178,7 +178,7 @@ function drawWheel(chart: Chart, enabledAspects: Set<string>, name: boolean): SV
       // 接線方向へ回転。下半分は上下反転して常に正立させる。白ハローで色地でも読める。
       let rot = Math.atan2(gy - cy, gx - cx) * 180 / Math.PI + 90;
       if (rot > 90 && rot < 270) rot -= 180;
-      const t = svg("text", { x: gx, y: gy, "text-anchor": "middle", "dominant-baseline": "central", "font-size": 10, fill: "#333", stroke: "#fff", "stroke-width": 2.5, "paint-order": "stroke", transform: `rotate(${rot.toFixed(1)} ${gx.toFixed(1)} ${gy.toFixed(1)})` });
+      const t = svg("text", { x: gx, y: gy, "text-anchor": "middle", "dominant-baseline": "central", "font-size": 10, fill: "#333", transform: `rotate(${rot.toFixed(1)} ${gx.toFixed(1)} ${gy.toFixed(1)})` });
       t.textContent = SIGN_NAME[SIGN_ORDER[i]];
       s.append(t);
     } else {
@@ -193,7 +193,7 @@ function drawWheel(chart: Chart, enabledAspects: Set<string>, name: boolean): SV
     const lon = cuspLons[i];
     const span = ((cuspLons[(i + 1) % 12] - lon) % 360 + 360) % 360;
     const [nx, ny] = pt(lon + span / 2, rHouseBand);
-    const t = svg("text", { x: nx, y: ny, "text-anchor": "middle", "dominant-baseline": "central", "font-size": 10, fill: "#555", "font-weight": "700", stroke: "#fff", "stroke-width": 2.5, "paint-order": "stroke" });
+    const t = svg("text", { x: nx, y: ny, "text-anchor": "middle", "dominant-baseline": "central", "font-size": 12, fill: "#555", "font-weight": "700" });
     t.textContent = String(i + 1);
     s.append(t);
   }
@@ -292,6 +292,10 @@ function drawWheel(chart: Chart, enabledAspects: Set<string>, name: boolean): SV
       });
       s.append(grp);
     } else {
+      // 線と被らないよう、記号の下にサイン色と同色の下地（白マスク＋サイン色）を敷いて線を隠す。
+      // リングと同色なので背景は目立たず、記号だけが浮く。
+      s.append(svg("circle", { cx: gx, cy: gy, r: 13, fill: "#fff", stroke: "none" }));
+      s.append(svg("circle", { cx: gx, cy: gy, r: 13, fill: signFill(o.p.sign), stroke: "none" }));
       const g = svg("text", { x: gx, y: gy, "text-anchor": "middle", "dominant-baseline": "central", "font-size": 26, fill: "#111" });
       g.textContent = PLANET_GLYPH[o.p.planet] ?? "?";
       s.append(g);
@@ -304,13 +308,13 @@ function drawWheel(chart: Chart, enabledAspects: Set<string>, name: boolean): SV
       const leftCorner = gx < cx;
       const dgx = leftCorner ? gx - w / 2 : gx + w / 2;
       const dgy = gy - h / 2 - 5;
-      const d = svg("text", { x: dgx, y: dgy, "text-anchor": leftCorner ? "start" : "end", "dominant-baseline": "central", "font-size": 10, fill: "#666" });
+      const d = svg("text", { x: dgx, y: dgy, "text-anchor": leftCorner ? "start" : "end", "dominant-baseline": "central", "font-size": 10, fill: "#222" });
       d.textContent = degText;
       s.append(d);
     } else {
       // 記号モードは従来どおり記号の外側（リング寄り）に。
       const [dx, dy] = pt(a, r + 15);
-      const d = svg("text", { x: dx, y: dy, "text-anchor": "middle", "dominant-baseline": "central", "font-size": 10, fill: "#666" });
+      const d = svg("text", { x: dx, y: dy, "text-anchor": "middle", "dominant-baseline": "central", "font-size": 10, fill: "#222" });
       d.textContent = degText;
       s.append(d);
     }
