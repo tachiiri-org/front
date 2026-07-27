@@ -78,6 +78,14 @@ async function api<T>(path: string, init?: RequestInit): Promise<T> {
   return res.json() as Promise<T>;
 }
 const lonOf = (p: Placement): number => SIGN_ORDER.indexOf(p.sign as typeof SIGN_ORDER[number]) * 30 + p.degree;
+// サイン内度数を「度°分′」に整形。
+const fmtDeg = (d: number): string => {
+  let deg = Math.floor(d), min = Math.round((d - deg) * 60);
+  if (min >= 60) { min -= 60; deg += 1; }
+  return `${deg}°${String(min).padStart(2, "0")}′`;
+};
+type Birth = { born_at: string | null; lat: string | null; lng: string | null; place: string | null; timezone: string | null };
+const HOUSE_SYSTEM_JA: Record<string, string> = { placidus: "プラシダス", whole_sign: "ホールサイン", koch: "コッホ", equal: "イコール", campanus: "カンパヌス", regiomontanus: "レギオモンタヌス" };
 const el = <K extends keyof HTMLElementTagNameMap>(tag: K, props: Partial<HTMLElementTagNameMap[K]> = {}, children: (Node | string)[] = []): HTMLElementTagNameMap[K] => {
   const e = document.createElement(tag);
   Object.assign(e, props);
@@ -161,13 +169,19 @@ function drawWheel(chart: Chart, enabledAspects: Set<string>, name: boolean): SV
     s.append(svg("line", { x1, y1, x2, y2, stroke: "#222", "stroke-width": 1 }));
   }
 
-  // ASC/MC/DSC/IC 軸。ハウス区切り線と区別せず黒で、サイン円の外〜最外周に。ラベルは円の外側（両端）。
-  for (const [lon, label, opp] of [[asc, "Asc", "Dsc"], [chart.midheaven, "MC", "IC"]] as [number, string, string][]) {
-    for (const [l, txt] of [[lon, label], [lon + 180, opp]] as [number, string][]) {
-      const [ax, ay] = pt(l, rSignCircle), [bx, by] = pt(l, R);
-      s.append(svg("line", { x1: ax, y1: ay, x2: bx, y2: by, stroke: "#222", "stroke-width": 1 }));
-      const [lx, ly] = pt(l, R + 11); const t = svg("text", { x: lx, y: ly, "text-anchor": "middle", "dominant-baseline": "central", "font-size": 11, fill: "#222", "font-weight": "bold" }); t.textContent = txt; s.append(t);
-    }
+  // ASC/MC/DSC/IC 軸。ハウス区切り線と区別せず黒で、サイン円の外〜最外周に。
+  // ラベル（円の外側）とその外にサイン記号＋度分を表示。
+  const placeByPlanet = new Map(chart.placements.map((p) => [p.planet, p]));
+  const axes: [number, string, string][] = [
+    [asc, "Asc", "asc"], [asc + 180, "Dsc", "dsc"],
+    [chart.midheaven, "MC", "mc"], [chart.midheaven + 180, "IC", "ic"],
+  ];
+  for (const [lon, txt, key] of axes) {
+    const [ax, ay] = pt(lon, rSignCircle), [bx, by] = pt(lon, R);
+    s.append(svg("line", { x1: ax, y1: ay, x2: bx, y2: by, stroke: "#222", "stroke-width": 1 }));
+    const [lx, ly] = pt(lon, R + 11); const t = svg("text", { x: lx, y: ly, "text-anchor": "middle", "dominant-baseline": "central", "font-size": 11, fill: "#222", "font-weight": "bold" }); t.textContent = txt; s.append(t);
+    const pl = placeByPlanet.get(key);
+    if (pl) { const [dx, dy] = pt(lon, R + 23); const d = svg("text", { x: dx, y: dy, "text-anchor": "middle", "dominant-baseline": "central", "font-size": 8, fill: "#555" }); d.textContent = `${SIGN_GLYPH[pl.sign]}︎${fmtDeg(pl.degree)}`; s.append(d); }
   }
 
   // 円: 最外周(R)、ハウス番号帯の内縁(rHouseIn)、中心の同心リング境界(サイン/元素/クオリティ)、中心の空円(rHole)。
@@ -322,7 +336,7 @@ function drawWheel(chart: Chart, enabledAspects: Set<string>, name: boolean): SV
       g.textContent = PLANET_GLYPH[o.p.planet] ?? "?";
       s.append(g);
     }
-    const degText = `${Math.floor(o.p.degree)}°${o.p.retrograde ? "℞" : ""}`;
+    const degText = `${fmtDeg(o.p.degree)}${o.p.retrograde ? "℞" : ""}`;
     // 度数は名前・記号どちらも枠（記号は擬似枠 boxDim）の「上側」の角に置く。
     // 左右は天体と同じ側: 中心より左の天体は左上、右の天体は右上。
     {
@@ -441,8 +455,23 @@ function settingsView(settings: Settings, onSaved: () => void | Promise<void>): 
 }
 
 // ───────────────────────── チャート表示 ─────────────────────────
-function chartView(chart: Chart): HTMLElement {
+function chartView(chart: Chart, birth?: Birth | null): HTMLElement {
   const wrap = el("div", { className: "u-chart" });
+
+  // 出生データ・計算方式の表（チャート上部）。
+  const info = el("div", { className: "u-data" });
+  const m = (birth?.born_at ?? "").match(/^(\d{4}-\d{2}-\d{2})T(\d{2}:\d{2})/);
+  const latlng = (birth?.lat && birth?.lng) ? `${Number(birth.lat).toFixed(4)}, ${Number(birth.lng).toFixed(4)}` : "-";
+  const rows: [string, string][] = [
+    ["生年月日", m?.[1] ?? "-"],
+    ["時刻", m?.[2] ?? "-"],
+    ["出生地", birth?.place ?? "-"],
+    ["緯度経度", latlng],
+    ["TZ", birth?.timezone ?? "-"],
+    ["ハウス", HOUSE_SYSTEM_JA[chart.house_system ?? ""] ?? chart.house_system ?? "-"],
+    ["ノード/リリス", "平均"],
+  ];
+  for (const [k, v] of rows) info.append(el("div", { className: "u-data-row" }, [el("span", { className: "u-data-k", textContent: k }), el("span", { className: "u-data-v", textContent: v })]));
 
   // アスペクトのオン/オフ（1ボタンで全種まとめて。既定オフ）。
   const present = ASPECT_ORDER.filter((t) => chart.aspects.some((a) => a.type === t));
@@ -475,7 +504,7 @@ function chartView(chart: Chart): HTMLElement {
   }
 
   redraw();
-  wrap.append(host, glyphToggle, toggles);
+  wrap.append(info, host, glyphToggle, toggles);
   if (chart.range_warnings?.length) {
     wrap.append(el("div", { className: "u-warn", textContent: `⚠️ 有効範囲外の天体: ${chart.range_warnings.join(", ")}` }));
   }
@@ -513,6 +542,10 @@ export async function renderUranai(container: HTMLElement): Promise<void> {
     .u-tg-btn.on{color:#1f2937;background:#4A90C218;border-color:#4A90C2aa;font-weight:600}
     .u-tg-btn.on .u-tg-sw{opacity:1}
     .u-warn{color:#c82;font-size:13px;margin:8px 0}
+    /* 出生データ・計算方式の表（チャート上部） */
+    .u-data{display:flex;flex-wrap:wrap;gap:2px 14px;margin:0 0 8px;max-width:600px;font-size:12px}
+    .u-data-row{display:inline-flex;gap:5px;align-items:baseline}
+    .u-data-k{color:#999}.u-data-v{color:#333;font-weight:600}
     .u-title{font-weight:700;font-size:18px;margin-bottom:8px}
     .u-chart-head{display:flex;align-items:center;justify-content:space-between;gap:12px;margin-bottom:4px}
     .u-chart-head .u-title{margin-bottom:0}
@@ -587,12 +620,13 @@ export async function renderUranai(container: HTMLElement): Promise<void> {
   const showChart = async (personId: string, label?: string | null, push = true) => {
     main.innerHTML = ""; main.append(el("div", { textContent: "読み込み中…" }));
     const chart = await api<Chart>(`/api/v1/uranai/astrology/person/${personId}/chart`);
+    const birth = await api<Birth>(`/api/v1/uranai/person/${personId}/birth`).catch(() => null);
     main.innerHTML = "";
     if (chart.placements.length === 0) { showForm(personId, { label }, push); return; }
     if (push) history.pushState({ uranai: { kind: "chart", personId, label: label ?? null } as UranaiView }, "");
     const editBtn = el("button", { className: "u-btn u-btn-sm", textContent: "✎ 出生データを編集" });
     editBtn.addEventListener("click", () => void openEdit(personId, label));
-    main.append(el("div", { className: "u-chart-head" }, [el("div", { className: "u-title", textContent: label ?? "" }), editBtn]), chartView(chart));
+    main.append(el("div", { className: "u-chart-head" }, [el("div", { className: "u-title", textContent: label ?? "" }), editBtn]), chartView(chart, birth));
   };
 
   // 人物リスト（サイド）を再構築し selectId をハイライトするだけ。画面遷移はしない。
