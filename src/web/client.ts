@@ -9,6 +9,7 @@ import { renderGroupSelectPage } from './runtime/render/page/group-select';
 import { renderSettingsPage } from './runtime/render/page/settings';
 import { renderAdminPage } from './runtime/render/page/admin';
 import { renderGraphEditor } from './runtime/render/page/graph-editor';
+import { renderUranai } from './runtime/render/page/uranai';
 import { renderStorageExplorer } from './runtime/render/page/storage-explorer';
 import type { GraphEditorComponent } from './schema/component/kind/graph-editor';
 import type { StorageExplorerComponent } from './schema/component/kind/storage-explorer';
@@ -22,6 +23,7 @@ const HEADER_HEIGHT = 36;
 const PRODUCT = (window as unknown as { __PRODUCT__?: string }).__PRODUCT__;
 const PRODUCT_CONFIG: Record<string, { screens: string[] }> = {
   graph: { screens: ['graph-editor'] },
+  uranai: { screens: ['uranai'] },
   admin: { screens: ['org-members', 'admin-members', 'storage-explorer'] },
 };
 const PRODUCT_SCREENS = PRODUCT ? PRODUCT_CONFIG[PRODUCT]?.screens : undefined;
@@ -35,6 +37,7 @@ const applyViewportLayout = (): void => {
   document.documentElement.style.height = '100%';
   document.documentElement.style.width = '100%';
   document.body.style.height = '100%';
+  document.body.style.minHeight = '';
   document.body.style.width = '100%';
   document.body.style.margin = '0';
   document.body.style.padding = '0';
@@ -43,11 +46,40 @@ const applyViewportLayout = (): void => {
   document.body.style.flexDirection = 'column';
 
   nav.style.display = 'flex';
+  nav.style.position = 'static'; // スクロール型レイアウト（sticky）から戻す
   nav.style.flexShrink = '0';
   nav.style.height = `${HEADER_HEIGHT}px`;
 
   root.style.width = '100%';
   root.style.flex = '1';
+  root.style.minHeight = '0';
+  root.style.boxSizing = 'border-box';
+};
+
+// ネイティブのドキュメントスクロールを使うレイアウト。body を overflow:hidden の
+// 固定フレームにせず、ページ全体をスクロールさせることで、モバイルの
+// pull-to-refresh（最上部で下スワイプ→更新）を有効化する。uranai などスクロール前提の画面で使う。
+const applyScrollableLayout = (): void => {
+  document.documentElement.style.height = 'auto';
+  document.documentElement.style.width = '100%';
+  document.body.style.height = 'auto';
+  document.body.style.minHeight = '100%';
+  document.body.style.width = '100%';
+  document.body.style.margin = '0';
+  document.body.style.padding = '0';
+  document.body.style.overflow = ''; // ドキュメントスクロール（PTR 有効）
+  document.body.style.display = 'block';
+  document.body.style.flexDirection = '';
+
+  nav.style.display = 'flex';
+  nav.style.position = 'sticky'; // スクロールしても上部に固定
+  nav.style.top = '0';
+  nav.style.zIndex = '30';
+  nav.style.flexShrink = '0';
+  nav.style.height = `${HEADER_HEIGHT}px`;
+
+  root.style.width = '100%';
+  root.style.flex = '';
   root.style.minHeight = '0';
   root.style.boxSizing = 'border-box';
 };
@@ -318,6 +350,15 @@ const renderScreenSpec = (screenId: string, spec: ScreenSpec): void => {
 };
 
 const renderScreen = async (screenId: string): Promise<void> => {
+  // uranai プロダクトはカスタム画面を直接描画（layouts スペック不要）。
+  if (screenId === 'uranai') {
+    applyScrollableLayout();
+    void renderNav(screenId);
+    root.innerHTML = '';
+    root.style.position = 'relative';
+    await renderUranai(root);
+    return;
+  }
   const inlineData = readInlineScreenData();
   let value: unknown;
   if (inlineData !== null) {
@@ -511,7 +552,10 @@ const loadEditorBootstrap = async (): Promise<void> => {
   await loadEditor(screenId);
 };
 
-window.addEventListener('popstate', () => {
+window.addEventListener('popstate', (e) => {
+  // uranai の内部ナビゲーション（history.state.uranai を持つ）は uranai 側の
+  // popstate ハンドラが復元するため、ここでの全体再ブートストラップはスキップ。
+  if ((e.state as { uranai?: unknown } | null)?.uranai) return;
   void loadEditorBootstrap();
 });
 

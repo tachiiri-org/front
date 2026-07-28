@@ -139,7 +139,7 @@ export async function handleAuthCallback(request: Request, env: AuthorizeEnv): P
 export function isProductHost(hostname: string): boolean {
   const parts = hostname.split(".");
   const i = parts.indexOf("tachiiri");
-  if (i <= 0) return false; // e.g. front-dev.workers.dev
+  if (i <= 0) return false;
   const role = parts[i - 1];
   return role !== "" && role !== "authn";
 }

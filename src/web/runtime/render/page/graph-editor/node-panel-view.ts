@@ -428,6 +428,10 @@ export function createNodePanelView(ctx: GraphEditorContext, nodePanelOpts?: Nod
       if (nodePanelOpts?.onContentWidthChange) scheduleWidthUpdate();
     });
     ta.addEventListener('focus', () => setNodePanelSelected(node.id));
+    // 既にフォーカス済みの行を再クリックしても focus は飛ばないので、click でも選択を通知する
+    // （関係パネルを × で閉じた後、同じノードをクリックして開き直せるようにするため）。選択伝播は
+    // panels-view 側で 180ms デバウンスされるので、通常のクリック（focus→click）でも二重処理にならない。
+    ta.addEventListener('click', () => setNodePanelSelected(node.id));
 
     // Multi-line paste → one node per line: the first line merges into this row at the caret, each
     // remaining line becomes a new node below (in order). Single-line paste is left to the browser.
