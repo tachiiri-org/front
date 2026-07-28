@@ -215,73 +215,103 @@ function chartView(chart: Chart, birth: Birth | null | undefined, personId: stri
     aspectNode.append(mkTable(["天体", "天体", "オーブ"], rows.map((a) => [bodyLabel(a.a), bodyLabel(a.b), `${a.orb.toFixed(2)}°`])));
   }
 
-  // 基本情報（インライン編集）。表示名・生年月日・時刻・出生地・タイムゾーンをその場で編集して保存。
-  const m = (birth?.born_at ?? "").match(/^(\d{4}-\d{2}-\d{2})T(\d{2}:\d{2})/);
-  let plat: number | null = birth?.lat ? Number(birth.lat) : null;
-  let plng: number | null = birth?.lng ? Number(birth.lng) : null;
-  let pplace = birth?.place ?? "";
-  const nameInp = el("input", { type: "text", className: "u-fi", value: label ?? "", placeholder: "表示名" });
-  const dateInp = el("input", { type: "date", className: "u-fi", value: m?.[1] ?? "" });
-  const timeInp = el("input", { type: "time", className: "u-fi", value: m?.[2] ?? "" });
-  const placeInp = el("input", { type: "text", className: "u-fi", value: pplace, placeholder: "出生地を検索（例: 松本市）" });
-  const geoRes = el("div", { className: "u-geo-results" });
-  const picked = el("div", { className: "u-picked" });
-  const setPicked = () => { picked.textContent = (plat !== null && plng !== null) ? `📍 ${pplace}（${plat.toFixed(3)}, ${plng.toFixed(3)}）` : ""; };
-  setPicked();
-  // タイムゾーン選択（IANA）。保存済みが IANA 名ならそれ、無ければ Asia/Tokyo を既定に。
-  const tzSel = el("select", { className: "u-fi" });
+  // 基本情報: 通常は表。各編集項目に編集アイコン、押すとその項目だけ編集モード（他はグレーアウト）、
+  // 再計算(保存)またはキャンセル。
+  const bm = (birth?.born_at ?? "").match(/^(\d{4}-\d{2}-\d{2})T(\d{2}:\d{2})/);
   const zones = IANA_ZONES.length ? IANA_ZONES : FALLBACK_ZONES;
-  for (const z of zones) tzSel.append(el("option", { value: z, textContent: z }));
   const initZone = (birth?.timezone && birth.timezone.includes("/")) ? birth.timezone : "Asia/Tokyo";
-  if (zones.includes(initZone)) tzSel.value = initZone;
-  // 出生地サジェスト（cc からタイムゾーンを自動セット）。
-  let geoTimer: ReturnType<typeof setTimeout> | undefined;
-  placeInp.addEventListener("input", () => {
-    clearTimeout(geoTimer);
-    const q = placeInp.value.trim();
-    if (q.length < 2) { geoRes.innerHTML = ""; return; }
-    geoTimer = setTimeout(async () => {
-      try {
-        const { results: rs } = await api<{ results: Array<{ name: string; place?: string; addr?: string; lat: number; lng: number; cc?: string }> }>(`/api/v1/uranai/geocode?q=${encodeURIComponent(q)}`);
-        geoRes.innerHTML = "";
-        for (const r of rs) {
-          const it = el("div", { className: "u-geo-item" }, [el("span", { className: "u-geo-addr", textContent: r.name })]);
-          it.addEventListener("click", () => {
-            plat = r.lat; plng = r.lng; pplace = r.name; placeInp.value = r.name; geoRes.innerHTML = ""; setPicked();
-            const z = r.cc ? CC_ZONE[r.cc] : undefined; if (z && zones.includes(z)) tzSel.value = z;
-          });
-          geoRes.append(it);
-        }
-      } catch { /* ignore */ }
-    }, 400);
-  });
-  const bStatus = el("div", { className: "u-status" });
-  const saveBtn = el("button", { className: "u-btn u-btn-sm", textContent: "保存して再計算" });
-  saveBtn.addEventListener("click", async () => {
-    if (!dateInp.value || !timeInp.value) { bStatus.textContent = "生年月日と時刻を入力してください"; return; }
-    if (plat === null || plng === null) { bStatus.textContent = "出生地を検索して選んでください"; return; }
-    bStatus.textContent = "保存中…";
+  const st = {
+    name: label ?? "", date: bm?.[1] ?? "", time: bm?.[2] ?? "", place: birth?.place ?? "",
+    lat: (birth?.lat ? Number(birth.lat) : null) as number | null,
+    lng: (birth?.lng ? Number(birth.lng) : null) as number | null,
+    tz: zones.includes(initZone) ? initZone : "Asia/Tokyo",
+  };
+  const orig = { ...st };
+  const houseName = HOUSE_SYSTEM_JA[chart.house_system ?? ""] ?? chart.house_system ?? "-";
+  const ICON: Record<string, string> = { name: "✎", date: "📅", time: "🕐", place: "📍", tz: "🌐" };
+  const basicNode = el("div", { className: "u-basic" });
+  let editing: string | null = null;
+  const doSave = async (statusEl: HTMLElement) => {
+    if (!st.date || !st.time) { statusEl.textContent = "生年月日と時刻を入力してください"; return; }
+    if (st.lat === null || st.lng === null) { statusEl.textContent = "出生地を選んでください"; return; }
+    statusEl.textContent = "再計算中…";
     try {
-      const nm = nameInp.value.trim();
-      if (nm) await api(`/api/v1/uranai/person/${personId}`, { method: "PATCH", body: JSON.stringify({ label: nm }) }).catch(() => {});
-      const off = offsetFromZone(tzSel.value, new Date(`${dateInp.value}T${timeInp.value}:00`));
-      const born_at = `${dateInp.value}T${timeInp.value}:00${off}`;
-      await api(`/api/v1/uranai/person/${personId}/birth`, { method: "PUT", body: JSON.stringify({ born_at, lat: String(plat), lng: String(plng), place: pplace, timezone: tzSel.value }) });
+      const nm = st.name.trim();
+      if (nm && nm !== (label ?? "")) await api(`/api/v1/uranai/person/${personId}`, { method: "PATCH", body: JSON.stringify({ label: nm }) }).catch(() => {});
+      const off = offsetFromZone(st.tz, new Date(`${st.date}T${st.time}:00`));
+      const born_at = `${st.date}T${st.time}:00${off}`;
+      await api(`/api/v1/uranai/person/${personId}/birth`, { method: "PUT", body: JSON.stringify({ born_at, lat: String(st.lat), lng: String(st.lng), place: st.place, timezone: st.tz }) });
       await api(`/api/v1/uranai/astrology/person/${personId}/compute`, { method: "POST", body: "{}" });
-      bStatus.textContent = "";
       await onSaved(nm || label);
-    } catch (e) { bStatus.textContent = `エラー: ${(e as Error).message}`; }
-  });
-  const row = (lbl: string, ...ctrl: (Node | string)[]) => el("div", { className: "u-row" }, [el("label", { textContent: lbl }), ...ctrl]);
-  const basicNode = el("div", { className: "u-form" }, [
-    row("表示名", nameInp),
-    row("生年月日", dateInp, timeInp),
-    row("出生地", el("div", { className: "u-geo-wrap" }, [placeInp, geoRes])),
-    picked,
-    row("TZ", tzSel),
-    saveBtn, bStatus,
-    el("div", { className: "u-picked", textContent: `ハウス: ${HOUSE_SYSTEM_JA[chart.house_system ?? ""] ?? chart.house_system ?? "-"}　ノード/リリス: 平均（方式は⚙設定）` }),
-  ]);
+    } catch (e) { statusEl.textContent = `エラー: ${(e as Error).message}`; }
+  };
+  const renderBasic = () => {
+    basicNode.innerHTML = "";
+    const editMode = editing !== null;
+    const disp: Record<string, string> = {
+      name: st.name || "-", date: st.date || "-", time: st.time || "-", place: st.place || "-",
+      lat: st.lat !== null ? st.lat.toFixed(4) : "-", lng: st.lng !== null ? st.lng.toFixed(4) : "-",
+      tz: st.tz, house: houseName, node: "平均",
+    };
+    // 編集中の項目のコントロールを生成。
+    let ctrl: HTMLElement | undefined;
+    if (editing === "name") { const i = el("input", { type: "text", className: "u-fi", value: st.name }); i.addEventListener("input", () => { st.name = i.value; }); ctrl = i; }
+    else if (editing === "date") { const i = el("input", { type: "date", className: "u-fi", value: st.date }); i.addEventListener("input", () => { st.date = i.value; }); ctrl = i; }
+    else if (editing === "time") { const i = el("input", { type: "time", className: "u-fi", value: st.time }); i.addEventListener("input", () => { st.time = i.value; }); ctrl = i; }
+    else if (editing === "tz") { const sel = el("select", { className: "u-fi" }); for (const z of zones) sel.append(el("option", { value: z, textContent: z })); sel.value = st.tz; sel.addEventListener("change", () => { st.tz = sel.value; }); ctrl = sel; }
+    else if (editing === "place") {
+      const i = el("input", { type: "text", className: "u-fi", value: st.place, placeholder: "出生地を検索" });
+      const gr = el("div", { className: "u-geo-results" });
+      let gt: ReturnType<typeof setTimeout> | undefined;
+      i.addEventListener("input", () => {
+        st.place = i.value; clearTimeout(gt); const q = i.value.trim();
+        if (q.length < 2) { gr.innerHTML = ""; return; }
+        gt = setTimeout(async () => {
+          try {
+            const { results: rs } = await api<{ results: Array<{ name: string; lat: number; lng: number; cc?: string }> }>(`/api/v1/uranai/geocode?q=${encodeURIComponent(q)}`);
+            gr.innerHTML = "";
+            for (const r of rs) {
+              const it = el("div", { className: "u-geo-item" }, [el("span", { className: "u-geo-addr", textContent: r.name })]);
+              it.addEventListener("click", () => { st.lat = r.lat; st.lng = r.lng; st.place = r.name; i.value = r.name; gr.innerHTML = ""; const z = r.cc ? CC_ZONE[r.cc] : undefined; if (z && zones.includes(z)) st.tz = z; });
+              gr.append(it);
+            }
+          } catch { /* ignore */ }
+        }, 400);
+      });
+      ctrl = el("div", { className: "u-geo-wrap" }, [i, gr]);
+    }
+    const tbl = el("table", { className: "u-basic-tbl" });
+    const addRow = (key: string, lbl: string, editable: boolean) => {
+      const tr = el("tr", { className: editMode && editing !== key ? "u-dim" : "" });
+      tr.append(el("td", { className: "u-basic-k", textContent: lbl }));
+      const vtd = el("td", { className: "u-basic-v" });
+      if (editing === key && ctrl) vtd.append(ctrl); else vtd.textContent = disp[key];
+      tr.append(vtd);
+      const itd = el("td", { className: "u-basic-ic" });
+      if (editable && !editMode) { const b = el("button", { className: "u-edit-ic", type: "button", title: "編集", textContent: ICON[key] ?? "✎" }); b.addEventListener("click", () => { editing = key; renderBasic(); }); itd.append(b); }
+      tr.append(itd);
+      tbl.append(tr);
+    };
+    addRow("name", "表示名", true);
+    addRow("date", "生年月日", true);
+    addRow("time", "時刻", true);
+    addRow("place", "出生地", true);
+    addRow("lat", "緯度", false);
+    addRow("lng", "経度", false);
+    addRow("tz", "TZ", true);
+    addRow("house", "ハウス", false);
+    addRow("node", "ノード/リリス", false);
+    basicNode.append(tbl);
+    if (editMode) {
+      const status = el("div", { className: "u-status" });
+      const rc = el("button", { className: "u-btn u-btn-sm", textContent: "再計算" });
+      rc.addEventListener("click", () => void doSave(status));
+      const cancel = el("button", { className: "u-btn u-btn-sm u-btn-ghost", textContent: "キャンセル" });
+      cancel.addEventListener("click", () => { Object.assign(st, orig); editing = null; renderBasic(); });
+      basicNode.append(el("div", { className: "u-basic-actions" }, [rc, cancel, status]));
+    }
+  };
+  renderBasic();
   // 元素・クオリティ（それぞれ独立タブ）。
   const ec = Object.fromEntries(chart.elements.map((e) => [e.element, e.count]));
   const qc = Object.fromEntries(chart.qualities.map((q) => [q.quality, q.count]));
@@ -370,6 +400,18 @@ export async function renderUranai(container: HTMLElement): Promise<void> {
     .u-tip-h{font-weight:700;font-size:13px;color:#fff;margin-bottom:2px}
     .u-tip-s{color:#93c5fd;font-weight:600;margin-top:5px}
     .u-tip-a{color:#cbd5e1}
+    /* 基本情報（表＋項目別編集） */
+    .u-basic-tbl{width:100%;border-collapse:collapse;font-size:12.5px}
+    .u-basic-tbl td{padding:6px 8px;border-bottom:1px solid #0001;vertical-align:middle}
+    .u-basic-k{color:#999;white-space:nowrap;width:120px}
+    .u-basic-v{color:#333}
+    .u-basic-v .u-fi{width:100%;box-sizing:border-box;padding:5px 6px;border:1px solid #4A90C2;border-radius:5px}
+    .u-basic-ic{width:40px;text-align:right}
+    .u-basic-tbl tr.u-dim{opacity:.32;pointer-events:none}
+    .u-edit-ic{border:0;background:transparent;cursor:pointer;font-size:14px;padding:3px 7px;border-radius:5px;color:#888;line-height:1}
+    .u-edit-ic:hover{background:#0000000f;color:#333}
+    .u-basic-actions{display:flex;gap:8px;align-items:center;margin-top:12px}
+    .u-btn-ghost{background:#0000000d;color:#333}.u-btn-ghost:hover{background:#00000014}
     /* 出生データ・計算方式の表（チャート上部） */
     .u-data{display:flex;flex-wrap:wrap;gap:2px 14px;margin:0 0 8px;max-width:600px;font-size:12px}
     .u-data-row{display:inline-flex;gap:5px;align-items:baseline}
