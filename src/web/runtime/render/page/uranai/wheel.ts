@@ -26,7 +26,7 @@ export function drawWheelPro(chart: Chart, enabledAspects: Set<string>, name: bo
     const a0 = i * 30;
     const [x0o, y0o] = pt(a0, R), [x1o, y1o] = pt(a0 + 30, R);
     const [x0i, y0i] = pt(a0, rSignIn), [x1i, y1i] = pt(a0 + 30, rSignIn);
-    s.append(svg("path", { d: `M${x0o},${y0o} A${R},${R} 0 0 0 ${x1o},${y1o} L${x1i},${y1i} A${rSignIn},${rSignIn} 0 0 1 ${x0i},${y0i} Z`, fill: signFill(SIGN_ORDER[i]), stroke: "none" }));
+    s.append(svg("path", { d: `M${x0o},${y0o} A${R},${R} 0 0 0 ${x1o},${y1o} L${x1i},${y1i} A${rSignIn},${rSignIn} 0 0 1 ${x0i},${y0i} Z`, fill: signFill(SIGN_ORDER[i]), stroke: "none", "data-tip": `sign:${SIGN_ORDER[i]}`, class: "u-hit" }));
     const [gx, gy] = pt(a0 + 15, (R + rSignIn) / 2);
     if (name) {
       let rot = Math.atan2(gy - cy, gx - cx) * 180 / Math.PI + 90;
@@ -58,7 +58,7 @@ export function drawWheelPro(chart: Chart, enabledAspects: Set<string>, name: bo
     s.append(svg("line", { x1, y1, x2, y2, stroke: angular ? "#333" : "#0007", "stroke-width": angular ? 1.4 : 0.7 }));
     const span = ((cuspLons[(i + 1) % 12] - lon) % 360 + 360) % 360;
     const [nx, ny] = pt(lon + span / 2, (rSignIn + rHouseIn) / 2);
-    const t = svg("text", { x: nx, y: ny, "text-anchor": "middle", "dominant-baseline": "central", "font-size": 11, fill: "#555", "font-weight": "700" });
+    const t = svg("text", { x: nx, y: ny, "text-anchor": "middle", "dominant-baseline": "central", "font-size": 11, fill: "#555", "font-weight": "700", "data-tip": `house:${i + 1}`, class: "u-hit" });
     t.textContent = String(i + 1); s.append(t);
     const [cdx, cdy] = pt(lon + 2, rHouseIn + 7);
     const ct = svg("text", { x: cdx, y: cdy, "text-anchor": "start", "dominant-baseline": "central", "font-size": 7, fill: "#999" });
@@ -89,10 +89,10 @@ export function drawWheelPro(chart: Chart, enabledAspects: Set<string>, name: bo
     if (horizontal) {
       const anchor = Math.cos(th) < 0 ? "end" : "start";
       const [px, py] = pt(lon, R + 5);
-      const t = svg("text", { x: px, y: py - 8, "text-anchor": anchor, "dominant-baseline": "central", "font-size": 11, fill: col, "font-weight": "bold" }); t.textContent = txt; s.append(t);
+      const t = svg("text", { x: px, y: py - 8, "text-anchor": anchor, "dominant-baseline": "central", "font-size": 11, fill: col, "font-weight": "bold", "data-tip": `axis:${key}`, class: "u-hit" }); t.textContent = txt; s.append(t);
       if (degStr) { const dd = svg("text", { x: px, y: py + 7, "text-anchor": anchor, "dominant-baseline": "central", "font-size": 8, fill: col }); dd.textContent = degStr; s.append(dd); }
     } else {
-      const [lx, ly] = pt(lon, R + 12); const t = svg("text", { x: lx, y: ly, "text-anchor": "middle", "dominant-baseline": "central", "font-size": 11, fill: col, "font-weight": "bold" }); t.textContent = txt; s.append(t);
+      const [lx, ly] = pt(lon, R + 12); const t = svg("text", { x: lx, y: ly, "text-anchor": "middle", "dominant-baseline": "central", "font-size": 11, fill: col, "font-weight": "bold", "data-tip": `axis:${key}`, class: "u-hit" }); t.textContent = txt; s.append(t);
       if (degStr) { const [ddx, ddy] = pt(lon, R + 24); const dd = svg("text", { x: ddx, y: ddy, "text-anchor": "middle", "dominant-baseline": "central", "font-size": 8, fill: col }); dd.textContent = degStr; s.append(dd); }
     }
   }
@@ -128,28 +128,27 @@ export function drawWheelPro(chart: Chart, enabledAspects: Set<string>, name: bo
     s.append(svg("line", { x1: m0x, y1: m0y, x2: m1x, y2: m1y, stroke: "#0008", "stroke-width": 0.8 }));
     if (r < rPlanet - 1) { const [l1x, l1y] = pt(lon, r + 11); s.append(svg("line", { x1: m1x, y1: m1y, x2: l1x, y2: l1y, stroke: "#0004", "stroke-width": 0.4 })); }
     const { w, h } = boxDim[i];
+    // 天体一式を <g data-tip> にまとめてホバー/長押しの対象にする。
+    const pg = svg("g", { "data-tip": `planet:${o.p.planet}`, class: "u-hit" });
     if (name) {
-      // 名前は四角で囲う（通常表示と同じ。色地と同色でリング色に馴染ませ線を隠す）。
-      const grp = svg("g", {});
-      grp.append(svg("rect", { x: gx - w / 2, y: gy - h / 2, width: w, height: h, rx: 2, fill: "#fff", stroke: "none" }));
-      grp.append(svg("rect", { x: gx - w / 2, y: gy - h / 2, width: w, height: h, rx: 2, fill: signFill(o.p.sign), stroke: "#222", "stroke-width": 0.8 }));
-      (labelLines[i]).forEach((line, k) => { const ty = gy - h / 2 + NAME_PADY + NAME_LH * (k + 0.5); const tx = svg("text", { x: gx, y: ty, "text-anchor": "middle", "dominant-baseline": "central", "font-size": NAME_FS, fill: "#111" }); tx.textContent = line; grp.append(tx); });
-      s.append(grp);
+      pg.append(svg("rect", { x: gx - w / 2, y: gy - h / 2, width: w, height: h, rx: 2, fill: "#fff", stroke: "none" }));
+      pg.append(svg("rect", { x: gx - w / 2, y: gy - h / 2, width: w, height: h, rx: 2, fill: signFill(o.p.sign), stroke: "#222", "stroke-width": 0.8 }));
+      (labelLines[i]).forEach((line, k) => { const ty = gy - h / 2 + NAME_PADY + NAME_LH * (k + 0.5); const tx = svg("text", { x: gx, y: ty, "text-anchor": "middle", "dominant-baseline": "central", "font-size": NAME_FS, fill: "#111" }); tx.textContent = line; pg.append(tx); });
     } else {
-      // 記号はサイン色の下地で線を隠して直接描く。
-      s.append(svg("circle", { cx: gx, cy: gy, r: 12, fill: "#fff", stroke: "none" }));
-      s.append(svg("circle", { cx: gx, cy: gy, r: 12, fill: signFill(o.p.sign), stroke: "none" }));
+      pg.append(svg("circle", { cx: gx, cy: gy, r: 12, fill: "#fff", stroke: "none" }));
+      pg.append(svg("circle", { cx: gx, cy: gy, r: 12, fill: signFill(o.p.sign), stroke: "none" }));
       const g = svg("text", { x: gx, y: gy, "text-anchor": "middle", "dominant-baseline": "central", "font-size": 18, fill: "#111" });
       g.textContent = (PLANET_GLYPH[o.p.planet] ?? "?") + "︎";
-      s.append(g);
+      pg.append(g);
     }
-    // 度数は通常表示と同じく枠の上角（天体と同じ左右）。
+    // 度数は枠の上角（天体と同じ左右）。
     const leftCorner = gx < cx;
     const dgx = leftCorner ? gx - w / 2 : gx + w / 2;
     const dgy = gy - h / 2 - 5;
     const d = svg("text", { x: dgx, y: dgy, "text-anchor": leftCorner ? "start" : "end", "dominant-baseline": "central", "font-size": 8, fill: "#222" });
     d.textContent = `${fmtDeg(o.p.degree)}${o.p.retrograde ? "℞" : ""}`;
-    s.append(d);
+    pg.append(d);
+    s.append(pg);
   });
 
   // 円: 最外周 / サイン帯内縁 / ハウス帯内縁 / アスペクトハブ。

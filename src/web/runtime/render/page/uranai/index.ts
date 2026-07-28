@@ -1,6 +1,6 @@
 // ウラナイ画面のルート描画とフォーム類。定数・型・ヘルパは ./parts、ホイール描画は ./wheel に分割。
 import {
-  SIGN_ORDER, SIGN_NAME, PLANET_GLYPH, PLANET_ORDER, PLANET_NAME_LINES, ASPECT_INFO, ASPECT_ORDER, Person, Prefill, Settings, SETTING_FIELDS, Chart, UranaiView, api, lonOf, fmtDeg, Birth, HOUSE_SYSTEM_JA, IANA_ZONES, FALLBACK_ZONES, CC_ZONE, offsetFromZone, el, selectEl, loadSettings,
+  SIGN_ORDER, SIGN_GLYPH, SIGN_NAME, SIGN_ELEMENT, SIGN_QUALITY, ELEMENT_CHAR, QUALITY_CHAR, PLANET_GLYPH, PLANET_ORDER, PLANET_NAME_LINES, ASPECT_INFO, ASPECT_ORDER, Person, Prefill, Settings, SETTING_FIELDS, Chart, UranaiView, api, lonOf, fmtDeg, Birth, HOUSE_SYSTEM_JA, IANA_ZONES, FALLBACK_ZONES, CC_ZONE, offsetFromZone, el, selectEl, loadSettings,
 } from "./parts";
 import { drawWheelPro } from "./wheel";
 
@@ -133,11 +133,71 @@ function chartView(chart: Chart, birth: Birth | null | undefined, personId: stri
   const drawChart = () => { host.innerHTML = ""; host.append(drawWheelPro(chart, enabled, nameMode)); };
   const nameCb = el("input", { type: "checkbox", checked: false });
   nameCb.addEventListener("change", () => { nameMode = nameCb.checked; drawChart(); });
+
+  // ツールチップ: 天体/ASC等/サイン/ハウスにホバー（PC）・長押し（モバイル）で着目情報。
+  const ELEM_JA: Record<string, string> = { fire: "火", earth: "地", air: "風", water: "水" };
+  const QUAL_JA: Record<string, string> = { cardinal: "活動", fixed: "不動", mutable: "柔軟" };
+  const aspOf = (k: string): string => chart.aspects.filter((a) => a.a === k || a.b === k).sort((x, y) => x.orb - y.orb)
+    .map((a) => `<div class="u-tip-a">${ASPECT_INFO[a.type]?.label ?? a.type}　${bodyLabel(a.a === k ? a.b : a.a)}　${a.orb.toFixed(2)}°</div>`).join("");
+  const tipHTML = (kind: string, id: string): string => {
+    if (kind === "planet" || kind === "axis") {
+      const p = place.get(id); if (!p) return "";
+      const nm = kind === "axis" ? (PLANET_GLYPH[id] ?? id) : bodyLabel(id);
+      const asp = aspOf(id);
+      return `<div class="u-tip-h">${nm}</div>`
+        + `<div>サイン: ${SIGN_NAME[p.sign] ?? p.sign} ${fmtDeg(p.degree)}${p.retrograde ? " ℞" : ""}</div>`
+        + (kind === "planet" ? `<div>ハウス: ${houseOf(lonOf(p))}室</div>` : "")
+        + (asp ? `<div class="u-tip-s">アスペクト</div>${asp}` : `<div class="u-tip-a">アスペクトなし</div>`);
+    }
+    if (kind === "sign") {
+      const inSign = chart.placements.filter((pp) => pp.sign === id && !["asc", "mc", "dsc", "ic"].includes(pp.planet)).map((pp) => bodyLabel(pp.planet)).join("、") || "なし";
+      return `<div class="u-tip-h">${SIGN_GLYPH[id]}︎ ${SIGN_NAME[id] ?? id}</div>`
+        + `<div>元素: ${ELEM_JA[SIGN_ELEMENT[id]] ?? ELEMENT_CHAR[SIGN_ELEMENT[id]]}　区分: ${QUAL_JA[SIGN_QUALITY[id]] ?? QUALITY_CHAR[SIGN_QUALITY[id]]}</div>`
+        + `<div class="u-tip-s">在住</div><div>${inSign}</div>`;
+    }
+    if (kind === "house") {
+      const n = Number(id); const lon = cuspLons[n - 1];
+      const sign = SIGN_ORDER[Math.floor((((lon % 360) + 360) % 360) / 30) % 12];
+      const inH = chart.placements.filter((pp) => !["asc", "mc", "dsc", "ic"].includes(pp.planet) && houseOf(lonOf(pp)) === n).map((pp) => bodyLabel(pp.planet)).join("、") || "なし";
+      return `<div class="u-tip-h">${n}室</div>`
+        + `<div>カスプ: ${SIGN_NAME[sign] ?? sign} ${fmtDeg(((lon % 30) + 30) % 30)}</div>`
+        + `<div class="u-tip-s">在住</div><div>${inH}</div>`;
+    }
+    return "";
+  };
+  const tip = el("div", { className: "u-tip" });
+  const hideTip = () => { tip.style.display = "none"; };
+  const showTip = (elm: Element, clientX: number, clientY: number) => {
+    const data = elm.getAttribute("data-tip"); if (!data) return hideTip();
+    const [kind, id] = data.split(":");
+    const html = tipHTML(kind, id); if (!html) return hideTip();
+    tip.innerHTML = html; tip.style.display = "block";
+    const r = tip.getBoundingClientRect(), pad = 14;
+    let x = clientX + pad, y = clientY + pad;
+    if (x + r.width > window.innerWidth - 6) x = clientX - r.width - pad;
+    if (y + r.height > window.innerHeight - 6) y = clientY - r.height - pad;
+    tip.style.left = `${Math.max(6, x)}px`; tip.style.top = `${Math.max(6, y)}px`;
+  };
+  const hitOf = (e: Event): Element | null => (e.target as Element).closest?.("[data-tip]") ?? null;
+  host.addEventListener("mouseover", (e) => { const t = hitOf(e); if (t) showTip(t, (e as MouseEvent).clientX, (e as MouseEvent).clientY); });
+  host.addEventListener("mousemove", (e) => { const t = hitOf(e); if (t) showTip(t, (e as MouseEvent).clientX, (e as MouseEvent).clientY); else hideTip(); });
+  host.addEventListener("mouseleave", hideTip);
+  let pressTimer: ReturnType<typeof setTimeout> | undefined;
+  host.addEventListener("touchstart", (e) => {
+    const t = hitOf(e); if (!t) { hideTip(); return; }
+    const touch = (e as TouchEvent).touches[0];
+    pressTimer = setTimeout(() => showTip(t, touch.clientX, touch.clientY), 450);
+  }, { passive: true });
+  const cancelPress = () => { if (pressTimer) clearTimeout(pressTimer); };
+  host.addEventListener("touchend", cancelPress);
+  host.addEventListener("touchmove", () => { cancelPress(); hideTip(); }, { passive: true });
+
   const chartNode = el("div", {}, [
     el("div", { className: "u-glyph-toggle" }, [el("label", { className: "u-tg-chip" }, [nameCb, el("span", { textContent: "天体を名前（フルネーム）で表示" })])]),
-    host,
+    host, tip,
   ]);
   drawChart();
+  hideTip();
   if (chart.range_warnings?.length) chartNode.append(el("div", { className: "u-warn", textContent: `⚠️ 有効範囲外の天体: ${chart.range_warnings.join(", ")}` }));
 
   // 天体（アングルも同じ表に。逆行・室はアングルでは空欄）
@@ -304,6 +364,12 @@ export async function renderUranai(container: HTMLElement): Promise<void> {
     .u-tg-btn.on{color:#1f2937;background:#4A90C218;border-color:#4A90C2aa;font-weight:600}
     .u-tg-btn.on .u-tg-sw{opacity:1}
     .u-warn{color:#c82;font-size:13px;margin:8px 0}
+    /* ツールチップ（ホバー/長押しで着目情報） */
+    .u-hit{cursor:pointer}
+    .u-tip{position:fixed;z-index:1000;pointer-events:none;display:none;max-width:280px;background:#1f2937;color:#e5e7eb;font-size:12px;line-height:1.55;padding:8px 11px;border-radius:8px;box-shadow:0 10px 28px #0006}
+    .u-tip-h{font-weight:700;font-size:13px;color:#fff;margin-bottom:2px}
+    .u-tip-s{color:#93c5fd;font-weight:600;margin-top:5px}
+    .u-tip-a{color:#cbd5e1}
     /* 出生データ・計算方式の表（チャート上部） */
     .u-data{display:flex;flex-wrap:wrap;gap:2px 14px;margin:0 0 8px;max-width:600px;font-size:12px}
     .u-data-row{display:inline-flex;gap:5px;align-items:baseline}
