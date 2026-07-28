@@ -558,6 +558,88 @@ export const handleApiRequest = async (request: Request, env: Env): Promise<Resp
     }
   }
 
+  // Uranai: 地名→緯度経度のジオコーディング（外部 Nominatim）。バックエンドではなく front で完結。
+  // 注: Nominatim は利用ポリシー/レート制限あり。将来は自前ジオコーダ/キャッシュに置換する。
+  if (url.pathname === '/api/v1/uranai/geocode' && request.method === 'GET') {
+    const q = (url.searchParams.get('q') ?? '').trim();
+    if (!q) return Response.json({ results: [] }, { status: 200 });
+    const nomi = new URL('https://nominatim.openstreetmap.org/search');
+    nomi.searchParams.set('q', q);
+    nomi.searchParams.set('format', 'json');
+    nomi.searchParams.set('limit', '6');
+    nomi.searchParams.set('accept-language', 'ja');
+    nomi.searchParams.set('addressdetails', '1');
+    type NomiAddr = Record<string, string>;
+    try {
+      const res = await fetch(nomi.toString(), { headers: { 'User-Agent': 'uranai.tachiiri.com/1.0 (astro chart)' } });
+      const arr = res.ok ? ((await res.json()) as Array<{ display_name: string; lat: string; lon: string; address?: NomiAddr; name?: string; addresstype?: string }>) : [];
+      // 構造化住所から「都道府県＋（郡）＋市区町村＋以下」を日本語順（例: 東京都渋谷区…）で組み立てる。
+      // 「北海道地方」等の region、「石狩振興局」等の振興局/支庁（county だが末尾が郡でない）は住所に書かないので除外。
+      // 特別区（例: 渋谷区）は state が入らず ISO3166-2-lvl4="JP-13" で都道府県が示される。ISO から補完する。
+      const JP_PREF: Record<string, string> = {
+        '01': '北海道', '02': '青森県', '03': '岩手県', '04': '宮城県', '05': '秋田県', '06': '山形県', '07': '福島県',
+        '08': '茨城県', '09': '栃木県', '10': '群馬県', '11': '埼玉県', '12': '千葉県', '13': '東京都', '14': '神奈川県',
+        '15': '新潟県', '16': '富山県', '17': '石川県', '18': '福井県', '19': '山梨県', '20': '長野県', '21': '岐阜県',
+        '22': '静岡県', '23': '愛知県', '24': '三重県', '25': '滋賀県', '26': '京都府', '27': '大阪府', '28': '兵庫県',
+        '29': '奈良県', '30': '和歌山県', '31': '鳥取県', '32': '島根県', '33': '岡山県', '34': '広島県', '35': '山口県',
+        '36': '徳島県', '37': '香川県', '38': '愛媛県', '39': '高知県', '40': '福岡県', '41': '佐賀県', '42': '長崎県',
+        '43': '熊本県', '44': '大分県', '45': '宮崎県', '46': '鹿児島県', '47': '沖縄県',
+      };
+      const prefFromISO = (a: NomiAddr): string => {
+        const m = /^JP-(\d{2})$/.exec(a['ISO3166-2-lvl4'] || a['ISO3166-2-lvl3'] || '');
+        return m ? (JP_PREF[m[1]] ?? '') : '';
+      };
+      const jpAddr = (a: NomiAddr | undefined): string => {
+        if (!a) return '';
+        const seen = new Set<string>(), out: string[] = [];
+        const push = (v?: string) => { if (v && !seen.has(v)) { seen.add(v); out.push(v); } };
+        push(a.state || a.province || prefFromISO(a));
+        if (a.county && /郡$/.test(a.county)) push(a.county);
+        push(a.city || a.town || a.village || a.municipality);
+        push(a.city_district || a.borough || a.ward);
+        push(a.suburb); push(a.quarter); push(a.neighbourhood);
+        push(a.road);
+        if (a.house_number) push(a.house_number);
+        return out.join('');
+      };
+      // 構造化住所が空なら display_name（「詳細,…,国」順）を逆順連結でフォールバック。
+      const fromDisplay = (displayName: string): string =>
+        String(displayName ?? '').split(',').map((s) => s.trim())
+          .filter((s) => s && s !== '日本' && s !== 'Japan' && !/^〒?\d{3}-?\d{0,4}$/.test(s))
+          .reverse().join('');
+      // 行政地名（市区町村）は住所に含まれるので地名を別出ししない。ランドマーク/駅等の POI 名は
+      // 住所に出てこないので「地名」として別に載せる（例: 松本城（長野県松本市丸の内））。
+      const ADMIN_TYPES = new Set(['country', 'state', 'province', 'county', 'city', 'town', 'village', 'municipality', 'city_district', 'borough', 'suburb', 'ward', 'district', 'administrative', 'postcode']);
+      return Response.json({
+        results: arr.map((r) => {
+          const addr = jpAddr(r.address) || fromDisplay(r.display_name) || r.display_name;
+          const nm = String(r.name ?? '').trim();
+          // POI（非行政）で、かつ住所文字列にまだ含まれていない地名だけを別出しする。
+          const place = nm && !ADMIN_TYPES.has(String(r.addresstype ?? '')) && !addr.includes(nm) ? nm : '';
+          const name = place ? `${place}（${addr}）` : addr;
+          const cc = String(r.address?.country_code ?? '').toLowerCase(); // 国コード（タイムゾーン既定推定用）
+          return { name, place, addr, lat: Number(r.lat), lng: Number(r.lon), cc };
+        }),
+      }, { status: 200 });
+    } catch {
+      return Response.json({ results: [] }, { status: 200 });
+    }
+  }
+
+  // Uranai per-tenant API — proxy to backend /api/v1/uranai/* (graph と同型)。
+  const uranaiApiMatch = url.pathname.match(/^\/api\/v1\/uranai(\/.*)?$/);
+  if (uranaiApiMatch) {
+    const suffix = uranaiApiMatch[1] ?? '/';
+    const backendPath = `/api/v1/uranai${suffix}${url.search}`;
+    const body = request.method !== 'GET' && request.method !== 'HEAD' ? await request.text() : undefined;
+    const identity = await readIdentity(env, request);
+    const tenantContext = { tenantId: identity?.groupId, subjectId: identity?.userId };
+    if (!tenantContext.tenantId || !tenantContext.subjectId) {
+      return Response.json({ error: 'unauthenticated' }, { status: 401 });
+    }
+    return authorizeFetch(env, { path: backendPath, method: request.method, body, tenantContext });
+  }
+
   const treesMatch = url.pathname.match(/^\/api\/v1\/trees\/(.+)$/);
   if (treesMatch) {
     const treeId = decodeURIComponent(treesMatch[1]);
@@ -676,7 +758,7 @@ export const handleApiRequest = async (request: Request, env: Env): Promise<Resp
   }
 
   if (isNavigationRequest(request)) {
-    return new Response('<!doctype html><script type="module" src="/client.js"></script>', {
+    return new Response('<!doctype html><html lang="ja"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1"></head><body><script type="module" src="/client.js"></script></body></html>', {
       headers: { 'Content-Type': 'text/html; charset=UTF-8' },
     });
   }

@@ -286,9 +286,12 @@ export function createPanelsView(ctx: GraphEditorContext): {
   const setSelectedNode = (nodeId: string | null, ancestorIds: Set<string> = new Set(), path: PanelPathEntry[] = [], updateRelation = true) => {
     // 同じノードの再選択（ウィンドウ復帰でノード行 textarea が再フォーカスされる等）では関係/コンテキスト
     // パネルを再描画しない — 無駄な再取得・チラつきを防ぐ。
+    // ただし × で関係パネルを閉じた後は「同じノードをもう一度クリック」が唯一の開き直し操作なので、
+    // プライマリが無いときは同一ノードでも開き直す（閉じた後に何も起きない、という状態を作らない）。
     const changed = nodeId !== selectedNodeId;
+    const primaryMissing = !relationPanels.some((p) => p.primary);
     selectedNodeId = nodeId;
-    if (nodeId !== null && updateRelation && changed) {
+    if (nodeId !== null && updateRelation && (changed || primaryMissing)) {
       ctx.setActiveRelation(null);
       ctx.setContextTarget?.(null, null); // ノードを変えたら、リレーション未選択＝コンテキストは空に
       ensurePrimaryPanel();

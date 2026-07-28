@@ -509,7 +509,7 @@ async function fetchInner(request: Request, env: Env): Promise<Response> {
     const productScript = isProductHost(productHostname)
       ? `<script>window.__PRODUCT__=${JSON.stringify(productClientId(productHostname))}</script>`
       : '';
-    return new Response(`<!doctype html>${productScript}<script type="module" src="${CLIENT_JS_PATH}"></script>`, {
+    return new Response(`<!doctype html><html lang="ja"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1">${productScript}<script type="module" src="${CLIENT_JS_PATH}"></script></head><body></body></html>`, {
       headers: { 'Content-Type': 'text/html; charset=UTF-8' },
     });
 }
