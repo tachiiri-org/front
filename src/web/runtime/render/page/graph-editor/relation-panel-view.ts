@@ -1,5 +1,5 @@
 import type { GraphEditorContext, PanelView, ExplorerNode, ExplorerRelation, PanelPathEntry } from './types';
-import { BORDER, TEXT_HIGH, TEXT_MID, TEXT_DIM, SELECT_STRONG, ORPHAN_ID, showToast } from './constants';
+import { BG, BORDER, TEXT_HIGH, TEXT_MID, TEXT_DIM, SELECT_STRONG, ORPHAN_ID, showToast } from './constants';
 import {
   fetchNodeRelations, apiCreateRelation, apiSetRelationText, apiAddRay, apiRemoveRay, fetchAllNodes, apiCreateNode,
   fetchOrphanRelations, apiDeleteRelation, apiDeleteNode, apiReorderNodeRelations, apiUpdateNode, apiPasteRelations,
@@ -115,6 +115,9 @@ export function createRelationPanelView(
   let relGroupFilter: { dom: number; sub: number } | null = null; // 検索サジェストで選んだグループ（null=全表示）
   let currentRelations: ExplorerRelation[] = [];
   let currentDraftNodeId: string | null = null; // 追加ドラフト行の対象ノード（orphan 表示中は null）。
+  // ノードパネルでソースノードを何も選択していない状態でも関係テキストを書けるようにする。主語ノードが
+  // 無いので、書いた行は「リンクなし(orphan)」として作る（本文の [[名前]]／⟦id⟧ だけが参加者になる）。
+  let currentDraftNoSubject = false;
   // ドメイン別分割: 各関係を「相手ノードのドメイン」で束ねる。アンカーノードは単一ドメインに属するので
   // 自分のドメインでは割れない → 相手のドメイン（別軸）で割る。ハブノードの関係がテーマ別に立ち上がる。
   // グループの並びは「件数の少ない順→多い順」（膨らんだ塊＝その他的に末尾へ）。相手不明(-1)は常に最後。
@@ -137,8 +140,10 @@ export function createRelationPanelView(
 
   // ノードパネルと同じ2行構成: 1行目=操作（言語切替 + ⟳ + リンクなし, 28px）、2行目=パンくず。
   // 各行が自分の border-bottom を持つので行間にも線が入り、ノードパネルと高さ・見た目が揃う。
+  // autoHeight（縦スタック）ではスクロールを持つのは列(relationColumn の子)側なので、head は sticky で
+  // 列の上端に貼り付ける（下スクロールしてもパンくず・検索が残る）。背景を敷かないと行が透けて重なる。
   const head = document.createElement('div');
-  head.style.cssText = `flex-shrink:0;box-sizing:border-box;display:flex;flex-direction:column;font-size:11px;color:${TEXT_MID};`;
+  head.style.cssText = `flex-shrink:0;box-sizing:border-box;display:flex;flex-direction:column;font-size:11px;color:${TEXT_MID};position:sticky;top:0;z-index:2;background:${BG};`;
   el.appendChild(head);
 
   const bodyEl = document.createElement('div');
@@ -401,11 +406,11 @@ export function createRelationPanelView(
     bw.addEventListener('mousedown', (e) => e.preventDefault());
     bw.addEventListener('click', () => { content.querySelector('textarea')?.focus(); });
 
-    // ③ コピーボタン: ノードの ❐ と同様に行の右端へ。`[lineId]ラベル解決済み本文` をコピー
-    // （⟦id⟧ はチップの表示ラベルへ解決）。AIエージェントとのやり取り用の参照文字列。
+    // ③ コピーボタン: ノードの ❐ と同様に行の右端へ。本文をそのまま貼り付けられる形でコピーする。
+    // lineId(uuid) は付けず、ノードリンクは `[[ラベル]]`（＝貼り付け時にリンクとして解釈される形式）。
     const relCopyText = () => Array.from(content.children).map((c) => {
       const cel = c as HTMLElement;
-      if (cel.dataset.nodeLink) return cel.textContent ?? '';
+      if (cel.dataset.nodeLink) return `[[${cel.textContent ?? ''}]]`;
       return (c as HTMLTextAreaElement).value;
     }).join('');
     const copyBtn = document.createElement('button');
@@ -414,7 +419,7 @@ export function createRelationPanelView(
     copyBtn.style.cssText = `flex-shrink:0;background:transparent;border:none;color:${TEXT_DIM};cursor:pointer;font-size:12px;padding:0 6px;line-height:1;`;
     copyBtn.addEventListener('mousedown', (e) => e.preventDefault());
     copyBtn.addEventListener('click', () => {
-      void navigator.clipboard.writeText(`[${relation.lineId}]${relCopyText()}`).then(() => showToast('コピーしました'));
+      void navigator.clipboard.writeText(relCopyText()).then(() => showToast('コピーしました'));
     });
     row.appendChild(copyBtn);
     // テキストの無い余白クリックでフォーカス。左ガター（先頭子要素より左＝padding 部）→ 先頭テキスト片の先頭、
@@ -794,7 +799,8 @@ export function createRelationPanelView(
   };
 
   // ノードパネルの draft 行と同じ構成（spacer+四角+入力）。テキストを書いて Enter で作成。
-  const makeDraftRow = (nodeId: string): HTMLElement => {
+  // nodeId=null は「主語ノードが決まっていないドラフト行」。作成は /paste（subjectId なし）に寄せる。
+  const makeDraftRow = (nodeId: string | null): HTMLElement => {
     const row = document.createElement('div');
     // 新規追加行は下に区切り線を入れて、既存の関係一覧と視覚的に分ける。
     row.style.cssText = `display:flex;align-items:flex-start;padding:2px 0 5px 0;margin-bottom:3px;border-bottom:1px solid ${BORDER};`;
@@ -823,6 +829,19 @@ export function createRelationPanelView(
           let mentionId = n.id;
           if (createLabel) { const c = await apiCreateNode(ctx.gId, lang, createLabel); if (!c) { closeMenu(); return; } mentionId = c.id; }
           mentionId = await ctx.awaitRealId(mentionId);   // never persist a temp id
+          // 主語ノードが無いドラフト行: /paste（subjectId なし）で1行だけ作り、その場に差し込む
+          // （現在ノードの関係一覧には属さないので render() では復元されない＝楽観挿入のみ）。
+          if (!nodeId) {
+            closeMenu();
+            ta.value = ''; ta.style.color = TEXT_DIM; resize();
+            const [rel] = await apiPasteRelations(ctx.gId, lang, null, [`${leftStr}⟦${mentionId}⟧${rightStr}`]);
+            if (!rel) return;
+            const newRow = renderRelationRow(rel);
+            row.insertAdjacentElement('afterend', newRow);
+            const nodeLink = newRow.querySelector(`[data-node-link="${CSS.escape(mentionId)}"]`) as HTMLElement | null;
+            ((nodeLink?.nextElementSibling as HTMLTextAreaElement | null) ?? (newRow.querySelector('textarea') as HTMLTextAreaElement | null))?.focus();
+            return;
+          }
           const subjId = await ctx.awaitRealId(nodeId);   // subject may itself be a freshly-created node
           closeMenu();
           ta.value = ''; ta.style.color = TEXT_DIM;
@@ -874,6 +893,8 @@ export function createRelationPanelView(
         const text = ta.value.trim();
         if (!text) return;
         ta.value = ''; resize();
+        // 主語ノードが無いドラフト行は、貼り付けと同じ経路（/paste・subjectId なし）で1行作成する。
+        if (!nodeId) { await pasteLines(row, [text]); return; }
         // ドラフト直後へ楽観挿入（点滅しない）。本文にノードリンクが無ければ末尾に ⟦node⟧ を付けて
         // 当該ノードに紐づける（後で手動で外せば ⑤ でリンクなしへ）。
         await insertRelationAfter(row, text);
@@ -937,7 +958,8 @@ export function createRelationPanelView(
     relationBoxByRelation.clear();
     selAnchor = null; selCursor = null; // 行を作り直すので複数選択はリセット。
     const q = filterQuery.trim().toLowerCase();
-    if (!orphanMode && currentDraftNodeId && !q && !relGroupFilter) bodyEl.appendChild(makeDraftRow(currentDraftNodeId)); // 検索/グループ絞り込み中は追加ドラフト行を隠す
+    // 検索/グループ絞り込み中は追加ドラフト行を隠す。ノード未選択(currentDraftNoSubject)でも行は出す。
+    if (!orphanMode && (currentDraftNodeId || currentDraftNoSubject) && !q && !relGroupFilter) bodyEl.appendChild(makeDraftRow(currentDraftNodeId));
     let visible = currentRelations.filter((r) => relationMatchesQuery(r, q));
     if (relGroupFilter) visible = visible.filter((r) => (relDomain.get(r.lineId) ?? -1) === relGroupFilter!.dom && (relSub.get(r.lineId) ?? -1) === relGroupFilter!.sub);
     // 相手ドメインが2つ以上に跨る時だけ境界ヘッダを出す（単一ドメインの末端ノードでは出さない＝ノイズ回避）。
@@ -1093,7 +1115,9 @@ export function createRelationPanelView(
     // ── パンくず（ルート › … › 現在ノード）＋ 更新(⟳) ── アウトラインの bcEl と同じ見た目。
     const bcRow = document.createElement('div');
     // 先頭を関係行・検索行と同じ構成（padding-left:8 + spacer:6）にして、ノード名を虫眼鏡・□の列に揃える。
-    bcRow.style.cssText = `display:flex;align-items:center;gap:2px;padding:4px 8px 4px 8px;border-bottom:1px solid ${BORDER};font-size:12px;min-width:0;`;
+    // 右端はパネル削除(×, panels-view が absolute で置く)の領域なので、その分だけ padding を空けて
+    // 更新(⟳)やパンくずが × と重ならないようにする。
+    bcRow.style.cssText = `display:flex;align-items:center;gap:2px;padding:4px 26px 4px 8px;border-bottom:1px solid ${BORDER};font-size:12px;min-width:0;`;
     const bcSpacer = document.createElement('span');
     bcSpacer.style.cssText = `flex-shrink:0;width:6px;`;
     bcRow.appendChild(bcSpacer);
@@ -1139,12 +1163,17 @@ export function createRelationPanelView(
     if (orphanMode) {
       const relations = await fetchOrphanRelations(ctx.gId);
       if (token !== renderToken) return;
-      currentRelations = relations; currentDraftNodeId = null;
+      currentRelations = relations; currentDraftNodeId = null; currentDraftNoSubject = false;
       renderBody();
       return;
     }
 
-    if (!currentNodeId) { currentRelations = []; currentDraftNodeId = null; renderBody(); return; }
+    // ノード未選択でも書けるように、主語なしのドラフト行を出す（compact＝ドリル先パネルは対象外）。
+    if (!currentNodeId) {
+      currentRelations = []; currentDraftNodeId = null; currentDraftNoSubject = !opts.compact;
+      renderBody();
+      return;
+    }
     const nodeId = currentNodeId;
     const relations = await fetchNodeRelations(ctx.gId, nodeId);
     if (token !== renderToken) return;
@@ -1228,7 +1257,7 @@ export function createRelationPanelView(
         for (const r of cl.rels) { relSub.set(r.lineId, showSub ? sid : -1); ordered.push(r); }
       }
     }
-    currentRelations = ordered; currentDraftNodeId = nodeId; // 追加ドラフト行はこのノード宛て
+    currentRelations = ordered; currentDraftNodeId = nodeId; currentDraftNoSubject = false; // 追加ドラフト行はこのノード宛て
     renderBody();
   };
 
