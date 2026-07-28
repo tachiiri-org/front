@@ -55,10 +55,28 @@ export const SETTING_FIELDS: Array<{ key: keyof Settings; label: string; options
 export type Placement = { planet: string; sign: string; degree: number; retrograde?: boolean };
 export type Aspect = { a: string; b: string; type: string; orb: number };
 export type Cusp = { system: string; index: number; longitude: number };
+// アスペクトパターン（バックエンド detectPatterns の出力）。bodies は構成天体。
+export type Pattern = { pattern: string; bodies: string[]; focus?: string; scope?: string; tight?: boolean; subsumed?: boolean };
+// 図形の表示メタ（名称・別名・構成・小配置か）。現代西洋/Tierney 準拠。
+export const PATTERN_INFO: Record<string, { name: string; aka?: string; comp: string; minor?: boolean }> = {
+  grand_sextile:     { name: "グランドセクスタイル", aka: "六芒星", comp: "セクスタイル×6（グランドトライン×2）" },
+  grand_cross:       { name: "グランドクロス", aka: "大十字", comp: "オポジション×2＋スクエア×4" },
+  kite:              { name: "カイト", aka: "凧", comp: "グランドトライン＋オポジション＋セクスタイル×2" },
+  mystic_rectangle:  { name: "ミスティックレクタングル", comp: "オポジション×2＋トライン×2＋セクスタイル×2" },
+  grand_trine:       { name: "グランドトライン", aka: "大三角", comp: "トライン×3" },
+  t_square:          { name: "Tスクエア", comp: "オポジション＋スクエア×2" },
+  yod:               { name: "ヨッド", aka: "神の指", comp: "セクスタイル＋インコンジャンクト×2" },
+  cradle:            { name: "クレイドル", aka: "ゆりかご", comp: "オポジション＋セクスタイル×3", minor: true },
+  wedge:             { name: "ウェッジ", aka: "調停", comp: "オポジション＋トライン＋セクスタイル", minor: true },
+  mini_trine:        { name: "ミニトライン", aka: "小三角", comp: "トライン＋セクスタイル×2", minor: true },
+  stellium:          { name: "ステリウム", comp: "同一サイン/ハウスに3天体以上" },
+};
+export const PATTERN_ORDER = ["grand_sextile", "grand_cross", "kite", "mystic_rectangle", "grand_trine", "t_square", "yod", "stellium", "cradle", "wedge", "mini_trine"];
 export type Chart = {
   ascendant: number; midheaven: number;
   house_system?: string; cusps?: Cusp[];
   placements: Placement[]; aspects: Aspect[];
+  patterns?: Pattern[];
   dignities: Array<{ planet: string; dignity: string }>;
   elements: Array<{ element: string; count: number }>;
   qualities: Array<{ quality: string; count: number }>;

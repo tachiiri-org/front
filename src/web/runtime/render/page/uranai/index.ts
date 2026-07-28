@@ -1,6 +1,6 @@
 // ウラナイ画面のルート描画とフォーム類。定数・型・ヘルパは ./parts、ホイール描画は ./wheel に分割。
 import {
-  SIGN_ORDER, SIGN_GLYPH, SIGN_NAME, SIGN_ELEMENT, SIGN_QUALITY, ELEMENT_CHAR, QUALITY_CHAR, PLANET_GLYPH, PLANET_ORDER, PLANET_NAME_LINES, ASPECT_INFO, ASPECT_ORDER, Person, Prefill, Settings, SETTING_FIELDS, Chart, UranaiView, api, lonOf, fmtDeg, Birth, HOUSE_SYSTEM_JA, IANA_ZONES, FALLBACK_ZONES, CC_ZONE, offsetFromZone, el, selectEl, loadSettings,
+  SIGN_ORDER, SIGN_GLYPH, SIGN_NAME, SIGN_ELEMENT, SIGN_QUALITY, ELEMENT_CHAR, QUALITY_CHAR, PLANET_GLYPH, PLANET_ORDER, PLANET_NAME_LINES, ASPECT_INFO, ASPECT_ORDER, PATTERN_INFO, PATTERN_ORDER, Person, Prefill, Settings, SETTING_FIELDS, Chart, UranaiView, api, lonOf, fmtDeg, Birth, HOUSE_SYSTEM_JA, IANA_ZONES, FALLBACK_ZONES, CC_ZONE, offsetFromZone, el, selectEl, loadSettings,
 } from "./parts";
 import { drawWheelPro } from "./wheel";
 
@@ -215,6 +215,45 @@ function chartView(chart: Chart, birth: Birth | null | undefined, personId: stri
     aspectNode.append(mkTable(["天体", "天体", "オーブ"], rows.map((a) => [bodyLabel(a.a), bodyLabel(a.b), `${a.orb.toFixed(2)}°`])));
   }
 
+  // アスペクトパターン（配置図形）。既定は非内包の主要図形、詳細トグルで小配置・内包も表示。
+  // 意味は表示せず、名称・別名・構成アスペクト・関与天体（＋頂点/出口）の事実のみ。
+  const patterns = chart.patterns ?? [];
+  const isMinor = (p: { pattern: string }): boolean => PATTERN_INFO[p.pattern]?.minor ?? false;
+  const majorCount = patterns.filter((p) => !p.subsumed && !isMinor(p)).length;
+  const FOCUS_LABEL: Record<string, string> = { kite: "出口", t_square: "頂点", yod: "頂点", wedge: "頂点", mini_trine: "頂点" };
+  const patternNode = el("div", {});
+  const patList = el("div", { className: "u-pat-list" });
+  const detailCb = el("input", { type: "checkbox" }) as HTMLInputElement;
+  const renderPatterns = () => {
+    patList.innerHTML = "";
+    const show = patterns.filter((p) => detailCb.checked || (!p.subsumed && !isMinor(p)));
+    show.sort((a, b) => (PATTERN_ORDER.indexOf(a.pattern) - PATTERN_ORDER.indexOf(b.pattern)) || (Number(a.subsumed ?? false) - Number(b.subsumed ?? false)));
+    if (!show.length) { patList.append(el("div", { className: "u-pat-empty", textContent: "該当する配置はありません" })); return; }
+    for (const p of show) {
+      const info = PATTERN_INFO[p.pattern];
+      const card = el("div", { className: "u-pat" + (p.subsumed ? " u-pat-sub" : "") });
+      const head = el("div", { className: "u-pat-h" }, [el("b", { textContent: info?.name ?? p.pattern })]);
+      if (info?.aka) head.append(el("span", { className: "u-pat-aka", textContent: info.aka }));
+      if (p.tight) head.append(el("span", { className: "u-pat-badge", textContent: "密集≤10°" }));
+      if (p.subsumed) head.append(el("span", { className: "u-pat-badge u-pat-in", textContent: "内包" }));
+      card.append(head, el("div", { className: "u-pat-comp", textContent: info?.comp ?? "" }));
+      card.append(el("div", { className: "u-pat-bodies", textContent: p.bodies.map((k) => bodyLabel(k)).join("　") }));
+      if (p.focus) card.append(el("div", { className: "u-pat-focus", textContent: `${FOCUS_LABEL[p.pattern] ?? "頂点"}: ${bodyLabel(p.focus)}` }));
+      if (p.pattern === "stellium") {
+        const s0 = place.get(p.bodies[0])?.sign;
+        const sc = p.scope === "house" ? "同一ハウス" : `同一サイン${s0 ? `: ${SIGN_GLYPH[s0]} ${SIGN_NAME[s0] ?? s0}` : ""}`;
+        card.append(el("div", { className: "u-pat-focus", textContent: sc }));
+      }
+      patList.append(card);
+    }
+  };
+  if (patterns.some((p) => p.subsumed || isMinor(p))) {
+    detailCb.addEventListener("change", renderPatterns);
+    patternNode.append(el("div", { className: "u-pat-toggle" }, [el("label", { className: "u-tg-chip" }, [detailCb, el("span", { textContent: "小配置・内包も表示" })])]));
+  }
+  patternNode.append(patList);
+  renderPatterns();
+
   // 基本情報: 通常は表。各編集項目に編集アイコン、押すとその項目だけ編集モード（他はグレーアウト）、
   // 再計算(保存)またはキャンセル。
   const bm = (birth?.born_at ?? "").match(/^(\d{4}-\d{2}-\d{2})T(\d{2}:\d{2})/);
@@ -327,6 +366,7 @@ function chartView(chart: Chart, birth: Birth | null | undefined, personId: stri
     { label: "天体", node: planetTbl },
     { label: "カスプ", node: cuspTbl },
     { label: `アスペクト(${chart.aspects.length})`, node: aspectNode },
+    { label: `配置(${majorCount})`, node: patternNode },
   ];
   const content = el("div", { className: "u-tab-content" });
   const secHeads = sections.map((s) => el("div", { className: "u-sec-head", textContent: s.label }));
@@ -394,6 +434,20 @@ export async function renderUranai(container: HTMLElement): Promise<void> {
     .u-tg-btn.on{color:#1f2937;background:#4A90C218;border-color:#4A90C2aa;font-weight:600}
     .u-tg-btn.on .u-tg-sw{opacity:1}
     .u-warn{color:#c82;font-size:13px;margin:8px 0}
+    /* アスペクトパターン（配置図形）カード */
+    .u-pat-toggle{margin:2px 0 10px}
+    .u-pat-list{display:flex;flex-direction:column;gap:8px}
+    .u-pat{border:1px solid #0002;border-left:3px solid #4A90C2;border-radius:8px;padding:8px 11px;background:#fff}
+    .u-pat-sub{border-left-color:#bbb;background:#fafafa;opacity:.85}
+    .u-pat-h{display:flex;flex-wrap:wrap;align-items:baseline;gap:8px}
+    .u-pat-h b{font-size:14px;color:#1f2937}
+    .u-pat-aka{font-size:11px;color:#999}
+    .u-pat-badge{font-size:10px;color:#2A7;border:1px solid #2A78;border-radius:999px;padding:1px 7px;line-height:1.5}
+    .u-pat-in{color:#999;border-color:#bbb}
+    .u-pat-comp{font-size:11px;color:#888;margin:2px 0 5px}
+    .u-pat-bodies{font-size:13px;color:#333;letter-spacing:.02em}
+    .u-pat-focus{font-size:11.5px;color:#4A90C2;margin-top:3px}
+    .u-pat-empty{font-size:12.5px;color:#999;padding:4px 2px}
     /* ツールチップ（ホバー/長押しで着目情報） */
     .u-hit{cursor:pointer}
     .u-tip{position:fixed;z-index:1000;pointer-events:none;display:none;max-width:280px;background:#1f2937;color:#e5e7eb;font-size:12px;line-height:1.55;padding:8px 11px;border-radius:8px;box-shadow:0 10px 28px #0006}
