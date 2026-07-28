@@ -178,11 +178,15 @@ export function createRelationPanelView(
     container.appendChild(item);
   };
   const closeMenu = () => { menu.style.display = 'none'; menu.innerHTML = ''; mention = null; navItems = []; navIdx = -1; menuOpen = false; };
-  const showMenu = (anchor: HTMLTextAreaElement, query: string, nodes: ExplorerNode[]) => {
+  // deferCreate: 確定してもノードを作らない呼び出し元（ドラフト行）向けの表示。実際の作成は行の確定(Enter)時。
+  const showMenu = (anchor: HTMLTextAreaElement, query: string, nodes: ExplorerNode[], deferCreate = false) => {
     menu.innerHTML = ''; navItems = []; navIdx = -1;
     nodes.slice(0, 20).forEach((n) => addMenuItem(menu, labelOf(n, lang), () => void mention?.onPick(n)));
     const exact = nodes.find((n) => labelOf(n, lang) === query);
-    if (query && !exact) addMenuItem(menu, `＋「${query}」を新規ノードで作成して挿入`, () => void mention?.onPick({ id: '' }, query));
+    if (query && !exact) {
+      const label = deferCreate ? `＋「${query}」を挿入（Enter で作成）` : `＋「${query}」を新規ノードで作成して挿入`;
+      addMenuItem(menu, label, () => void mention?.onPick({ id: '' }, query));
+    }
     if (navItems.length === 0) { closeMenu(); return; }
     const rect = anchor.getBoundingClientRect();
     menu.style.left = `${rect.left}px`;
@@ -785,8 +789,12 @@ export function createRelationPanelView(
   // 楽観的に表示するが、実体は現在ノードの関係ではないので、次の再描画(render)で現在ノードの関係一覧からは消える
   // （マークが現在ノード自身を含む行だけが本当に現在ノードの関係として残る）。並べ替えは現在ノードの関係ではない
   // ため行わない。
-  const pasteLines = async (anchorRow: HTMLElement, lines: string[]): Promise<number> => {
-    const created = await apiPasteRelations(ctx.gId, lang, null, lines);
+  // subjectId を渡した場合だけ、作成した行に現在ノードを主語(参加者)として紐づける。貼り付けは従来どおり
+  // 主語なし（null）で呼ぶ。ドラフト行の Enter は、本文の [[名前]] をサーバに解決させたうえで現在ノードの
+  // 関係にしたいので subjectId を渡す。
+  const pasteLines = async (anchorRow: HTMLElement, lines: string[], subjectId: string | null = null): Promise<number> => {
+    const subj = subjectId ? await ctx.awaitRealId(subjectId) : null;
+    const created = await apiPasteRelations(ctx.gId, lang, subj, lines);
     let anchor: HTMLElement = anchorRow;
     let shown = 0;
     for (const rel of created) {
@@ -795,6 +803,8 @@ export function createRelationPanelView(
       anchor = newRow;
       shown++;
     }
+    // 主語つき（＝現在ノードの関係として作った）ときだけ、画面の並びをサーバへ保存する。
+    if (subj && shown) await apiReorderNodeRelations(ctx.gId, subj, relationRows().map((r) => r.dataset.lineId!));
     return shown;
   };
 
@@ -825,42 +835,25 @@ export function createRelationPanelView(
       const rightStr = ta.value.slice(caret);
       mention = {
         anchor: ta,
+        // ドラフト行では「ノードリンクの確定」だけを行う。ここではノードも関係も作らず、本文に
+        // [[ラベル]] を書いて入力を続けられるようにする（既存ノードの選択も「＋新規作成」も同じ）。
+        // 実際の解決・作成は Enter 時に /paste へ委ねる（マーク先が既存ならリンク、無ければ新規作成）。
         onPick: async (n, createLabel) => {
-          let mentionId = n.id;
-          if (createLabel) { const c = await apiCreateNode(ctx.gId, lang, createLabel); if (!c) { closeMenu(); return; } mentionId = c.id; }
-          mentionId = await ctx.awaitRealId(mentionId);   // never persist a temp id
-          // 主語ノードが無いドラフト行: /paste（subjectId なし）で1行だけ作り、その場に差し込む
-          // （現在ノードの関係一覧には属さないので render() では復元されない＝楽観挿入のみ）。
-          if (!nodeId) {
-            closeMenu();
-            ta.value = ''; ta.style.color = TEXT_DIM; resize();
-            const [rel] = await apiPasteRelations(ctx.gId, lang, null, [`${leftStr}⟦${mentionId}⟧${rightStr}`]);
-            if (!rel) return;
-            const newRow = renderRelationRow(rel);
-            row.insertAdjacentElement('afterend', newRow);
-            const nodeLink = newRow.querySelector(`[data-node-link="${CSS.escape(mentionId)}"]`) as HTMLElement | null;
-            ((nodeLink?.nextElementSibling as HTMLTextAreaElement | null) ?? (newRow.querySelector('textarea') as HTMLTextAreaElement | null))?.focus();
-            return;
-          }
-          const subjId = await ctx.awaitRealId(nodeId);   // subject may itself be a freshly-created node
+          const label = createLabel ?? labelOf(n, lang);
           closeMenu();
-          ta.value = ''; ta.style.color = TEXT_DIM;
-          const rel = await apiCreateRelation(ctx.gId, subjId, lang, `${leftStr}⟦${mentionId}⟧${rightStr}`);
-          if (!rel) return;
-          // Attach the mentioned node as a participant BEFORE re-rendering: render() re-fetches the
-          // relation, and the chip's label is resolved from the participant list. Rendering first
-          // showed the raw id (UUID) until a reload re-fetched it.
-          await apiAddRay(ctx.gId, rel.lineId, mentionId);
-          await render();
-          const rrow = bodyEl.querySelector(`[data-line-id="${CSS.escape(rel.lineId)}"]`);
-          const nodeLink = rrow?.querySelector(`[data-node-link="${CSS.escape(mentionId)}"]`) as HTMLElement | null;
-          ((nodeLink?.nextElementSibling as HTMLTextAreaElement | null) ?? (rrow?.querySelector('textarea') as HTMLTextAreaElement | null))?.focus();
+          const mark = `[[${label}]]`;
+          ta.value = `${leftStr}${mark}${rightStr}`;
+          ta.style.color = TEXT_HIGH;
+          resize();
+          const pos = leftStr.length + mark.length;
+          ta.focus();
+          ta.setSelectionRange(pos, pos);
         },
       };
       const seq = ++mentionSeq;
       const { nodes } = await fetchAllNodes(ctx.gId, [], 0, lang, undefined, query || undefined);
       if (seq !== mentionSeq || mention?.anchor !== ta) return;
-      showMenu(ta, query, nodes);
+      showMenu(ta, query, nodes, true);
     };
     ta.addEventListener('focus', () => { ta.style.color = TEXT_HIGH; clearSelection(); });
     ta.addEventListener('blur', () => { if (!ta.value.trim()) ta.style.color = TEXT_DIM; if (mention?.anchor === ta) closeMenu(); });
@@ -895,6 +888,9 @@ export function createRelationPanelView(
         ta.value = ''; resize();
         // 主語ノードが無いドラフト行は、貼り付けと同じ経路（/paste・subjectId なし）で1行作成する。
         if (!nodeId) { await pasteLines(row, [text]); return; }
+        // @ で確定した [[名前]]（や ⟦id⟧）を含む行は、サーバに解決させてから作る。既存ラベルなら
+        // そのノードへリンクし、無ければここで初めてノードが作られる（＝確定時には作らない）。
+        if (hasMark(text)) { await pasteLines(row, [text], nodeId); return; }
         // ドラフト直後へ楽観挿入（点滅しない）。本文にノードリンクが無ければ末尾に ⟦node⟧ を付けて
         // 当該ノードに紐づける（後で手動で外せば ⑤ でリンクなしへ）。
         await insertRelationAfter(row, text);

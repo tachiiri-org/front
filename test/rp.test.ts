@@ -2,14 +2,7 @@ import { expect, it } from "vitest";
 
 import { isProductHost, productClientId } from "../src/session/rp";
 
-it("workers.dev のアプリホストは product host ではない（RP リダイレクトを掛けない）", () => {
-  // アカウント名の "tachiiri" ラベルを product ラベルと誤認すると、存在しない
-  // authn.tachiiri.workers.dev へ飛ばしてログイン不能になる。
-  expect(isProductHost("front-dev.tachiiri.workers.dev")).toBe(false);
-  expect(isProductHost("front-stage.tachiiri.workers.dev")).toBe(false);
-  expect(isProductHost("front-production.tachiiri.workers.dev")).toBe(false);
-});
-
+// front-*.tachiiri.workers.dev（ワーカー既定ホスト）は入口として使わないので、ここでは規定しない。
 it("プロダクトドメインは product host、auth origin は除外", () => {
   expect(isProductHost("graph.tachiiri.com")).toBe(true);
   expect(isProductHost("dev.admin.tachiiri.com")).toBe(true);
