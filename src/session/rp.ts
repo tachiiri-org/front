@@ -137,9 +137,13 @@ export async function handleAuthCallback(request: Request, env: AuthorizeEnv): P
 // Whether a hostname is a product host (a role label that is neither the auth origin nor
 // a workers.dev app host). Used by the worker to gate the relying-party flow.
 export function isProductHost(hostname: string): boolean {
+  // *.workers.dev のアプリホスト（front-dev.tachiiri.workers.dev など）は対象外。アカウント名の
+  // "tachiiri" ラベルを product ラベルと誤認すると、authn.tachiiri.workers.dev（存在しない）へ
+  // リダイレクトしてログインできなくなる。プロダクトドメインが生きるまで workers.dev は従来どおり。
+  if (hostname === "workers.dev" || hostname.endsWith(".workers.dev")) return false;
   const parts = hostname.split(".");
   const i = parts.indexOf("tachiiri");
-  if (i <= 0) return false; // e.g. front-dev.workers.dev
+  if (i <= 0) return false;
   const role = parts[i - 1];
   return role !== "" && role !== "authn";
 }
