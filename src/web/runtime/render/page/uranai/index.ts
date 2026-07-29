@@ -311,6 +311,10 @@ function chartView(chart: Chart, birth: Birth | null | undefined, personId: stri
     const rows = chart.aspects.filter((a) => a.type === t).sort((a, b) => a.orb - b.orb);
     if (!rows.length) continue;
     aspectNode.append(el("div", { className: "u-tbl-title", textContent: `${ASPECT_INFO[t]?.label ?? t}（${rows.length}）` }));
+    // アスペクト種別の意味（流派スコープ）。ルディアは角度に固定の意味を置かず位相から読むので、
+    // 原典が個別に定義していない種別にはその旨が入る。
+    const am = meaningOf("aspect_type", t);
+    if (am) aspectNode.append(el("div", { className: "u-pat-comp", textContent: am }));
     // 位相（上弦/下弦）はルディアの中核。同じ90度でも上弦と下弦で意味が違う。
     aspectNode.append(mkTable(["天体", "天体", "オーブ", "位相"], rows.map((a) =>
       [bodyLabel(a.a), bodyLabel(a.b), `${a.orb.toFixed(2)}°`, a.phase === "waxing" ? "上弦" : a.phase === "waning" ? "下弦" : "—"])));
