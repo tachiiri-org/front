@@ -78,6 +78,22 @@ function settingsView(settings: Settings, onSaved: () => void | Promise<void>): 
   const wrap = el("div", { className: "u-form" });
   const sels: Partial<Record<keyof Settings, HTMLSelectElement>> = {};
   const grid = el("div", { className: "u-set-grid" });
+  // 流派（ruleset）。ハウス・使用天体・アスペクト・意味・描画規約をまとめて決めるので先頭に置く。
+  // 保存先は計算方式(p_user_setting)ではなく占う人の設定(p_reading_preference)。
+  const rsSel = el("select", { className: "u-set-sel" });
+  let rsInitial = "default";
+  grid.append(el("div", { className: "u-set-row" }, [el("label", { textContent: "流派" }), rsSel]));
+  void (async () => {
+    try {
+      const [ref, pref] = await Promise.all([
+        api<{ rulesets?: Array<{ id: string; name: string | null }> }>(`/api/v1/uranai/astrology/reference`),
+        api<{ ruleset_id?: string }>(`/api/v1/uranai/astrology/preference`),
+      ]);
+      for (const r of ref.rulesets ?? []) rsSel.append(el("option", { value: r.id, textContent: r.name ?? r.id }));
+      rsInitial = pref.ruleset_id ?? "default";
+      rsSel.value = rsInitial;
+    } catch { /* 参照が取れない時は流派を触らせない */ }
+  })();
   for (const f of SETTING_FIELDS) {
     const sel = selectEl(f.options, settings[f.key]);
     sels[f.key] = sel;
@@ -91,6 +107,10 @@ function settingsView(settings: Settings, onSaved: () => void | Promise<void>): 
       const payload: Record<string, string> = {};
       for (const f of SETTING_FIELDS) { const v = sels[f.key]?.value; if (v) { payload[f.key as string] = v; (settings as Record<string, string>)[f.key as string] = v; } }
       await api(`/api/v1/uranai/astrology/settings`, { method: "PUT", body: JSON.stringify(payload) });
+      if (rsSel.value && rsSel.value !== rsInitial) {
+        await api(`/api/v1/uranai/astrology/preference`, { method: "PUT", body: JSON.stringify({ ruleset_id: rsSel.value }) });
+        rsInitial = rsSel.value;
+      }
       // 設定は全人物のチャートに影響するため、保存済みの全チャートを再計算して反映。
       const { persons } = await api<{ persons: Person[] }>(`/api/v1/uranai/person`);
       let done = 0;
