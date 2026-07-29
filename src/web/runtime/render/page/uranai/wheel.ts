@@ -17,17 +17,43 @@ export function drawWheelPro(chart: Chart, enabledAspects: Set<string>, name: bo
   s.setAttribute("viewBox", `0 0 ${size} ${size}`);
   s.setAttribute("width", "100%"); s.style.maxWidth = "700px";
   const asc = chart.ascendant;
-  const scr = (lon: number): number => 180 + (lon - asc);
+  const norm = (x: number): number => ((x % 360) + 360) % 360;
+  const storedCusps = (chart.cusps ?? []).filter((c) => c.system === (chart.house_system ?? "whole_sign")).sort((a, b) => a.index - b.index);
+  const cuspLons = storedCusps.length === 12 ? storedCusps.map((c) => c.longitude) : Array.from({ length: 12 }, (_, i) => ((Math.floor(asc / 30) * 30) + i * 30) % 360);
+
+  // 黄経 → 画面角。描画規約は流派の属性としてバックエンドが返す。
+  //   sign_fixed: 黄経に比例して配置する（従来）。Asc は左だが MC は真上に来ない。
+  //   mandala   : 各ハウスを画面上の30度に均等割り付け。結果として地平線(Asc-Dsc)と
+  //               子午線(MC-IC)が直交し、個人を中心に据えたマンダラになる。サイン帯の
+  //               幅は不揃いになるが、それが空間分割を正しく写した姿。
+  const scr = chart.wheel_layout === "mandala"
+    ? (lon: number): number => {
+        const L = norm(lon);
+        for (let i = 0; i < 12; i++) {
+          const span = norm(cuspLons[(i + 1) % 12] - cuspLons[i]);
+          const off = norm(L - cuspLons[i]);
+          if (span > 0 && off < span) return 180 + i * 30 + (off / span) * 30;
+        }
+        return 180 + (L - asc);
+      }
+    : (lon: number): number => 180 + (lon - asc);
   const pt = (lon: number, r: number): [number, number] => { const t = scr(lon) * Math.PI / 180; return [cx + r * Math.cos(t), cy - r * Math.sin(t)]; };
   const placeByPlanet = new Map(chart.placements.map((p) => [p.planet, p]));
 
   // サイン帯（薄い元素色 + グリフ）
   for (let i = 0; i < 12; i++) {
     const a0 = i * 30;
+    // mandala では 1サインの画面上の幅が不揃いになる。large-arc フラグを跨がないよう、
+    // 画面角の差が 180 度を超える場合に備えて掃引量から判定する。
+    const sweep = norm(scr(a0) - scr(a0 + 30));
+    const large = sweep > 180 ? 1 : 0;
     const [x0o, y0o] = pt(a0, R), [x1o, y1o] = pt(a0 + 30, R);
     const [x0i, y0i] = pt(a0, rSignIn), [x1i, y1i] = pt(a0 + 30, rSignIn);
-    s.append(svg("path", { d: `M${x0o},${y0o} A${R},${R} 0 0 0 ${x1o},${y1o} L${x1i},${y1i} A${rSignIn},${rSignIn} 0 0 1 ${x0i},${y0i} Z`, fill: signFill(SIGN_ORDER[i]), stroke: "none", "data-tip": `sign:${SIGN_ORDER[i]}`, class: "u-hit" }));
-    const [gx, gy] = pt(a0 + 15, (R + rSignIn) / 2);
+    s.append(svg("path", { d: `M${x0o},${y0o} A${R},${R} 0 ${large} 0 ${x1o},${y1o} L${x1i},${y1i} A${rSignIn},${rSignIn} 0 ${large} 1 ${x0i},${y0i} Z`, fill: signFill(SIGN_ORDER[i]), stroke: "none", "data-tip": `sign:${SIGN_ORDER[i]}`, class: "u-hit" }));
+    // 画面上の中点。mandala では黄経の中点と画面の中点がずれるため、画面角で取る。
+    const midScr = scr(a0) - sweep / 2;
+    const rMid = (R + rSignIn) / 2;
+    const gx = cx + rMid * Math.cos(midScr * Math.PI / 180), gy = cy - rMid * Math.sin(midScr * Math.PI / 180);
     if (name) {
       let rot = Math.atan2(gy - cy, gx - cx) * 180 / Math.PI + 90;
       if (rot > 90 && rot < 270) rot -= 180;
@@ -49,8 +75,6 @@ export function drawWheelPro(chart: Chart, enabledAspects: Set<string>, name: bo
   for (let a = 0; a < 360; a += 30) { const [x0, y0] = pt(a, rSignIn), [x1, y1] = pt(a, R); s.append(svg("line", { x1: x0, y1: y0, x2: x1, y2: y1, stroke: "#0005", "stroke-width": 0.7 })); }
 
   // ハウス（カスプ）
-  const storedCusps = (chart.cusps ?? []).filter((c) => c.system === (chart.house_system ?? "whole_sign")).sort((a, b) => a.index - b.index);
-  const cuspLons = storedCusps.length === 12 ? storedCusps.map((c) => c.longitude) : Array.from({ length: 12 }, (_, i) => ((Math.floor(asc / 30) * 30) + i * 30) % 360);
   for (let i = 0; i < 12; i++) {
     const lon = cuspLons[i];
     const angular = i % 3 === 0;

@@ -47,7 +47,7 @@ export type Prefill = { label?: string | null; date?: string; time?: string; pla
 export type Settings = { zodiac: string; house_system_id: string; ephemeris: string; ayanamsha: string };
 // ユーザーごとの方式デフォルト（設定画面）の選択肢。[key, ラベル, 選択肢[[値,表示]]]。
 export const SETTING_FIELDS: Array<{ key: keyof Settings; label: string; options: Array<[string, string]> }> = [
-  { key: "house_system_id", label: "ハウス", options: [["whole_sign", "ホールサイン"], ["placidus", "プラシダス"]] },
+  { key: "house_system_id", label: "ハウス", options: [["whole_sign", "ホールサイン"], ["placidus", "プラシダス"], ["campanus", "カンパヌス"]] },
   { key: "zodiac", label: "黄道帯", options: [["tropical", "トロピカル（回帰）"], ["sidereal", "サイデリアル（恒星）"]] },
   { key: "ephemeris", label: "天体暦", options: [["vsop87", "VSOP87（高精度）"], ["standard", "簡易（Standard）"]] },
   { key: "ayanamsha", label: "アヤナムシャ", options: [["lahiri", "ラヒリ"], ["fagan_bradley", "フェイガン/ブラッドレー"]] },
@@ -75,6 +75,7 @@ export const PATTERN_ORDER = ["grand_sextile", "grand_cross", "kite", "mystic_re
 export type Chart = {
   ascendant: number; midheaven: number;
   house_system?: string; cusps?: Cusp[];
+  wheel_layout?: "sign_fixed" | "mandala"; // 流派が指定する描画規約（バックエンドが返す）
   placements: Placement[]; aspects: Aspect[];
   patterns?: Pattern[];
   dignities: Array<{ planet: string; dignity: string }>;
