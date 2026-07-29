@@ -1,6 +1,6 @@
 // ウラナイ画面のルート描画とフォーム類。定数・型・ヘルパは ./parts、ホイール描画は ./wheel に分割。
 import {
-  SIGN_ORDER, SIGN_GLYPH, SIGN_NAME, SIGN_ELEMENT, SIGN_QUALITY, ELEMENT_CHAR, QUALITY_CHAR, PLANET_GLYPH, PLANET_ORDER, PLANET_NAME_LINES, ASPECT_INFO, ASPECT_ORDER, PATTERN_INFO, PATTERN_ORDER, Person, Prefill, Settings, SETTING_FIELDS, Chart, UranaiView, api, lonOf, fmtDeg, Birth, HOUSE_SYSTEM_JA, IANA_ZONES, FALLBACK_ZONES, CC_ZONE, offsetFromZone, el, selectEl, loadSettings,
+  SIGN_ORDER, SIGN_GLYPH, SIGN_NAME, SIGN_ELEMENT, SIGN_QUALITY, ELEMENT_CHAR, QUALITY_CHAR, PLANET_GLYPH, PLANET_ORDER, PLANET_NAME_LINES, ASPECT_INFO, ASPECT_ORDER, PATTERN_INFO, PATTERN_ORDER, SHAPE_INFO, Person, Prefill, Settings, SETTING_FIELDS, Chart, UranaiView, api, lonOf, fmtDeg, Birth, HOUSE_SYSTEM_JA, IANA_ZONES, FALLBACK_ZONES, CC_ZONE, offsetFromZone, el, selectEl, loadSettings,
 } from "./parts";
 import { drawWheelPro } from "./wheel";
 
@@ -297,6 +297,32 @@ function chartView(chart: Chart, birth: Birth | null | undefined, personId: stri
   patternNode.append(patList);
   renderPatterns();
 
+  // チャート全体の形（ゲシュタルト）。ルディアは個々のアスペクトを見る前に、まず全体の形と
+  // 重みのバランスを捉えよと説く。ここも意味は書かず事実のみ。
+  const shapeNode = el("div", {});
+  const sh = chart.shape;
+  if (!sh) {
+    shapeNode.append(el("div", { className: "u-pat-empty", textContent: "全体の形は算出されていません" }));
+  } else {
+    const info = SHAPE_INFO[sh.shape];
+    const card = el("div", { className: "u-pat" });
+    card.append(el("div", { className: "u-pat-h" }, [el("b", { textContent: info?.name ?? sh.shape })]));
+    card.append(el("div", { className: "u-pat-comp", textContent: info?.cond ?? "" }));
+    card.append(el("div", { className: "u-pat-bodies", textContent: `占有 ${sh.span.toFixed(1)}° / 最大の空白 ${sh.largestGap.toFixed(1)}°` }));
+    if (sh.handle?.length) card.append(el("div", { className: "u-pat-focus", textContent: `取っ手: ${sh.handle.map((k) => bodyLabel(k)).join("　")}` }));
+    if (sh.leadingBody) card.append(el("div", { className: "u-pat-focus", textContent: `先頭: ${bodyLabel(sh.leadingBody)}` }));
+    shapeNode.append(card);
+    if (sh.singleton) {
+      const sc = el("div", { className: "u-pat" });
+      sc.append(el("div", { className: "u-pat-h" }, [el("b", { textContent: "シングルトン" })]));
+      sc.append(el("div", { className: "u-pat-comp", textContent: sh.singleton.axis === "horizon" ? "地平線で分けた半球にただ1つ" : "子午線で分けた半球にただ1つ" }));
+      sc.append(el("div", { className: "u-pat-bodies", textContent: bodyLabel(sh.singleton.planet) }));
+      shapeNode.append(sc);
+    } else {
+      shapeNode.append(el("div", { className: "u-pat-empty", textContent: "シングルトンはありません" }));
+    }
+  }
+
   // 基本情報: 通常は表。各編集項目に編集アイコン、押すとその項目だけ編集モード（他はグレーアウト）、
   // 再計算(保存)またはキャンセル。
   const bm = (birth?.born_at ?? "").match(/^(\d{4}-\d{2}-\d{2})T(\d{2}:\d{2})/);
@@ -404,6 +430,7 @@ function chartView(chart: Chart, birth: Birth | null | undefined, personId: stri
   const sections: Array<{ label: string; node: HTMLElement }> = [
     { label: "基本情報", node: basicNode },
     { label: "チャート", node: chartNode },
+    { label: "全体の形", node: shapeNode },
     { label: "元素", node: elemNode },
     { label: "クオリティ", node: qualNode },
     { label: "天体", node: planetTbl },

@@ -77,6 +77,8 @@ export type Chart = {
   house_system?: string; cusps?: Cusp[];
   wheel_layout?: "sign_fixed" | "mandala"; // 流派が指定する描画規約（バックエンドが返す）
   interceptions?: Array<{ house: string; sign: string }>; // どのカスプにも現れないサイン
+  shape?: { shape: string; span: number; largestGap: number; handle?: string[]; leadingBody?: string;
+            singleton?: { planet: string; axis: "horizon" | "meridian" } };
   placements: Placement[]; aspects: Aspect[];
   patterns?: Pattern[];
   dignities: Array<{ planet: string; dignity: string }>;
@@ -105,6 +107,17 @@ export const fmtDeg = (d: number): string => {
   return `${deg}°${String(min).padStart(2, "0")}′`;
 };
 export type Birth = { born_at: string | null; lat: string | null; lng: string | null; place: string | null; timezone: string | null };
+// チャート全体の形（ジョーンズの惑星配置型）。名称と成立条件の事実のみ。閾値は標準的な定義。
+export const SHAPE_INFO: Record<string, { name: string; cond: string }> = {
+  bundle: { name: "バンドル", cond: "全天体が120度以内に集中" },
+  bowl: { name: "ボウル", cond: "全天体が180度以内（半球）に収まる" },
+  bucket: { name: "バケット", cond: "ボウルの反対側に取っ手となる天体がある" },
+  locomotive: { name: "ロコモーティブ", cond: "120度以上の空白が1本、残り240度に連なる" },
+  seesaw: { name: "シーソー", cond: "60度以上の空白が2本、2群が対向する" },
+  splash: { name: "スプラッシュ", cond: "最大の空白が60度未満、全周に散在" },
+  splay: { name: "スプレイ", cond: "上記のいずれにも当てはまらない不規則な塊" },
+};
+
 export const HOUSE_SYSTEM_JA: Record<string, string> = { placidus: "プラシダス", whole_sign: "ホールサイン", koch: "コッホ", equal: "イコール", campanus: "カンパヌス", regiomontanus: "レギオモンタヌス" };
 // タイムゾーン: IANA一覧（Intl組込みの既定データセット。tokyo/osaka等を選べる）と、国コード→既定ゾーン、ゾーン→UTCオフセット。
 export const IANA_ZONES: string[] = (() => { try { const v = (Intl as unknown as { supportedValuesOf?: (k: string) => string[] }).supportedValuesOf?.("timeZone"); return v && v.length ? v : []; } catch { return []; } })();
