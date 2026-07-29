@@ -108,16 +108,25 @@ function settingsView(settings: Settings, onSaved: () => void | Promise<void>): 
       for (const f of SETTING_FIELDS) { const v = sels[f.key]?.value; if (v) { payload[f.key as string] = v; (settings as Record<string, string>)[f.key as string] = v; } }
       await api(`/api/v1/uranai/astrology/settings`, { method: "PUT", body: JSON.stringify(payload) });
       if (rsSel.value && rsSel.value !== rsInitial) {
-        await api(`/api/v1/uranai/astrology/preference`, { method: "PUT", body: JSON.stringify({ ruleset_id: rsSel.value }) });
+        const saved = await api<{ ruleset_id?: string }>(`/api/v1/uranai/astrology/preference`, { method: "PUT", body: JSON.stringify({ ruleset_id: rsSel.value }) });
+        if (saved.ruleset_id !== rsSel.value) throw new Error(`流派の保存に失敗しました（要求 ${rsSel.value} / 保存 ${saved.ruleset_id ?? "なし"}）`);
         rsInitial = rsSel.value;
       }
       // 設定は全人物のチャートに影響するため、保存済みの全チャートを再計算して反映。
       const { persons } = await api<{ persons: Person[] }>(`/api/v1/uranai/person`);
       let done = 0;
+      // 再計算の失敗は握り潰さない。サーバ側の例外で一部のファクトだけが欠けた状態になり得るため、
+      // 静かに成功したように見せるとデータの欠損に気づけない。
+      const failed: string[] = [];
       for (const p of persons) {
         status.textContent = `再計算中… (${++done}/${persons.length})`;
-        await api(`/api/v1/uranai/astrology/person/${p.id}/compute`, { method: "POST", body: "{}" }).catch(() => {});
+        try {
+          await api(`/api/v1/uranai/astrology/person/${p.id}/compute`, { method: "POST", body: "{}" });
+        } catch (e) {
+          failed.push(`${p.label ?? p.id}: ${(e as Error).message}`);
+        }
       }
+      if (failed.length) throw new Error(`再計算に失敗しました（${failed.length}/${persons.length}件）: ${failed.join(" / ")}`);
       status.textContent = "";
       await onSaved();
     } catch (e) { status.textContent = `エラー: ${(e as Error).message}`; }
