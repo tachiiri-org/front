@@ -1,6 +1,6 @@
 // ウラナイ画面のルート描画とフォーム類。定数・型・ヘルパは ./parts、ホイール描画は ./wheel に分割。
 import {
-  SIGN_ORDER, SIGN_GLYPH, SIGN_NAME, SIGN_ELEMENT, SIGN_QUALITY, ELEMENT_CHAR, QUALITY_CHAR, PLANET_GLYPH, PLANET_ORDER, PLANET_NAME_LINES, ASPECT_INFO, ASPECT_ORDER, PATTERN_INFO, PATTERN_ORDER, SHAPE_INFO, Person, Prefill, Settings, SETTING_FIELDS, Chart, UranaiView, api, lonOf, fmtDeg, Birth, HOUSE_SYSTEM_JA, IANA_ZONES, FALLBACK_ZONES, CC_ZONE, offsetFromZone, el, selectEl, loadSettings,
+  SIGN_ORDER, SIGN_GLYPH, SIGN_NAME, SIGN_ELEMENT, SIGN_QUALITY, ELEMENT_CHAR, QUALITY_CHAR, PLANET_GLYPH, PLANET_ORDER, PLANET_NAME_LINES, ASPECT_INFO, ASPECT_ORDER, PATTERN_INFO, PATTERN_ORDER, SHAPE_INFO, SHAPE_ORDER, Person, Prefill, Settings, SETTING_FIELDS, Chart, UranaiView, api, lonOf, fmtDeg, Birth, HOUSE_SYSTEM_JA, IANA_ZONES, FALLBACK_ZONES, CC_ZONE, offsetFromZone, el, selectEl, loadSettings,
 } from "./parts";
 import { drawWheelPro } from "./wheel";
 
@@ -302,25 +302,29 @@ function chartView(chart: Chart, birth: Birth | null | undefined, personId: stri
   const shapeNode = el("div", {});
   const sh = chart.shape;
   if (!sh) {
-    shapeNode.append(el("div", { className: "u-pat-empty", textContent: "全体の形は算出されていません" }));
+    shapeNode.append(el("div", { className: "u-pat-empty", textContent: "全体の形は算出されていません（対象は10天体）" }));
   } else {
-    const info = SHAPE_INFO[sh.shape];
-    const card = el("div", { className: "u-pat" });
-    card.append(el("div", { className: "u-pat-h" }, [el("b", { textContent: info?.name ?? sh.shape })]));
-    card.append(el("div", { className: "u-pat-comp", textContent: info?.cond ?? "" }));
-    card.append(el("div", { className: "u-pat-bodies", textContent: `占有 ${sh.span.toFixed(1)}° / 最大の空白 ${sh.largestGap.toFixed(1)}°` }));
-    if (sh.handle?.length) card.append(el("div", { className: "u-pat-focus", textContent: `取っ手: ${sh.handle.map((k) => bodyLabel(k)).join("　")}` }));
-    if (sh.leadingBody) card.append(el("div", { className: "u-pat-focus", textContent: `先頭: ${bodyLabel(sh.leadingBody)}` }));
-    shapeNode.append(card);
-    if (sh.singleton) {
-      const sc = el("div", { className: "u-pat" });
-      sc.append(el("div", { className: "u-pat-h" }, [el("b", { textContent: "シングルトン" })]));
-      sc.append(el("div", { className: "u-pat-comp", textContent: sh.singleton.axis === "horizon" ? "地平線で分けた半球にただ1つ" : "子午線で分けた半球にただ1つ" }));
-      sc.append(el("div", { className: "u-pat-bodies", textContent: bodyLabel(sh.singleton.planet) }));
-      shapeNode.append(sc);
-    } else {
-      shapeNode.append(el("div", { className: "u-pat-empty", textContent: "シングルトンはありません" }));
-    }
+    // 7パターンを常に全部並べ、該当するものだけ印を付ける。該当しないものも「—」で残すことで、
+    // 何が判定されなかったのかが読み取れるようにする。
+    shapeNode.append(el("div", { className: "u-tbl-title", textContent: "惑星配置型（判定対象は10天体。キロン・小惑星・ノード・感受点は含めない）" }));
+    // 形ごとの固有要素（バケットの取っ手、ロコモーティブの先頭）は同じ行に入れる。
+    // その形にしか無い概念なので、別表に切り出すと「なし」ばかりの表になる。
+    const extra = (k: string): string => {
+      if (k === "bucket") return sh.handle?.length ? `取っ手: ${sh.handle.map((x) => bodyLabel(x)).join("　")}` : "";
+      if (k === "locomotive") return sh.leadingBody ? `先頭: ${bodyLabel(sh.leadingBody)}` : "";
+      return "";
+    };
+    shapeNode.append(mkTable(["形", "判定", ""], SHAPE_ORDER.map((k) => [
+      SHAPE_INFO[k]?.name ?? k, k === sh.shape ? "● 該当" : "—", k === sh.shape ? extra(k) : "",
+    ])));
+
+    // シングルトンは7パターンとは別の概念（分布の形ではなく孤立というアクセント）なので別に出す。
+    const AXIS_JA: Record<string, string> = { horizon: "地平線", meridian: "子午線" };
+    const same = sh.singleton && sh.handle?.length === 1 && sh.handle[0] === sh.singleton.planet;
+    shapeNode.append(el("div", { className: "u-tbl-title", textContent: "シングルトン" }));
+    shapeNode.append(mkTable(["天体", "孤立の軸"], sh.singleton
+      ? [[bodyLabel(sh.singleton.planet), `${AXIS_JA[sh.singleton.axis] ?? sh.singleton.axis}で分けた半球にただ1つ${same ? "（取っ手と同一）" : ""}`]]
+      : [["なし", "—"]]));
   }
 
   // 基本情報: 通常は表。各編集項目に編集アイコン、押すとその項目だけ編集モード（他はグレーアウト）、

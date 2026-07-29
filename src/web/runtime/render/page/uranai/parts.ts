@@ -109,6 +109,8 @@ export const fmtDeg = (d: number): string => {
 };
 export type Birth = { born_at: string | null; lat: string | null; lng: string | null; place: string | null; timezone: string | null };
 // チャート全体の形（ジョーンズの惑星配置型）。名称と成立条件の事実のみ。閾値は標準的な定義。
+// 7パターンの表示順（ジョーンズの定義。集中→分散の順）。
+export const SHAPE_ORDER = ["bundle", "bowl", "bucket", "locomotive", "seesaw", "splash", "splay"];
 export const SHAPE_INFO: Record<string, { name: string; cond: string }> = {
   bundle: { name: "バンドル", cond: "全天体が120度以内に集中" },
   bowl: { name: "ボウル", cond: "全天体が180度以内（半球）に収まる" },
