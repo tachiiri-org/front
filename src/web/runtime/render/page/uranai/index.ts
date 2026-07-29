@@ -1,6 +1,6 @@
 // ウラナイ画面のルート描画とフォーム類。定数・型・ヘルパは ./parts、ホイール描画は ./wheel に分割。
 import {
-  SIGN_ORDER, SIGN_GLYPH, SIGN_NAME, SIGN_ELEMENT, SIGN_QUALITY, ELEMENT_CHAR, QUALITY_CHAR, PLANET_GLYPH, PLANET_ORDER, PLANET_NAME_LINES, ASPECT_INFO, ASPECT_ORDER, PATTERN_INFO, PATTERN_ORDER, SHAPE_INFO, SHAPE_ORDER, Person, Prefill, Settings, SETTING_FIELDS, Chart, loadMeanings, meaningOf, roleOf, clearMeanings, UranaiView, api, lonOf, fmtDeg, Birth, HOUSE_SYSTEM_JA, IANA_ZONES, FALLBACK_ZONES, CC_ZONE, offsetFromZone, el, selectEl, loadSettings,
+  SIGN_ORDER, SIGN_GLYPH, SIGN_NAME, SIGN_ELEMENT, SIGN_QUALITY, ELEMENT_CHAR, QUALITY_CHAR, PLANET_GLYPH, PLANET_ORDER, PLANET_NAME_LINES, ASPECT_INFO, ASPECT_ORDER, PATTERN_INFO, PATTERN_ORDER, SHAPE_INFO, SHAPE_ORDER, Person, Prefill, Settings, SETTING_FIELDS, Chart, Derived, loadMeanings, meaningOf, roleOf, clearMeanings, UranaiView, api, lonOf, fmtDeg, Birth, HOUSE_SYSTEM_JA, IANA_ZONES, FALLBACK_ZONES, CC_ZONE, offsetFromZone, el, selectEl, loadSettings,
 } from "./parts";
 import { drawWheelPro } from "./wheel";
 
@@ -389,6 +389,46 @@ function chartView(chart: Chart, birth: Birth | null | undefined, personId: stri
       : [["なし"]]));
   }
 
+  // 進行・経過。派生値なので取得は遅延（タブを開いたときに読む）。
+  const derivedNode = (kind: "progressed" | "transit"): HTMLElement => {
+    const box = el("div", {});
+    const dateIn = el("input", { type: "date", value: new Date().toISOString().slice(0, 10) }) as HTMLInputElement;
+    const out = el("div", {});
+    const load = async () => {
+      out.innerHTML = "";
+      out.append(el("div", { className: "u-pat-empty", textContent: "算出中…" }));
+      try {
+        const d = await api<Derived>(`/api/v1/uranai/astrology/person/${personId}/${kind}?date=${dateIn.value}`);
+        out.innerHTML = "";
+        out.append(el("div", { className: "u-pat-comp", textContent: kind === "progressed"
+          ? `1日 = 1年。天体位置は ${d.at.slice(0, 16).replace("T", " ")} UTC の瞬間。ハウスは出生図の枠。`
+          : `天体位置は ${d.at.slice(0, 16).replace("T", " ")} UTC。ハウスは出生図の枠。` }));
+        if (d.lunation) {
+          out.append(el("div", { className: "u-tbl-title", textContent: "ルネーション" }));
+          out.append(mkTable(["離角", "位相"], [[`${d.lunation.elongation.toFixed(1)}°`,
+            d.lunation.phase === "waxing" ? "上弦" : "下弦"]]));
+        }
+        out.append(el("div", { className: "u-tbl-title", textContent: "天体" }));
+        out.append(mkTable(["天体", "サイン", "度数", "逆行", "室"], d.placements.map((p) =>
+          [bodyLabel(p.planet), SIGN_NAME[p.sign] ?? p.sign, fmtDeg(p.degree), p.retrograde ? "℞" : "", p.house.replace("house_", "") + "室"])));
+        out.append(el("div", { className: "u-tbl-title", textContent: `出生図とのアスペクト（${d.aspects.length}）` }));
+        out.append(d.aspects.length
+          ? mkTable([kind === "progressed" ? "進行" : "経過", "出生", "種別", "オーブ", "位相"],
+              [...d.aspects].sort((x, y) => x.orb - y.orb).map((a) => [bodyLabel(a.a), bodyLabel(a.b),
+                ASPECT_INFO[a.type]?.label ?? a.type, `${a.orb.toFixed(2)}°`, a.phase === "waxing" ? "上弦" : "下弦"]))
+          : el("div", { className: "u-pat-empty", textContent: "該当するアスペクトはありません" }));
+      } catch (e) {
+        out.innerHTML = "";
+        out.append(el("div", { className: "u-status", textContent: `エラー: ${(e as Error).message}` }));
+      }
+    };
+    const btn = el("button", { className: "u-btn u-btn-sm", textContent: "算出" });
+    btn.addEventListener("click", () => void load());
+    box.append(el("div", { className: "u-row" }, [el("label", { textContent: "対象日" }), dateIn, btn]), out);
+    void load();
+    return box;
+  };
+
   // 基本情報: 通常は表。各編集項目に編集アイコン、押すとその項目だけ編集モード（他はグレーアウト）、
   // 再計算(保存)またはキャンセル。
   const bm = (birth?.born_at ?? "").match(/^(\d{4}-\d{2}-\d{2})T(\d{2}:\d{2})/);
@@ -509,6 +549,8 @@ function chartView(chart: Chart, birth: Birth | null | undefined, personId: stri
     { label: "ルネーション", node: lunTbl },
     { label: `アスペクト(${chart.aspects.length})`, node: aspectNode },
     { label: `配置(${majorCount})`, node: patternNode },
+    { label: "進行", node: derivedNode("progressed") },
+    { label: "経過", node: derivedNode("transit") },
   ];
   const content = el("div", { className: "u-tab-content" });
   const secHeads = sections.map((s) => el("div", { className: "u-sec-head", textContent: s.label }));

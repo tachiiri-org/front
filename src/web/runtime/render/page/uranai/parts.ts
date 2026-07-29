@@ -59,6 +59,14 @@ export const SETTING_FIELDS: Array<{ key: keyof Settings; label: string; options
 export type Placement = { planet: string; sign: string; degree: number; retrograde?: boolean };
 export type Aspect = { a: string; b: string; type: string; orb: number; phase?: "waxing" | "waning" };
 export type Cusp = { system: string; index: number; longitude: number };
+// 進行（二次進行）・経過。出生図＝解剖学、進行＝生理学として統合して読む。
+export type Derived = {
+  kind: "progressed" | "transit";
+  at: string; target: string; house_system?: string;
+  placements: Array<{ planet: string; sign: string; degree: number; retrograde: boolean; house: string }>;
+  aspects: Array<{ a: string; b: string; type: string; orb: number; phase: "waxing" | "waning" }>;
+  lunation: { elongation: number; phase: "waxing" | "waning" } | null;
+};
 // アスペクトパターン（バックエンド detectPatterns の出力）。bodies は構成天体。
 export type Pattern = { pattern: string; bodies: string[]; focus?: string; scope?: string; tight?: boolean; subsumed?: boolean };
 // 図形の表示メタ（名称・別名・構成・小配置か）。現代西洋/Tierney 準拠。
