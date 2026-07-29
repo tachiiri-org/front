@@ -275,6 +275,12 @@ function chartView(chart: Chart, birth: Birth | null | undefined, personId: stri
   const cuspTbl = mkTable(["室", "サイン", "度数", "意味"], cuspLons.map((lon, i) => { const sign = SIGN_ORDER[Math.floor((((lon % 360) + 360) % 360) / 30) % 12]; return [String(i + 1), SIGN_NAME[sign], fmtDeg(((lon % 30) + 30) % 30), meaningOf("house", `house_${i + 1}`)]; }), [3]);
   // サインの意味（流派スコープ）。ルディアはサインを「生命プロセスの12の位相」として定義する。
   const signTbl = mkTable(["サイン", "意味"], SIGN_ORDER.map((k) => [`${SIGN_GLYPH[k]}︎ ${SIGN_NAME[k] ?? k}`, meaningOf("sign", k)]), [1]);
+  // ディグニティ。ルディアも解釈手順で確認する項目だが、吉凶ではなく機能的な強調として読む。
+  const DIGNITY_JA: Record<string, string> = { domicile: "ドミサイル", exaltation: "イグザルテーション", detriment: "デトリメント", fall: "フォール", peregrine: "ペレグリン" };
+  const digTbl = mkTable(["天体", "ディグニティ", "意味"], (chart.dignities ?? []).length
+    ? (chart.dignities ?? []).map((d) => [bodyLabel(d.planet), DIGNITY_JA[d.dignity] ?? d.dignity, meaningOf("dignity", d.dignity)])
+    : [["なし", "—", ""]], [2]);
+
   // 象限。地平線と子午線が作る4つのクォーター。ルディアはハウスをこの単位でも読む。
   const quadTbl = mkTable(["象限", "ハウス", "意味"], (chart.quadrants ?? []).map((q) => [
     QUAD_JA[q.id] ?? q.id,
@@ -294,6 +300,13 @@ function chartView(chart: Chart, birth: Birth | null | undefined, personId: stri
 
   // アスペクト（種類ごとにグループ化）
   const aspectNode = el("div", {});
+  // 位相の意味は上弦/下弦で共通なので、表ごとに繰り返さず先頭に凡例として置く。
+  if (meaningOf("phase", "waxing")) {
+    aspectNode.append(el("div", { className: "u-tbl-title", textContent: "位相" }));
+    aspectNode.append(mkTable(["位相", "意味"], [
+      ["上弦", meaningOf("phase", "waxing")], ["下弦", meaningOf("phase", "waning")],
+    ], [1]));
+  }
   for (const t of ASPECT_ORDER) {
     const rows = chart.aspects.filter((a) => a.type === t).sort((a, b) => a.orb - b.orb);
     if (!rows.length) continue;
@@ -487,6 +500,7 @@ function chartView(chart: Chart, birth: Birth | null | undefined, personId: stri
     { label: "カスプ", node: cuspTbl },
     { label: "サイン", node: signTbl },
     { label: "インターセプト", node: icptTbl },
+    { label: "ディグニティ", node: digTbl },
     { label: "象限", node: quadTbl },
     { label: "ルネーション", node: lunTbl },
     { label: `アスペクト(${chart.aspects.length})`, node: aspectNode },
