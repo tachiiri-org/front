@@ -57,7 +57,7 @@ export const SETTING_FIELDS: Array<{ key: keyof Settings; label: string; options
   { key: "ayanamsha", label: "アヤナムシャ", options: [["lahiri", "ラヒリ"], ["fagan_bradley", "フェイガン/ブラッドレー"]] },
 ];
 export type Placement = { planet: string; sign: string; degree: number; retrograde?: boolean };
-export type Aspect = { a: string; b: string; type: string; orb: number };
+export type Aspect = { a: string; b: string; type: string; orb: number; phase?: "waxing" | "waning" };
 export type Cusp = { system: string; index: number; longitude: number };
 // アスペクトパターン（バックエンド detectPatterns の出力）。bodies は構成天体。
 export type Pattern = { pattern: string; bodies: string[]; focus?: string; scope?: string; tight?: boolean; subsumed?: boolean };
@@ -158,18 +158,27 @@ export const selectEl = (options: Array<[string, string]>, value: string): HTMLS
 // 流派を切り替えると内容が変わるので、設定保存時に clearMeanings() で捨てる。
 type MeaningMap = Record<string, Record<string, string>>;
 let meaningCache: MeaningMap | null = null;
-export function clearMeanings(): void { meaningCache = null; }
+export function clearMeanings(): void { meaningCache = null; roleCache = null; }
 export async function loadMeanings(): Promise<void> {
   if (meaningCache) return;
   try {
-    const r = await api<{ meanings?: Array<{ concept_kind: string; concept_id: string; value: string }> }>(
-      `/api/v1/uranai/astrology/reference`);
+    const r = await api<{
+      meanings?: Array<{ concept_kind: string; concept_id: string; value: string }>;
+      body_role?: Array<{ planet_id: string; body_role_id: string }>;
+    }>(`/api/v1/uranai/astrology/reference`);
     const m: MeaningMap = {};
     for (const x of r.meanings ?? []) (m[x.concept_kind] ??= {})[x.concept_id] = x.value;
     meaningCache = m;
-  } catch { meaningCache = {}; }
+    const roles: Record<string, string> = {};
+    for (const x of r.body_role ?? []) roles[x.planet_id] = m.body_role?.[x.body_role_id] ? x.body_role_id : x.body_role_id;
+    roleCache = roles;
+  } catch { meaningCache = {}; roleCache = {}; }
 }
 export const meaningOf = (kind: string, id: string): string => meaningCache?.[kind]?.[id] ?? "";
+
+// 天体の階層（流派スコープ）。ルディア: 二光体 / 有機的生活の惑星 / 超越的活動の惑星。
+let roleCache: Record<string, string> | null = null;
+export const roleOf = (planet: string): string => roleCache?.[planet] ?? "";
 
 export async function loadSettings(): Promise<Settings> {
   const d: Settings = { zodiac: "tropical", house_system_id: "whole_sign", ephemeris: "vsop87", ayanamsha: "lahiri" };

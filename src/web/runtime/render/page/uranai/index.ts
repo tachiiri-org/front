@@ -1,6 +1,6 @@
 // ウラナイ画面のルート描画とフォーム類。定数・型・ヘルパは ./parts、ホイール描画は ./wheel に分割。
 import {
-  SIGN_ORDER, SIGN_GLYPH, SIGN_NAME, SIGN_ELEMENT, SIGN_QUALITY, ELEMENT_CHAR, QUALITY_CHAR, PLANET_GLYPH, PLANET_ORDER, PLANET_NAME_LINES, ASPECT_INFO, ASPECT_ORDER, PATTERN_INFO, PATTERN_ORDER, SHAPE_INFO, SHAPE_ORDER, Person, Prefill, Settings, SETTING_FIELDS, Chart, loadMeanings, meaningOf, clearMeanings, UranaiView, api, lonOf, fmtDeg, Birth, HOUSE_SYSTEM_JA, IANA_ZONES, FALLBACK_ZONES, CC_ZONE, offsetFromZone, el, selectEl, loadSettings,
+  SIGN_ORDER, SIGN_GLYPH, SIGN_NAME, SIGN_ELEMENT, SIGN_QUALITY, ELEMENT_CHAR, QUALITY_CHAR, PLANET_GLYPH, PLANET_ORDER, PLANET_NAME_LINES, ASPECT_INFO, ASPECT_ORDER, PATTERN_INFO, PATTERN_ORDER, SHAPE_INFO, SHAPE_ORDER, Person, Prefill, Settings, SETTING_FIELDS, Chart, loadMeanings, meaningOf, roleOf, clearMeanings, UranaiView, api, lonOf, fmtDeg, Birth, HOUSE_SYSTEM_JA, IANA_ZONES, FALLBACK_ZONES, CC_ZONE, offsetFromZone, el, selectEl, loadSettings,
 } from "./parts";
 import { drawWheelPro } from "./wheel";
 
@@ -163,10 +163,19 @@ function chartView(chart: Chart, birth: Birth | null | undefined, personId: stri
   const houseOf = (lon: number): number => { for (let i = 0; i < 12; i++) { const a = cuspLons[i], b = cuspLons[(i + 1) % 12]; const span = ((b - a) % 360 + 360) % 360; const off = ((lon - a) % 360 + 360) % 360; if (off < span) return i + 1; } return 12; };
   const place = new Map(chart.placements.map((p) => [p.planet, p]));
   const bodyLabel = (k: string): string => { const nm = PLANET_NAME_LINES[k]?.[0]; return nm ? `${PLANET_GLYPH[k] ?? ""} ${nm}`.trim() : (PLANET_GLYPH[k] ?? k); };
-  const mkTable = (headers: string[], rows: string[][]): HTMLElement => {
-    const tbl = el("table", { className: "u-tbl" });
-    const htr = el("tr", {}); for (const h of headers) htr.append(el("th", { textContent: h })); tbl.append(htr);
-    for (const r of rows) { const tr = el("tr", {}); for (const c of r) tr.append(el("td", { textContent: c })); tbl.append(tr); }
+  // wrap: 折り返して左寄せにする列の番号。意味など長文の列は1行に収まらないので省略せず折り返す。
+  const ROLE_JA: Record<string, string> = { light: "二光体", organic: "有機的生活", transcendent: "超越的活動" };
+  const mkTable = (headers: string[], rows: string[][], wrap?: number[]): HTMLElement => {
+    const w = new Set(wrap ?? []);
+    const tbl = el("table", { className: "u-tbl" + (w.size ? " u-tbl-auto" : "") });
+    const htr = el("tr", {});
+    headers.forEach((h, i) => htr.append(el("th", { textContent: h, className: w.has(i) ? "u-mean" : "" })));
+    tbl.append(htr);
+    for (const r of rows) {
+      const tr = el("tr", {});
+      r.forEach((c, i) => tr.append(el("td", { textContent: c, className: w.has(i) ? "u-mean" : "" })));
+      tbl.append(tr);
+    }
     return tbl;
   };
 
@@ -259,12 +268,12 @@ function chartView(chart: Chart, birth: Birth | null | undefined, personId: stri
   // 天体（アングルも同じ表に。逆行・室はアングルでは空欄）
   const planetRows = PLANET_ORDER.filter((k) => place.has(k)).map((k) => { const p = place.get(k)!; return [bodyLabel(k), SIGN_NAME[p.sign] ?? p.sign, fmtDeg(p.degree), p.retrograde ? "℞" : "", String(houseOf(lonOf(p)))]; });
   const angleRows = ["asc", "mc", "dsc", "ic"].filter((k) => place.has(k)).map((k) => { const p = place.get(k)!; return [PLANET_GLYPH[k] ?? k, SIGN_NAME[p.sign] ?? p.sign, fmtDeg(p.degree), "", ""]; });
-  const planetTbl = mkTable(["天体", "サイン", "度数", "逆行", "室", "意味"],
-    [...planetRows.map((r, i) => [...r, meaningOf("planet", PLANET_ORDER.filter((k) => place.has(k))[i])]),
-     ...angleRows.map((r) => [...r, ""])]);
-  const cuspTbl = mkTable(["室", "サイン", "度数", "意味"], cuspLons.map((lon, i) => { const sign = SIGN_ORDER[Math.floor((((lon % 360) + 360) % 360) / 30) % 12]; return [String(i + 1), SIGN_NAME[sign], fmtDeg(((lon % 30) + 30) % 30), meaningOf("house", `house_${i + 1}`)]; }));
+  const planetTbl = mkTable(["天体", "サイン", "度数", "逆行", "室", "階層", "意味"],
+    [...planetRows.map((r, i) => { const k = PLANET_ORDER.filter((x) => place.has(x))[i]; return [...r, ROLE_JA[roleOf(k)] ?? "", meaningOf("planet", k)]; }),
+     ...angleRows.map((r) => [...r, "", ""])], [6]);
+  const cuspTbl = mkTable(["室", "サイン", "度数", "意味"], cuspLons.map((lon, i) => { const sign = SIGN_ORDER[Math.floor((((lon % 360) + 360) % 360) / 30) % 12]; return [String(i + 1), SIGN_NAME[sign], fmtDeg(((lon % 30) + 30) % 30), meaningOf("house", `house_${i + 1}`)]; }), [3]);
   // サインの意味（流派スコープ）。ルディアはサインを「生命プロセスの12の位相」として定義する。
-  const signTbl = mkTable(["サイン", "意味"], SIGN_ORDER.map((k) => [`${SIGN_GLYPH[k]}︎ ${SIGN_NAME[k] ?? k}`, meaningOf("sign", k)]));
+  const signTbl = mkTable(["サイン", "意味"], SIGN_ORDER.map((k) => [`${SIGN_GLYPH[k]}︎ ${SIGN_NAME[k] ?? k}`, meaningOf("sign", k)]), [1]);
   // インターセプト（どのカスプにも現れないサイン）。ホイールには描かず表で示す。
   const icptTbl = mkTable(["サイン", "収まるハウス"], (chart.interceptions ?? []).length
     ? (chart.interceptions ?? []).map((x) => [`${SIGN_GLYPH[x.sign] ?? ""}︎ ${SIGN_NAME[x.sign] ?? x.sign}`, `${x.house.replace("house_", "")}室`])
@@ -276,7 +285,9 @@ function chartView(chart: Chart, birth: Birth | null | undefined, personId: stri
     const rows = chart.aspects.filter((a) => a.type === t).sort((a, b) => a.orb - b.orb);
     if (!rows.length) continue;
     aspectNode.append(el("div", { className: "u-tbl-title", textContent: `${ASPECT_INFO[t]?.label ?? t}（${rows.length}）` }));
-    aspectNode.append(mkTable(["天体", "天体", "オーブ"], rows.map((a) => [bodyLabel(a.a), bodyLabel(a.b), `${a.orb.toFixed(2)}°`])));
+    // 位相（上弦/下弦）はルディアの中核。同じ90度でも上弦と下弦で意味が違う。
+    aspectNode.append(mkTable(["天体", "天体", "オーブ", "位相"], rows.map((a) =>
+      [bodyLabel(a.a), bodyLabel(a.b), `${a.orb.toFixed(2)}°`, a.phase === "waxing" ? "上弦" : a.phase === "waning" ? "下弦" : "—"])));
   }
 
   // アスペクトパターン（配置図形）。既定は非内包の主要図形、詳細トグルで小配置・内包も表示。
@@ -583,6 +594,10 @@ export async function renderUranai(container: HTMLElement): Promise<void> {
     .u-tbl th{color:#999;font-weight:600;text-align:center;padding:5px 4px;border-bottom:1px solid #0002}
     .u-tbl td{color:#333;text-align:center;padding:5px 4px;border-bottom:1px solid #0001;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
     .u-tbl-title{font-size:12px;font-weight:700;color:#555;margin:10px 0 4px}
+    /* 長文の列（意味など）は折り返して左寄せ。列幅は内容に合わせる。 */
+    .u-tbl.u-tbl-auto{table-layout:auto}
+    .u-tbl td.u-mean{white-space:normal;text-align:left;overflow:visible;text-overflow:clip;line-height:1.5}
+    .u-tbl th.u-mean{text-align:left}
     .u-title{font-weight:700;font-size:18px;margin-bottom:8px}
     .u-chart-head{display:flex;align-items:center;justify-content:space-between;gap:12px;margin-bottom:4px}
     .u-chart-head .u-title{margin-bottom:0}
