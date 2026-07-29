@@ -97,7 +97,12 @@ function settingsView(settings: Settings, onSaved: () => void | Promise<void>): 
   for (const f of SETTING_FIELDS) {
     const sel = selectEl(f.options, settings[f.key]);
     sels[f.key] = sel;
-    grid.append(el("div", { className: "u-set-row" }, [el("label", { textContent: f.label }), sel]));
+    // ハウスは流派が決める（空間の分割方式は教義そのもの）。実効値を見せるが編集はさせない。
+    const derived = f.key === "house_system_id";
+    if (derived) sel.disabled = true;
+    grid.append(el("div", { className: "u-set-row" }, [
+      el("label", { textContent: derived ? `${f.label}（流派で決まる）` : f.label }), sel,
+    ]));
   }
   const status = el("div", { className: "u-status" });
   const save = el("button", { className: "u-btn", textContent: "保存して全チャート再計算" });
@@ -105,7 +110,12 @@ function settingsView(settings: Settings, onSaved: () => void | Promise<void>): 
     status.textContent = "保存中…";
     try {
       const payload: Record<string, string> = {};
-      for (const f of SETTING_FIELDS) { const v = sels[f.key]?.value; if (v) { payload[f.key as string] = v; (settings as Record<string, string>)[f.key as string] = v; } }
+      // 流派由来の項目は送らない。送るとユーザー設定として保存され、流派を切り替えても残ってしまう。
+      for (const f of SETTING_FIELDS) {
+        if (f.key === "house_system_id") continue;
+        const v = sels[f.key]?.value;
+        if (v) { payload[f.key as string] = v; (settings as Record<string, string>)[f.key as string] = v; }
+      }
       await api(`/api/v1/uranai/astrology/settings`, { method: "PUT", body: JSON.stringify(payload) });
       if (rsSel.value && rsSel.value !== rsInitial) {
         const saved = await api<{ ruleset_id?: string }>(`/api/v1/uranai/astrology/preference`, { method: "PUT", body: JSON.stringify({ ruleset_id: rsSel.value }) });
@@ -118,16 +128,20 @@ function settingsView(settings: Settings, onSaved: () => void | Promise<void>): 
       // 再計算の失敗は握り潰さない。サーバ側の例外で一部のファクトだけが欠けた状態になり得るため、
       // 静かに成功したように見せるとデータの欠損に気づけない。
       const failed: string[] = [];
+      const skipped: string[] = [];
       for (const p of persons) {
         status.textContent = `再計算中… (${++done}/${persons.length})`;
         try {
           await api(`/api/v1/uranai/astrology/person/${p.id}/compute`, { method: "POST", body: "{}" });
         } catch (e) {
-          failed.push(`${p.label ?? p.id}: ${(e as Error).message}`);
+          const msg = (e as Error).message;
+          // 400 は出生データ未入力など、その人物を計算できないという意味。設定保存の失敗ではない。
+          if (/^400\b/.test(msg)) skipped.push(p.label ?? p.id);
+          else failed.push(`${p.label ?? p.id}: ${msg}`);
         }
       }
       if (failed.length) throw new Error(`再計算に失敗しました（${failed.length}/${persons.length}件）: ${failed.join(" / ")}`);
-      status.textContent = "";
+      status.textContent = skipped.length ? `${skipped.length}件を対象外にしました（出生データ未入力）: ${skipped.join(", ")}` : "";
       await onSaved();
     } catch (e) { status.textContent = `エラー: ${(e as Error).message}`; }
   });
