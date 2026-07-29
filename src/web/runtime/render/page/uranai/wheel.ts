@@ -26,7 +26,8 @@ export function drawWheelPro(chart: Chart, enabledAspects: Set<string>, name: bo
   //   mandala   : 各ハウスを画面上の30度に均等割り付け。結果として地平線(Asc-Dsc)と
   //               子午線(MC-IC)が直交し、個人を中心に据えたマンダラになる。サイン帯の
   //               幅は不揃いになるが、それが空間分割を正しく写した姿。
-  const scr = chart.wheel_layout === "mandala"
+  const mandala = chart.wheel_layout === "mandala";
+  const scr = mandala
     ? (lon: number): number => {
         const L = norm(lon);
         for (let i = 0; i < 12; i++) {
@@ -67,8 +68,11 @@ export function drawWheelPro(chart: Chart, enabledAspects: Set<string>, name: bo
       s.append(g);
     }
   }
-  // 度目盛（1°小 / 5°中 / 10°大）
-  for (let d = 0; d < 360; d++) {
+  // 度目盛（1°小 / 5°中 / 10°大）。
+  // 曼荼羅では描かない。ルディアは目盛りリングを指示しておらず、カスプと天体の度数を数字で
+  // 記す方式で、図は精密な測定器ではなく全体のバランスを掴むための象徴的な絵という位置づけ。
+  // 従来表示(sign_fixed)は変えないので、目盛りが必要なら流派を切り替えれば戻る。
+  if (!mandala) for (let d = 0; d < 360; d++) {
     const len = d % 10 === 0 ? 7 : d % 5 === 0 ? 4.5 : 2.5;
     const [x0, y0] = pt(d, rSignIn), [x1, y1] = pt(d, rSignIn - len);
     s.append(svg("line", { x1: x0, y1: y0, x2: x1, y2: y1, stroke: "#0007", "stroke-width": d % 10 === 0 ? 0.7 : 0.4 }));
@@ -85,6 +89,18 @@ export function drawWheelPro(chart: Chart, enabledAspects: Set<string>, name: bo
     const [nx, ny] = pt(lon + span / 2, (rSignIn + rHouseIn) / 2);
     const t = svg("text", { x: nx, y: ny, "text-anchor": "middle", "dominant-baseline": "central", "font-size": 11, fill: "#555", "font-weight": "700", "data-tip": `house:${i + 1}`, class: "u-hit" });
     t.textContent = String(i + 1); s.append(t);
+    // インターセプト: そのハウスに丸ごと収まるサインを記号で併記する。ルディアは
+    // 「挟み込まれたサインを正確に記す」ことを求めている。
+    const intercepted = (chart.interceptions ?? []).filter((x) => x.house === `house_${i + 1}`);
+    if (intercepted.length) {
+      const [ix, iy] = pt(lon + span / 2, (rSignIn + rHouseIn) / 2 - 11);
+      const it = svg("text", {
+        x: ix, y: iy, "text-anchor": "middle", "dominant-baseline": "central",
+        "font-size": 10, fill: "#7b3fa0", "data-tip": `interception:${intercepted.map((x) => x.sign).join(",")}`, class: "u-hit",
+      });
+      it.textContent = intercepted.map((x) => SIGN_GLYPH[x.sign] ?? x.sign).join(" ");
+      s.append(it);
+    }
     const [cdx, cdy] = pt(lon + 2, rHouseIn + 7);
     const ct = svg("text", { x: cdx, y: cdy, "text-anchor": "start", "dominant-baseline": "central", "font-size": 7, fill: "#999" });
     ct.textContent = fmtDeg(((lon % 30) + 30) % 30); s.append(ct);

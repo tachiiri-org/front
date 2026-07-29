@@ -76,6 +76,7 @@ export type Chart = {
   ascendant: number; midheaven: number;
   house_system?: string; cusps?: Cusp[];
   wheel_layout?: "sign_fixed" | "mandala"; // 流派が指定する描画規約（バックエンドが返す）
+  interceptions?: Array<{ house: string; sign: string }>; // どのカスプにも現れないサイン
   placements: Placement[]; aspects: Aspect[];
   patterns?: Pattern[];
   dignities: Array<{ planet: string; dignity: string }>;
