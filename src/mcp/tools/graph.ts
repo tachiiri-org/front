@@ -102,7 +102,8 @@ function relationLineText(line: ApiLine): string {
     .filter((b) => b.length > 0);
   const prose = bodies.length ? bodies.join("\n  ") : "(本文なし)";
   const parts = line.participants.map((p) => `[${p.id}] ${participantLabel(p)}`).join(", ");
-  return `● ${prose}\n  関係ノード: ${parts || "(なし)"}`;
+  // line_id is surfaced so a caller can address this exact line (e.g. graph_delete_relation).
+  return `● ${prose}\n  line_id: ${line.lineId}\n  関係ノード: ${parts || "(なし)"}`;
 }
 
 // A relation line matches `word` if the word appears in any participant label or in any body text.
@@ -222,6 +223,20 @@ export const GRAPH_TOOLS = [
         graph_id: { type: "string", description: "Word graph ID (e.g. 'word-graph-1')" },
         node_id: { type: "string", description: "Node ID to delete (use node_ids for bulk)" },
         node_ids: { type: "array", items: { type: "string" }, description: "Multiple node IDs to delete (alternative to node_id)" },
+      },
+      required: ["graph_id"],
+    },
+  },
+  {
+    name: "graph_delete_relation",
+    description:
+      "[migration] Delete whole RELATION LINES (リレーション) by line_id — the prose rows in the relation panel. This is the only way to remove a relation: graph_unlink targets structural edges and never matches a line that has prose, and graph_delete_node would take the participant nodes with it. Get line_ids from graph_read_relations / graph_search_relations / graph_export, which print `line_id:` on each line. Deleting a line removes its body and its participant links; the participant NODES themselves are left untouched. Irreversible — read the lines first and delete in small batches.",
+    inputSchema: {
+      type: "object",
+      properties: {
+        graph_id: { type: "string", description: "Word graph ID (e.g. 'word-graph-1')" },
+        line_id: { type: "string", description: "Relation line ID to delete (use line_ids for bulk)" },
+        line_ids: { type: "array", items: { type: "string" }, description: "Multiple relation line IDs to delete (alternative to line_id)" },
       },
       required: ["graph_id"],
     },
@@ -379,6 +394,19 @@ export async function callGraphTool(
         if (!res.ok) throw new Error(`delete_node_failed:${res.status}:${id}`);
       }));
       return { content: [{ type: "text", text: ids.length === 1 ? `Deleted [${ids[0]}]` : `Deleted ${ids.length} nodes` }] };
+    }
+
+    if (name === "graph_delete_relation") {
+      const ids = Array.isArray(args.line_ids) ? (args.line_ids as string[]) : [String(args.line_id)];
+      // Sequential, not Promise.all: deleteLine rewrites each participant's h_node_relation
+      // prev/next chain, so concurrent deletes on lines sharing a node would race on that chain.
+      const failed: string[] = [];
+      for (const id of ids) {
+        const res = await graphFetch(env, graphId, `line/${encodeURIComponent(id)}`, "DELETE");
+        if (!res.ok) failed.push(`${id}:${res.status}`);
+      }
+      if (failed.length) throw new Error(`delete_relation_failed:${failed.join(",")}`);
+      return { content: [{ type: "text", text: ids.length === 1 ? `Deleted relation [${ids[0]}]` : `Deleted ${ids.length} relations` }] };
     }
 
     if (name === "graph_link") {
