@@ -1,6 +1,6 @@
 // ウラナイ画面のルート描画とフォーム類。定数・型・ヘルパは ./parts、ホイール描画は ./wheel に分割。
 import {
-  SIGN_ORDER, SIGN_GLYPH, SIGN_NAME, SIGN_ELEMENT, SIGN_QUALITY, ELEMENT_CHAR, QUALITY_CHAR, PLANET_GLYPH, PLANET_ORDER, PLANET_NAME_LINES, ASPECT_INFO, ASPECT_ORDER, PATTERN_INFO, PATTERN_ORDER, Person, Prefill, Settings, SETTING_FIELDS, Chart, UranaiView, api, lonOf, fmtDeg, Birth, HOUSE_SYSTEM_JA, IANA_ZONES, FALLBACK_ZONES, CC_ZONE, offsetFromZone, el, selectEl, loadSettings,
+  SIGN_ORDER, SIGN_GLYPH, SIGN_NAME, SIGN_ELEMENT, SIGN_QUALITY, ELEMENT_CHAR, QUALITY_CHAR, PLANET_GLYPH, PLANET_ORDER, PLANET_NAME_LINES, ASPECT_INFO, ASPECT_ORDER, PATTERN_INFO, PATTERN_ORDER, SHAPE_INFO, SHAPE_ORDER, Person, Prefill, Settings, SETTING_FIELDS, Chart, loadMeanings, meaningOf, roleOf, clearMeanings, UranaiView, api, lonOf, fmtDeg, Birth, HOUSE_SYSTEM_JA, IANA_ZONES, FALLBACK_ZONES, CC_ZONE, offsetFromZone, el, selectEl, loadSettings,
 } from "./parts";
 import { drawWheelPro } from "./wheel";
 
@@ -56,6 +56,7 @@ function birthForm(personId: string, onDone: (chart: Chart) => void, prefill?: P
       if (label.value.trim()) await api(`/api/v1/uranai/person/${personId}`, { method: "PATCH", body: JSON.stringify({ label: label.value.trim() }) }).catch(() => {});
       const born_at = `${date.value}T${time.value}:00${tz.value.trim() || "+00:00"}`;
       await api(`/api/v1/uranai/person/${personId}/birth`, { method: "PUT", body: JSON.stringify({ born_at, lat: String(lat), lng: String(lng), place: placeName, timezone: tz.value.trim() }) });
+      await loadMeanings();
       const chart = await api<Chart>(`/api/v1/uranai/astrology/person/${personId}/compute`, { method: "POST", body: "{}" });
       status.textContent = "";
       onDone(chart);
@@ -97,7 +98,12 @@ function settingsView(settings: Settings, onSaved: () => void | Promise<void>): 
   for (const f of SETTING_FIELDS) {
     const sel = selectEl(f.options, settings[f.key]);
     sels[f.key] = sel;
-    grid.append(el("div", { className: "u-set-row" }, [el("label", { textContent: f.label }), sel]));
+    // ハウスは流派が決める（空間の分割方式は教義そのもの）。実効値を見せるが編集はさせない。
+    const derived = f.key === "house_system_id";
+    if (derived) sel.disabled = true;
+    grid.append(el("div", { className: "u-set-row" }, [
+      el("label", { textContent: derived ? `${f.label}（流派で決まる）` : f.label }), sel,
+    ]));
   }
   const status = el("div", { className: "u-status" });
   const save = el("button", { className: "u-btn", textContent: "保存して全チャート再計算" });
@@ -105,20 +111,39 @@ function settingsView(settings: Settings, onSaved: () => void | Promise<void>): 
     status.textContent = "保存中…";
     try {
       const payload: Record<string, string> = {};
-      for (const f of SETTING_FIELDS) { const v = sels[f.key]?.value; if (v) { payload[f.key as string] = v; (settings as Record<string, string>)[f.key as string] = v; } }
+      // 流派由来の項目は送らない。送るとユーザー設定として保存され、流派を切り替えても残ってしまう。
+      for (const f of SETTING_FIELDS) {
+        if (f.key === "house_system_id") continue;
+        const v = sels[f.key]?.value;
+        if (v) { payload[f.key as string] = v; (settings as Record<string, string>)[f.key as string] = v; }
+      }
       await api(`/api/v1/uranai/astrology/settings`, { method: "PUT", body: JSON.stringify(payload) });
       if (rsSel.value && rsSel.value !== rsInitial) {
-        await api(`/api/v1/uranai/astrology/preference`, { method: "PUT", body: JSON.stringify({ ruleset_id: rsSel.value }) });
+        const saved = await api<{ ruleset_id?: string }>(`/api/v1/uranai/astrology/preference`, { method: "PUT", body: JSON.stringify({ ruleset_id: rsSel.value }) });
+        if (saved.ruleset_id !== rsSel.value) throw new Error(`流派の保存に失敗しました（要求 ${rsSel.value} / 保存 ${saved.ruleset_id ?? "なし"}）`);
         rsInitial = rsSel.value;
       }
       // 設定は全人物のチャートに影響するため、保存済みの全チャートを再計算して反映。
       const { persons } = await api<{ persons: Person[] }>(`/api/v1/uranai/person`);
       let done = 0;
+      // 再計算の失敗は握り潰さない。サーバ側の例外で一部のファクトだけが欠けた状態になり得るため、
+      // 静かに成功したように見せるとデータの欠損に気づけない。
+      const failed: string[] = [];
+      const skipped: string[] = [];
       for (const p of persons) {
         status.textContent = `再計算中… (${++done}/${persons.length})`;
-        await api(`/api/v1/uranai/astrology/person/${p.id}/compute`, { method: "POST", body: "{}" }).catch(() => {});
+        try {
+          await api(`/api/v1/uranai/astrology/person/${p.id}/compute`, { method: "POST", body: "{}" });
+        } catch (e) {
+          const msg = (e as Error).message;
+          // 400 は出生データ未入力など、その人物を計算できないという意味。設定保存の失敗ではない。
+          if (/^400\b/.test(msg)) skipped.push(p.label ?? p.id);
+          else failed.push(`${p.label ?? p.id}: ${msg}`);
+        }
       }
-      status.textContent = "";
+      clearMeanings(); // 流派が変わると意味も変わる
+      if (failed.length) throw new Error(`再計算に失敗しました（${failed.length}/${persons.length}件）: ${failed.join(" / ")}`);
+      status.textContent = skipped.length ? `${skipped.length}件を対象外にしました（出生データ未入力）: ${skipped.join(", ")}` : "";
       await onSaved();
     } catch (e) { status.textContent = `エラー: ${(e as Error).message}`; }
   });
@@ -138,10 +163,20 @@ function chartView(chart: Chart, birth: Birth | null | undefined, personId: stri
   const houseOf = (lon: number): number => { for (let i = 0; i < 12; i++) { const a = cuspLons[i], b = cuspLons[(i + 1) % 12]; const span = ((b - a) % 360 + 360) % 360; const off = ((lon - a) % 360 + 360) % 360; if (off < span) return i + 1; } return 12; };
   const place = new Map(chart.placements.map((p) => [p.planet, p]));
   const bodyLabel = (k: string): string => { const nm = PLANET_NAME_LINES[k]?.[0]; return nm ? `${PLANET_GLYPH[k] ?? ""} ${nm}`.trim() : (PLANET_GLYPH[k] ?? k); };
-  const mkTable = (headers: string[], rows: string[][]): HTMLElement => {
-    const tbl = el("table", { className: "u-tbl" });
-    const htr = el("tr", {}); for (const h of headers) htr.append(el("th", { textContent: h })); tbl.append(htr);
-    for (const r of rows) { const tr = el("tr", {}); for (const c of r) tr.append(el("td", { textContent: c })); tbl.append(tr); }
+  // wrap: 折り返して左寄せにする列の番号。意味など長文の列は1行に収まらないので省略せず折り返す。
+  const QUAD_JA: Record<string, string> = { quadrant_1: "第1象限", quadrant_2: "第2象限", quadrant_3: "第3象限", quadrant_4: "第4象限" };
+  const ROLE_JA: Record<string, string> = { light: "二光体", organic: "有機的生活", transcendent: "超越的活動" };
+  const mkTable = (headers: string[], rows: string[][], wrap?: number[]): HTMLElement => {
+    const w = new Set(wrap ?? []);
+    const tbl = el("table", { className: "u-tbl" + (w.size ? " u-tbl-auto" : "") });
+    const htr = el("tr", {});
+    headers.forEach((h, i) => htr.append(el("th", { textContent: h, className: w.has(i) ? "u-mean" : "" })));
+    tbl.append(htr);
+    for (const r of rows) {
+      const tr = el("tr", {});
+      r.forEach((c, i) => tr.append(el("td", { textContent: c, className: w.has(i) ? "u-mean" : "" })));
+      tbl.append(tr);
+    }
     return tbl;
   };
 
@@ -151,6 +186,7 @@ function chartView(chart: Chart, birth: Birth | null | undefined, personId: stri
   let nameMode = false;
   const host = el("div", { className: "u-wheel" });
   const drawChart = () => { host.innerHTML = ""; host.append(drawWheelPro(chart, enabled, nameMode)); };
+  host.addEventListener("u-redraw", drawChart); // テーマ切替時にホイールを描き直す
   const nameCb = el("input", { type: "checkbox", checked: false });
   nameCb.addEventListener("change", () => { nameMode = nameCb.checked; drawChart(); });
 
@@ -159,6 +195,11 @@ function chartView(chart: Chart, birth: Birth | null | undefined, personId: stri
   const QUAL_JA: Record<string, string> = { cardinal: "活動", fixed: "不動", mutable: "柔軟" };
   const aspOf = (k: string): string => chart.aspects.filter((a) => a.a === k || a.b === k).sort((x, y) => x.orb - y.orb)
     .map((a) => `<div class="u-tip-a">${ASPECT_INFO[a.type]?.label ?? a.type}　${bodyLabel(a.a === k ? a.b : a.a)}　${a.orb.toFixed(2)}°</div>`).join("");
+  // 流派の意味（ルディア等）。参照APIから取得済みのものを引く。無ければ何も出さない。
+  const mean = (kind: string, id: string): string => {
+    const v = meaningOf(kind, id);
+    return v ? `<div class="u-tip-s">意味</div><div>${v}</div>` : "";
+  };
   const tipHTML = (kind: string, id: string): string => {
     if (kind === "planet" || kind === "axis") {
       const p = place.get(id); if (!p) return "";
@@ -167,12 +208,16 @@ function chartView(chart: Chart, birth: Birth | null | undefined, personId: stri
       return `<div class="u-tip-h">${nm}</div>`
         + `<div>サイン: ${SIGN_NAME[p.sign] ?? p.sign} ${fmtDeg(p.degree)}${p.retrograde ? " ℞" : ""}</div>`
         + (kind === "planet" ? `<div>ハウス: ${houseOf(lonOf(p))}室</div>` : "")
+        + mean("planet", id)
         + (asp ? `<div class="u-tip-s">アスペクト</div>${asp}` : `<div class="u-tip-a">アスペクトなし</div>`);
     }
     if (kind === "sign") {
       const inSign = chart.placements.filter((pp) => pp.sign === id && !["asc", "mc", "dsc", "ic"].includes(pp.planet)).map((pp) => bodyLabel(pp.planet)).join("、") || "なし";
+      const icpt = (chart.interceptions ?? []).find((x) => x.sign === id);
       return `<div class="u-tip-h">${SIGN_GLYPH[id]}︎ ${SIGN_NAME[id] ?? id}</div>`
-        + `<div>元素: ${ELEM_JA[SIGN_ELEMENT[id]] ?? ELEMENT_CHAR[SIGN_ELEMENT[id]]}　区分: ${QUAL_JA[SIGN_QUALITY[id]] ?? QUALITY_CHAR[SIGN_QUALITY[id]]}</div>`
+        + (chart.tally === false ? "" : `<div>元素: ${ELEM_JA[SIGN_ELEMENT[id]] ?? ELEMENT_CHAR[SIGN_ELEMENT[id]]}　区分: ${QUAL_JA[SIGN_QUALITY[id]] ?? QUALITY_CHAR[SIGN_QUALITY[id]]}</div>`)
+        + mean("sign", id)
+        + (icpt ? `<div class="u-tip-a">インターセプト（${icpt.house.replace("house_", "")}室に丸ごと収まる）</div>` : "")
         + `<div class="u-tip-s">在住</div><div>${inSign}</div>`;
     }
     if (kind === "house") {
@@ -181,6 +226,7 @@ function chartView(chart: Chart, birth: Birth | null | undefined, personId: stri
       const inH = chart.placements.filter((pp) => !["asc", "mc", "dsc", "ic"].includes(pp.planet) && houseOf(lonOf(pp)) === n).map((pp) => bodyLabel(pp.planet)).join("、") || "なし";
       return `<div class="u-tip-h">${n}室</div>`
         + `<div>カスプ: ${SIGN_NAME[sign] ?? sign} ${fmtDeg(((lon % 30) + 30) % 30)}</div>`
+        + mean("house", `house_${n}`)
         + `<div class="u-tip-s">在住</div><div>${inH}</div>`;
     }
     return "";
@@ -223,16 +269,51 @@ function chartView(chart: Chart, birth: Birth | null | undefined, personId: stri
   // 天体（アングルも同じ表に。逆行・室はアングルでは空欄）
   const planetRows = PLANET_ORDER.filter((k) => place.has(k)).map((k) => { const p = place.get(k)!; return [bodyLabel(k), SIGN_NAME[p.sign] ?? p.sign, fmtDeg(p.degree), p.retrograde ? "℞" : "", String(houseOf(lonOf(p)))]; });
   const angleRows = ["asc", "mc", "dsc", "ic"].filter((k) => place.has(k)).map((k) => { const p = place.get(k)!; return [PLANET_GLYPH[k] ?? k, SIGN_NAME[p.sign] ?? p.sign, fmtDeg(p.degree), "", ""]; });
-  const planetTbl = mkTable(["天体", "サイン", "度数", "逆行", "室"], [...planetRows, ...angleRows]);
-  const cuspTbl = mkTable(["室", "サイン", "度数"], cuspLons.map((lon, i) => { const sign = SIGN_ORDER[Math.floor((((lon % 360) + 360) % 360) / 30) % 12]; return [String(i + 1), SIGN_NAME[sign], fmtDeg(((lon % 30) + 30) % 30)]; }));
+  const planetTbl = mkTable(["天体", "サイン", "度数", "逆行", "室", "階層", "意味"],
+    [...planetRows.map((r, i) => { const k = PLANET_ORDER.filter((x) => place.has(x))[i]; return [...r, ROLE_JA[roleOf(k)] ?? "", meaningOf("planet", k)]; }),
+     ...angleRows.map((r) => [...r, "", ""])], [6]);
+  const cuspTbl = mkTable(["室", "サイン", "度数", "意味"], cuspLons.map((lon, i) => { const sign = SIGN_ORDER[Math.floor((((lon % 360) + 360) % 360) / 30) % 12]; return [String(i + 1), SIGN_NAME[sign], fmtDeg(((lon % 30) + 30) % 30), meaningOf("house", `house_${i + 1}`)]; }), [3]);
+  // サインの意味（流派スコープ）。ルディアはサインを「生命プロセスの12の位相」として定義する。
+  const signTbl = mkTable(["サイン", "意味"], SIGN_ORDER.map((k) => [`${SIGN_GLYPH[k]}︎ ${SIGN_NAME[k] ?? k}`, meaningOf("sign", k)]), [1]);
+  // ディグニティ。ルディアも解釈手順で確認する項目だが、吉凶ではなく機能的な強調として読む。
+  const DIGNITY_JA: Record<string, string> = { domicile: "ドミサイル", exaltation: "イグザルテーション", detriment: "デトリメント", fall: "フォール", peregrine: "ペレグリン" };
+  const digTbl = mkTable(["天体", "ディグニティ", "意味"], (chart.dignities ?? []).length
+    ? (chart.dignities ?? []).map((d) => [bodyLabel(d.planet), DIGNITY_JA[d.dignity] ?? d.dignity, meaningOf("dignity", d.dignity)])
+    : [["なし", "—", ""]], [2]);
+
+  // 象限。地平線と子午線が作る4つのクォーター。ルディアはハウスをこの単位でも読む。
+  const quadTbl = mkTable(["象限", "ハウス", "意味"], (chart.quadrants ?? []).map((q) => [
+    QUAD_JA[q.id] ?? q.id,
+    `${q.houses[0].replace("house_", "")}〜${q.houses[q.houses.length - 1].replace("house_", "")}室`,
+    meaningOf("quadrant", q.id),
+  ]), [2]);
+  // ルネーション: 太陽から測った月の離角。PoF の地平線上下がこれで決まる。
+  const lun = chart.lunation;
+  const lunTbl = mkTable(["項目", "値"], lun
+    ? [["太陽から測った月の離角", `${lun.elongation.toFixed(1)}°`],
+       ["位相", lun.phase === "waxing" ? "上弦（合から衝へ向かう）" : "下弦（衝から合へ戻る）"]]
+    : [["算出できません", "—"]]);
+  // インターセプト（どのカスプにも現れないサイン）。ホイールには描かず表で示す。
+  const icptTbl = mkTable(["サイン", "収まるハウス"], (chart.interceptions ?? []).length
+    ? (chart.interceptions ?? []).map((x) => [`${SIGN_GLYPH[x.sign] ?? ""}︎ ${SIGN_NAME[x.sign] ?? x.sign}`, `${x.house.replace("house_", "")}室`])
+    : [["なし", "—"]]);
 
   // アスペクト（種類ごとにグループ化）
   const aspectNode = el("div", {});
+  // 位相の意味は上弦/下弦で共通なので、表ごとに繰り返さず先頭に凡例として置く。
+  if (meaningOf("phase", "waxing")) {
+    aspectNode.append(el("div", { className: "u-tbl-title", textContent: "位相" }));
+    aspectNode.append(mkTable(["位相", "意味"], [
+      ["上弦", meaningOf("phase", "waxing")], ["下弦", meaningOf("phase", "waning")],
+    ], [1]));
+  }
   for (const t of ASPECT_ORDER) {
     const rows = chart.aspects.filter((a) => a.type === t).sort((a, b) => a.orb - b.orb);
     if (!rows.length) continue;
     aspectNode.append(el("div", { className: "u-tbl-title", textContent: `${ASPECT_INFO[t]?.label ?? t}（${rows.length}）` }));
-    aspectNode.append(mkTable(["天体", "天体", "オーブ"], rows.map((a) => [bodyLabel(a.a), bodyLabel(a.b), `${a.orb.toFixed(2)}°`])));
+    // 位相（上弦/下弦）はルディアの中核。同じ90度でも上弦と下弦で意味が違う。
+    aspectNode.append(mkTable(["天体", "天体", "オーブ", "位相"], rows.map((a) =>
+      [bodyLabel(a.a), bodyLabel(a.b), `${a.orb.toFixed(2)}°`, a.phase === "waxing" ? "上弦" : a.phase === "waning" ? "下弦" : "—"])));
   }
 
   // アスペクトパターン（配置図形）。既定は非内包の主要図形、詳細トグルで小配置・内包も表示。
@@ -273,6 +354,36 @@ function chartView(chart: Chart, birth: Birth | null | undefined, personId: stri
   }
   patternNode.append(patList);
   renderPatterns();
+
+  // チャート全体の形（ゲシュタルト）。ルディアは個々のアスペクトを見る前に、まず全体の形と
+  // 重みのバランスを捉えよと説く。ここも意味は書かず事実のみ。
+  const shapeNode = el("div", {});
+  const sh = chart.shape;
+  if (!sh) {
+    shapeNode.append(el("div", { className: "u-pat-empty", textContent: "全体の形は算出されていません（対象は10天体）" }));
+  } else {
+    // 7パターンを常に全部並べ、該当するものだけ印を付ける。該当しないものも「—」で残すことで、
+    // 何が判定されなかったのかが読み取れるようにする。
+    shapeNode.append(el("div", { className: "u-tbl-title", textContent: "惑星配置型（判定対象は10天体。キロン・小惑星・ノード・感受点は含めない）" }));
+    // 形ごとの固有要素（バケットの取っ手、ロコモーティブの先頭）は同じ行に入れる。
+    // その形にしか無い概念なので、別表に切り出すと「なし」ばかりの表になる。
+    const extra = (k: string): string => {
+      if (k === "bucket") return sh.handle?.length ? `取っ手: ${sh.handle.map((x) => bodyLabel(x)).join("　")}` : "";
+      if (k === "locomotive") return sh.leadingBody ? `先頭: ${bodyLabel(sh.leadingBody)}` : "";
+      return "";
+    };
+    shapeNode.append(mkTable(["形", "判定", ""], SHAPE_ORDER.map((k) => [
+      SHAPE_INFO[k]?.name ?? k, k === sh.shape ? "● 該当" : "—", k === sh.shape ? extra(k) : "",
+    ])));
+
+    // シングルトンは7パターンとは別の概念（分布の形ではなく孤立というアクセント）なので別に出す。
+    const AXIS_JA: Record<string, string> = { horizon: "地平線", meridian: "子午線" };
+    const same = sh.singleton && sh.handle?.length === 1 && sh.handle[0] === sh.singleton.planet;
+    shapeNode.append(el("div", { className: "u-tbl-title", textContent: "シングルトン" }));
+    shapeNode.append(mkTable(["天体"], sh.singleton
+      ? [[`${bodyLabel(sh.singleton.planet)}（${AXIS_JA[sh.singleton.axis] ?? sh.singleton.axis}で分けた半球にただ1つ${same ? "。取っ手と同一" : ""}）`]]
+      : [["なし"]]));
+  }
 
   // 基本情報: 通常は表。各編集項目に編集アイコン、押すとその項目だけ編集モード（他はグレーアウト）、
   // 再計算(保存)またはキャンセル。
@@ -381,10 +492,17 @@ function chartView(chart: Chart, birth: Birth | null | undefined, personId: stri
   const sections: Array<{ label: string; node: HTMLElement }> = [
     { label: "基本情報", node: basicNode },
     { label: "チャート", node: chartNode },
-    { label: "元素", node: elemNode },
-    { label: "クオリティ", node: qualNode },
+    { label: "全体の形", node: shapeNode },
+    // エレメント/クオリティの数え上げは流派依存。使わない流派（ルディア）では出さない。
+    ...(chart.tally === false ? [] : [{ label: "元素", node: elemNode }, { label: "クオリティ", node: qualNode }]),
+
     { label: "天体", node: planetTbl },
     { label: "カスプ", node: cuspTbl },
+    { label: "サイン", node: signTbl },
+    { label: "インターセプト", node: icptTbl },
+    { label: "ディグニティ", node: digTbl },
+    { label: "象限", node: quadTbl },
+    { label: "ルネーション", node: lunTbl },
     { label: `アスペクト(${chart.aspects.length})`, node: aspectNode },
     { label: `配置(${majorCount})`, node: patternNode },
   ];
@@ -505,6 +623,10 @@ export async function renderUranai(container: HTMLElement): Promise<void> {
     .u-tbl th{color:#999;font-weight:600;text-align:center;padding:5px 4px;border-bottom:1px solid #0002}
     .u-tbl td{color:#333;text-align:center;padding:5px 4px;border-bottom:1px solid #0001;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
     .u-tbl-title{font-size:12px;font-weight:700;color:#555;margin:10px 0 4px}
+    /* 長文の列（意味など）は折り返して左寄せ。列幅は内容に合わせる。 */
+    .u-tbl.u-tbl-auto{table-layout:auto}
+    .u-tbl td.u-mean{white-space:normal;text-align:left;overflow:visible;text-overflow:clip;line-height:1.5}
+    .u-tbl th.u-mean{text-align:left}
     .u-title{font-weight:700;font-size:18px;margin-bottom:8px}
     .u-chart-head{display:flex;align-items:center;justify-content:space-between;gap:12px;margin-bottom:4px}
     .u-chart-head .u-title{margin-bottom:0}
@@ -517,6 +639,38 @@ export async function renderUranai(container: HTMLElement): Promise<void> {
     .u-set-row label{width:88px;flex:none;color:#666;font-size:12px}
     .u-set-sel{flex:1;min-width:0;padding:4px 6px;border:1px solid #0002;border-radius:5px;font-size:12px;background:#fff}
     .u-settings-note{font-size:12px;color:#888;margin-bottom:12px;max-width:520px}
+    /* テーマ切替ボタン */
+    .u-theme-btn{position:fixed;right:14px;bottom:14px;z-index:900;border:1px solid #0002;background:#fff;color:#666;
+      border-radius:999px;width:36px;height:36px;font-size:16px;line-height:1;cursor:pointer;box-shadow:0 4px 12px #0002}
+    /* ── ダーク（既定）。ライトの規則は触らず、data-theme=dark のときだけ上書きする ── */
+    .u-wrap[data-theme=dark]{color:#e6e8eb;background:#14161a}
+    [data-theme=dark] .u-side{border-right-color:#ffffff1f}
+    [data-theme=dark] .u-report{border-left-color:#ffffff1f}
+    [data-theme=dark] .u-report-head,[data-theme=dark] .u-sec-head,[data-theme=dark] .u-basic-v,
+    [data-theme=dark] .u-data-v,[data-theme=dark] .u-pat-bodies,[data-theme=dark] .u-tbl td{color:#e6e8eb}
+    [data-theme=dark] .u-pat-h b,[data-theme=dark] .u-tg-btn.on,[data-theme=dark] .u-tab-btn.on{color:#f3f5f7}
+    [data-theme=dark] .u-report-body,[data-theme=dark] .u-person-menu,[data-theme=dark] .u-pat-comp,
+    [data-theme=dark] .u-settings-note,[data-theme=dark] .u-pat-empty,[data-theme=dark] .u-pat-aka,
+    [data-theme=dark] .u-basic-k,[data-theme=dark] .u-tbl th,[data-theme=dark] .u-data-k,
+    [data-theme=dark] .u-geo-addr,[data-theme=dark] .u-picked,[data-theme=dark] .u-tg-title,
+    [data-theme=dark] .u-set-title,[data-theme=dark] .u-tbl-title{color:#8b95a3}
+    [data-theme=dark] .u-tg-chip,[data-theme=dark] .u-geo-name,[data-theme=dark] .u-row label,
+    [data-theme=dark] .u-set-row label,[data-theme=dark] .u-tab-btn,[data-theme=dark] .u-tg-btn{color:#b3bcc7}
+    [data-theme=dark] .u-person:hover{background:#ffffff0f}
+    [data-theme=dark] .u-person-menu:hover,[data-theme=dark] .u-edit-ic:hover{background:#ffffff14;color:#e6e8eb}
+    [data-theme=dark] .u-person-pop,[data-theme=dark] .u-geo-results,[data-theme=dark] .u-pat,
+    [data-theme=dark] .u-tab-btn,[data-theme=dark] .u-tg-btn,[data-theme=dark] .u-set-sel,
+    [data-theme=dark] .u-row input,[data-theme=dark] .u-theme-btn{background:#1b1f26;border-color:#ffffff26;color:#dfe4ea}
+    [data-theme=dark] .u-pat-sub{background:#171a20;border-left-color:#4b5563}
+    [data-theme=dark] .u-tab-btn:hover,[data-theme=dark] .u-tg-btn:hover{border-color:#ffffff44}
+    [data-theme=dark] .u-tbl td,[data-theme=dark] .u-basic-tbl td,[data-theme=dark] .u-geo-item{border-bottom-color:#ffffff14}
+    [data-theme=dark] .u-tbl th{border-bottom-color:#ffffff26}
+    [data-theme=dark] .u-geo-item:hover{background:#4A90C233}
+    [data-theme=dark] .u-btn-ghost,[data-theme=dark] .u-btn-sm{background:#ffffff14;color:#e6e8eb}
+    [data-theme=dark] .u-btn-ghost:hover,[data-theme=dark] .u-btn-sm:hover{background:#ffffff22}
+    [data-theme=dark] .u-settings{background:#ffffff0a;border-color:#ffffff1f}
+    [data-theme=dark] .u-edit-ic{color:#8b95a3}
+    [data-theme=dark] .u-tip{background:#0b0d11;box-shadow:0 10px 28px #000a}
     .u-set-btn{margin-top:6px}
     /* モバイル: 縦積み＋人物リストを横スクロールのチップ化 */
     @media (max-width: 640px){
@@ -539,6 +693,23 @@ export async function renderUranai(container: HTMLElement): Promise<void> {
     }
   </style>`;
   const wrap = el("div", { className: "u-wrap" });
+  // テーマ。既定はダーク。SVG 側は currentTheme() が documentElement を見るので両方に付ける。
+  const applyTheme = (t: "dark" | "light") => {
+    wrap.dataset.theme = t;
+    document.documentElement.dataset.uTheme = t;
+    themeBtn.textContent = t === "dark" ? "☀" : "☾";
+    themeBtn.title = t === "dark" ? "ライトモードに切り替え" : "ダークモードに切り替え";
+  };
+  const themeBtn = el("button", { className: "u-theme-btn", type: "button" }) as HTMLButtonElement;
+  let theme: "dark" | "light" = localStorage.getItem("u-theme") === "light" ? "light" : "dark";
+  themeBtn.addEventListener("click", () => {
+    theme = theme === "dark" ? "light" : "dark";
+    localStorage.setItem("u-theme", theme);
+    applyTheme(theme);
+    // ホイールは SVG の属性に色を焼き込んでいるので描き直す。
+    for (const h of Array.from(document.querySelectorAll<HTMLElement>(".u-wheel"))) h.dispatchEvent(new CustomEvent("u-redraw"));
+  });
+  applyTheme(theme);
   const side = el("div", { className: "u-side" });
   const main = el("div", { className: "u-main" });
   // 右側: 鑑定レポート枠（今は空。独立スクロール）。
@@ -546,7 +717,7 @@ export async function renderUranai(container: HTMLElement): Promise<void> {
     el("div", { className: "u-report-head", textContent: "鑑定レポート" }),
     el("div", { className: "u-report-body" }),
   ]);
-  wrap.append(side, main, report); container.append(wrap);
+  wrap.append(side, main, report, themeBtn); container.append(wrap);
 
   // 流派設定（マスタ）。編集フォームで表示・変更する。全人物のチャートに適用。
   const settings = await loadSettings();
@@ -571,6 +742,7 @@ export async function renderUranai(container: HTMLElement): Promise<void> {
   // 既存人物の出生データを取得して編集フォームを事前入力で開く。
   const showChart = async (personId: string, label?: string | null, push = true) => {
     main.innerHTML = ""; main.append(el("div", { textContent: "読み込み中…" }));
+    await loadMeanings();
     const chart = await api<Chart>(`/api/v1/uranai/astrology/person/${personId}/chart`);
     const birth = await api<Birth>(`/api/v1/uranai/person/${personId}/birth`).catch(() => null);
     main.innerHTML = "";
