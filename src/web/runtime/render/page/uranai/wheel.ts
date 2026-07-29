@@ -43,15 +43,16 @@ export function drawWheelPro(chart: Chart, enabledAspects: Set<string>, name: bo
   // サイン帯（薄い元素色 + グリフ）
   for (let i = 0; i < 12; i++) {
     const a0 = i * 30;
-    // mandala では 1サインの画面上の幅が不揃いになる。large-arc フラグを跨がないよう、
-    // 画面角の差が 180 度を超える場合に備えて掃引量から判定する。
-    const sweep = norm(scr(a0) - scr(a0 + 30));
+    // mandala では 1サインの画面上の幅が不揃いになるので、large-arc フラグを掃引量から決める。
+    // scr は黄経に対して増加するため、掃引量は必ず (終点 - 始点) の向きで取る。
+    // 逆向きに取ると常に 330 度となり large-arc が立ちっぱなしになり、帯が円の外へはみ出す。
+    const sweep = norm(scr(a0 + 30) - scr(a0));
     const large = sweep > 180 ? 1 : 0;
     const [x0o, y0o] = pt(a0, R), [x1o, y1o] = pt(a0 + 30, R);
     const [x0i, y0i] = pt(a0, rSignIn), [x1i, y1i] = pt(a0 + 30, rSignIn);
     s.append(svg("path", { d: `M${x0o},${y0o} A${R},${R} 0 ${large} 0 ${x1o},${y1o} L${x1i},${y1i} A${rSignIn},${rSignIn} 0 ${large} 1 ${x0i},${y0i} Z`, fill: signFill(SIGN_ORDER[i]), stroke: "none", "data-tip": `sign:${SIGN_ORDER[i]}`, class: "u-hit" }));
     // 画面上の中点。mandala では黄経の中点と画面の中点がずれるため、画面角で取る。
-    const midScr = scr(a0) - sweep / 2;
+    const midScr = scr(a0) + sweep / 2;
     const rMid = (R + rSignIn) / 2;
     const gx = cx + rMid * Math.cos(midScr * Math.PI / 180), gy = cy - rMid * Math.sin(midScr * Math.PI / 180);
     if (name) {
