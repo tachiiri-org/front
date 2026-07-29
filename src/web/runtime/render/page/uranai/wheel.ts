@@ -93,12 +93,14 @@ export function drawWheelPro(chart: Chart, enabledAspects: Set<string>, name: bo
     // 「挟み込まれたサインを正確に記す」ことを求めている。
     const intercepted = (chart.interceptions ?? []).filter((x) => x.house === `house_${i + 1}`);
     if (intercepted.length) {
-      const [ix, iy] = pt(lon + span / 2, (rSignIn + rHouseIn) / 2 - 11);
+      // ハウス番号の内側に置く。サイン記号には U+FE0E を付けてテキスト表示を強制する
+      // （付けないと絵文字表示になり、フォントによっては豆腐になる。サイン帯と同じ扱い）。
+      const [ix, iy] = pt(lon + span / 2, rHouseIn + 9);
       const it = svg("text", {
         x: ix, y: iy, "text-anchor": "middle", "dominant-baseline": "central",
-        "font-size": 10, fill: "#7b3fa0", "data-tip": `interception:${intercepted.map((x) => x.sign).join(",")}`, class: "u-hit",
+        "font-size": 11, fill: "#7b3fa0", "data-tip": `interception:${intercepted.map((x) => x.sign).join(",")}`, class: "u-hit",
       });
-      it.textContent = intercepted.map((x) => SIGN_GLYPH[x.sign] ?? x.sign).join(" ");
+      it.textContent = intercepted.map((x) => `${SIGN_GLYPH[x.sign] ?? x.sign}︎`).join(" ");
       s.append(it);
     }
     const [cdx, cdy] = pt(lon + 2, rHouseIn + 7);

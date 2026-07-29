@@ -431,8 +431,9 @@ function chartView(chart: Chart, birth: Birth | null | undefined, personId: stri
     { label: "基本情報", node: basicNode },
     { label: "チャート", node: chartNode },
     { label: "全体の形", node: shapeNode },
-    { label: "元素", node: elemNode },
-    { label: "クオリティ", node: qualNode },
+    // エレメント/クオリティの数え上げは流派依存。使わない流派（ルディア）では出さない。
+    ...(chart.tally === false ? [] : [{ label: "元素", node: elemNode }, { label: "クオリティ", node: qualNode }]),
+
     { label: "天体", node: planetTbl },
     { label: "カスプ", node: cuspTbl },
     { label: `アスペクト(${chart.aspects.length})`, node: aspectNode },
