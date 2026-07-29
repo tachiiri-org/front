@@ -82,6 +82,8 @@ export type Chart = {
   wheel_layout?: "sign_fixed" | "mandala"; // 流派が指定する描画規約（バックエンドが返す）
   interceptions?: Array<{ house: string; sign: string }>; // どのカスプにも現れないサイン
   tally?: boolean; // エレメント/クオリティの数え上げを使う流派か
+  quadrants?: Array<{ id: string; houses: string[] }>;
+  lunation?: { elongation: number; phase: "waxing" | "waning" } | null;
   shape?: { shape: string; span: number; largestGap: number; handle?: string[]; leadingBody?: string;
             singleton?: { planet: string; axis: "horizon" | "meridian" } };
   placements: Placement[]; aspects: Aspect[];

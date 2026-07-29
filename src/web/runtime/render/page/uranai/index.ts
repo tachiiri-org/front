@@ -164,6 +164,7 @@ function chartView(chart: Chart, birth: Birth | null | undefined, personId: stri
   const place = new Map(chart.placements.map((p) => [p.planet, p]));
   const bodyLabel = (k: string): string => { const nm = PLANET_NAME_LINES[k]?.[0]; return nm ? `${PLANET_GLYPH[k] ?? ""} ${nm}`.trim() : (PLANET_GLYPH[k] ?? k); };
   // wrap: 折り返して左寄せにする列の番号。意味など長文の列は1行に収まらないので省略せず折り返す。
+  const QUAD_JA: Record<string, string> = { quadrant_1: "第1象限", quadrant_2: "第2象限", quadrant_3: "第3象限", quadrant_4: "第4象限" };
   const ROLE_JA: Record<string, string> = { light: "二光体", organic: "有機的生活", transcendent: "超越的活動" };
   const mkTable = (headers: string[], rows: string[][], wrap?: number[]): HTMLElement => {
     const w = new Set(wrap ?? []);
@@ -274,6 +275,18 @@ function chartView(chart: Chart, birth: Birth | null | undefined, personId: stri
   const cuspTbl = mkTable(["室", "サイン", "度数", "意味"], cuspLons.map((lon, i) => { const sign = SIGN_ORDER[Math.floor((((lon % 360) + 360) % 360) / 30) % 12]; return [String(i + 1), SIGN_NAME[sign], fmtDeg(((lon % 30) + 30) % 30), meaningOf("house", `house_${i + 1}`)]; }), [3]);
   // サインの意味（流派スコープ）。ルディアはサインを「生命プロセスの12の位相」として定義する。
   const signTbl = mkTable(["サイン", "意味"], SIGN_ORDER.map((k) => [`${SIGN_GLYPH[k]}︎ ${SIGN_NAME[k] ?? k}`, meaningOf("sign", k)]), [1]);
+  // 象限。地平線と子午線が作る4つのクォーター。ルディアはハウスをこの単位でも読む。
+  const quadTbl = mkTable(["象限", "ハウス", "意味"], (chart.quadrants ?? []).map((q) => [
+    QUAD_JA[q.id] ?? q.id,
+    `${q.houses[0].replace("house_", "")}〜${q.houses[q.houses.length - 1].replace("house_", "")}室`,
+    meaningOf("quadrant", q.id),
+  ]), [2]);
+  // ルネーション: 太陽から測った月の離角。PoF の地平線上下がこれで決まる。
+  const lun = chart.lunation;
+  const lunTbl = mkTable(["項目", "値"], lun
+    ? [["太陽から測った月の離角", `${lun.elongation.toFixed(1)}°`],
+       ["位相", lun.phase === "waxing" ? "上弦（合から衝へ向かう）" : "下弦（衝から合へ戻る）"]]
+    : [["算出できません", "—"]]);
   // インターセプト（どのカスプにも現れないサイン）。ホイールには描かず表で示す。
   const icptTbl = mkTable(["サイン", "収まるハウス"], (chart.interceptions ?? []).length
     ? (chart.interceptions ?? []).map((x) => [`${SIGN_GLYPH[x.sign] ?? ""}︎ ${SIGN_NAME[x.sign] ?? x.sign}`, `${x.house.replace("house_", "")}室`])
@@ -474,6 +487,8 @@ function chartView(chart: Chart, birth: Birth | null | undefined, personId: stri
     { label: "カスプ", node: cuspTbl },
     { label: "サイン", node: signTbl },
     { label: "インターセプト", node: icptTbl },
+    { label: "象限", node: quadTbl },
+    { label: "ルネーション", node: lunTbl },
     { label: `アスペクト(${chart.aspects.length})`, node: aspectNode },
     { label: `配置(${majorCount})`, node: patternNode },
   ];
