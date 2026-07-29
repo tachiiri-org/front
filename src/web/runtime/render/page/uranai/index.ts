@@ -1,6 +1,6 @@
 // ウラナイ画面のルート描画とフォーム類。定数・型・ヘルパは ./parts、ホイール描画は ./wheel に分割。
 import {
-  SIGN_ORDER, SIGN_GLYPH, SIGN_NAME, SIGN_ELEMENT, SIGN_QUALITY, ELEMENT_CHAR, QUALITY_CHAR, PLANET_GLYPH, PLANET_ORDER, PLANET_NAME_LINES, ASPECT_INFO, ASPECT_ORDER, PATTERN_INFO, PATTERN_ORDER, SHAPE_INFO, SHAPE_ORDER, Person, Prefill, Settings, SETTING_FIELDS, Chart, UranaiView, api, lonOf, fmtDeg, Birth, HOUSE_SYSTEM_JA, IANA_ZONES, FALLBACK_ZONES, CC_ZONE, offsetFromZone, el, selectEl, loadSettings,
+  SIGN_ORDER, SIGN_GLYPH, SIGN_NAME, SIGN_ELEMENT, SIGN_QUALITY, ELEMENT_CHAR, QUALITY_CHAR, PLANET_GLYPH, PLANET_ORDER, PLANET_NAME_LINES, ASPECT_INFO, ASPECT_ORDER, PATTERN_INFO, PATTERN_ORDER, SHAPE_INFO, SHAPE_ORDER, Person, Prefill, Settings, SETTING_FIELDS, Chart, loadMeanings, meaningOf, clearMeanings, UranaiView, api, lonOf, fmtDeg, Birth, HOUSE_SYSTEM_JA, IANA_ZONES, FALLBACK_ZONES, CC_ZONE, offsetFromZone, el, selectEl, loadSettings,
 } from "./parts";
 import { drawWheelPro } from "./wheel";
 
@@ -56,6 +56,7 @@ function birthForm(personId: string, onDone: (chart: Chart) => void, prefill?: P
       if (label.value.trim()) await api(`/api/v1/uranai/person/${personId}`, { method: "PATCH", body: JSON.stringify({ label: label.value.trim() }) }).catch(() => {});
       const born_at = `${date.value}T${time.value}:00${tz.value.trim() || "+00:00"}`;
       await api(`/api/v1/uranai/person/${personId}/birth`, { method: "PUT", body: JSON.stringify({ born_at, lat: String(lat), lng: String(lng), place: placeName, timezone: tz.value.trim() }) });
+      await loadMeanings();
       const chart = await api<Chart>(`/api/v1/uranai/astrology/person/${personId}/compute`, { method: "POST", body: "{}" });
       status.textContent = "";
       onDone(chart);
@@ -140,6 +141,7 @@ function settingsView(settings: Settings, onSaved: () => void | Promise<void>): 
           else failed.push(`${p.label ?? p.id}: ${msg}`);
         }
       }
+      clearMeanings(); // 流派が変わると意味も変わる
       if (failed.length) throw new Error(`再計算に失敗しました（${failed.length}/${persons.length}件）: ${failed.join(" / ")}`);
       status.textContent = skipped.length ? `${skipped.length}件を対象外にしました（出生データ未入力）: ${skipped.join(", ")}` : "";
       await onSaved();
@@ -182,6 +184,11 @@ function chartView(chart: Chart, birth: Birth | null | undefined, personId: stri
   const QUAL_JA: Record<string, string> = { cardinal: "活動", fixed: "不動", mutable: "柔軟" };
   const aspOf = (k: string): string => chart.aspects.filter((a) => a.a === k || a.b === k).sort((x, y) => x.orb - y.orb)
     .map((a) => `<div class="u-tip-a">${ASPECT_INFO[a.type]?.label ?? a.type}　${bodyLabel(a.a === k ? a.b : a.a)}　${a.orb.toFixed(2)}°</div>`).join("");
+  // 流派の意味（ルディア等）。参照APIから取得済みのものを引く。無ければ何も出さない。
+  const mean = (kind: string, id: string): string => {
+    const v = meaningOf(kind, id);
+    return v ? `<div class="u-tip-s">意味</div><div>${v}</div>` : "";
+  };
   const tipHTML = (kind: string, id: string): string => {
     if (kind === "planet" || kind === "axis") {
       const p = place.get(id); if (!p) return "";
@@ -190,12 +197,16 @@ function chartView(chart: Chart, birth: Birth | null | undefined, personId: stri
       return `<div class="u-tip-h">${nm}</div>`
         + `<div>サイン: ${SIGN_NAME[p.sign] ?? p.sign} ${fmtDeg(p.degree)}${p.retrograde ? " ℞" : ""}</div>`
         + (kind === "planet" ? `<div>ハウス: ${houseOf(lonOf(p))}室</div>` : "")
+        + mean("planet", id)
         + (asp ? `<div class="u-tip-s">アスペクト</div>${asp}` : `<div class="u-tip-a">アスペクトなし</div>`);
     }
     if (kind === "sign") {
       const inSign = chart.placements.filter((pp) => pp.sign === id && !["asc", "mc", "dsc", "ic"].includes(pp.planet)).map((pp) => bodyLabel(pp.planet)).join("、") || "なし";
+      const icpt = (chart.interceptions ?? []).find((x) => x.sign === id);
       return `<div class="u-tip-h">${SIGN_GLYPH[id]}︎ ${SIGN_NAME[id] ?? id}</div>`
-        + `<div>元素: ${ELEM_JA[SIGN_ELEMENT[id]] ?? ELEMENT_CHAR[SIGN_ELEMENT[id]]}　区分: ${QUAL_JA[SIGN_QUALITY[id]] ?? QUALITY_CHAR[SIGN_QUALITY[id]]}</div>`
+        + (chart.tally === false ? "" : `<div>元素: ${ELEM_JA[SIGN_ELEMENT[id]] ?? ELEMENT_CHAR[SIGN_ELEMENT[id]]}　区分: ${QUAL_JA[SIGN_QUALITY[id]] ?? QUALITY_CHAR[SIGN_QUALITY[id]]}</div>`)
+        + mean("sign", id)
+        + (icpt ? `<div class="u-tip-a">インターセプト（${icpt.house.replace("house_", "")}室に丸ごと収まる）</div>` : "")
         + `<div class="u-tip-s">在住</div><div>${inSign}</div>`;
     }
     if (kind === "house") {
@@ -204,6 +215,7 @@ function chartView(chart: Chart, birth: Birth | null | undefined, personId: stri
       const inH = chart.placements.filter((pp) => !["asc", "mc", "dsc", "ic"].includes(pp.planet) && houseOf(lonOf(pp)) === n).map((pp) => bodyLabel(pp.planet)).join("、") || "なし";
       return `<div class="u-tip-h">${n}室</div>`
         + `<div>カスプ: ${SIGN_NAME[sign] ?? sign} ${fmtDeg(((lon % 30) + 30) % 30)}</div>`
+        + mean("house", `house_${n}`)
         + `<div class="u-tip-s">在住</div><div>${inH}</div>`;
     }
     return "";
@@ -246,8 +258,16 @@ function chartView(chart: Chart, birth: Birth | null | undefined, personId: stri
   // 天体（アングルも同じ表に。逆行・室はアングルでは空欄）
   const planetRows = PLANET_ORDER.filter((k) => place.has(k)).map((k) => { const p = place.get(k)!; return [bodyLabel(k), SIGN_NAME[p.sign] ?? p.sign, fmtDeg(p.degree), p.retrograde ? "℞" : "", String(houseOf(lonOf(p)))]; });
   const angleRows = ["asc", "mc", "dsc", "ic"].filter((k) => place.has(k)).map((k) => { const p = place.get(k)!; return [PLANET_GLYPH[k] ?? k, SIGN_NAME[p.sign] ?? p.sign, fmtDeg(p.degree), "", ""]; });
-  const planetTbl = mkTable(["天体", "サイン", "度数", "逆行", "室"], [...planetRows, ...angleRows]);
-  const cuspTbl = mkTable(["室", "サイン", "度数"], cuspLons.map((lon, i) => { const sign = SIGN_ORDER[Math.floor((((lon % 360) + 360) % 360) / 30) % 12]; return [String(i + 1), SIGN_NAME[sign], fmtDeg(((lon % 30) + 30) % 30)]; }));
+  const planetTbl = mkTable(["天体", "サイン", "度数", "逆行", "室", "意味"],
+    [...planetRows.map((r, i) => [...r, meaningOf("planet", PLANET_ORDER.filter((k) => place.has(k))[i])]),
+     ...angleRows.map((r) => [...r, ""])]);
+  const cuspTbl = mkTable(["室", "サイン", "度数", "意味"], cuspLons.map((lon, i) => { const sign = SIGN_ORDER[Math.floor((((lon % 360) + 360) % 360) / 30) % 12]; return [String(i + 1), SIGN_NAME[sign], fmtDeg(((lon % 30) + 30) % 30), meaningOf("house", `house_${i + 1}`)]; }));
+  // サインの意味（流派スコープ）。ルディアはサインを「生命プロセスの12の位相」として定義する。
+  const signTbl = mkTable(["サイン", "意味"], SIGN_ORDER.map((k) => [`${SIGN_GLYPH[k]}︎ ${SIGN_NAME[k] ?? k}`, meaningOf("sign", k)]));
+  // インターセプト（どのカスプにも現れないサイン）。ホイールには描かず表で示す。
+  const icptTbl = mkTable(["サイン", "収まるハウス"], (chart.interceptions ?? []).length
+    ? (chart.interceptions ?? []).map((x) => [`${SIGN_GLYPH[x.sign] ?? ""}︎ ${SIGN_NAME[x.sign] ?? x.sign}`, `${x.house.replace("house_", "")}室`])
+    : [["なし", "—"]]);
 
   // アスペクト（種類ごとにグループ化）
   const aspectNode = el("div", {});
@@ -322,9 +342,9 @@ function chartView(chart: Chart, birth: Birth | null | undefined, personId: stri
     const AXIS_JA: Record<string, string> = { horizon: "地平線", meridian: "子午線" };
     const same = sh.singleton && sh.handle?.length === 1 && sh.handle[0] === sh.singleton.planet;
     shapeNode.append(el("div", { className: "u-tbl-title", textContent: "シングルトン" }));
-    shapeNode.append(mkTable(["天体", "孤立の軸"], sh.singleton
-      ? [[bodyLabel(sh.singleton.planet), `${AXIS_JA[sh.singleton.axis] ?? sh.singleton.axis}で分けた半球にただ1つ${same ? "（取っ手と同一）" : ""}`]]
-      : [["なし", "—"]]));
+    shapeNode.append(mkTable(["天体"], sh.singleton
+      ? [[`${bodyLabel(sh.singleton.planet)}（${AXIS_JA[sh.singleton.axis] ?? sh.singleton.axis}で分けた半球にただ1つ${same ? "。取っ手と同一" : ""}）`]]
+      : [["なし"]]));
   }
 
   // 基本情報: 通常は表。各編集項目に編集アイコン、押すとその項目だけ編集モード（他はグレーアウト）、
@@ -440,6 +460,8 @@ function chartView(chart: Chart, birth: Birth | null | undefined, personId: stri
 
     { label: "天体", node: planetTbl },
     { label: "カスプ", node: cuspTbl },
+    { label: "サイン", node: signTbl },
+    { label: "インターセプト", node: icptTbl },
     { label: `アスペクト(${chart.aspects.length})`, node: aspectNode },
     { label: `配置(${majorCount})`, node: patternNode },
   ];
@@ -626,6 +648,7 @@ export async function renderUranai(container: HTMLElement): Promise<void> {
   // 既存人物の出生データを取得して編集フォームを事前入力で開く。
   const showChart = async (personId: string, label?: string | null, push = true) => {
     main.innerHTML = ""; main.append(el("div", { textContent: "読み込み中…" }));
+    await loadMeanings();
     const chart = await api<Chart>(`/api/v1/uranai/astrology/person/${personId}/chart`);
     const birth = await api<Birth>(`/api/v1/uranai/person/${personId}/birth`).catch(() => null);
     main.innerHTML = "";

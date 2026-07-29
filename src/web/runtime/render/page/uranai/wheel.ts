@@ -51,7 +51,16 @@ export function drawWheelPro(chart: Chart, enabledAspects: Set<string>, name: bo
     const large = sweep > 180 ? 1 : 0;
     const [x0o, y0o] = pt(a0, R), [x1o, y1o] = pt(a0 + 30, R);
     const [x0i, y0i] = pt(a0, rSignIn), [x1i, y1i] = pt(a0 + 30, rSignIn);
-    s.append(svg("path", { d: `M${x0o},${y0o} A${R},${R} 0 ${large} 0 ${x1o},${y1o} L${x1i},${y1i} A${rSignIn},${rSignIn} 0 ${large} 1 ${x0i},${y0i} Z`, fill: signFill(SIGN_ORDER[i]), stroke: "none", "data-tip": `sign:${SIGN_ORDER[i]}`, class: "u-hit" }));
+    // インターセプト（どのカスプにも現れず1つのハウスに丸ごと収まるサイン）は、記号を別に
+    // 足すとサイン帯の記号と二重になるので、その帯自体を縁取って示す。ルディアは挟み込まれた
+    // サインを正確に記すことを求めており、記録としてはこれで足りる。
+    const isIcpt = (chart.interceptions ?? []).some((x) => x.sign === SIGN_ORDER[i]);
+    s.append(svg("path", {
+      d: `M${x0o},${y0o} A${R},${R} 0 ${large} 0 ${x1o},${y1o} L${x1i},${y1i} A${rSignIn},${rSignIn} 0 ${large} 1 ${x0i},${y0i} Z`,
+      fill: signFill(SIGN_ORDER[i]),
+      stroke: isIcpt ? "#7b3fa0" : "none", "stroke-width": isIcpt ? 1.6 : 0,
+      "data-tip": `sign:${SIGN_ORDER[i]}`, class: "u-hit",
+    }));
     // 画面上の中点。mandala では黄経の中点と画面の中点がずれるため、画面角で取る。
     const midScr = scr(a0) + sweep / 2;
     const rMid = (R + rSignIn) / 2;
@@ -59,11 +68,11 @@ export function drawWheelPro(chart: Chart, enabledAspects: Set<string>, name: bo
     if (name) {
       let rot = Math.atan2(gy - cy, gx - cx) * 180 / Math.PI + 90;
       if (rot > 90 && rot < 270) rot -= 180;
-      const t = svg("text", { x: gx, y: gy, "text-anchor": "middle", "dominant-baseline": "central", "font-size": 11, fill: "#333", transform: `rotate(${rot.toFixed(1)} ${gx.toFixed(1)} ${gy.toFixed(1)})` });
+      const t = svg("text", { x: gx, y: gy, "text-anchor": "middle", "dominant-baseline": "central", "font-size": 11, fill: isIcpt ? "#7b3fa0" : "#333", transform: `rotate(${rot.toFixed(1)} ${gx.toFixed(1)} ${gy.toFixed(1)})` });
       t.textContent = SIGN_NAME[SIGN_ORDER[i]];
       s.append(t);
     } else {
-      const g = svg("text", { x: gx, y: gy, "text-anchor": "middle", "dominant-baseline": "central", "font-size": 16, fill: "#333" });
+      const g = svg("text", { x: gx, y: gy, "text-anchor": "middle", "dominant-baseline": "central", "font-size": 16, fill: isIcpt ? "#7b3fa0" : "#333" });
       g.textContent = SIGN_GLYPH[SIGN_ORDER[i]] + "︎";
       s.append(g);
     }
@@ -89,23 +98,6 @@ export function drawWheelPro(chart: Chart, enabledAspects: Set<string>, name: bo
     const [nx, ny] = pt(lon + span / 2, (rSignIn + rHouseIn) / 2);
     const t = svg("text", { x: nx, y: ny, "text-anchor": "middle", "dominant-baseline": "central", "font-size": 11, fill: "#555", "font-weight": "700", "data-tip": `house:${i + 1}`, class: "u-hit" });
     t.textContent = String(i + 1); s.append(t);
-    // インターセプト: そのハウスに丸ごと収まるサインを記号で併記する。ルディアは
-    // 「挟み込まれたサインを正確に記す」ことを求めている。
-    const intercepted = (chart.interceptions ?? []).filter((x) => x.house === `house_${i + 1}`);
-    if (intercepted.length) {
-      // ハウス番号と同じ帯・同じ半径に、画面角で少しずらして置く。半径をずらすとハウス帯が
-      // 26px しかないため番号と重なる。サイン記号には U+FE0E を付けてテキスト表示を強制する
-      // （付けないと絵文字表示になり、フォントによっては豆腐になる。サイン帯と同じ扱い）。
-      const midS = scr(lon + span / 2) - 8;
-      const rBand = (rSignIn + rHouseIn) / 2;
-      const ix = cx + rBand * Math.cos(midS * Math.PI / 180), iy = cy - rBand * Math.sin(midS * Math.PI / 180);
-      const it = svg("text", {
-        x: ix, y: iy, "text-anchor": "middle", "dominant-baseline": "central",
-        "font-size": 11, fill: "#7b3fa0", "data-tip": `interception:${intercepted.map((x) => x.sign).join(",")}`, class: "u-hit",
-      });
-      it.textContent = intercepted.map((x) => `${SIGN_GLYPH[x.sign] ?? x.sign}︎`).join(" ");
-      s.append(it);
-    }
     const [cdx, cdy] = pt(lon + 2, rHouseIn + 7);
     const ct = svg("text", { x: cdx, y: cdy, "text-anchor": "start", "dominant-baseline": "central", "font-size": 7, fill: "#999" });
     ct.textContent = fmtDeg(((lon % 30) + 30) % 30); s.append(ct);

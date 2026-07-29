@@ -150,6 +150,23 @@ export const selectEl = (options: Array<[string, string]>, value: string): HTMLS
   sel.value = value;
   return sel;
 };
+// 概念の意味（流派スコープ）。参照APIから1回だけ取り、ツールチップと表で共用する。
+// 流派を切り替えると内容が変わるので、設定保存時に clearMeanings() で捨てる。
+type MeaningMap = Record<string, Record<string, string>>;
+let meaningCache: MeaningMap | null = null;
+export function clearMeanings(): void { meaningCache = null; }
+export async function loadMeanings(): Promise<void> {
+  if (meaningCache) return;
+  try {
+    const r = await api<{ meanings?: Array<{ concept_kind: string; concept_id: string; value: string }> }>(
+      `/api/v1/uranai/astrology/reference`);
+    const m: MeaningMap = {};
+    for (const x of r.meanings ?? []) (m[x.concept_kind] ??= {})[x.concept_id] = x.value;
+    meaningCache = m;
+  } catch { meaningCache = {}; }
+}
+export const meaningOf = (kind: string, id: string): string => meaningCache?.[kind]?.[id] ?? "";
+
 export async function loadSettings(): Promise<Settings> {
   const d: Settings = { zodiac: "tropical", house_system_id: "whole_sign", ephemeris: "vsop87", ayanamsha: "lahiri" };
   try {
