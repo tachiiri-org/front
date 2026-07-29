@@ -16,6 +16,10 @@ export const ELEMENT_HUE: Record<string, number> = { fire: 12, earth: 95, air: 5
 export const ELEMENT_SAT: Record<string, number> = { fire: 75, earth: 45, air: 75, water: 55 };
 export const QUALITY_ALPHA: Record<string, number> = { cardinal: 0.24, fixed: 0.15, mutable: 0.08 };
 // 元素=色相/彩度・クオリティ=不透明度（トーン）で薄めに塗る。
+// 表示テーマ。既定はダーク。SVG は CSS 変数を属性で受けられないので、描画側でパレットを引く。
+export const currentTheme = (): "dark" | "light" =>
+  document.documentElement.dataset.uTheme === "light" ? "light" : "dark";
+
 export const signFill = (id: string): string => `hsla(${ELEMENT_HUE[SIGN_ELEMENT[id]]}, ${ELEMENT_SAT[SIGN_ELEMENT[id]]}%, 52%, ${QUALITY_ALPHA[SIGN_QUALITY[id]]})`;
 export const PLANET_GLYPH: Record<string, string> = { sun: "☉", moon: "☽", mercury: "☿", venus: "♀", mars: "♂", jupiter: "♃", saturn: "♄", uranus: "♅", neptune: "♆", pluto: "♇", chiron: "⚷", ceres: "⚳", pallas: "⚴", juno: "⚵", vesta: "⚶", pholus: "⯛", lilith: "⚸", dragon_head: "☊", dragon_tail: "☋", fortune: "⊗", asc: "Asc", mc: "MC", dsc: "Dsc", ic: "IC" };
 // データ表での天体の並び順。
@@ -53,7 +57,7 @@ export const SETTING_FIELDS: Array<{ key: keyof Settings; label: string; options
   { key: "ayanamsha", label: "アヤナムシャ", options: [["lahiri", "ラヒリ"], ["fagan_bradley", "フェイガン/ブラッドレー"]] },
 ];
 export type Placement = { planet: string; sign: string; degree: number; retrograde?: boolean };
-export type Aspect = { a: string; b: string; type: string; orb: number };
+export type Aspect = { a: string; b: string; type: string; orb: number; phase?: "waxing" | "waning" };
 export type Cusp = { system: string; index: number; longitude: number };
 // アスペクトパターン（バックエンド detectPatterns の出力）。bodies は構成天体。
 export type Pattern = { pattern: string; bodies: string[]; focus?: string; scope?: string; tight?: boolean; subsumed?: boolean };
@@ -76,6 +80,12 @@ export type Chart = {
   ascendant: number; midheaven: number;
   house_system?: string; cusps?: Cusp[];
   wheel_layout?: "sign_fixed" | "mandala"; // 流派が指定する描画規約（バックエンドが返す）
+  interceptions?: Array<{ house: string; sign: string }>; // どのカスプにも現れないサイン
+  tally?: boolean; // エレメント/クオリティの数え上げを使う流派か
+  quadrants?: Array<{ id: string; houses: string[] }>;
+  lunation?: { elongation: number; phase: "waxing" | "waning" } | null;
+  shape?: { shape: string; span: number; largestGap: number; handle?: string[]; leadingBody?: string;
+            singleton?: { planet: string; axis: "horizon" | "meridian" } };
   placements: Placement[]; aspects: Aspect[];
   patterns?: Pattern[];
   dignities: Array<{ planet: string; dignity: string }>;
@@ -104,6 +114,19 @@ export const fmtDeg = (d: number): string => {
   return `${deg}°${String(min).padStart(2, "0")}′`;
 };
 export type Birth = { born_at: string | null; lat: string | null; lng: string | null; place: string | null; timezone: string | null };
+// チャート全体の形（ジョーンズの惑星配置型）。名称と成立条件の事実のみ。閾値は標準的な定義。
+// 7パターンの表示順（ジョーンズの定義。集中→分散の順）。
+export const SHAPE_ORDER = ["bundle", "bowl", "bucket", "locomotive", "seesaw", "splash", "splay"];
+export const SHAPE_INFO: Record<string, { name: string; cond: string }> = {
+  bundle: { name: "バンドル", cond: "全天体が120度以内に集中" },
+  bowl: { name: "ボウル", cond: "全天体が180度以内（半球）に収まる" },
+  bucket: { name: "バケット", cond: "ボウルの反対側に取っ手となる天体がある" },
+  locomotive: { name: "ロコモーティブ", cond: "120度以上の空白が1本、残り240度に連なる" },
+  seesaw: { name: "シーソー", cond: "60度以上の空白が2本、2群が対向する" },
+  splash: { name: "スプラッシュ", cond: "最大の空白が60度未満、全周に散在" },
+  splay: { name: "スプレイ", cond: "上記のいずれにも当てはまらない不規則な塊" },
+};
+
 export const HOUSE_SYSTEM_JA: Record<string, string> = { placidus: "プラシダス", whole_sign: "ホールサイン", koch: "コッホ", equal: "イコール", campanus: "カンパヌス", regiomontanus: "レギオモンタヌス" };
 // タイムゾーン: IANA一覧（Intl組込みの既定データセット。tokyo/osaka等を選べる）と、国コード→既定ゾーン、ゾーン→UTCオフセット。
 export const IANA_ZONES: string[] = (() => { try { const v = (Intl as unknown as { supportedValuesOf?: (k: string) => string[] }).supportedValuesOf?.("timeZone"); return v && v.length ? v : []; } catch { return []; } })();
@@ -133,6 +156,32 @@ export const selectEl = (options: Array<[string, string]>, value: string): HTMLS
   sel.value = value;
   return sel;
 };
+// 概念の意味（流派スコープ）。参照APIから1回だけ取り、ツールチップと表で共用する。
+// 流派を切り替えると内容が変わるので、設定保存時に clearMeanings() で捨てる。
+type MeaningMap = Record<string, Record<string, string>>;
+let meaningCache: MeaningMap | null = null;
+export function clearMeanings(): void { meaningCache = null; roleCache = null; }
+export async function loadMeanings(): Promise<void> {
+  if (meaningCache) return;
+  try {
+    const r = await api<{
+      meanings?: Array<{ concept_kind: string; concept_id: string; value: string }>;
+      body_role?: Array<{ planet_id: string; body_role_id: string }>;
+    }>(`/api/v1/uranai/astrology/reference`);
+    const m: MeaningMap = {};
+    for (const x of r.meanings ?? []) (m[x.concept_kind] ??= {})[x.concept_id] = x.value;
+    meaningCache = m;
+    const roles: Record<string, string> = {};
+    for (const x of r.body_role ?? []) roles[x.planet_id] = m.body_role?.[x.body_role_id] ? x.body_role_id : x.body_role_id;
+    roleCache = roles;
+  } catch { meaningCache = {}; roleCache = {}; }
+}
+export const meaningOf = (kind: string, id: string): string => meaningCache?.[kind]?.[id] ?? "";
+
+// 天体の階層（流派スコープ）。ルディア: 二光体 / 有機的生活の惑星 / 超越的活動の惑星。
+let roleCache: Record<string, string> | null = null;
+export const roleOf = (planet: string): string => roleCache?.[planet] ?? "";
+
 export async function loadSettings(): Promise<Settings> {
   const d: Settings = { zodiac: "tropical", house_system_id: "whole_sign", ephemeris: "vsop87", ayanamsha: "lahiri" };
   try {
