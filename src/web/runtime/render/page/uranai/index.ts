@@ -176,6 +176,7 @@ function chartView(chart: Chart, birth: Birth | null | undefined, personId: stri
   let nameMode = false;
   const host = el("div", { className: "u-wheel" });
   const drawChart = () => { host.innerHTML = ""; host.append(drawWheelPro(chart, enabled, nameMode)); };
+  host.addEventListener("u-redraw", drawChart); // テーマ切替時にホイールを描き直す
   const nameCb = el("input", { type: "checkbox", checked: false });
   nameCb.addEventListener("change", () => { nameMode = nameCb.checked; drawChart(); });
 
@@ -594,6 +595,38 @@ export async function renderUranai(container: HTMLElement): Promise<void> {
     .u-set-row label{width:88px;flex:none;color:#666;font-size:12px}
     .u-set-sel{flex:1;min-width:0;padding:4px 6px;border:1px solid #0002;border-radius:5px;font-size:12px;background:#fff}
     .u-settings-note{font-size:12px;color:#888;margin-bottom:12px;max-width:520px}
+    /* テーマ切替ボタン */
+    .u-theme-btn{position:fixed;right:14px;bottom:14px;z-index:900;border:1px solid #0002;background:#fff;color:#666;
+      border-radius:999px;width:36px;height:36px;font-size:16px;line-height:1;cursor:pointer;box-shadow:0 4px 12px #0002}
+    /* ── ダーク（既定）。ライトの規則は触らず、data-theme=dark のときだけ上書きする ── */
+    .u-wrap[data-theme=dark]{color:#e6e8eb;background:#14161a}
+    [data-theme=dark] .u-side{border-right-color:#ffffff1f}
+    [data-theme=dark] .u-report{border-left-color:#ffffff1f}
+    [data-theme=dark] .u-report-head,[data-theme=dark] .u-sec-head,[data-theme=dark] .u-basic-v,
+    [data-theme=dark] .u-data-v,[data-theme=dark] .u-pat-bodies,[data-theme=dark] .u-tbl td{color:#e6e8eb}
+    [data-theme=dark] .u-pat-h b,[data-theme=dark] .u-tg-btn.on,[data-theme=dark] .u-tab-btn.on{color:#f3f5f7}
+    [data-theme=dark] .u-report-body,[data-theme=dark] .u-person-menu,[data-theme=dark] .u-pat-comp,
+    [data-theme=dark] .u-settings-note,[data-theme=dark] .u-pat-empty,[data-theme=dark] .u-pat-aka,
+    [data-theme=dark] .u-basic-k,[data-theme=dark] .u-tbl th,[data-theme=dark] .u-data-k,
+    [data-theme=dark] .u-geo-addr,[data-theme=dark] .u-picked,[data-theme=dark] .u-tg-title,
+    [data-theme=dark] .u-set-title,[data-theme=dark] .u-tbl-title{color:#8b95a3}
+    [data-theme=dark] .u-tg-chip,[data-theme=dark] .u-geo-name,[data-theme=dark] .u-row label,
+    [data-theme=dark] .u-set-row label,[data-theme=dark] .u-tab-btn,[data-theme=dark] .u-tg-btn{color:#b3bcc7}
+    [data-theme=dark] .u-person:hover{background:#ffffff0f}
+    [data-theme=dark] .u-person-menu:hover,[data-theme=dark] .u-edit-ic:hover{background:#ffffff14;color:#e6e8eb}
+    [data-theme=dark] .u-person-pop,[data-theme=dark] .u-geo-results,[data-theme=dark] .u-pat,
+    [data-theme=dark] .u-tab-btn,[data-theme=dark] .u-tg-btn,[data-theme=dark] .u-set-sel,
+    [data-theme=dark] .u-row input,[data-theme=dark] .u-theme-btn{background:#1b1f26;border-color:#ffffff26;color:#dfe4ea}
+    [data-theme=dark] .u-pat-sub{background:#171a20;border-left-color:#4b5563}
+    [data-theme=dark] .u-tab-btn:hover,[data-theme=dark] .u-tg-btn:hover{border-color:#ffffff44}
+    [data-theme=dark] .u-tbl td,[data-theme=dark] .u-basic-tbl td,[data-theme=dark] .u-geo-item{border-bottom-color:#ffffff14}
+    [data-theme=dark] .u-tbl th{border-bottom-color:#ffffff26}
+    [data-theme=dark] .u-geo-item:hover{background:#4A90C233}
+    [data-theme=dark] .u-btn-ghost,[data-theme=dark] .u-btn-sm{background:#ffffff14;color:#e6e8eb}
+    [data-theme=dark] .u-btn-ghost:hover,[data-theme=dark] .u-btn-sm:hover{background:#ffffff22}
+    [data-theme=dark] .u-settings{background:#ffffff0a;border-color:#ffffff1f}
+    [data-theme=dark] .u-edit-ic{color:#8b95a3}
+    [data-theme=dark] .u-tip{background:#0b0d11;box-shadow:0 10px 28px #000a}
     .u-set-btn{margin-top:6px}
     /* モバイル: 縦積み＋人物リストを横スクロールのチップ化 */
     @media (max-width: 640px){
@@ -616,6 +649,23 @@ export async function renderUranai(container: HTMLElement): Promise<void> {
     }
   </style>`;
   const wrap = el("div", { className: "u-wrap" });
+  // テーマ。既定はダーク。SVG 側は currentTheme() が documentElement を見るので両方に付ける。
+  const applyTheme = (t: "dark" | "light") => {
+    wrap.dataset.theme = t;
+    document.documentElement.dataset.uTheme = t;
+    themeBtn.textContent = t === "dark" ? "☀" : "☾";
+    themeBtn.title = t === "dark" ? "ライトモードに切り替え" : "ダークモードに切り替え";
+  };
+  const themeBtn = el("button", { className: "u-theme-btn", type: "button" }) as HTMLButtonElement;
+  let theme: "dark" | "light" = localStorage.getItem("u-theme") === "light" ? "light" : "dark";
+  themeBtn.addEventListener("click", () => {
+    theme = theme === "dark" ? "light" : "dark";
+    localStorage.setItem("u-theme", theme);
+    applyTheme(theme);
+    // ホイールは SVG の属性に色を焼き込んでいるので描き直す。
+    for (const h of Array.from(document.querySelectorAll<HTMLElement>(".u-wheel"))) h.dispatchEvent(new CustomEvent("u-redraw"));
+  });
+  applyTheme(theme);
   const side = el("div", { className: "u-side" });
   const main = el("div", { className: "u-main" });
   // 右側: 鑑定レポート枠（今は空。独立スクロール）。
@@ -623,7 +673,7 @@ export async function renderUranai(container: HTMLElement): Promise<void> {
     el("div", { className: "u-report-head", textContent: "鑑定レポート" }),
     el("div", { className: "u-report-body" }),
   ]);
-  wrap.append(side, main, report); container.append(wrap);
+  wrap.append(side, main, report, themeBtn); container.append(wrap);
 
   // 流派設定（マスタ）。編集フォームで表示・変更する。全人物のチャートに適用。
   const settings = await loadSettings();

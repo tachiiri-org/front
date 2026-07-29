@@ -1,12 +1,28 @@
 // 本格表示（標準チャート）のホイール描画。定数・型・ヘルパは ./parts。
 import {
-  SIGN_ORDER, SIGN_GLYPH, SIGN_NAME, signFill, PLANET_GLYPH, PLANET_NAME_LINES, ASPECT_COLOR, NS, Chart, lonOf, fmtDeg, svg,
+  SIGN_ORDER, SIGN_GLYPH, SIGN_NAME, signFill, currentTheme, PLANET_GLYPH, PLANET_NAME_LINES, ASPECT_COLOR, NS, Chart, lonOf, fmtDeg, svg,
 } from "./parts";
 
 // ───────────────────────── ホイール図（本格表示・標準チャート） ─────────────────────────
 // 外周: サイン帯(グリフ+度目盛) → ハウス帯(番号+カスプ度数) → 天体 → 中央: アスペクト線。
 // 天体はハウス(角度)を保持し、混雑時は半径方向へずらす。内円には入れず、度数も含めて重なり判定。
+// テーマ別のパレット。SVG の presentation attribute には var() を確実には渡せないため、
+// 描画時に値を解決する。ライトの値は従来のまま。
+const PALETTE = {
+  light: {
+    ink: "#333", ink2: "#2c3e50", sub: "#555", muted: "#999", paper: "#fff",
+    line: "#0004", line2: "#0005", line3: "#0007", line4: "#0008",
+    angle: "#c0392b", icpt: "#7b3fa0",
+  },
+  dark: {
+    ink: "#dfe4ea", ink2: "#cfd6e0", sub: "#b3bcc7", muted: "#8b95a3", paper: "#1b1f26",
+    line: "#ffffff33", line2: "#ffffff3d", line3: "#ffffff55", line4: "#ffffff66",
+    angle: "#e07a6c", icpt: "#c39be0",
+  },
+};
+
 export function drawWheelPro(chart: Chart, enabledAspects: Set<string>, name: boolean): SVGSVGElement {
+  const C = PALETTE[currentTheme()];
   const size = 720, cx = size / 2, cy = size / 2, R = 310; // 外周に余白(50px)を確保
   const rSignIn = R - 28;            // サイン帯の内縁
   const rHouseIn = rSignIn - 26;     // ハウス帯の内縁
@@ -58,7 +74,7 @@ export function drawWheelPro(chart: Chart, enabledAspects: Set<string>, name: bo
     s.append(svg("path", {
       d: `M${x0o},${y0o} A${R},${R} 0 ${large} 0 ${x1o},${y1o} L${x1i},${y1i} A${rSignIn},${rSignIn} 0 ${large} 1 ${x0i},${y0i} Z`,
       fill: signFill(SIGN_ORDER[i]),
-      stroke: isIcpt ? "#7b3fa0" : "none", "stroke-width": isIcpt ? 1.6 : 0,
+      stroke: isIcpt ? C.icpt : "none", "stroke-width": isIcpt ? 1.6 : 0,
       "data-tip": `sign:${SIGN_ORDER[i]}`, class: "u-hit",
     }));
     // 画面上の中点。mandala では黄経の中点と画面の中点がずれるため、画面角で取る。
@@ -68,11 +84,11 @@ export function drawWheelPro(chart: Chart, enabledAspects: Set<string>, name: bo
     if (name) {
       let rot = Math.atan2(gy - cy, gx - cx) * 180 / Math.PI + 90;
       if (rot > 90 && rot < 270) rot -= 180;
-      const t = svg("text", { x: gx, y: gy, "text-anchor": "middle", "dominant-baseline": "central", "font-size": 11, fill: isIcpt ? "#7b3fa0" : "#333", transform: `rotate(${rot.toFixed(1)} ${gx.toFixed(1)} ${gy.toFixed(1)})` });
+      const t = svg("text", { x: gx, y: gy, "text-anchor": "middle", "dominant-baseline": "central", "font-size": 11, fill: isIcpt ? C.icpt : C.ink, transform: `rotate(${rot.toFixed(1)} ${gx.toFixed(1)} ${gy.toFixed(1)})` });
       t.textContent = SIGN_NAME[SIGN_ORDER[i]];
       s.append(t);
     } else {
-      const g = svg("text", { x: gx, y: gy, "text-anchor": "middle", "dominant-baseline": "central", "font-size": 16, fill: isIcpt ? "#7b3fa0" : "#333" });
+      const g = svg("text", { x: gx, y: gy, "text-anchor": "middle", "dominant-baseline": "central", "font-size": 16, fill: isIcpt ? C.icpt : C.ink });
       g.textContent = SIGN_GLYPH[SIGN_ORDER[i]] + "︎";
       s.append(g);
     }
@@ -84,22 +100,22 @@ export function drawWheelPro(chart: Chart, enabledAspects: Set<string>, name: bo
   if (!mandala) for (let d = 0; d < 360; d++) {
     const len = d % 10 === 0 ? 7 : d % 5 === 0 ? 4.5 : 2.5;
     const [x0, y0] = pt(d, rSignIn), [x1, y1] = pt(d, rSignIn - len);
-    s.append(svg("line", { x1: x0, y1: y0, x2: x1, y2: y1, stroke: "#0007", "stroke-width": d % 10 === 0 ? 0.7 : 0.4 }));
+    s.append(svg("line", { x1: x0, y1: y0, x2: x1, y2: y1, stroke: C.line3, "stroke-width": d % 10 === 0 ? 0.7 : 0.4 }));
   }
-  for (let a = 0; a < 360; a += 30) { const [x0, y0] = pt(a, rSignIn), [x1, y1] = pt(a, R); s.append(svg("line", { x1: x0, y1: y0, x2: x1, y2: y1, stroke: "#0005", "stroke-width": 0.7 })); }
+  for (let a = 0; a < 360; a += 30) { const [x0, y0] = pt(a, rSignIn), [x1, y1] = pt(a, R); s.append(svg("line", { x1: x0, y1: y0, x2: x1, y2: y1, stroke: C.line2, "stroke-width": 0.7 })); }
 
   // ハウス（カスプ）
   for (let i = 0; i < 12; i++) {
     const lon = cuspLons[i];
     const angular = i % 3 === 0;
     const [x1, y1] = pt(lon, rAsp), [x2, y2] = pt(lon, rSignIn);
-    s.append(svg("line", { x1, y1, x2, y2, stroke: angular ? "#333" : "#0007", "stroke-width": angular ? 1.4 : 0.7 }));
+    s.append(svg("line", { x1, y1, x2, y2, stroke: angular ? C.ink : C.line3, "stroke-width": angular ? 1.4 : 0.7 }));
     const span = ((cuspLons[(i + 1) % 12] - lon) % 360 + 360) % 360;
     const [nx, ny] = pt(lon + span / 2, (rSignIn + rHouseIn) / 2);
-    const t = svg("text", { x: nx, y: ny, "text-anchor": "middle", "dominant-baseline": "central", "font-size": 11, fill: "#555", "font-weight": "700", "data-tip": `house:${i + 1}`, class: "u-hit" });
+    const t = svg("text", { x: nx, y: ny, "text-anchor": "middle", "dominant-baseline": "central", "font-size": 11, fill: C.sub, "font-weight": "700", "data-tip": `house:${i + 1}`, class: "u-hit" });
     t.textContent = String(i + 1); s.append(t);
     const [cdx, cdy] = pt(lon + 2, rHouseIn + 7);
-    const ct = svg("text", { x: cdx, y: cdy, "text-anchor": "start", "dominant-baseline": "central", "font-size": 7, fill: "#999" });
+    const ct = svg("text", { x: cdx, y: cdy, "text-anchor": "start", "dominant-baseline": "central", "font-size": 7, fill: C.muted });
     ct.textContent = fmtDeg(((lon % 30) + 30) % 30); s.append(ct);
   }
 
@@ -109,13 +125,13 @@ export function drawWheelPro(chart: Chart, enabledAspects: Set<string>, name: bo
     const pa = placeByPlanet.get(aspt.a), pb = placeByPlanet.get(aspt.b);
     if (!pa || !pb) continue;
     const [axx, ayy] = pt(lonOf(pa), rAsp), [bxx, byy] = pt(lonOf(pb), rAsp);
-    s.append(svg("line", { x1: axx, y1: ayy, x2: bxx, y2: byy, stroke: ASPECT_COLOR[aspt.type] ?? "#999", "stroke-width": 0.9, opacity: 0.75 }));
+    s.append(svg("line", { x1: axx, y1: ayy, x2: bxx, y2: byy, stroke: ASPECT_COLOR[aspt.type] ?? C.muted, "stroke-width": 0.9, opacity: 0.75 }));
   }
 
   // ASC/MC/DSC/IC 軸。水平軸は外向きアンカーで余白側へ、ラベル(上)/度数(下)に分けて円と被らない。
   const axes: [number, string, string, string][] = [
-    [asc, "Asc", "asc", "#c0392b"], [asc + 180, "Dsc", "dsc", "#c0392b"],
-    [chart.midheaven, "MC", "mc", "#2c3e50"], [chart.midheaven + 180, "IC", "ic", "#2c3e50"],
+    [asc, "Asc", "asc", C.angle], [asc + 180, "Dsc", "dsc", C.angle],
+    [chart.midheaven, "MC", "mc", C.ink2], [chart.midheaven + 180, "IC", "ic", C.ink2],
   ];
   for (const [lon, txt, key, col] of axes) {
     const [x1, y1] = pt(lon, rAsp), [x2, y2] = pt(lon, R);
@@ -163,19 +179,19 @@ export function drawWheelPro(chart: Chart, enabledAspects: Set<string>, name: bo
     const [gx, gy] = pt(lon, r);
     // 真位置マーカー（ハウス帯内縁）＋内側にずれた場合のリーダー線。
     const [m0x, m0y] = pt(lon, rHouseIn), [m1x, m1y] = pt(lon, rHouseIn - 5);
-    s.append(svg("line", { x1: m0x, y1: m0y, x2: m1x, y2: m1y, stroke: "#0008", "stroke-width": 0.8 }));
-    if (r < rPlanet - 1) { const [l1x, l1y] = pt(lon, r + 11); s.append(svg("line", { x1: m1x, y1: m1y, x2: l1x, y2: l1y, stroke: "#0004", "stroke-width": 0.4 })); }
+    s.append(svg("line", { x1: m0x, y1: m0y, x2: m1x, y2: m1y, stroke: C.line4, "stroke-width": 0.8 }));
+    if (r < rPlanet - 1) { const [l1x, l1y] = pt(lon, r + 11); s.append(svg("line", { x1: m1x, y1: m1y, x2: l1x, y2: l1y, stroke: C.line, "stroke-width": 0.4 })); }
     const { w, h } = boxDim[i];
     // 天体一式を <g data-tip> にまとめてホバー/長押しの対象にする。
     const pg = svg("g", { "data-tip": `planet:${o.p.planet}`, class: "u-hit" });
     if (name) {
-      pg.append(svg("rect", { x: gx - w / 2, y: gy - h / 2, width: w, height: h, rx: 2, fill: "#fff", stroke: "none" }));
-      pg.append(svg("rect", { x: gx - w / 2, y: gy - h / 2, width: w, height: h, rx: 2, fill: signFill(o.p.sign), stroke: "#222", "stroke-width": 0.8 }));
-      (labelLines[i]).forEach((line, k) => { const ty = gy - h / 2 + NAME_PADY + NAME_LH * (k + 0.5); const tx = svg("text", { x: gx, y: ty, "text-anchor": "middle", "dominant-baseline": "central", "font-size": NAME_FS, fill: "#111" }); tx.textContent = line; pg.append(tx); });
+      pg.append(svg("rect", { x: gx - w / 2, y: gy - h / 2, width: w, height: h, rx: 2, fill: C.paper, stroke: "none" }));
+      pg.append(svg("rect", { x: gx - w / 2, y: gy - h / 2, width: w, height: h, rx: 2, fill: signFill(o.p.sign), stroke: C.ink, "stroke-width": 0.8 }));
+      (labelLines[i]).forEach((line, k) => { const ty = gy - h / 2 + NAME_PADY + NAME_LH * (k + 0.5); const tx = svg("text", { x: gx, y: ty, "text-anchor": "middle", "dominant-baseline": "central", "font-size": NAME_FS, fill: C.ink }); tx.textContent = line; pg.append(tx); });
     } else {
-      pg.append(svg("circle", { cx: gx, cy: gy, r: 12, fill: "#fff", stroke: "none" }));
+      pg.append(svg("circle", { cx: gx, cy: gy, r: 12, fill: C.paper, stroke: "none" }));
       pg.append(svg("circle", { cx: gx, cy: gy, r: 12, fill: signFill(o.p.sign), stroke: "none" }));
-      const g = svg("text", { x: gx, y: gy, "text-anchor": "middle", "dominant-baseline": "central", "font-size": 18, fill: "#111" });
+      const g = svg("text", { x: gx, y: gy, "text-anchor": "middle", "dominant-baseline": "central", "font-size": 18, fill: C.ink });
       g.textContent = (PLANET_GLYPH[o.p.planet] ?? "?") + "︎";
       pg.append(g);
     }
@@ -183,14 +199,14 @@ export function drawWheelPro(chart: Chart, enabledAspects: Set<string>, name: bo
     const leftCorner = gx < cx;
     const dgx = leftCorner ? gx - w / 2 : gx + w / 2;
     const dgy = gy - h / 2 - 5;
-    const d = svg("text", { x: dgx, y: dgy, "text-anchor": leftCorner ? "start" : "end", "dominant-baseline": "central", "font-size": 8, fill: "#222" });
+    const d = svg("text", { x: dgx, y: dgy, "text-anchor": leftCorner ? "start" : "end", "dominant-baseline": "central", "font-size": 8, fill: C.ink });
     d.textContent = `${fmtDeg(o.p.degree)}${o.p.retrograde ? "℞" : ""}`;
     pg.append(d);
     s.append(pg);
   });
 
   // 円: 最外周 / サイン帯内縁 / ハウス帯内縁 / アスペクトハブ。
-  for (const r of [R, rSignIn, rHouseIn, rAsp]) s.append(svg("circle", { cx, cy, r, fill: "none", stroke: "#333", "stroke-width": 0.8 }));
+  for (const r of [R, rSignIn, rHouseIn, rAsp]) s.append(svg("circle", { cx, cy, r, fill: "none", stroke: C.ink, "stroke-width": 0.8 }));
 
   return s;
 }

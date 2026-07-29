@@ -16,6 +16,10 @@ export const ELEMENT_HUE: Record<string, number> = { fire: 12, earth: 95, air: 5
 export const ELEMENT_SAT: Record<string, number> = { fire: 75, earth: 45, air: 75, water: 55 };
 export const QUALITY_ALPHA: Record<string, number> = { cardinal: 0.24, fixed: 0.15, mutable: 0.08 };
 // 元素=色相/彩度・クオリティ=不透明度（トーン）で薄めに塗る。
+// 表示テーマ。既定はダーク。SVG は CSS 変数を属性で受けられないので、描画側でパレットを引く。
+export const currentTheme = (): "dark" | "light" =>
+  document.documentElement.dataset.uTheme === "light" ? "light" : "dark";
+
 export const signFill = (id: string): string => `hsla(${ELEMENT_HUE[SIGN_ELEMENT[id]]}, ${ELEMENT_SAT[SIGN_ELEMENT[id]]}%, 52%, ${QUALITY_ALPHA[SIGN_QUALITY[id]]})`;
 export const PLANET_GLYPH: Record<string, string> = { sun: "☉", moon: "☽", mercury: "☿", venus: "♀", mars: "♂", jupiter: "♃", saturn: "♄", uranus: "♅", neptune: "♆", pluto: "♇", chiron: "⚷", ceres: "⚳", pallas: "⚴", juno: "⚵", vesta: "⚶", pholus: "⯛", lilith: "⚸", dragon_head: "☊", dragon_tail: "☋", fortune: "⊗", asc: "Asc", mc: "MC", dsc: "Dsc", ic: "IC" };
 // データ表での天体の並び順。
