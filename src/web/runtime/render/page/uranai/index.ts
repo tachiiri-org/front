@@ -1,6 +1,6 @@
 // ウラナイ画面のルート描画とフォーム類。定数・型・ヘルパは ./parts、ホイール描画は ./wheel に分割。
 import {
-  SIGN_ORDER, SIGN_GLYPH, SIGN_NAME, SIGN_ELEMENT, SIGN_QUALITY, ELEMENT_CHAR, QUALITY_CHAR, PLANET_GLYPH, PLANET_ORDER, PLANET_NAME_LINES, ASPECT_INFO, ASPECT_ORDER, PATTERN_INFO, PATTERN_ORDER, SHAPE_INFO, SHAPE_ORDER, Person, Prefill, Settings, SETTING_FIELDS, Chart, Derived, Cycles, optionsOf, nameOf, ownOf, setOwn, loadMeanings, meaningOf, roleOf, clearMeanings, UranaiView, api, lonOf, fmtDeg, Birth, HOUSE_SYSTEM_JA, IANA_ZONES, FALLBACK_ZONES, CC_ZONE, offsetFromZone, el, selectEl, loadSettings,
+  SIGN_ORDER, SIGN_GLYPH, SIGN_NAME, SIGN_ELEMENT, SIGN_QUALITY, ELEMENT_CHAR, QUALITY_CHAR, PLANET_GLYPH, PLANET_ORDER, PLANET_NAME_LINES, ASPECT_INFO, ASPECT_ORDER, PATTERN_INFO, PATTERN_ORDER, SHAPE_INFO, SHAPE_ORDER, Person, Prefill, Settings, SETTING_FIELDS, Chart, Derived, Cycles, optionsOf, nameOf, ownOf, setOwn, questionsOf, loadMeanings, meaningOf, roleOf, clearMeanings, UranaiView, api, lonOf, fmtDeg, Birth, HOUSE_SYSTEM_JA, IANA_ZONES, FALLBACK_ZONES, CC_ZONE, offsetFromZone, el, selectEl, loadSettings,
 } from "./parts";
 import { drawWheelPro } from "./wheel";
 
@@ -566,7 +566,8 @@ function chartView(chart: Chart, birth: Birth | null | undefined, personId: stri
   // 押すと右ペインでそのページが開く。ここでは読むだけ。
   const notesFor = (rays: Ray[], heading = "この材料に紐づく解釈"): HTMLElement => {
     const box = el("div", {});
-    const hit = notes.filter((n) => rays.some((r) => hasRay(n, r.concept_kind, r.concept_id)));
+    const hit = notes.filter((n) => !hasRay(n, "note_type", "question")
+      && rays.some((r) => hasRay(n, r.concept_kind, r.concept_id)));
     if (!hit.length) return box;
     box.append(el("div", { className: "u-tbl-title", textContent: `${heading}（${hit.length}）` }));
     for (const n of hit) {
@@ -580,8 +581,27 @@ function chartView(chart: Chart, birth: Birth | null | undefined, personId: stri
     return box;
   };
 
+  // 問いの欄。原典由来の問い（共通）と、この人物向けに書いた問い（種別=問い かつ その手順）。
+  const questionBox = (step: string): HTMLElement => {
+    const box = el("div", {});
+    const common = questionsOf(step);
+    const mine = notes.filter((n) => hasRay(n, "reading_step", step) && hasRay(n, "note_type", "question"));
+    if (!common.length && !mine.length) return box;
+    box.append(el("div", { className: "u-tbl-title", textContent: "問い" }));
+    for (const q of common) box.append(el("div", { className: "u-q", textContent: q }));
+    for (const n of mine) {
+      const btn = el("button", { className: "u-row-btn u-q-own" });
+      btn.append(el("div", { textContent: titleOf(n) }));
+      if (n.value) btn.append(el("div", { className: "u-row-sub", textContent: n.value.slice(0, 90) }));
+      btn.addEventListener("click", () => { openNote = n.note_id; renderNotes(); });
+      box.append(btn);
+    }
+    return box;
+  };
+
   const materialOf = (step: string): HTMLElement => {
     const box = el("div", {});
+    box.append(questionBox(step)); // 問いを先に置く。何を見て何を問うかの入口。
     const title = (t: string) => box.append(el("div", { className: "u-tbl-title", textContent: t }));
     if (step === "summary") {
       // 統合ではここまでに書いた解釈を全部並べる。
@@ -656,6 +676,7 @@ function chartView(chart: Chart, birth: Birth | null | undefined, personId: stri
     if (r.concept_kind === "reading_step") return READ_STEPS.find((x) => x.id === r.concept_id)?.label ?? r.concept_id;
     if (r.concept_kind === "aspect_type") return ASPECT_INFO[r.concept_id]?.label ?? r.concept_id;
     if (r.concept_kind === "shape") return nameOf("shape", r.concept_id);
+    if (r.concept_kind === "note_type") return nameOf("note_type", r.concept_id);
     return `${r.concept_kind}:${r.concept_id}`;
   };
   let notes: Note[] = [];
@@ -667,6 +688,7 @@ function chartView(chart: Chart, birth: Birth | null | undefined, personId: stri
     { kind: "house", label: "ハウス" }, { kind: "planet", label: "天体" }, { kind: "sign", label: "サイン" },
     { kind: "aspect_type", label: "アスペクト" }, { kind: "quadrant", label: "象限" },
     { kind: "reading_step", label: "手順" }, { kind: "shape", label: "配置型" },
+    { kind: "note_type", label: "種別" },
   ];
   const titleOf = (n: Note): string => n.title || n.value.split("\n")[0] || "無題";
   let openNote: string | null = null;
@@ -1187,6 +1209,9 @@ export async function renderUranai(container: HTMLElement): Promise<void> {
     .u-page-title{width:100%;box-sizing:border-box;border:0;background:transparent;font-size:19px;font-weight:700;color:#1f2937;padding:6px 0;margin-bottom:4px;font-family:inherit}
     .u-page-title:focus{outline:none;border-bottom:1px solid #4A90C2}
     [data-theme=dark] .u-page-title{color:#f3f5f7}
+    .u-q{font-size:12.5px;color:#555;border-left:2px solid #4A90C2;padding:3px 0 3px 9px;margin:3px 0;line-height:1.6}
+    [data-theme=dark] .u-q{color:#c3c9d1}
+    .u-q-own{border-left:2px solid #4A90C2}
     .u-row-sub{font-size:11px;color:#888;margin-top:2px;white-space:normal;line-height:1.5}
     [data-theme=dark] .u-row-sub{color:#8b95a3}
     .u-row-btn{display:block;width:100%;text-align:left;border:1px solid #0002;background:#fff;color:#333;border-radius:6px;padding:6px 9px;margin-bottom:5px;font-size:12.5px;cursor:pointer}

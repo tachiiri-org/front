@@ -189,6 +189,7 @@ export async function loadMeanings(): Promise<void> {
       meanings?: Array<{ concept_kind: string; concept_id: string; value: string }>;
       names?: Array<{ concept_kind: string; concept_id: string; value: string }>;
       concept_notes?: Array<{ concept_kind: string; concept_id: string; value: string }>;
+      reading_questions?: Array<{ step_id: string; idx: number; value: string }>;
       body_role?: Array<{ planet_id: string; body_role_id: string }>;
     }>(`/api/v1/uranai/astrology/reference`);
     const m: MeaningMap = {};
@@ -200,16 +201,22 @@ export async function loadMeanings(): Promise<void> {
     const ow: MeaningMap = {};
     for (const x of r.concept_notes ?? []) (ow[x.concept_kind] ??= {})[x.concept_id] = x.value;
     ownCache = ow;
+    questionCache = (r.reading_questions ?? []).slice();
     const roles: Record<string, string> = {};
     for (const x of r.body_role ?? []) roles[x.planet_id] = m.body_role?.[x.body_role_id] ? x.body_role_id : x.body_role_id;
     roleCache = roles;
-  } catch { meaningCache = {}; roleCache = {}; nameCache = {}; ownCache = {}; }
+  } catch { meaningCache = {}; roleCache = {}; nameCache = {}; ownCache = {}; questionCache = []; }
 }
 export const meaningOf = (kind: string, id: string): string => meaningCache?.[kind]?.[id] ?? "";
 
 // 自分の意味。原典由来とは別に持ち、画面では自分の意味を先に出す。
 let ownCache: MeaningMap | null = null;
 export const ownOf = (kind: string, id: string): string => ownCache?.[kind]?.[id] ?? "";
+
+// 手順ごとの問い（原典由来・共通）。
+let questionCache: Array<{ step_id: string; idx: number; value: string }> = [];
+export const questionsOf = (stepId: string): string[] =>
+  questionCache.filter((q) => q.step_id === stepId).sort((a, b) => a.idx - b.idx).map((q) => q.value);
 export const setOwn = (kind: string, id: string, value: string): void => {
   if (!ownCache) ownCache = {};
   (ownCache[kind] ??= {})[id] = value;
