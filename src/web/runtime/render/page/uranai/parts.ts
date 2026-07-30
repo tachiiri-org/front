@@ -74,7 +74,7 @@ export type Cycles = {
   target: string;
   returns: { sun: string | null; moon: string | null };
   progressed_lunation: Array<{ kind: "new" | "full"; at: string }>;
-  eclipses: Array<{ kind: "solar" | "lunar"; at: string; nodeDistance: number; house: string }>;
+  eclipses: Array<{ kind: "solar" | "lunar"; at: string; moonLatitude: number; house: string }>;
 };
 // アスペクトパターン（バックエンド detectPatterns の出力）。bodies は構成天体。
 export type Pattern = { pattern: string; bodies: string[]; focus?: string; scope?: string; tight?: boolean; subsumed?: boolean };

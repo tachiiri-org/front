@@ -469,12 +469,12 @@ function chartView(chart: Chart, birth: Birth | null | undefined, personId: stri
           : el("div", { className: "u-pat-empty", textContent: "範囲内に節目はありません" }));
         out.append(el("div", { className: "u-tbl-title", textContent: "食（対象日の前後400日）" }));
         out.append(c.eclipses.length
-          ? mkTable(["種別", "日時", "出生図のハウス", "交点距離"], c.eclipses.map((e) =>
+          ? mkTable(["種別", "日時", "出生図のハウス", "月の黄緯"], c.eclipses.map((e) =>
               [e.kind === "solar" ? "日食" : "月食", e.at.slice(0, 16).replace("T", " "),
-               `${e.house.replace("house_", "")}室`, `${e.nodeDistance.toFixed(1)}°`]))
+               `${e.house.replace("house_", "")}室`, `${e.moonLatitude.toFixed(3)}°`]))
           : el("div", { className: "u-pat-empty", textContent: "範囲内に食はありません" }));
         out.append(el("div", { className: "u-pat-comp", textContent:
-          "食の判定は近似。朔望の瞬間に太陽が交点から日食18度・月食12度以内にあるものを食とみなす（月の黄緯を持たないため）。" }));
+          "食は朔望の瞬間の月の黄緯で判定する（日食 |β|≦1.58度、月食 |β|≦1.05度）。等級・継続時間・食の種別は求めない。" }));
       } catch (e) {
         out.innerHTML = "";
         out.append(el("div", { className: "u-status", textContent: `エラー: ${(e as Error).message}` }));
