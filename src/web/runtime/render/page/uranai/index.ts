@@ -1,6 +1,6 @@
 // ウラナイ画面のルート描画とフォーム類。定数・型・ヘルパは ./parts、ホイール描画は ./wheel に分割。
 import {
-  SIGN_ORDER, SIGN_GLYPH, SIGN_NAME, SIGN_ELEMENT, SIGN_QUALITY, ELEMENT_CHAR, QUALITY_CHAR, PLANET_GLYPH, PLANET_ORDER, PLANET_NAME_LINES, ASPECT_INFO, ASPECT_ORDER, PATTERN_INFO, PATTERN_ORDER, SHAPE_INFO, SHAPE_ORDER, Person, Prefill, Settings, SETTING_FIELDS, Chart, loadMeanings, meaningOf, roleOf, clearMeanings, UranaiView, api, lonOf, fmtDeg, Birth, HOUSE_SYSTEM_JA, IANA_ZONES, FALLBACK_ZONES, CC_ZONE, offsetFromZone, el, selectEl, loadSettings,
+  SIGN_ORDER, SIGN_GLYPH, SIGN_NAME, SIGN_ELEMENT, SIGN_QUALITY, ELEMENT_CHAR, QUALITY_CHAR, PLANET_GLYPH, PLANET_ORDER, PLANET_NAME_LINES, ASPECT_INFO, ASPECT_ORDER, PATTERN_INFO, PATTERN_ORDER, SHAPE_INFO, SHAPE_ORDER, Person, Prefill, Settings, SETTING_FIELDS, Chart, Derived, Cycles, loadMeanings, meaningOf, roleOf, clearMeanings, UranaiView, api, lonOf, fmtDeg, Birth, HOUSE_SYSTEM_JA, IANA_ZONES, FALLBACK_ZONES, CC_ZONE, offsetFromZone, el, selectEl, loadSettings,
 } from "./parts";
 import { drawWheelPro } from "./wheel";
 
@@ -164,6 +164,12 @@ function chartView(chart: Chart, birth: Birth | null | undefined, personId: stri
   const place = new Map(chart.placements.map((p) => [p.planet, p]));
   const bodyLabel = (k: string): string => { const nm = PLANET_NAME_LINES[k]?.[0]; return nm ? `${PLANET_GLYPH[k] ?? ""} ${nm}`.trim() : (PLANET_GLYPH[k] ?? k); };
   // wrap: 折り返して左寄せにする列の番号。意味など長文の列は1行に収まらないので省略せず折り返す。
+  // ルネーションのクォーター。原典が骨組みとして明示する合・上弦のスクエア・衝・下弦の
+  // スクエアで区切る。8局面の名称は原典に無いので設けない。
+  const LUN_Q: Record<number, string> = {
+    1: "第1クォーター（合〜上弦のスクエア）", 2: "第2クォーター（上弦のスクエア〜衝）",
+    3: "第3クォーター（衝〜下弦のスクエア）", 4: "第4クォーター（下弦のスクエア〜合）",
+  };
   const QUAD_JA: Record<string, string> = { quadrant_1: "第1象限", quadrant_2: "第2象限", quadrant_3: "第3象限", quadrant_4: "第4象限" };
   const ROLE_JA: Record<string, string> = { light: "二光体", organic: "有機的生活", transcendent: "超越的活動" };
   const mkTable = (headers: string[], rows: string[][], wrap?: number[]): HTMLElement => {
@@ -291,8 +297,9 @@ function chartView(chart: Chart, birth: Birth | null | undefined, personId: stri
   const lun = chart.lunation;
   const lunTbl = mkTable(["項目", "値"], lun
     ? [["太陽から測った月の離角", `${lun.elongation.toFixed(1)}°`],
-       ["位相", lun.phase === "waxing" ? "上弦（合から衝へ向かう）" : "下弦（衝から合へ戻る）"]]
-    : [["算出できません", "—"]]);
+       ["位相", lun.phase === "waxing" ? "上弦（合から衝へ向かう）" : "下弦（衝から合へ戻る）"],
+       ["クォーター", LUN_Q[lun.quarter] ?? String(lun.quarter)]]
+    : [["算出できません", "—"]], [1]);
   // インターセプト（どのカスプにも現れないサイン）。ホイールには描かず表で示す。
   const icptTbl = mkTable(["サイン", "収まるハウス"], (chart.interceptions ?? []).length
     ? (chart.interceptions ?? []).map((x) => [`${SIGN_GLYPH[x.sign] ?? ""}︎ ${SIGN_NAME[x.sign] ?? x.sign}`, `${x.house.replace("house_", "")}室`])
@@ -356,6 +363,8 @@ function chartView(chart: Chart, birth: Birth | null | undefined, personId: stri
     detailCb.addEventListener("change", renderPatterns);
     patternNode.append(el("div", { className: "u-pat-toggle" }, [el("label", { className: "u-tg-chip" }, [detailCb, el("span", { textContent: "小配置・内包も表示" })])]));
   }
+  patternNode.append(el("div", { className: "u-pat-comp", textContent:
+    "図形の固有名はルディアの用語ではない。主となる読みは「全体の形」で、ここは補助的なラベル。" }));
   patternNode.append(patList);
   renderPatterns();
 
@@ -388,6 +397,95 @@ function chartView(chart: Chart, birth: Birth | null | undefined, personId: stri
       ? [[`${bodyLabel(sh.singleton.planet)}（${AXIS_JA[sh.singleton.axis] ?? sh.singleton.axis}で分けた半球にただ1つ${same ? "。取っ手と同一" : ""}）`]]
       : [["なし"]]));
   }
+
+  // 進行・経過。派生値なので取得は遅延（タブを開いたときに読む）。
+  const derivedNode = (kind: "progressed" | "transit"): HTMLElement => {
+    const box = el("div", {});
+    const dateIn = el("input", { type: "date", value: new Date().toISOString().slice(0, 10) }) as HTMLInputElement;
+    const out = el("div", {});
+    const load = async () => {
+      out.innerHTML = "";
+      out.append(el("div", { className: "u-pat-empty", textContent: "算出中…" }));
+      try {
+        const d = await api<Derived>(`/api/v1/uranai/astrology/person/${personId}/${kind}?date=${dateIn.value}`);
+        out.innerHTML = "";
+        out.append(el("div", { className: "u-pat-comp", textContent: kind === "progressed"
+          ? `1日 = 1年。天体位置は ${d.at.slice(0, 16).replace("T", " ")} UTC の瞬間。ハウスは出生図の枠。`
+          : `天体位置は ${d.at.slice(0, 16).replace("T", " ")} UTC。ハウスは出生図の枠。` }));
+        if (d.lunation) {
+          out.append(el("div", { className: "u-tbl-title", textContent: kind === "progressed"
+            ? "進行のルネーション（約30年で一巡。パーソナリティ発達の基本スケジュール）" : "ルネーション" }));
+          out.append(mkTable(["離角", "位相", "クォーター"], [[`${d.lunation.elongation.toFixed(1)}°`,
+            d.lunation.phase === "waxing" ? "上弦" : "下弦", LUN_Q[d.lunation.quarter] ?? ""]], [2]));
+        }
+        out.append(el("div", { className: "u-tbl-title", textContent: "天体" }));
+        out.append(mkTable(["天体", "サイン", "度数", "逆行", "室"], d.placements.map((p) =>
+          [bodyLabel(p.planet), SIGN_NAME[p.sign] ?? p.sign, fmtDeg(p.degree), p.retrograde ? "℞" : "", p.house.replace("house_", "") + "室"])));
+        out.append(el("div", { className: "u-tbl-title", textContent: `出生図とのアスペクト（${d.aspects.length}）` }));
+        out.append(d.aspects.length
+          ? mkTable([kind === "progressed" ? "進行" : "経過", "出生", "種別", "オーブ", "位相"],
+              [...d.aspects].sort((x, y) => x.orb - y.orb).map((a) => [bodyLabel(a.a), bodyLabel(a.b),
+                ASPECT_INFO[a.type]?.label ?? a.type, `${a.orb.toFixed(2)}°`, a.phase === "waxing" ? "上弦" : "下弦"]))
+          : el("div", { className: "u-pat-empty", textContent: "該当するアスペクトはありません" }));
+        if (kind === "progressed") {
+          out.append(el("div", { className: "u-tbl-title", textContent: `進行天体どうし（${d.internal.length}）` }));
+          out.append(d.internal.length
+            ? mkTable(["進行", "進行", "種別", "オーブ", "位相"],
+                [...d.internal].sort((x, y) => x.orb - y.orb).map((a) => [bodyLabel(a.a), bodyLabel(a.b),
+                  ASPECT_INFO[a.type]?.label ?? a.type, `${a.orb.toFixed(2)}°`, a.phase === "waxing" ? "上弦" : "下弦"]))
+            : el("div", { className: "u-pat-empty", textContent: "該当するアスペクトはありません" }));
+        }
+      } catch (e) {
+        out.innerHTML = "";
+        out.append(el("div", { className: "u-status", textContent: `エラー: ${(e as Error).message}` }));
+      }
+    };
+    const btn = el("button", { className: "u-btn u-btn-sm", textContent: "算出" });
+    btn.addEventListener("click", () => void load());
+    box.append(el("div", { className: "u-row" }, [el("label", { textContent: "対象日" }), dateIn, btn]), out);
+    void load();
+    return box;
+  };
+
+  // 時間軸のサイクル。リターン図・進行のルネーションの節目・食。
+  const cyclesNode = (): HTMLElement => {
+    const box = el("div", {});
+    const dateIn = el("input", { type: "date", value: new Date().toISOString().slice(0, 10) }) as HTMLInputElement;
+    const out = el("div", {});
+    const fmt = (iso: string | null) => iso ? iso.slice(0, 16).replace("T", " ") + " UTC" : "算出できません";
+    const load = async () => {
+      out.innerHTML = "";
+      out.append(el("div", { className: "u-pat-empty", textContent: "算出中…" }));
+      try {
+        const c = await api<Cycles>(`/api/v1/uranai/astrology/person/${personId}/cycles?date=${dateIn.value}`);
+        out.innerHTML = "";
+        out.append(el("div", { className: "u-tbl-title", textContent: "リターン（対象日の直前）" }));
+        out.append(mkTable(["種別", "瞬間"], [
+          ["太陽回帰", fmt(c.returns.sun)], ["月回帰", fmt(c.returns.moon)],
+        ], [1]));
+        out.append(el("div", { className: "u-tbl-title", textContent: "進行のルネーションの節目（約30年で一巡）" }));
+        out.append(c.progressed_lunation.length
+          ? mkTable(["節目", "暦日"], c.progressed_lunation.map((e) => [e.kind === "new" ? "進行新月（合）" : "進行満月（衝）", e.at.slice(0, 10)]))
+          : el("div", { className: "u-pat-empty", textContent: "範囲内に節目はありません" }));
+        out.append(el("div", { className: "u-tbl-title", textContent: "食（対象日の前後400日）" }));
+        out.append(c.eclipses.length
+          ? mkTable(["種別", "日時", "出生図のハウス", "月の黄緯"], c.eclipses.map((e) =>
+              [e.kind === "solar" ? "日食" : "月食", e.at.slice(0, 16).replace("T", " "),
+               `${e.house.replace("house_", "")}室`, `${e.moonLatitude.toFixed(3)}°`]))
+          : el("div", { className: "u-pat-empty", textContent: "範囲内に食はありません" }));
+        out.append(el("div", { className: "u-pat-comp", textContent:
+          "食は朔望の瞬間の月の黄緯で判定する（日食 |β|≦1.58度、月食 |β|≦1.05度）。等級・継続時間・食の種別は求めない。" }));
+      } catch (e) {
+        out.innerHTML = "";
+        out.append(el("div", { className: "u-status", textContent: `エラー: ${(e as Error).message}` }));
+      }
+    };
+    const btn = el("button", { className: "u-btn u-btn-sm", textContent: "算出" });
+    btn.addEventListener("click", () => void load());
+    box.append(el("div", { className: "u-row" }, [el("label", { textContent: "対象日" }), dateIn, btn]), out);
+    void load();
+    return box;
+  };
 
   // 基本情報: 通常は表。各編集項目に編集アイコン、押すとその項目だけ編集モード（他はグレーアウト）、
   // 再計算(保存)またはキャンセル。
@@ -508,7 +606,11 @@ function chartView(chart: Chart, birth: Birth | null | undefined, personId: stri
     { label: "象限", node: quadTbl },
     { label: "ルネーション", node: lunTbl },
     { label: `アスペクト(${chart.aspects.length})`, node: aspectNode },
-    { label: `配置(${majorCount})`, node: patternNode },
+    // 図形の固有名はルディアの用語ではないので、使わない流派では表示項目から外す。
+    ...(chart.aspect_figure === false ? [] : [{ label: `配置(${majorCount})`, node: patternNode }]),
+    { label: "進行", node: derivedNode("progressed") },
+    { label: "経過", node: derivedNode("transit") },
+    { label: "サイクル", node: cyclesNode() },
   ];
   const content = el("div", { className: "u-tab-content" });
   const secHeads = sections.map((s) => el("div", { className: "u-sec-head", textContent: s.label }));
