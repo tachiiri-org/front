@@ -164,6 +164,12 @@ function chartView(chart: Chart, birth: Birth | null | undefined, personId: stri
   const place = new Map(chart.placements.map((p) => [p.planet, p]));
   const bodyLabel = (k: string): string => { const nm = PLANET_NAME_LINES[k]?.[0]; return nm ? `${PLANET_GLYPH[k] ?? ""} ${nm}`.trim() : (PLANET_GLYPH[k] ?? k); };
   // wrap: 折り返して左寄せにする列の番号。意味など長文の列は1行に収まらないので省略せず折り返す。
+  // ルネーションのクォーター。原典が骨組みとして明示する合・上弦のスクエア・衝・下弦の
+  // スクエアで区切る。8局面の名称は原典に無いので設けない。
+  const LUN_Q: Record<number, string> = {
+    1: "第1クォーター（合〜上弦のスクエア）", 2: "第2クォーター（上弦のスクエア〜衝）",
+    3: "第3クォーター（衝〜下弦のスクエア）", 4: "第4クォーター（下弦のスクエア〜合）",
+  };
   const QUAD_JA: Record<string, string> = { quadrant_1: "第1象限", quadrant_2: "第2象限", quadrant_3: "第3象限", quadrant_4: "第4象限" };
   const ROLE_JA: Record<string, string> = { light: "二光体", organic: "有機的生活", transcendent: "超越的活動" };
   const mkTable = (headers: string[], rows: string[][], wrap?: number[]): HTMLElement => {
@@ -291,8 +297,9 @@ function chartView(chart: Chart, birth: Birth | null | undefined, personId: stri
   const lun = chart.lunation;
   const lunTbl = mkTable(["項目", "値"], lun
     ? [["太陽から測った月の離角", `${lun.elongation.toFixed(1)}°`],
-       ["位相", lun.phase === "waxing" ? "上弦（合から衝へ向かう）" : "下弦（衝から合へ戻る）"]]
-    : [["算出できません", "—"]]);
+       ["位相", lun.phase === "waxing" ? "上弦（合から衝へ向かう）" : "下弦（衝から合へ戻る）"],
+       ["クォーター", LUN_Q[lun.quarter] ?? String(lun.quarter)]]
+    : [["算出できません", "—"]], [1]);
   // インターセプト（どのカスプにも現れないサイン）。ホイールには描かず表で示す。
   const icptTbl = mkTable(["サイン", "収まるハウス"], (chart.interceptions ?? []).length
     ? (chart.interceptions ?? []).map((x) => [`${SIGN_GLYPH[x.sign] ?? ""}︎ ${SIGN_NAME[x.sign] ?? x.sign}`, `${x.house.replace("house_", "")}室`])
@@ -356,6 +363,8 @@ function chartView(chart: Chart, birth: Birth | null | undefined, personId: stri
     detailCb.addEventListener("change", renderPatterns);
     patternNode.append(el("div", { className: "u-pat-toggle" }, [el("label", { className: "u-tg-chip" }, [detailCb, el("span", { textContent: "小配置・内包も表示" })])]));
   }
+  patternNode.append(el("div", { className: "u-pat-comp", textContent:
+    "図形の固有名はルディアの用語ではない。主となる読みは「全体の形」で、ここは補助的なラベル。" }));
   patternNode.append(patList);
   renderPatterns();
 
@@ -404,9 +413,10 @@ function chartView(chart: Chart, birth: Birth | null | undefined, personId: stri
           ? `1日 = 1年。天体位置は ${d.at.slice(0, 16).replace("T", " ")} UTC の瞬間。ハウスは出生図の枠。`
           : `天体位置は ${d.at.slice(0, 16).replace("T", " ")} UTC。ハウスは出生図の枠。` }));
         if (d.lunation) {
-          out.append(el("div", { className: "u-tbl-title", textContent: "ルネーション" }));
-          out.append(mkTable(["離角", "位相"], [[`${d.lunation.elongation.toFixed(1)}°`,
-            d.lunation.phase === "waxing" ? "上弦" : "下弦"]]));
+          out.append(el("div", { className: "u-tbl-title", textContent: kind === "progressed"
+            ? "進行のルネーション（約30年で一巡。パーソナリティ発達の基本スケジュール）" : "ルネーション" }));
+          out.append(mkTable(["離角", "位相", "クォーター"], [[`${d.lunation.elongation.toFixed(1)}°`,
+            d.lunation.phase === "waxing" ? "上弦" : "下弦", LUN_Q[d.lunation.quarter] ?? ""]], [2]));
         }
         out.append(el("div", { className: "u-tbl-title", textContent: "天体" }));
         out.append(mkTable(["天体", "サイン", "度数", "逆行", "室"], d.placements.map((p) =>
@@ -417,6 +427,14 @@ function chartView(chart: Chart, birth: Birth | null | undefined, personId: stri
               [...d.aspects].sort((x, y) => x.orb - y.orb).map((a) => [bodyLabel(a.a), bodyLabel(a.b),
                 ASPECT_INFO[a.type]?.label ?? a.type, `${a.orb.toFixed(2)}°`, a.phase === "waxing" ? "上弦" : "下弦"]))
           : el("div", { className: "u-pat-empty", textContent: "該当するアスペクトはありません" }));
+        if (kind === "progressed") {
+          out.append(el("div", { className: "u-tbl-title", textContent: `進行天体どうし（${d.internal.length}）` }));
+          out.append(d.internal.length
+            ? mkTable(["進行", "進行", "種別", "オーブ", "位相"],
+                [...d.internal].sort((x, y) => x.orb - y.orb).map((a) => [bodyLabel(a.a), bodyLabel(a.b),
+                  ASPECT_INFO[a.type]?.label ?? a.type, `${a.orb.toFixed(2)}°`, a.phase === "waxing" ? "上弦" : "下弦"]))
+            : el("div", { className: "u-pat-empty", textContent: "該当するアスペクトはありません" }));
+        }
       } catch (e) {
         out.innerHTML = "";
         out.append(el("div", { className: "u-status", textContent: `エラー: ${(e as Error).message}` }));
