@@ -585,6 +585,7 @@ function chartView(chart: Chart, birth: Birth | null | undefined, personId: stri
     if (r.concept_kind === "quadrant") return QUAD_JA[r.concept_id] ?? r.concept_id;
     if (r.concept_kind === "reading_step") return READ_STEPS.find((x) => x.id === r.concept_id)?.label ?? r.concept_id;
     if (r.concept_kind === "aspect_type") return ASPECT_INFO[r.concept_id]?.label ?? r.concept_id;
+    if (r.concept_kind === "shape") return nameOf("shape", r.concept_id);
     return `${r.concept_kind}:${r.concept_id}`;
   };
   let notes: Note[] = [];
@@ -596,12 +597,50 @@ function chartView(chart: Chart, birth: Birth | null | undefined, personId: stri
   const PROP_KINDS: Array<{ kind: string; label: string }> = [
     { kind: "house", label: "ハウス" }, { kind: "planet", label: "天体" }, { kind: "sign", label: "サイン" },
     { kind: "aspect_type", label: "アスペクト" }, { kind: "quadrant", label: "象限" },
-    { kind: "reading_step", label: "手順" },
+    { kind: "reading_step", label: "手順" }, { kind: "shape", label: "配置型" },
   ];
   const titleOf = (n: Note): string => n.title || n.value.split("\n")[0] || "無題";
   let openNote: string | null = null;
   let stepFilter: string | null = null;
   let houseFilter: string | null = null;
+
+  // いま見ている材料から決まるプロパティ。手順に加えて、その手順で焦点になっている対象を付ける。
+  // 判定結果そのもの（バケット、その取っ手の月）なので、我々の判断は入っていない。
+  const contextRays = (): Ray[] => {
+    const out: Ray[] = [];
+    if (houseFilter) {
+      out.push({ concept_kind: "house", concept_id: houseFilter });
+      const rl = (chart.house_rulers ?? []).find((r) => r.house === houseFilter);
+      if (rl) out.push({ concept_kind: "sign", concept_id: rl.cusp_sign });
+      if (rl?.ruler) out.push({ concept_kind: "planet", concept_id: rl.ruler });
+      for (const k of inHouse(houseFilter)) out.push({ concept_kind: "planet", concept_id: k });
+      out.push({ concept_kind: "quadrant", concept_id: quadOf(Number(houseFilter.replace("house_", ""))) });
+      return out;
+    }
+    if (!stepFilter) return out;
+    out.push({ concept_kind: "reading_step", concept_id: stepFilter });
+    const sh = chart.shape;
+    if ((stepFilter === "shape" || stepFilter === "accent") && sh) {
+      out.push({ concept_kind: "shape", concept_id: sh.shape });
+      for (const k of sh.handle ?? []) out.push({ concept_kind: "planet", concept_id: k });
+      if (sh.leadingBody) out.push({ concept_kind: "planet", concept_id: sh.leadingBody });
+      if (sh.singleton) out.push({ concept_kind: "planet", concept_id: sh.singleton.planet });
+    }
+    if (stepFilter === "accent") {
+      for (const x of chart.interceptions ?? []) out.push({ concept_kind: "sign", concept_id: x.sign });
+    }
+    if (stepFilter === "center" && sh?.center) {
+      const cs = SIGN_ORDER[Math.floor((((sh.center.longitude % 360) + 360) % 360) / 30) % 12];
+      out.push({ concept_kind: "sign", concept_id: cs });
+      out.push({ concept_kind: "house", concept_id: `house_${houseOf(sh.center.longitude)}` });
+    }
+    if (stepFilter === "aspects") {
+      for (const t of [...new Set(chart.aspects.map((a) => a.type))]) out.push({ concept_kind: "aspect_type", concept_id: t });
+    }
+    // 重複を落とす。
+    const seen = new Set<string>();
+    return out.filter((r) => { const k = `${r.concept_kind}|${r.concept_id}`; if (seen.has(k)) return false; seen.add(k); return true; });
+  };
 
   const patch = (n: Note, body: Record<string, unknown>, after: () => void) => {
     void api<{ rays: Ray[]; links: string[] }>(`/api/v1/uranai/astrology/note/${n.note_id}`,
@@ -609,25 +648,37 @@ function chartView(chart: Chart, birth: Birth | null | undefined, personId: stri
       .then((res) => { if (res.rays) n.rays = res.rays; if (res.links) n.links = res.links; after(); });
   };
 
-  // プロパティ1種類ぶん。既定の選択肢から選ぶ。チップを押すと外れる。
-  const propRow = (n: Note, kind: string, label: string, after: () => void): HTMLElement => {
+  // プロパティは1行にまとめる。種類の区別は「＋」を押した後の選択肢（種類ごとのグループ）に出す。
+  const propRow = (n: Note, after: () => void): HTMLElement => {
     const vals = el("div", { className: "u-ray-chips" });
-    for (const r of n.rays.filter((x) => x.concept_kind === kind)) {
+    for (const r of n.rays) {
       const c = el("button", { className: "u-ray on", textContent: rayLabel(r) });
-      c.addEventListener("click", () => patch(n, { rays: n.rays.filter((x) => !(x.concept_kind === kind && x.concept_id === r.concept_id)) }, after));
+      c.title = PROP_KINDS.find((k) => k.kind === r.concept_kind)?.label ?? r.concept_kind;
+      c.addEventListener("click", () => patch(n, { rays: n.rays.filter((x) => !(x.concept_kind === r.concept_kind && x.concept_id === r.concept_id)) }, after));
       vals.append(c);
     }
+    const addBtn = el("button", { className: "u-ray", textContent: "＋" });
     const sel = el("select", { className: "u-prop-sel" }) as HTMLSelectElement;
-    sel.append(el("option", { value: "", textContent: "＋" }));
-    for (const o of optionsOf(kind)) {
-      if (n.rays.some((x) => x.concept_kind === kind && x.concept_id === o.id)) continue;
-      sel.append(el("option", { value: o.id, textContent: o.label }));
+    sel.style.display = "none";
+    sel.append(el("option", { value: "", textContent: "選択" }));
+    for (const k of PROP_KINDS) {
+      const g = el("optgroup") as HTMLOptGroupElement;
+      g.label = k.label;
+      let any = false;
+      for (const o of optionsOf(k.kind)) {
+        if (n.rays.some((x) => x.concept_kind === k.kind && x.concept_id === o.id)) continue;
+        g.append(el("option", { value: `${k.kind}|${o.id}`, textContent: o.label }));
+        any = true;
+      }
+      if (any) sel.append(g);
     }
+    addBtn.addEventListener("click", () => { addBtn.style.display = "none"; sel.style.display = ""; sel.focus(); });
     sel.addEventListener("change", () => {
-      if (sel.value) patch(n, { rays: [...n.rays, { concept_kind: kind, concept_id: sel.value }] }, after);
+      const [kind, id] = sel.value.split("|");
+      if (kind && id) patch(n, { rays: [...n.rays, { concept_kind: kind, concept_id: id }] }, after);
     });
-    vals.append(sel);
-    return el("div", { className: "u-prop" }, [el("div", { className: "u-prop-k", textContent: label }), vals]);
+    vals.append(addBtn, sel);
+    return el("div", { className: "u-prop" }, [el("div", { className: "u-prop-k", textContent: "プロパティ" }), vals]);
   };
 
   // ページ: タイトル・プロパティ・本文。
@@ -640,7 +691,7 @@ function chartView(chart: Chart, birth: Birth | null | undefined, personId: stri
     ti.placeholder = "無題";
     ti.addEventListener("blur", () => { n.title = ti.value; patch(n, { title: ti.value }, after); });
     box.append(ti);
-    for (const c of PROP_KINDS) box.append(propRow(n, c.kind, c.label, after));
+    box.append(propRow(n, after));
     const at = el("input", { type: "date", className: "u-prop-sel", value: (n.at ?? "").slice(0, 10) }) as HTMLInputElement;
     at.addEventListener("change", () => {
       n.at = at.value ? `${at.value}T12:00:00Z` : null;
@@ -702,8 +753,7 @@ function chartView(chart: Chart, birth: Birth | null | undefined, personId: stri
     reportHost.append(tbl);
     const add = el("button", { className: "u-btn u-btn-sm", textContent: "＋" });
     add.addEventListener("click", () => {
-      const rays: Ray[] = houseFilter ? [{ concept_kind: "house", concept_id: houseFilter }]
-        : stepFilter ? [{ concept_kind: "reading_step", concept_id: stepFilter }] : [];
+      const rays = contextRays();
       void api<{ note_id: string; idx: number; rays: Ray[]; links: string[] }>(`/api/v1/uranai/astrology/person/${personId}/notes`,
         { method: "POST", body: JSON.stringify({ value: "", title: "", rays }) })
         .then((r) => {
