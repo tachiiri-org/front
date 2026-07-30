@@ -549,15 +549,10 @@ function chartView(chart: Chart, birth: Birth | null | undefined, personId: stri
           ["支配星とその在住", rl?.ruler ? `${bodyLabel(rl.ruler)} → ${rl.ruler_sign ? SIGN_NAME[rl.ruler_sign] ?? rl.ruler_sign : "—"}${rl.ruler_house ? ` / ${rl.ruler_house.replace("house_", "")}室` : ""}` : "—"],
           ["インターセプト", (chart.interceptions ?? []).filter((x) => x.house === hid).map((x) => SIGN_NAME[x.sign] ?? x.sign).join("、") || "なし"],
         ], [1]));
-        // その室に紐づく解釈。参加者にその室を自動で付け、在住天体・カスプのサイン・支配星を候補に出す。
-        const suggest: Ray[] = [
-          ...bodies.map((k) => ({ concept_kind: "planet", concept_id: k })),
-          ...(rl ? [{ concept_kind: "sign", concept_id: rl.cusp_sign }] : []),
-          ...(rl?.ruler ? [{ concept_kind: "planet", concept_id: rl.ruler }] : []),
-          { concept_kind: "quadrant", concept_id: quadOf(i) },
-          { concept_kind: "reading_step", concept_id: "houses" },
-        ];
-        box.append(noteEditor([{ concept_kind: "house", concept_id: hid }], suggest));
+        // その室を選ぶと右ペインの一覧をその室で絞る。書くのは右ペインに集約する。
+        const pick = el("button", { className: "u-btn-sm u-btn-ghost", textContent: `第${i}室の解釈` });
+        pick.addEventListener("click", () => { houseFilter = hid; stepFilter = null; openNote = null; renderNotes(); });
+        box.append(pick);
       }
       return box;
     }
@@ -581,7 +576,7 @@ function chartView(chart: Chart, birth: Birth | null | undefined, personId: stri
   // 解釈メモ。ステップごとに複数書ける。保存は暗号化してサーバへ。
   // メモはグラフのリレーションと同じ形。本文＋n項の参加者。読みのステップも参加者の1つ。
   type Ray = { concept_kind: string; concept_id: string };
-  type Note = { note_id: string; idx: number; at: string | null; value: string; rays: Ray[] };
+  type Note = { note_id: string; idx: number; at: string | null; title: string; value: string; rays: Ray[]; links: string[] };
   const hasRay = (n: Note, kind: string, id: string) => n.rays.some((r) => r.concept_kind === kind && r.concept_id === id);
   const rayLabel = (r: Ray): string => {
     if (r.concept_kind === "planet") return bodyLabel(r.concept_id);
@@ -596,31 +591,30 @@ function chartView(chart: Chart, birth: Birth | null | undefined, personId: stri
   const readNode = el("div", {});
   const matHost = el("div", {});
   let current = READ_STEPS[0].id;
-  // 解釈はデータベース。1行が1ページで、列がプロパティ（マスタから選ぶ）。本文は行単位で書く。
-  // プロパティの種類。concept_kind をそのまま列にする。
-  const PROP_COLS: Array<{ kind: string; label: string }> = [
+  // 解釈はデータベース。1行が1ページ。列は概念の種類で分けず、プロパティとして付ける。
+  // ページはタイトル・プロパティ・本文の構成。ページ間のリンクも張れる。
+  const PROP_KINDS: Array<{ kind: string; label: string }> = [
     { kind: "house", label: "ハウス" }, { kind: "planet", label: "天体" }, { kind: "sign", label: "サイン" },
     { kind: "aspect_type", label: "アスペクト" }, { kind: "quadrant", label: "象限" },
     { kind: "reading_step", label: "手順" },
   ];
-  const rayText = (n: Note, kind: string): string =>
-    n.rays.filter((r) => r.concept_kind === kind).map((r) => rayLabel(r)).join("　") || "";
-  const titleOf = (n: Note): string => (n.value.split("\n")[0] || "無題").slice(0, 40);
-
+  const titleOf = (n: Note): string => n.title || n.value.split("\n")[0] || "無題";
   let openNote: string | null = null;
-  const saveRays = (n: Note, next: Ray[], after: () => void) => {
-    void api<{ rays: Ray[] }>(`/api/v1/uranai/astrology/note/${n.note_id}`, { method: "PUT", body: JSON.stringify({ rays: next }) })
-      .then((res) => { n.rays = res.rays ?? next; after(); });
+  let stepFilter: string | null = null;
+  let houseFilter: string | null = null;
+
+  const patch = (n: Note, body: Record<string, unknown>, after: () => void) => {
+    void api<{ rays: Ray[]; links: string[] }>(`/api/v1/uranai/astrology/note/${n.note_id}`,
+      { method: "PUT", body: JSON.stringify(body) })
+      .then((res) => { if (res.rays) n.rays = res.rays; if (res.links) n.links = res.links; after(); });
   };
 
-  // 1つのプロパティ（種類）の編集。既定の選択肢から選ぶ。押して外す。
-  const propEditor = (n: Note, kind: string, label: string, after: () => void): HTMLElement => {
-    const row = el("div", { className: "u-prop" });
-    row.append(el("div", { className: "u-prop-k", textContent: label }));
+  // プロパティ1種類ぶん。既定の選択肢から選ぶ。チップを押すと外れる。
+  const propRow = (n: Note, kind: string, label: string, after: () => void): HTMLElement => {
     const vals = el("div", { className: "u-ray-chips" });
     for (const r of n.rays.filter((x) => x.concept_kind === kind)) {
       const c = el("button", { className: "u-ray on", textContent: rayLabel(r) });
-      c.addEventListener("click", () => saveRays(n, n.rays.filter((x) => !(x.concept_kind === kind && x.concept_id === r.concept_id)), after));
+      c.addEventListener("click", () => patch(n, { rays: n.rays.filter((x) => !(x.concept_kind === kind && x.concept_id === r.concept_id)) }, after));
       vals.append(c);
     }
     const sel = el("select", { className: "u-prop-sel" }) as HTMLSelectElement;
@@ -630,32 +624,53 @@ function chartView(chart: Chart, birth: Birth | null | undefined, personId: stri
       sel.append(el("option", { value: o.id, textContent: o.label }));
     }
     sel.addEventListener("change", () => {
-      if (!sel.value) return;
-      saveRays(n, [...n.rays, { concept_kind: kind, concept_id: sel.value }], after);
+      if (sel.value) patch(n, { rays: [...n.rays, { concept_kind: kind, concept_id: sel.value }] }, after);
     });
     vals.append(sel);
-    row.append(vals);
-    return row;
+    return el("div", { className: "u-prop" }, [el("div", { className: "u-prop-k", textContent: label }), vals]);
   };
 
-  // ページ（1行の中身）。本文＋プロパティ。
+  // ページ: タイトル・プロパティ・本文。
   const pageView = (n: Note, after: () => void): HTMLElement => {
-    const box = el("div", {});
+    const box = el("div", { className: "u-page" });
+    const back = el("button", { className: "u-btn-sm u-btn-ghost", textContent: "← 一覧" });
+    back.addEventListener("click", () => { openNote = null; after(); });
+    box.append(back);
+    const ti = el("input", { className: "u-page-title", value: titleOf(n) === "無題" ? "" : n.title }) as HTMLInputElement;
+    ti.placeholder = "無題";
+    ti.addEventListener("blur", () => { n.title = ti.value; patch(n, { title: ti.value }, after); });
+    box.append(ti);
+    for (const c of PROP_KINDS) box.append(propRow(n, c.kind, c.label, after));
+    const at = el("input", { type: "date", className: "u-prop-sel", value: (n.at ?? "").slice(0, 10) }) as HTMLInputElement;
+    at.addEventListener("change", () => {
+      n.at = at.value ? `${at.value}T12:00:00Z` : null;
+      patch(n, { at: at.value ? `${at.value}T12:00:00Z` : "" }, () => { /* 一覧の再描画は不要 */ });
+    });
+    box.append(el("div", { className: "u-prop" }, [el("div", { className: "u-prop-k", textContent: "日時" }), at]));
+    // ページ間のリンク。
+    const links = el("div", { className: "u-ray-chips" });
+    for (const t of n.links) {
+      const target = notes.find((x) => x.note_id === t);
+      const c = el("button", { className: "u-ray on", textContent: target ? titleOf(target) : t.slice(0, 8) });
+      c.addEventListener("click", () => patch(n, { links: n.links.filter((x) => x !== t) }, after));
+      links.append(c);
+    }
+    const lsel = el("select", { className: "u-prop-sel" }) as HTMLSelectElement;
+    lsel.append(el("option", { value: "", textContent: "＋" }));
+    for (const o of notes.filter((x) => x.note_id !== n.note_id && !n.links.includes(x.note_id))) {
+      lsel.append(el("option", { value: o.note_id, textContent: titleOf(o) }));
+    }
+    lsel.addEventListener("change", () => { if (lsel.value) patch(n, { links: [...n.links, lsel.value] }, after); });
+    links.append(lsel);
+    box.append(el("div", { className: "u-prop" }, [el("div", { className: "u-prop-k", textContent: "リンク" }), links]));
     const ta = el("textarea", { className: "u-note" }) as HTMLTextAreaElement;
     ta.value = n.value;
     ta.addEventListener("blur", () => {
       void api(`/api/v1/uranai/astrology/note/${n.note_id}`, { method: "PUT", body: JSON.stringify({ value: ta.value }) })
-        .then(() => { n.value = ta.value; after(); });
+        .then(() => { n.value = ta.value; });
     });
     box.append(ta);
-    for (const c of PROP_COLS) box.append(propEditor(n, c.kind, c.label, after));
-    const at = el("input", { type: "date", className: "u-prop-sel", value: (n.at ?? "").slice(0, 10) }) as HTMLInputElement;
-    at.addEventListener("change", () => {
-      void api(`/api/v1/uranai/astrology/note/${n.note_id}`, { method: "PUT", body: JSON.stringify({ at: at.value ? `${at.value}T12:00:00Z` : "" }) })
-        .then(() => { n.at = at.value ? `${at.value}T12:00:00Z` : null; });
-    });
-    box.append(el("div", { className: "u-prop" }, [el("div", { className: "u-prop-k", textContent: "日時" }), at]));
-    const del = el("button", { className: "u-btn-sm u-btn-ghost", textContent: "この行を削除" });
+    const del = el("button", { className: "u-btn-sm u-btn-ghost", textContent: "削除" });
     del.addEventListener("click", () => {
       void api(`/api/v1/uranai/astrology/note/${n.note_id}`, { method: "DELETE" }).then(() => {
         notes = notes.filter((x) => x.note_id !== n.note_id); openNote = null; after();
@@ -665,75 +680,45 @@ function chartView(chart: Chart, birth: Birth | null | undefined, personId: stri
     return box;
   };
 
-  // 指定の参加者を持つ行の一覧＋新規。ハウス単位でもステップ単位でも同じ器を使う。
-  const noteEditor = (rays: Ray[], suggest: Ray[] = []): HTMLElement => {
-    void suggest;
-    const host = el("div", {});
-    const draw = () => {
-      host.innerHTML = "";
-      const mine = notes.filter((n) => rays.every((r) => hasRay(n, r.concept_kind, r.concept_id)));
-      for (const n of mine) {
-        if (openNote === n.note_id) { host.append(pageView(n, draw)); continue; }
-        const row = el("button", { className: "u-row-btn", textContent: titleOf(n) });
-        row.addEventListener("click", () => { openNote = n.note_id; draw(); });
-        host.append(row);
-      }
-      const add = el("button", { className: "u-btn u-btn-sm", textContent: "＋" });
-      add.addEventListener("click", () => {
-        void api<{ note_id: string; idx: number; rays: Ray[] }>(`/api/v1/uranai/astrology/person/${personId}/notes`,
-          { method: "POST", body: JSON.stringify({ value: "", rays }) })
-          .then((r) => { notes.push({ note_id: r.note_id, idx: r.idx, at: null, value: "", rays: r.rays ?? rays }); openNote = r.note_id; draw(); renderDb(); });
-      });
-      host.append(add);
-    };
-    draw();
-    return host;
-  };
-
-  // データベースビュー。1行が1ページ、列がプロパティ。
-  const dbNode = el("div", {});
-  const renderDb = () => {
-    dbNode.innerHTML = "";
-    const head = el("tr", {});
-    for (const h of ["本文", ...PROP_COLS.map((c) => c.label), "日時"]) head.append(el("th", { textContent: h }));
-    const tbl = el("table", { className: "u-tbl u-tbl-auto" }, [head]);
-    for (const n of notes) {
-      const tr = el("tr", { className: "u-hit" });
-      const title = el("td", { className: "u-mean", textContent: titleOf(n) });
-      tr.append(title);
-      for (const c of PROP_COLS) tr.append(el("td", { className: "u-mean", textContent: rayText(n, c.kind) }));
-      tr.append(el("td", { textContent: (n.at ?? "").slice(0, 10) }));
-      tr.addEventListener("click", () => { openNote = n.note_id; renderDb(); if (reportHost) renderNotes(); });
-      tbl.append(tr);
-      if (openNote === n.note_id) {
-        const pr = el("tr", {});
-        const td = el("td", { className: "u-mean" });
-        td.setAttribute("colspan", String(PROP_COLS.length + 2));
-        td.append(pageView(n, () => { renderDb(); }));
-        pr.append(td); tbl.append(pr);
-      }
-    }
-    dbNode.append(tbl);
-    const add = el("button", { className: "u-btn u-btn-sm", textContent: "＋" });
-    add.addEventListener("click", () => {
-      void api<{ note_id: string; idx: number; rays: Ray[] }>(`/api/v1/uranai/astrology/person/${personId}/notes`,
-        { method: "POST", body: JSON.stringify({ value: "", rays: [] }) })
-        .then((r) => { notes.push({ note_id: r.note_id, idx: r.idx, at: null, value: "", rays: r.rays ?? [] }); openNote = r.note_id; renderDb(); });
-    });
-    dbNode.append(add);
-  };
-
+  // 右ペイン: 一覧（1行=1ページ）またはページ。手順を選んでいる間はその手順で絞る。
   const renderNotes = () => {
     if (!reportHost) return;
     reportHost.innerHTML = "";
-    const step = READ_STEPS.find((x) => x.id === current);
-    if (!step) return;
-    reportHost.append(el("div", { className: "u-tbl-title", textContent: step.label }));
-    reportHost.append(noteEditor([{ concept_kind: "reading_step", concept_id: current }]));
+    const open = openNote ? notes.find((x) => x.note_id === openNote) : null;
+    if (open) { reportHost.append(pageView(open, renderNotes)); return; }
+    const shown = houseFilter ? notes.filter((n) => hasRay(n, "house", houseFilter as string))
+      : stepFilter ? notes.filter((n) => hasRay(n, "reading_step", stepFilter as string)) : notes;
+    const head = el("tr", {});
+    for (const h of ["タイトル", "プロパティ", "日時"]) head.append(el("th", { textContent: h }));
+    const tbl = el("table", { className: "u-tbl u-tbl-auto" }, [head]);
+    for (const n of shown) {
+      const tr = el("tr", { className: "u-hit" });
+      tr.append(el("td", { className: "u-mean", textContent: `▤ ${titleOf(n)}` }));
+      tr.append(el("td", { className: "u-mean", textContent: n.rays.map(rayLabel).join("　") }));
+      tr.append(el("td", { textContent: (n.at ?? "").slice(0, 10) }));
+      tr.addEventListener("click", () => { openNote = n.note_id; renderNotes(); });
+      tbl.append(tr);
+    }
+    reportHost.append(tbl);
+    const add = el("button", { className: "u-btn u-btn-sm", textContent: "＋" });
+    add.addEventListener("click", () => {
+      const rays: Ray[] = houseFilter ? [{ concept_kind: "house", concept_id: houseFilter }]
+        : stepFilter ? [{ concept_kind: "reading_step", concept_id: stepFilter }] : [];
+      void api<{ note_id: string; idx: number; rays: Ray[]; links: string[] }>(`/api/v1/uranai/astrology/person/${personId}/notes`,
+        { method: "POST", body: JSON.stringify({ value: "", title: "", rays }) })
+        .then((r) => {
+          notes.push({ note_id: r.note_id, idx: r.idx, at: null, title: "", value: "", rays: r.rays ?? rays, links: r.links ?? [] });
+          openNote = r.note_id; renderNotes();
+        });
+    });
+    reportHost.append(add);
   };
 
   const selectStep = (id: string) => {
     current = id;
+    stepFilter = id;
+    houseFilter = null;
+    openNote = null;
     matHost.innerHTML = "";
     matHost.append(materialOf(id));
     for (const c of Array.from(readNode.querySelectorAll<HTMLElement>(".u-step-chip"))) {
@@ -750,7 +735,7 @@ function chartView(chart: Chart, birth: Birth | null | undefined, personId: stri
   }
   readNode.append(chips, matHost);
   void api<{ notes: Note[] }>(`/api/v1/uranai/astrology/person/${personId}/notes`)
-    .then((r) => { notes = r.notes ?? []; renderNotes(); renderCross(); renderDb(); selectStep(current); })
+    .then((r) => { notes = r.notes ?? []; renderCross(); selectStep(current); })
     .catch(() => { /* メモが取れなくても材料は見せる */ });
 
   // 横断ビュー。参加者ごとにメモを束ねて見る。参加者を持たせた価値はここに出る。
@@ -886,7 +871,6 @@ function chartView(chart: Chart, birth: Birth | null | undefined, personId: stri
   // タブ（可視切替）＋全表示
   const sections: Array<{ label: string; node: HTMLElement }> = [
     { label: "読み", node: readNode },
-    { label: "解釈", node: dbNode },
     { label: "横断", node: crossNode },
     { label: "基本情報", node: basicNode },
     { label: "チャート", node: chartNode },
@@ -1052,6 +1036,10 @@ export async function renderUranai(container: HTMLElement): Promise<void> {
     .u-prop-sel{font-size:11.5px;padding:2px 4px;border:1px solid #0002;border-radius:5px;background:#fff;color:#666}
     [data-theme=dark] .u-prop-sel{background:#1b1f26;border-color:#ffffff26;color:#dfe4ea}
     [data-theme=dark] .u-prop-k{color:#8b95a3}
+    .u-page{display:flex;flex-direction:column;gap:2px;align-items:flex-start}
+    .u-page-title{width:100%;box-sizing:border-box;border:0;background:transparent;font-size:19px;font-weight:700;color:#1f2937;padding:6px 0;margin-bottom:4px;font-family:inherit}
+    .u-page-title:focus{outline:none;border-bottom:1px solid #4A90C2}
+    [data-theme=dark] .u-page-title{color:#f3f5f7}
     .u-row-btn{display:block;width:100%;text-align:left;border:1px solid #0002;background:#fff;color:#333;border-radius:6px;padding:6px 9px;margin-bottom:5px;font-size:12.5px;cursor:pointer}
     [data-theme=dark] .u-row-btn{background:#1b1f26;border-color:#ffffff26;color:#e6e8eb}
     .u-ray{font-size:11px;border:1px solid #0002;background:#fff;color:#666;border-radius:999px;padding:2px 8px;cursor:pointer;line-height:1.5}
@@ -1134,10 +1122,8 @@ export async function renderUranai(container: HTMLElement): Promise<void> {
   const side = el("div", { className: "u-side" });
   const main = el("div", { className: "u-main" });
   // 右側: 鑑定レポート枠（今は空。独立スクロール）。
-  const report = el("div", { className: "u-report" }, [
-    el("div", { className: "u-report-head", textContent: "鑑定レポート" }),
-    el("div", { className: "u-report-body" }),
-  ]);
+  // 右ペインは解釈のデータベース。見出しは置かない（ナビゲーションテキストは極力なし）。
+  const report = el("div", { className: "u-report" }, [el("div", { className: "u-report-body" })]);
   wrap.append(side, main, report, themeBtn); container.append(wrap);
 
   // 流派設定（マスタ）。編集フォームで表示・変更する。全人物のチャートに適用。
