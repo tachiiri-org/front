@@ -181,23 +181,33 @@ export const selectEl = (options: Array<[string, string]>, value: string): HTMLS
 // 流派を切り替えると内容が変わるので、設定保存時に clearMeanings() で捨てる。
 type MeaningMap = Record<string, Record<string, string>>;
 let meaningCache: MeaningMap | null = null;
-export function clearMeanings(): void { meaningCache = null; roleCache = null; }
+export function clearMeanings(): void { meaningCache = null; roleCache = null; nameCache = null; }
 export async function loadMeanings(): Promise<void> {
   if (meaningCache) return;
   try {
     const r = await api<{
       meanings?: Array<{ concept_kind: string; concept_id: string; value: string }>;
+      names?: Array<{ concept_kind: string; concept_id: string; value: string }>;
       body_role?: Array<{ planet_id: string; body_role_id: string }>;
     }>(`/api/v1/uranai/astrology/reference`);
     const m: MeaningMap = {};
     for (const x of r.meanings ?? []) (m[x.concept_kind] ??= {})[x.concept_id] = x.value;
     meaningCache = m;
+    const nm: MeaningMap = {};
+    for (const x of r.names ?? []) (nm[x.concept_kind] ??= {})[x.concept_id] = x.value;
+    nameCache = nm;
     const roles: Record<string, string> = {};
     for (const x of r.body_role ?? []) roles[x.planet_id] = m.body_role?.[x.body_role_id] ? x.body_role_id : x.body_role_id;
     roleCache = roles;
-  } catch { meaningCache = {}; roleCache = {}; }
+  } catch { meaningCache = {}; roleCache = {}; nameCache = {}; }
 }
 export const meaningOf = (kind: string, id: string): string => meaningCache?.[kind]?.[id] ?? "";
+
+// 概念の名称。プロパティの選択肢（既定の選択肢）としても使う。
+let nameCache: MeaningMap | null = null;
+export const nameOf = (kind: string, id: string): string => nameCache?.[kind]?.[id] ?? id;
+export const optionsOf = (kind: string): Array<{ id: string; label: string }> =>
+  Object.entries(nameCache?.[kind] ?? {}).map(([id, label]) => ({ id, label }));
 
 // 天体の階層（流派スコープ）。ルディア: 二光体 / 有機的生活の惑星 / 超越的活動の惑星。
 let roleCache: Record<string, string> | null = null;
