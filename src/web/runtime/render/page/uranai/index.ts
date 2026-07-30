@@ -1,6 +1,6 @@
 // ウラナイ画面のルート描画とフォーム類。定数・型・ヘルパは ./parts、ホイール描画は ./wheel に分割。
 import {
-  SIGN_ORDER, SIGN_GLYPH, SIGN_NAME, SIGN_ELEMENT, SIGN_QUALITY, ELEMENT_CHAR, QUALITY_CHAR, PLANET_GLYPH, PLANET_ORDER, PLANET_NAME_LINES, ASPECT_INFO, ASPECT_ORDER, PATTERN_INFO, PATTERN_ORDER, SHAPE_INFO, SHAPE_ORDER, Person, Prefill, Settings, SETTING_FIELDS, Chart, Derived, Cycles, optionsOf, nameOf, ownOf, setOwn, loadMeanings, meaningOf, roleOf, clearMeanings, UranaiView, api, lonOf, fmtDeg, Birth, HOUSE_SYSTEM_JA, IANA_ZONES, FALLBACK_ZONES, CC_ZONE, offsetFromZone, el, selectEl, loadSettings,
+  SIGN_ORDER, SIGN_GLYPH, SIGN_NAME, SIGN_ELEMENT, SIGN_QUALITY, ELEMENT_CHAR, QUALITY_CHAR, PLANET_GLYPH, PLANET_ORDER, PLANET_NAME_LINES, ASPECT_INFO, ASPECT_ORDER, PATTERN_INFO, PATTERN_ORDER, SHAPE_INFO, SHAPE_ORDER, Person, Prefill, Settings, SETTING_FIELDS, Chart, Derived, Cycles, optionsOf, nameOf, ownOf, setOwn, usesPart, partsOn, allParts, setParts, loadMeanings, meaningOf, roleOf, clearMeanings, UranaiView, api, lonOf, fmtDeg, Birth, HOUSE_SYSTEM_JA, IANA_ZONES, FALLBACK_ZONES, CC_ZONE, offsetFromZone, el, selectEl, loadSettings,
 } from "./parts";
 import { drawWheelPro } from "./wheel";
 
@@ -105,7 +105,42 @@ function settingsView(settings: Settings, onSaved: () => void | Promise<void>): 
       el("label", { textContent: derived ? `${f.label}（流派で決まる）` : f.label }), sel,
     ]));
   }
+  // 部品の採用。流派を切り替えると既定が読み込まれ、そこから自分用に変えられる。
+  const partsBox = el("div", { className: "u-parts" });
+  const renderParts = () => {
+    partsBox.innerHTML = "";
+    if (!allParts().length) return;
+    partsBox.append(el("div", { className: "u-set-title", textContent: "使う部品" }));
+    const on = new Set(partsOn());
+    const grid = el("div", { className: "u-parts-grid" });
+    for (const id of allParts()) {
+      const cb = el("input", { type: "checkbox" }) as HTMLInputElement;
+      cb.checked = on.has(id);
+      cb.addEventListener("change", () => {
+        const next = allParts().filter((x) => x === id ? cb.checked : on.has(x));
+        void api<{ parts: string[] }>(`/api/v1/uranai/astrology/parts`,
+          { method: "PUT", body: JSON.stringify({ ruleset: rsSel.value || undefined, parts: next }) })
+          .then((r) => { setParts(r.parts ?? next); renderParts(); })
+          .catch((e) => { status.textContent = `エラー: ${(e as Error).message}`; cb.checked = on.has(id); });
+      });
+      grid.append(el("label", { className: "u-tg-chip" }, [cb, el("span", { textContent: nameOf("part", id) })]));
+    }
+    partsBox.append(grid);
+  };
+
   const status = el("div", { className: "u-status" });
+  // 既定の流派をそのまま書き換えないよう、自分用に複製してから変える。
+  const copyBtn = el("button", { className: "u-btn-sm u-btn-ghost", textContent: "この流派を自分用に複製" });
+  copyBtn.addEventListener("click", () => {
+    status.textContent = "複製中…";
+    void api<{ ruleset: string }>(`/api/v1/uranai/astrology/ruleset-copy`,
+      { method: "POST", body: JSON.stringify({ from: rsSel.value, to: "custom", name: "自分用" }) })
+      .then(async (r) => {
+        await api(`/api/v1/uranai/astrology/preference`, { method: "PUT", body: JSON.stringify({ ruleset_id: r.ruleset }) });
+        clearMeanings(); status.textContent = ""; await onSaved();
+      })
+      .catch((e) => { status.textContent = `エラー: ${(e as Error).message}`; });
+  });
   const save = el("button", { className: "u-btn", textContent: "保存して全チャート再計算" });
   save.addEventListener("click", async () => {
     status.textContent = "保存中…";
@@ -147,9 +182,10 @@ function settingsView(settings: Settings, onSaved: () => void | Promise<void>): 
       await onSaved();
     } catch (e) { status.textContent = `エラー: ${(e as Error).message}`; }
   });
+  renderParts();
   wrap.append(
     el("div", { className: "u-settings-note", textContent: "この設定はあなた（ユーザー）の既定として保存され、全チャートに適用されます。" }),
-    el("div", { className: "u-set-title", textContent: "計算方式" }), grid, save, status,
+    el("div", { className: "u-set-title", textContent: "計算方式" }), grid, copyBtn, partsBox, save, status,
   );
   return wrap;
 }
@@ -326,6 +362,16 @@ function chartView(chart: Chart, birth: Birth | null | undefined, personId: stri
         r.ruler_sign ? `${SIGN_NAME[r.ruler_sign] ?? r.ruler_sign}${r.ruler_house ? ` / ${r.ruler_house.replace("house_", "")}室` : ""}` : "—",
       ])
     : [["—", "—", "—", "—"]]);
+
+  // ディスポジター連鎖。天体が在るサインの支配星を辿る。ルディアの体系には無い部品。
+  const dispTbl = mkTable(["天体", "ディスポジター", "連鎖", "最終", "相互受容"],
+    (chart.dispositors ?? []).map((d) => [
+      { t: bodyLabel(d.planet), tip: `planet:${d.planet}` },
+      d.dispositor ? { t: bodyLabel(d.dispositor), tip: `planet:${d.dispositor}` } : "—",
+      d.chain.map((k) => bodyLabel(k)).join(" → ") || "—",
+      d.final ? "●" : "",
+      d.mutual ? bodyLabel(d.mutual) : "",
+    ]), [2]);
 
   // 象限。地平線と子午線が作る4つのクォーター。ルディアはハウスをこの単位でも読む。
   const quadTbl = mkTable(["象限", "ハウス", "意味"], (chart.quadrants ?? []).map((q) => [
@@ -921,22 +967,23 @@ function chartView(chart: Chart, birth: Birth | null | undefined, personId: stri
     { label: "基本情報", node: basicNode },
     { label: "チャート", node: chartNode },
     { label: "概念", node: conceptNode },
-    { label: "全体の形", node: shapeNode },
-    ...(chart.tally === false ? [] : [{ label: "元素", node: elemNode }, { label: "クオリティ", node: qualNode }]),
+    ...(usesPart("shape") || usesPart("singleton") || usesPart("center") ? [{ label: "全体の形", node: shapeNode }] : []),
+    ...(chart.tally === false || !usesPart("tally") ? [] : [{ label: "元素", node: elemNode }, { label: "クオリティ", node: qualNode }]),
     { label: "天体", node: planetTbl },
     { label: "カスプ", node: cuspTbl },
     { label: "ハウス詳細", node: matHost },
     { label: "サイン", node: signTbl },
-    { label: "インターセプト", node: icptTbl },
-    { label: "ディグニティ", node: digTbl },
-    { label: "支配関係", node: rulerTbl },
-    { label: "象限", node: quadTbl },
-    { label: "ルネーション", node: lunTbl },
+    ...(usesPart("interception") ? [{ label: "インターセプト", node: icptTbl }] : []),
+    ...(usesPart("dignity") ? [{ label: "ディグニティ", node: digTbl }] : []),
+    ...(usesPart("rulership") ? [{ label: "支配関係", node: rulerTbl }] : []),
+    ...(usesPart("dispositor") ? [{ label: "ディスポジター", node: dispTbl }] : []),
+    ...(usesPart("quadrant") ? [{ label: "象限", node: quadTbl }] : []),
+    ...(usesPart("lunation") ? [{ label: "ルネーション", node: lunTbl }] : []),
     { label: `アスペクト(${chart.aspects.length})`, node: aspectNode },
-    ...(chart.aspect_figure === false ? [] : [{ label: `配置(${majorCount})`, node: patternNode }]),
-    { label: "進行", node: derivedNode("progressed") },
-    { label: "経過", node: derivedNode("transit") },
-    { label: "サイクル", node: cyclesNode() },
+    ...(chart.aspect_figure === false || !usesPart("aspect_figure") ? [] : [{ label: `配置(${majorCount})`, node: patternNode }]),
+    ...(usesPart("progression") ? [{ label: "進行", node: derivedNode("progressed") }] : []),
+    ...(usesPart("transit") ? [{ label: "経過", node: derivedNode("transit") }] : []),
+    ...(usesPart("cycles") ? [{ label: "サイクル", node: cyclesNode() }] : []),
   ];
 
   const content = el("div", { className: "u-tab-content" });
@@ -1066,6 +1113,8 @@ export async function renderUranai(container: HTMLElement): Promise<void> {
     .u-btn-sm:hover{background:#00000014}
     .u-settings{margin:12px 0 4px;padding:10px 12px;border:1px solid #0001;border-radius:8px;background:#0000000a;max-width:520px}
     .u-set-title{font-size:13px;font-weight:600;color:#555;margin-bottom:8px}
+    .u-parts{margin:10px 0 4px}
+    .u-parts-grid{display:grid;grid-template-columns:repeat(auto-fill,minmax(190px,1fr));gap:4px 12px}
     .u-set-grid{display:grid;grid-template-columns:1fr 1fr;gap:6px 14px}
     .u-set-row{display:flex;align-items:center;gap:8px}
     .u-set-row label{width:88px;flex:none;color:#666;font-size:12px}

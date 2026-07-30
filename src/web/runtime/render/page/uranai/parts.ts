@@ -107,6 +107,8 @@ export type Chart = {
             center?: { longitude: number; concentration: number } };
   house_rulers?: Array<{ house: string; cusp_sign: string; ruler: string | null;
                          ruler_sign: string | null; ruler_house: string | null }>;
+  dispositors?: Array<{ planet: string; dispositor: string | null; chain: string[];
+                        final: boolean; mutual: string | null }>;
   placements: Placement[]; aspects: Aspect[];
   patterns?: Pattern[];
   dignities: Array<{ planet: string; dignity: string }>;
@@ -189,6 +191,7 @@ export async function loadMeanings(): Promise<void> {
       meanings?: Array<{ concept_kind: string; concept_id: string; value: string }>;
       names?: Array<{ concept_kind: string; concept_id: string; value: string }>;
       concept_notes?: Array<{ concept_kind: string; concept_id: string; value: string }>;
+      parts?: string[]; all_parts?: string[];
       body_role?: Array<{ planet_id: string; body_role_id: string }>;
     }>(`/api/v1/uranai/astrology/reference`);
     const m: MeaningMap = {};
@@ -200,10 +203,11 @@ export async function loadMeanings(): Promise<void> {
     const ow: MeaningMap = {};
     for (const x of r.concept_notes ?? []) (ow[x.concept_kind] ??= {})[x.concept_id] = x.value;
     ownCache = ow;
+    partCache = { parts: (r.parts ?? []).slice(), all: (r.all_parts ?? []).slice() };
     const roles: Record<string, string> = {};
     for (const x of r.body_role ?? []) roles[x.planet_id] = m.body_role?.[x.body_role_id] ? x.body_role_id : x.body_role_id;
     roleCache = roles;
-  } catch { meaningCache = {}; roleCache = {}; nameCache = {}; ownCache = {}; }
+  } catch { meaningCache = {}; roleCache = {}; nameCache = {}; ownCache = {}; partCache = { parts: [], all: [] }; }
 }
 export const meaningOf = (kind: string, id: string): string => meaningCache?.[kind]?.[id] ?? "";
 
@@ -219,6 +223,13 @@ export const setOwn = (kind: string, id: string, value: string): void => {
 // 概念の名称。プロパティの選択肢（既定の選択肢）としても使う。
 let nameCache: MeaningMap | null = null;
 export const nameOf = (kind: string, id: string): string => nameCache?.[kind]?.[id] ?? id;
+// 採用している部品。画面はこれに従ってタブを出し分ける。
+let partCache: { parts: string[]; all: string[] } = { parts: [], all: [] };
+export const partsOn = (): string[] => partCache.parts;
+export const allParts = (): string[] => partCache.all;
+export const usesPart = (id: string): boolean => partCache.parts.length === 0 || partCache.parts.includes(id);
+export const setParts = (list: string[]): void => { partCache = { ...partCache, parts: list.slice() }; };
+
 export const optionsOf = (kind: string): Array<{ id: string; label: string }> =>
   Object.entries(nameCache?.[kind] ?? {}).map(([id, label]) => ({ id, label }));
 
