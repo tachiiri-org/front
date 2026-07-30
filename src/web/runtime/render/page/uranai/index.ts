@@ -550,8 +550,14 @@ function chartView(chart: Chart, birth: Birth | null | undefined, personId: stri
           ["インターセプト", (chart.interceptions ?? []).filter((x) => x.house === hid).map((x) => SIGN_NAME[x.sign] ?? x.sign).join("、") || "なし"],
         ], [1]));
         // その室を選ぶと右ペインの一覧をその室で絞る。書くのは右ペインに集約する。
-        const pick = el("button", { className: "u-btn-sm u-btn-ghost", textContent: `第${i}室の解釈` });
-        pick.addEventListener("click", () => { houseFilter = hid; stepFilter = null; openNote = null; renderNotes(); });
+        // 選択中の室は枠で示す。プロパティの初期反映がどの選択から来るかを見えるようにする。
+        const pick = el("button", { className: "u-pick" + (houseFilter === hid ? " on" : ""), textContent: `第${i}室を選択` });
+        pick.addEventListener("click", () => {
+          houseFilter = houseFilter === hid ? null : hid;
+          openNote = null;
+          matHost.innerHTML = ""; matHost.append(materialOf("houses"));
+          renderNotes();
+        });
         box.append(pick);
       }
       return box;
@@ -589,7 +595,6 @@ function chartView(chart: Chart, birth: Birth | null | undefined, personId: stri
     return `${r.concept_kind}:${r.concept_id}`;
   };
   let notes: Note[] = [];
-  const readNode = el("div", {});
   const matHost = el("div", {});
   let current = READ_STEPS[0].id;
   // 解釈はデータベース。1行が1ページ。列は概念の種類で分けず、プロパティとして付ける。
@@ -739,6 +744,13 @@ function chartView(chart: Chart, birth: Birth | null | undefined, personId: stri
     if (open) { reportHost.append(pageView(open, renderNotes)); return; }
     const shown = houseFilter ? notes.filter((n) => hasRay(n, "house", houseFilter as string))
       : stepFilter ? notes.filter((n) => hasRay(n, "reading_step", stepFilter as string)) : notes;
+    // 何で絞っているかと、新規作成時に入るプロパティを先に見せる。
+    const ctx = contextRays();
+    if (ctx.length) {
+      const scope = el("div", { className: "u-scope" });
+      for (const r of ctx) scope.append(el("span", { className: "u-ray on", textContent: rayLabel(r) }));
+      reportHost.append(scope);
+    }
     const head = el("tr", {});
     for (const h of ["タイトル", "プロパティ", "日時"]) head.append(el("th", { textContent: h }));
     const tbl = el("table", { className: "u-tbl u-tbl-auto" }, [head]);
@@ -754,10 +766,11 @@ function chartView(chart: Chart, birth: Birth | null | undefined, personId: stri
     const add = el("button", { className: "u-btn u-btn-sm", textContent: "＋" });
     add.addEventListener("click", () => {
       const rays = contextRays();
+      const nowIso = new Date().toISOString(); // 日時は既定で現在時刻
       void api<{ note_id: string; idx: number; rays: Ray[]; links: string[] }>(`/api/v1/uranai/astrology/person/${personId}/notes`,
-        { method: "POST", body: JSON.stringify({ value: "", title: "", rays }) })
+        { method: "POST", body: JSON.stringify({ value: "", title: "", rays, at: nowIso }) })
         .then((r) => {
-          notes.push({ note_id: r.note_id, idx: r.idx, at: null, title: "", value: "", rays: r.rays ?? rays, links: r.links ?? [] });
+          notes.push({ note_id: r.note_id, idx: r.idx, at: nowIso, title: "", value: "", rays: r.rays ?? rays, links: r.links ?? [] });
           openNote = r.note_id; renderNotes();
         });
     });
@@ -771,49 +784,11 @@ function chartView(chart: Chart, birth: Birth | null | undefined, personId: stri
     openNote = null;
     matHost.innerHTML = "";
     matHost.append(materialOf(id));
-    for (const c of Array.from(readNode.querySelectorAll<HTMLElement>(".u-step-chip"))) {
-      c.classList.toggle("on", c.dataset.step === id);
-    }
     renderNotes();
   };
-  const chips = el("div", { className: "u-tabs" });
-  for (const st of READ_STEPS) {
-    const c = el("button", { className: "u-tab-btn u-step-chip", type: "button", textContent: st.label });
-    c.dataset.step = st.id;
-    c.addEventListener("click", () => selectStep(st.id));
-    chips.append(c);
-  }
-  readNode.append(chips, matHost);
   void api<{ notes: Note[] }>(`/api/v1/uranai/astrology/person/${personId}/notes`)
-    .then((r) => { notes = r.notes ?? []; renderCross(); selectStep(current); })
+    .then((r) => { notes = r.notes ?? []; selectStep(current); })
     .catch(() => { /* メモが取れなくても材料は見せる */ });
-
-  // 横断ビュー。参加者ごとにメモを束ねて見る。参加者を持たせた価値はここに出る。
-  const crossNode = el("div", {});
-  const renderCross = () => {
-    crossNode.innerHTML = "";
-    const byKey = new Map<string, { ray: Ray; notes: Note[] }>();
-    for (const n of notes) {
-      for (const r of n.rays) {
-        const k = `${r.concept_kind}|${r.concept_id}`;
-        (byKey.get(k) ?? byKey.set(k, { ray: r, notes: [] }).get(k)!).notes.push(n);
-      }
-    }
-    if (!byKey.size) {
-      crossNode.append(el("div", { className: "u-pat-empty", textContent: "まだ解釈がありません。" }));
-      return;
-    }
-    const KIND_JA: Record<string, string> = { house: "ハウス", planet: "天体", sign: "サイン", quadrant: "象限", reading_step: "読みの手順", aspect_type: "アスペクト" };
-    const groups = [...byKey.values()].sort((a, b) =>
-      (a.ray.concept_kind.localeCompare(b.ray.concept_kind)) || a.ray.concept_id.localeCompare(b.ray.concept_id));
-    for (const g of groups) {
-      crossNode.append(el("div", { className: "u-tbl-title", textContent: `${KIND_JA[g.ray.concept_kind] ?? g.ray.concept_kind}: ${rayLabel(g.ray)}（${g.notes.length}）` }));
-      crossNode.append(mkTable(["解釈", "ほかの参加者"], g.notes.map((n) => [
-        n.value || "（空）",
-        n.rays.filter((r) => !(r.concept_kind === g.ray.concept_kind && r.concept_id === g.ray.concept_id)).map(rayLabel).join("　") || "—",
-      ]), [0, 1]));
-    }
-  };
 
   // 基本情報: 通常は表。各編集項目に編集アイコン、押すとその項目だけ編集モード（他はグレーアウト）、
   // 再計算(保存)またはキャンセル。
@@ -919,15 +894,13 @@ function chartView(chart: Chart, birth: Birth | null | undefined, personId: stri
   const qualNode = mkTable(["活動", "不動", "柔軟"], [[String(qc.cardinal ?? 0), String(qc.fixed ?? 0), String(qc.mutable ?? 0)]]);
 
   // タブ（可視切替）＋全表示
-  const sections: Array<{ label: string; node: HTMLElement }> = [
-    { label: "読み", node: readNode },
-    { label: "横断", node: crossNode },
+  // 大分類 → タブ の2段階。上段で大分類を選び、下段でその中のタブを選ぶ。
+  // 「読み」の大分類では下段が手順になり、選んだ手順の材料だけを出す。
+  const dataSections: Array<{ label: string; node: HTMLElement }> = [
     { label: "基本情報", node: basicNode },
     { label: "チャート", node: chartNode },
     { label: "全体の形", node: shapeNode },
-    // エレメント/クオリティの数え上げは流派依存。使わない流派（ルディア）では出さない。
     ...(chart.tally === false ? [] : [{ label: "元素", node: elemNode }, { label: "クオリティ", node: qualNode }]),
-
     { label: "天体", node: planetTbl },
     { label: "カスプ", node: cuspTbl },
     { label: "サイン", node: signTbl },
@@ -937,33 +910,53 @@ function chartView(chart: Chart, birth: Birth | null | undefined, personId: stri
     { label: "象限", node: quadTbl },
     { label: "ルネーション", node: lunTbl },
     { label: `アスペクト(${chart.aspects.length})`, node: aspectNode },
-    // 図形の固有名はルディアの用語ではないので、使わない流派では表示項目から外す。
     ...(chart.aspect_figure === false ? [] : [{ label: `配置(${majorCount})`, node: patternNode }]),
     { label: "進行", node: derivedNode("progressed") },
     { label: "経過", node: derivedNode("transit") },
     { label: "サイクル", node: cyclesNode() },
   ];
+
   const content = el("div", { className: "u-tab-content" });
-  const secHeads = sections.map((s) => el("div", { className: "u-sec-head", textContent: s.label }));
-  const secWraps = sections.map((s, i) => el("div", { className: "u-section" }, [secHeads[i], s.node]));
-  for (const w of secWraps) content.append(w);
-  const bar = el("div", { className: "u-tabs" });
-  const secBtns = sections.map((s) => el("button", { className: "u-tab-btn", type: "button", textContent: s.label }));
-  const allBtn = el("button", { className: "u-tab-btn u-tab-all", type: "button", textContent: "全表示" });
-  const select = (idx: number | null) => {
-    secWraps.forEach((w, i) => { w.style.display = (idx === null || i === idx) ? "" : "none"; });
-    // 見出しは全表示のときだけ表示（単一タブ時はタブ名で分かるので隠す）。
-    secHeads.forEach((h) => { h.style.display = idx === null ? "" : "none"; });
-    secBtns.forEach((b, j) => b.classList.toggle("on", j === idx));
-    allBtn.classList.toggle("on", idx === null);
+  const dataWraps = dataSections.map((sec) => el("div", { className: "u-section" }, [sec.node]));
+  for (const w of dataWraps) content.append(w);
+  content.append(el("div", { className: "u-section" }, [matHost]));
+  const readWrap = content.lastElementChild as HTMLElement;
+
+  const groupBar = el("div", { className: "u-tabs u-groups" });
+  const tabBar = el("div", { className: "u-tabs" });
+  const GROUPS = [{ id: "data", label: "基本情報" }, { id: "read", label: "読み" }] as const;
+  let group: "data" | "read" = "read";
+  let dataIdx = 0;
+
+  const paint = () => {
+    for (const b of Array.from(groupBar.children) as HTMLElement[]) b.classList.toggle("on", b.dataset.g === group);
+    tabBar.innerHTML = "";
+    if (group === "data") {
+      dataSections.forEach((sec, i) => {
+        const b = el("button", { className: "u-tab-btn" + (i === dataIdx ? " on" : ""), type: "button", textContent: sec.label });
+        b.addEventListener("click", () => { dataIdx = i; paint(); });
+        tabBar.append(b);
+      });
+    } else {
+      for (const st of READ_STEPS) {
+        const b = el("button", { className: "u-tab-btn u-step-chip" + (st.id === current ? " on" : ""), type: "button", textContent: st.label });
+        b.addEventListener("click", () => { selectStep(st.id); paint(); });
+        tabBar.append(b);
+      }
+    }
+    dataWraps.forEach((w, i) => { w.style.display = group === "data" && i === dataIdx ? "" : "none"; });
+    readWrap.style.display = group === "read" ? "" : "none";
   };
-  secBtns.forEach((b, i) => b.addEventListener("click", () => select(i)));
-  allBtn.addEventListener("click", () => select(null));
-  for (const b of secBtns) bar.append(b);
-  bar.append(allBtn);
+  for (const g of GROUPS) {
+    const b = el("button", { className: "u-tab-btn u-group-btn", type: "button", textContent: g.label });
+    b.dataset.g = g.id;
+    b.addEventListener("click", () => { group = g.id; paint(); });
+    groupBar.append(b);
+  }
+  const bar = el("div", {}, [groupBar, tabBar]);
+  paint();
   wrap.append(bar, content);
   selectStep(READ_STEPS[0].id); // 読みは第1ステップから
-  select(null); // 既定は全表示
   return wrap;
 }
 
@@ -1098,6 +1091,16 @@ export async function renderUranai(container: HTMLElement): Promise<void> {
     [data-theme=dark] .u-ray.on{background:#4A90C233;border-color:#4A90C2aa;color:#e6e8eb}
     [data-theme=dark] .u-note{background:#1b1f26;border-color:#ffffff26;color:#e6e8eb}
     .u-step-chip{text-align:left}
+    /* 大分類（T の上）とタブ（T の下）を横線で分ける */
+    .u-groups{margin:6px 0 0;padding-bottom:6px;border-bottom:1px solid #0002}
+    .u-group-btn{font-weight:700}
+    [data-theme=dark] .u-groups{border-bottom-color:#ffffff26}
+    /* 選択中であることを枠で示す */
+    .u-pick{font-size:11.5px;border:1px solid #0002;background:transparent;color:#888;border-radius:6px;padding:3px 9px;cursor:pointer;margin:2px 0 8px}
+    .u-pick.on{border-color:#4A90C2;color:#4A90C2;box-shadow:0 0 0 2px #4A90C233}
+    [data-theme=dark] .u-pick{border-color:#ffffff26;color:#8b95a3}
+    /* 新規作成時に入るプロパティの予告 */
+    .u-scope{display:flex;flex-wrap:wrap;gap:4px;margin:0 0 8px}
     /* テーマ切替ボタン */
     .u-theme-btn{position:fixed;right:14px;bottom:14px;z-index:900;border:1px solid #0002;background:#fff;color:#666;
       border-radius:999px;width:36px;height:36px;font-size:16px;line-height:1;cursor:pointer;box-shadow:0 4px 12px #0002}
