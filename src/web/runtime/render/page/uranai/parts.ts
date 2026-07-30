@@ -190,6 +190,7 @@ export async function loadMeanings(): Promise<void> {
       names?: Array<{ concept_kind: string; concept_id: string; value: string }>;
       concept_notes?: Array<{ concept_kind: string; concept_id: string; value: string }>;
       reading_questions?: Array<{ step_id: string; idx: number; value: string }>;
+      reading_principles?: Array<{ idx: number; value: string }>;
       body_role?: Array<{ planet_id: string; body_role_id: string }>;
     }>(`/api/v1/uranai/astrology/reference`);
     const m: MeaningMap = {};
@@ -202,10 +203,11 @@ export async function loadMeanings(): Promise<void> {
     for (const x of r.concept_notes ?? []) (ow[x.concept_kind] ??= {})[x.concept_id] = x.value;
     ownCache = ow;
     questionCache = (r.reading_questions ?? []).slice();
+    principleCache = (r.reading_principles ?? []).sort((a, b) => a.idx - b.idx).map((x) => x.value);
     const roles: Record<string, string> = {};
     for (const x of r.body_role ?? []) roles[x.planet_id] = m.body_role?.[x.body_role_id] ? x.body_role_id : x.body_role_id;
     roleCache = roles;
-  } catch { meaningCache = {}; roleCache = {}; nameCache = {}; ownCache = {}; questionCache = []; }
+  } catch { meaningCache = {}; roleCache = {}; nameCache = {}; ownCache = {}; questionCache = []; principleCache = []; }
 }
 export const meaningOf = (kind: string, id: string): string => meaningCache?.[kind]?.[id] ?? "";
 
@@ -215,6 +217,10 @@ export const ownOf = (kind: string, id: string): string => ownCache?.[kind]?.[id
 
 // 手順ごとの問い（原典由来・共通）。
 let questionCache: Array<{ step_id: string; idx: number; value: string }> = [];
+// 段階に紐づかず、全体を通して立ち返る問い。
+let principleCache: string[] = [];
+export const principles = (): string[] => principleCache;
+
 export const questionsOf = (stepId: string): string[] =>
   questionCache.filter((q) => q.step_id === stepId).sort((a, b) => a.idx - b.idx).map((q) => q.value);
 export const setOwn = (kind: string, id: string, value: string): void => {

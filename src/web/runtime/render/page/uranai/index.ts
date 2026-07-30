@@ -1,6 +1,6 @@
 // ウラナイ画面のルート描画とフォーム類。定数・型・ヘルパは ./parts、ホイール描画は ./wheel に分割。
 import {
-  SIGN_ORDER, SIGN_GLYPH, SIGN_NAME, SIGN_ELEMENT, SIGN_QUALITY, ELEMENT_CHAR, QUALITY_CHAR, PLANET_GLYPH, PLANET_ORDER, PLANET_NAME_LINES, ASPECT_INFO, ASPECT_ORDER, PATTERN_INFO, PATTERN_ORDER, SHAPE_INFO, SHAPE_ORDER, Person, Prefill, Settings, SETTING_FIELDS, Chart, Derived, Cycles, optionsOf, nameOf, ownOf, setOwn, questionsOf, loadMeanings, meaningOf, roleOf, clearMeanings, UranaiView, api, lonOf, fmtDeg, Birth, HOUSE_SYSTEM_JA, IANA_ZONES, FALLBACK_ZONES, CC_ZONE, offsetFromZone, el, selectEl, loadSettings,
+  SIGN_ORDER, SIGN_GLYPH, SIGN_NAME, SIGN_ELEMENT, SIGN_QUALITY, ELEMENT_CHAR, QUALITY_CHAR, PLANET_GLYPH, PLANET_ORDER, PLANET_NAME_LINES, ASPECT_INFO, ASPECT_ORDER, PATTERN_INFO, PATTERN_ORDER, SHAPE_INFO, SHAPE_ORDER, Person, Prefill, Settings, SETTING_FIELDS, Chart, Derived, Cycles, optionsOf, nameOf, ownOf, setOwn, questionsOf, principles, loadMeanings, meaningOf, roleOf, clearMeanings, UranaiView, api, lonOf, fmtDeg, Birth, HOUSE_SYSTEM_JA, IANA_ZONES, FALLBACK_ZONES, CC_ZONE, offsetFromZone, el, selectEl, loadSettings,
 } from "./parts";
 import { drawWheelPro } from "./wheel";
 
@@ -1044,7 +1044,11 @@ function chartView(chart: Chart, birth: Birth | null | undefined, personId: stri
   const content = el("div", { className: "u-tab-content" });
   const dataWraps = dataSections.map((sec) => el("div", { className: "u-section" }, [sec.node]));
   for (const w of dataWraps) content.append(w);
-  content.append(el("div", { className: "u-section" }, [matHost]));
+  // 全体を通して立ち返る問い。常に見えると邪魔なので折りたたんで置く。
+  const princ = el("details", { className: "u-princ" });
+  princ.append(el("summary", { textContent: "常に立ち返る問い" }));
+  for (const q of principles()) princ.append(el("div", { className: "u-q", textContent: q }));
+  content.append(el("div", { className: "u-section" }, [...(principles().length ? [princ] : []), matHost]));
   const readWrap = content.lastElementChild as HTMLElement;
 
   const groupBar = el("div", { className: "u-tabs u-groups" });
@@ -1209,6 +1213,9 @@ export async function renderUranai(container: HTMLElement): Promise<void> {
     .u-page-title{width:100%;box-sizing:border-box;border:0;background:transparent;font-size:19px;font-weight:700;color:#1f2937;padding:6px 0;margin-bottom:4px;font-family:inherit}
     .u-page-title:focus{outline:none;border-bottom:1px solid #4A90C2}
     [data-theme=dark] .u-page-title{color:#f3f5f7}
+    .u-princ{margin:4px 0 10px}
+    .u-princ>summary{font-size:12px;color:#888;cursor:pointer}
+    [data-theme=dark] .u-princ>summary{color:#8b95a3}
     .u-q{font-size:12.5px;color:#555;border-left:2px solid #4A90C2;padding:3px 0 3px 9px;margin:3px 0;line-height:1.6}
     [data-theme=dark] .u-q{color:#c3c9d1}
     .u-q-own{border-left:2px solid #4A90C2}
