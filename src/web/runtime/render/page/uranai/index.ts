@@ -287,6 +287,16 @@ function chartView(chart: Chart, birth: Birth | null | undefined, personId: stri
     ? (chart.dignities ?? []).map((d) => [bodyLabel(d.planet), DIGNITY_JA[d.dignity] ?? d.dignity, meaningOf("dignity", d.dignity)])
     : [["なし", "—", ""]], [2]);
 
+  // ハウスの支配関係。ルディアは解釈のステップで支配関係を確認するよう指示している。
+  const rulerTbl = mkTable(["室", "カスプのサイン", "支配星", "支配星の在住"], (chart.house_rulers ?? []).length
+    ? (chart.house_rulers ?? []).map((r) => [
+        `${r.house.replace("house_", "")}室`,
+        `${SIGN_GLYPH[r.cusp_sign] ?? ""}︎ ${SIGN_NAME[r.cusp_sign] ?? r.cusp_sign}`,
+        r.ruler ? bodyLabel(r.ruler) : "—",
+        r.ruler_sign ? `${SIGN_NAME[r.ruler_sign] ?? r.ruler_sign}${r.ruler_house ? ` / ${r.ruler_house.replace("house_", "")}室` : ""}` : "—",
+      ])
+    : [["—", "—", "—", "—"]]);
+
   // 象限。地平線と子午線が作る4つのクォーター。ルディアはハウスをこの単位でも読む。
   const quadTbl = mkTable(["象限", "ハウス", "意味"], (chart.quadrants ?? []).map((q) => [
     QUAD_JA[q.id] ?? q.id,
@@ -388,6 +398,19 @@ function chartView(chart: Chart, birth: Birth | null | undefined, personId: stri
     shapeNode.append(mkTable(["形", "判定", ""], SHAPE_ORDER.map((k) => [
       SHAPE_INFO[k]?.name ?? k, k === sh.shape ? "● 該当" : "—", k === sh.shape ? extra(k) : "",
     ])));
+
+    // 重心。ルディアは個々の天体を見る前に「重みのバランス」と「重心」を掴めと説く。
+    // 集中度は 0（全周に均等）〜1（一点に集中）。対向する2群は打ち消して 0 に近づく。
+    if (sh.center) {
+      const cl = sh.center.longitude;
+      const cs = SIGN_ORDER[Math.floor((((cl % 360) + 360) % 360) / 30) % 12];
+      shapeNode.append(el("div", { className: "u-tbl-title", textContent: "重心（重みのバランス）" }));
+      shapeNode.append(mkTable(["黄経", "ハウス", "集中度"], [[
+        `${SIGN_GLYPH[cs] ?? ""}︎ ${SIGN_NAME[cs] ?? cs} ${fmtDeg(((cl % 30) + 30) % 30)}`,
+        `${houseOf(cl)}室`,
+        `${sh.center.concentration.toFixed(3)}`,
+      ]]));
+    }
 
     // シングルトンは7パターンとは別の概念（分布の形ではなく孤立というアクセント）なので別に出す。
     const AXIS_JA: Record<string, string> = { horizon: "地平線", meridian: "子午線" };
@@ -603,6 +626,7 @@ function chartView(chart: Chart, birth: Birth | null | undefined, personId: stri
     { label: "サイン", node: signTbl },
     { label: "インターセプト", node: icptTbl },
     { label: "ディグニティ", node: digTbl },
+    { label: "支配関係", node: rulerTbl },
     { label: "象限", node: quadTbl },
     { label: "ルネーション", node: lunTbl },
     { label: `アスペクト(${chart.aspects.length})`, node: aspectNode },
