@@ -1215,6 +1215,25 @@ export async function renderUranai(container: HTMLElement): Promise<void> {
     [data-theme=dark] .u-tip{background:#0b0d11;box-shadow:0 10px 28px #000a}
     .u-set-btn{margin-top:6px}
     /* モバイル: 縦積み＋人物リストを横スクロールのチップ化 */
+    /* モバイルの固定フッター。3ペインの切り替え。 */
+    .u-foot{display:none}
+    @media (max-width: 640px){
+      .u-foot{display:flex;position:fixed;left:0;right:0;bottom:0;z-index:950;border-top:1px solid #0002;background:#fff}
+      .u-foot-btn{flex:1;border:0;background:transparent;color:#888;font-size:13px;padding:11px 0;cursor:pointer}
+      .u-foot-btn.on{color:#1f2937;font-weight:700;box-shadow:inset 0 -2px 0 #4A90C2}
+      [data-theme=dark] .u-foot{background:#14161a;border-top-color:#ffffff26}
+      [data-theme=dark] .u-foot-btn{color:#8b95a3}
+      [data-theme=dark] .u-foot-btn.on{color:#f3f5f7}
+      /* 選んだペインだけ出す。人物一覧は縦積みに戻す（横スクロールのチップをやめる）。 */
+      .u-wrap{padding-bottom:60px}
+      .u-wrap[data-pane=side] .u-main,.u-wrap[data-pane=side] .u-report{display:none}
+      .u-wrap[data-pane=main] .u-side,.u-wrap[data-pane=main] .u-report{display:none}
+      .u-wrap[data-pane=report] .u-side,.u-wrap[data-pane=report] .u-main{display:none}
+      .u-wrap[data-pane=report] .u-report{display:block;border-left:0;padding-left:0}
+      .u-wrap[data-pane=side] .u-side{display:block;border-bottom:0;overflow-x:visible}
+      .u-wrap[data-pane=side] .u-person{white-space:normal}
+      .u-theme-btn{bottom:60px}
+    }
     @media (max-width: 640px){
       /* モバイル: 縦積み・自然高（body スクロール=pull-to-refresh 有効）。空のレポートは隠す。 */
       .u-wrap{flex-direction:column;gap:10px;padding:10px;height:auto}
@@ -1257,7 +1276,21 @@ export async function renderUranai(container: HTMLElement): Promise<void> {
   // 右側: 鑑定レポート枠（今は空。独立スクロール）。
   // 右ペインは解釈のデータベース。見出しは置かない（ナビゲーションテキストは極力なし）。
   const report = el("div", { className: "u-report" }, [el("div", { className: "u-report-body" })]);
-  wrap.append(side, main, report, themeBtn); container.append(wrap);
+  // モバイル用の固定フッター。3つのペインを切り替える。PCでは出さない。
+  const PANES = [{ id: "side", label: "人物" }, { id: "main", label: "情報" }, { id: "report", label: "解釈" }] as const;
+  const foot = el("div", { className: "u-foot" });
+  const setPane = (id: string) => {
+    wrap.dataset.pane = id;
+    for (const b of Array.from(foot.children) as HTMLElement[]) b.classList.toggle("on", b.dataset.pane === id);
+  };
+  for (const pn of PANES) {
+    const b = el("button", { className: "u-foot-btn", type: "button", textContent: pn.label });
+    b.dataset.pane = pn.id;
+    b.addEventListener("click", () => setPane(pn.id));
+    foot.append(b);
+  }
+  setPane("main");
+  wrap.append(side, main, report, themeBtn, foot); container.append(wrap);
 
   // 流派設定（マスタ）。編集フォームで表示・変更する。全人物のチャートに適用。
   const settings = await loadSettings();
@@ -1291,6 +1324,8 @@ export async function renderUranai(container: HTMLElement): Promise<void> {
     // 保存後は一覧のラベル更新＋再描画（画面遷移せず反映）。
     const onSaved = async (newLabel: string | null) => { await refreshList(personId); void showChart(personId, newLabel ?? label, false); };
     main.append(el("div", { className: "u-chart-head" }, [el("div", { className: "u-title", textContent: label ?? "" })]), chartView(chart, birth, personId, label ?? null, onSaved, report.querySelector(".u-report-body") as HTMLElement));
+    // モバイルで人物を選んだら情報へ移る（フッターの選択も追従させる）。
+    if (window.matchMedia("(max-width: 640px)").matches) setPane("main");
   };
 
   // 人物リスト（サイド）を再構築し selectId をハイライトするだけ。画面遷移はしない。
