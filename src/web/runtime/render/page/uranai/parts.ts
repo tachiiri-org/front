@@ -181,13 +181,14 @@ export const selectEl = (options: Array<[string, string]>, value: string): HTMLS
 // 流派を切り替えると内容が変わるので、設定保存時に clearMeanings() で捨てる。
 type MeaningMap = Record<string, Record<string, string>>;
 let meaningCache: MeaningMap | null = null;
-export function clearMeanings(): void { meaningCache = null; roleCache = null; nameCache = null; }
+export function clearMeanings(): void { meaningCache = null; roleCache = null; nameCache = null; ownCache = null; }
 export async function loadMeanings(): Promise<void> {
   if (meaningCache) return;
   try {
     const r = await api<{
       meanings?: Array<{ concept_kind: string; concept_id: string; value: string }>;
       names?: Array<{ concept_kind: string; concept_id: string; value: string }>;
+      concept_notes?: Array<{ concept_kind: string; concept_id: string; value: string }>;
       body_role?: Array<{ planet_id: string; body_role_id: string }>;
     }>(`/api/v1/uranai/astrology/reference`);
     const m: MeaningMap = {};
@@ -196,12 +197,23 @@ export async function loadMeanings(): Promise<void> {
     const nm: MeaningMap = {};
     for (const x of r.names ?? []) (nm[x.concept_kind] ??= {})[x.concept_id] = x.value;
     nameCache = nm;
+    const ow: MeaningMap = {};
+    for (const x of r.concept_notes ?? []) (ow[x.concept_kind] ??= {})[x.concept_id] = x.value;
+    ownCache = ow;
     const roles: Record<string, string> = {};
     for (const x of r.body_role ?? []) roles[x.planet_id] = m.body_role?.[x.body_role_id] ? x.body_role_id : x.body_role_id;
     roleCache = roles;
-  } catch { meaningCache = {}; roleCache = {}; nameCache = {}; }
+  } catch { meaningCache = {}; roleCache = {}; nameCache = {}; ownCache = {}; }
 }
 export const meaningOf = (kind: string, id: string): string => meaningCache?.[kind]?.[id] ?? "";
+
+// 自分の意味。原典由来とは別に持ち、画面では自分の意味を先に出す。
+let ownCache: MeaningMap | null = null;
+export const ownOf = (kind: string, id: string): string => ownCache?.[kind]?.[id] ?? "";
+export const setOwn = (kind: string, id: string, value: string): void => {
+  if (!ownCache) ownCache = {};
+  (ownCache[kind] ??= {})[id] = value;
+};
 
 // 概念の名称。プロパティの選択肢（既定の選択肢）としても使う。
 let nameCache: MeaningMap | null = null;

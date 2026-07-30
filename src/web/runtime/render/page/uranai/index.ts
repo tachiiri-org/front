@@ -1,6 +1,6 @@
 // ウラナイ画面のルート描画とフォーム類。定数・型・ヘルパは ./parts、ホイール描画は ./wheel に分割。
 import {
-  SIGN_ORDER, SIGN_GLYPH, SIGN_NAME, SIGN_ELEMENT, SIGN_QUALITY, ELEMENT_CHAR, QUALITY_CHAR, PLANET_GLYPH, PLANET_ORDER, PLANET_NAME_LINES, ASPECT_INFO, ASPECT_ORDER, PATTERN_INFO, PATTERN_ORDER, SHAPE_INFO, SHAPE_ORDER, Person, Prefill, Settings, SETTING_FIELDS, Chart, Derived, Cycles, optionsOf, nameOf, loadMeanings, meaningOf, roleOf, clearMeanings, UranaiView, api, lonOf, fmtDeg, Birth, HOUSE_SYSTEM_JA, IANA_ZONES, FALLBACK_ZONES, CC_ZONE, offsetFromZone, el, selectEl, loadSettings,
+  SIGN_ORDER, SIGN_GLYPH, SIGN_NAME, SIGN_ELEMENT, SIGN_QUALITY, ELEMENT_CHAR, QUALITY_CHAR, PLANET_GLYPH, PLANET_ORDER, PLANET_NAME_LINES, ASPECT_INFO, ASPECT_ORDER, PATTERN_INFO, PATTERN_ORDER, SHAPE_INFO, SHAPE_ORDER, Person, Prefill, Settings, SETTING_FIELDS, Chart, Derived, Cycles, optionsOf, nameOf, ownOf, setOwn, loadMeanings, meaningOf, roleOf, clearMeanings, UranaiView, api, lonOf, fmtDeg, Birth, HOUSE_SYSTEM_JA, IANA_ZONES, FALLBACK_ZONES, CC_ZONE, offsetFromZone, el, selectEl, loadSettings,
 } from "./parts";
 import { drawWheelPro } from "./wheel";
 
@@ -172,7 +172,9 @@ function chartView(chart: Chart, birth: Birth | null | undefined, personId: stri
   };
   const QUAD_JA: Record<string, string> = { quadrant_1: "第1象限", quadrant_2: "第2象限", quadrant_3: "第3象限", quadrant_4: "第4象限" };
   const ROLE_JA: Record<string, string> = { light: "二光体", organic: "有機的生活", transcendent: "超越的活動" };
-  const mkTable = (headers: string[], rows: string[][], wrap?: number[]): HTMLElement => {
+  // セルは文字列、または { t: 表示, tip: "kind:id" }。tip を付けるとホバーで意味と関連データが出る。
+  type Cell = string | { t: string; tip: string };
+  const mkTable = (headers: string[], rows: Cell[][], wrap?: number[]): HTMLElement => {
     const w = new Set(wrap ?? []);
     const tbl = el("table", { className: "u-tbl" + (w.size ? " u-tbl-auto" : "") });
     const htr = el("tr", {});
@@ -180,7 +182,13 @@ function chartView(chart: Chart, birth: Birth | null | undefined, personId: stri
     tbl.append(htr);
     for (const r of rows) {
       const tr = el("tr", {});
-      r.forEach((c, i) => tr.append(el("td", { textContent: c, className: w.has(i) ? "u-mean" : "" })));
+      r.forEach((c, i) => {
+        const cls = w.has(i) ? "u-mean" : "";
+        if (typeof c === "string") { tr.append(el("td", { textContent: c, className: cls })); return; }
+        const td = el("td", { className: `${cls} u-hit`.trim(), textContent: c.t });
+        td.setAttribute("data-tip", c.tip);
+        tr.append(td);
+      });
       tbl.append(tr);
     }
     return tbl;
@@ -206,38 +214,59 @@ function chartView(chart: Chart, birth: Birth | null | undefined, personId: stri
     const v = meaningOf(kind, id);
     return v ? `<div class="u-tip-s">意味</div><div>${v}</div>` : "";
   };
+  const DIGNITY_JA: Record<string, string> = { domicile: "ドミサイル", exaltation: "イグザルテーション", detriment: "デトリメント", fall: "フォール", peregrine: "ペレグリン" };
+  // ツールチップ。自分の意味 → 原典の意味 → 関連データ の順に出す。
+  // 自分の解釈はここには出さず、右ペインの一覧に出す（クリックでその概念に絞る）。
+  const esc = (t: string): string => t.replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;");
+  const meaningBlock = (kind: string, id: string): string => {
+    const own = ownOf(kind, id), src = meaningOf(kind, id);
+    return (own ? `<div class="u-tip-s">自分の意味</div><div>${esc(own)}</div>` : "")
+      + (src ? `<div class="u-tip-s">原典</div><div>${esc(src)}</div>` : "")
+      + (!own && !src ? `<div class="u-tip-a">意味は未記入</div>` : "");
+  };
   const tipHTML = (kind: string, id: string): string => {
-    if (kind === "planet" || kind === "axis") {
-      const p = place.get(id); if (!p) return "";
-      const nm = kind === "axis" ? (PLANET_GLYPH[id] ?? id) : bodyLabel(id);
+    const K = kind === "axis" ? "planet" : kind;
+    const head = (t: string) => `<div class="u-tip-h">${esc(t)}</div>`;
+    if (K === "planet") {
+      const p = place.get(id);
       const asp = aspOf(id);
-      return `<div class="u-tip-h">${nm}</div>`
-        + `<div>サイン: ${SIGN_NAME[p.sign] ?? p.sign} ${fmtDeg(p.degree)}${p.retrograde ? " ℞" : ""}</div>`
-        + (kind === "planet" ? `<div>ハウス: ${houseOf(lonOf(p))}室</div>` : "")
-        + mean("planet", id)
-        + (asp ? `<div class="u-tip-s">アスペクト</div>${asp}` : `<div class="u-tip-a">アスペクトなし</div>`);
+      const rel = p
+        ? `<div class="u-tip-s">関連</div><div>${SIGN_NAME[p.sign] ?? p.sign} ${fmtDeg(p.degree)}${p.retrograde ? " ℞" : ""}`
+          + `${["asc", "mc", "dsc", "ic"].includes(id) ? "" : ` / ${houseOf(lonOf(p))}室`}`
+          + `${ROLE_JA[roleOf(id)] ? ` / ${ROLE_JA[roleOf(id)]}` : ""}`
+          + `${(chart.dignities ?? []).find((d) => d.planet === id) ? ` / ${DIGNITY_JA[(chart.dignities ?? []).find((d) => d.planet === id)!.dignity] ?? ""}` : ""}</div>`
+        : "";
+      return head(kind === "axis" ? (PLANET_GLYPH[id] ?? id) : bodyLabel(id)) + meaningBlock("planet", id) + rel
+        + (asp ? `<div class="u-tip-s">アスペクト</div>${asp}` : "");
     }
-    if (kind === "sign") {
-      const inSign = chart.placements.filter((pp) => pp.sign === id && !["asc", "mc", "dsc", "ic"].includes(pp.planet)).map((pp) => bodyLabel(pp.planet)).join("、") || "なし";
+    if (K === "sign") {
+      const inSign = chart.placements.filter((pp) => pp.sign === id && !["asc", "mc", "dsc", "ic"].includes(pp.planet)).map((pp) => bodyLabel(pp.planet)).join("、");
       const icpt = (chart.interceptions ?? []).find((x) => x.sign === id);
-      return `<div class="u-tip-h">${SIGN_GLYPH[id]}︎ ${SIGN_NAME[id] ?? id}</div>`
-        + (chart.tally === false ? "" : `<div>元素: ${ELEM_JA[SIGN_ELEMENT[id]] ?? ELEMENT_CHAR[SIGN_ELEMENT[id]]}　区分: ${QUAL_JA[SIGN_QUALITY[id]] ?? QUALITY_CHAR[SIGN_QUALITY[id]]}</div>`)
-        + mean("sign", id)
-        + (icpt ? `<div class="u-tip-a">インターセプト（${icpt.house.replace("house_", "")}室に丸ごと収まる）</div>` : "")
-        + `<div class="u-tip-s">在住</div><div>${inSign}</div>`;
+      return head(`${SIGN_GLYPH[id] ?? ""}︎ ${SIGN_NAME[id] ?? id}`) + meaningBlock("sign", id)
+        + `<div class="u-tip-s">関連</div><div>在住: ${inSign || "なし"}${icpt ? ` / ${icpt.house.replace("house_", "")}室にインターセプト` : ""}</div>`;
     }
-    if (kind === "house") {
-      const n = Number(id); const lon = cuspLons[n - 1];
-      const sign = SIGN_ORDER[Math.floor((((lon % 360) + 360) % 360) / 30) % 12];
-      const inH = chart.placements.filter((pp) => !["asc", "mc", "dsc", "ic"].includes(pp.planet) && houseOf(lonOf(pp)) === n).map((pp) => bodyLabel(pp.planet)).join("、") || "なし";
-      return `<div class="u-tip-h">${n}室</div>`
-        + `<div>カスプ: ${SIGN_NAME[sign] ?? sign} ${fmtDeg(((lon % 30) + 30) % 30)}</div>`
-        + mean("house", `house_${n}`)
-        + `<div class="u-tip-s">在住</div><div>${inH}</div>`;
+    if (K === "house") {
+      const n = Number(id.replace("house_", ""));
+      const rl = (chart.house_rulers ?? []).find((r) => r.house === id);
+      const inH = inHouse(id).map((k) => bodyLabel(k)).join("、");
+      return head(`${n}室`) + meaningBlock("house", id)
+        + `<div class="u-tip-s">関連</div><div>在住: ${inH || "なし"}`
+        + `${rl ? ` / カスプ ${SIGN_NAME[rl.cusp_sign] ?? rl.cusp_sign}` : ""}`
+        + `${rl?.ruler ? ` / 支配星 ${bodyLabel(rl.ruler)}${rl.ruler_house ? `（${rl.ruler_house.replace("house_", "")}室）` : ""}` : ""}</div>`;
+    }
+    if (K === "shape" || K === "quadrant" || K === "aspect_type" || K === "reading_step" || K === "dignity" || K === "phase") {
+      const label = K === "aspect_type" ? (ASPECT_INFO[id]?.label ?? id) : nameOf(K, id);
+      return head(label) + meaningBlock(K, id);
+    }
+    if (K === "concentration") {
+      return head("集中度") + `<div>0 = 全周に均等、1 = 一点に集中。対向する2群は打ち消して 0 に近づく。</div>`
+        + meaningBlock("concentration", "value");
     }
     return "";
   };
+  // ツールチップは材料・表・右ペインのどこでも効かせる。
   const tip = el("div", { className: "u-tip" });
+  document.body.append(tip);
   const hideTip = () => { tip.style.display = "none"; };
   const showTip = (elm: Element, clientX: number, clientY: number) => {
     const data = elm.getAttribute("data-tip"); if (!data) return hideTip();
@@ -251,11 +280,11 @@ function chartView(chart: Chart, birth: Birth | null | undefined, personId: stri
     tip.style.left = `${Math.max(6, x)}px`; tip.style.top = `${Math.max(6, y)}px`;
   };
   const hitOf = (e: Event): Element | null => (e.target as Element).closest?.("[data-tip]") ?? null;
-  host.addEventListener("mouseover", (e) => { const t = hitOf(e); if (t) showTip(t, (e as MouseEvent).clientX, (e as MouseEvent).clientY); });
-  host.addEventListener("mousemove", (e) => { const t = hitOf(e); if (t) showTip(t, (e as MouseEvent).clientX, (e as MouseEvent).clientY); else hideTip(); });
-  host.addEventListener("mouseleave", hideTip);
+  document.addEventListener("mouseover", (e) => { const t = hitOf(e); if (t) showTip(t, (e as MouseEvent).clientX, (e as MouseEvent).clientY); });
+  document.addEventListener("mousemove", (e) => { const t = hitOf(e); if (t) showTip(t, (e as MouseEvent).clientX, (e as MouseEvent).clientY); else hideTip(); });
+  document.addEventListener("mouseleave", hideTip);
   let pressTimer: ReturnType<typeof setTimeout> | undefined;
-  host.addEventListener("touchstart", (e) => {
+  document.addEventListener("touchstart", (e) => {
     const t = hitOf(e); if (!t) { hideTip(); return; }
     const touch = (e as TouchEvent).touches[0];
     pressTimer = setTimeout(() => showTip(t, touch.clientX, touch.clientY), 450);
@@ -273,16 +302,17 @@ function chartView(chart: Chart, birth: Birth | null | undefined, personId: stri
   if (chart.range_warnings?.length) chartNode.append(el("div", { className: "u-warn", textContent: `⚠️ 有効範囲外の天体: ${chart.range_warnings.join(", ")}` }));
 
   // 天体（アングルも同じ表に。逆行・室はアングルでは空欄）
-  const planetRows = PLANET_ORDER.filter((k) => place.has(k)).map((k) => { const p = place.get(k)!; return [bodyLabel(k), SIGN_NAME[p.sign] ?? p.sign, fmtDeg(p.degree), p.retrograde ? "℞" : "", String(houseOf(lonOf(p)))]; });
+  const planetRows = PLANET_ORDER.filter((k) => place.has(k)).map((k) => { const p = place.get(k)!; return [
+    { t: bodyLabel(k), tip: `planet:${k}` }, { t: SIGN_NAME[p.sign] ?? p.sign, tip: `sign:${p.sign}` },
+    fmtDeg(p.degree), p.retrograde ? "℞" : "", { t: String(houseOf(lonOf(p))), tip: `house:house_${houseOf(lonOf(p))}` }]; });
   const angleRows = ["asc", "mc", "dsc", "ic"].filter((k) => place.has(k)).map((k) => { const p = place.get(k)!; return [PLANET_GLYPH[k] ?? k, SIGN_NAME[p.sign] ?? p.sign, fmtDeg(p.degree), "", ""]; });
   const planetTbl = mkTable(["天体", "サイン", "度数", "逆行", "室", "階層", "意味"],
     [...planetRows.map((r, i) => { const k = PLANET_ORDER.filter((x) => place.has(x))[i]; return [...r, ROLE_JA[roleOf(k)] ?? "", meaningOf("planet", k)]; }),
      ...angleRows.map((r) => [...r, "", ""])], [6]);
   const cuspTbl = mkTable(["室", "サイン", "度数", "意味"], cuspLons.map((lon, i) => { const sign = SIGN_ORDER[Math.floor((((lon % 360) + 360) % 360) / 30) % 12]; return [String(i + 1), SIGN_NAME[sign], fmtDeg(((lon % 30) + 30) % 30), meaningOf("house", `house_${i + 1}`)]; }), [3]);
   // サインの意味（流派スコープ）。ルディアはサインを「生命プロセスの12の位相」として定義する。
-  const signTbl = mkTable(["サイン", "意味"], SIGN_ORDER.map((k) => [`${SIGN_GLYPH[k]}︎ ${SIGN_NAME[k] ?? k}`, meaningOf("sign", k)]), [1]);
-  // ディグニティ。ルディアも解釈手順で確認する項目だが、吉凶ではなく機能的な強調として読む。
-  const DIGNITY_JA: Record<string, string> = { domicile: "ドミサイル", exaltation: "イグザルテーション", detriment: "デトリメント", fall: "フォール", peregrine: "ペレグリン" };
+  const signTbl = mkTable(["サイン", "意味"], SIGN_ORDER.map((k) => [
+    { t: `${SIGN_GLYPH[k]}︎ ${SIGN_NAME[k] ?? k}`, tip: `sign:${k}` }, ownOf("sign", k) || meaningOf("sign", k)]), [1]);
   const digTbl = mkTable(["天体", "ディグニティ", "意味"], (chart.dignities ?? []).length
     ? (chart.dignities ?? []).map((d) => [bodyLabel(d.planet), DIGNITY_JA[d.dignity] ?? d.dignity, meaningOf("dignity", d.dignity)])
     : [["なし", "—", ""]], [2]);
@@ -394,7 +424,7 @@ function chartView(chart: Chart, birth: Birth | null | undefined, personId: stri
       return "";
     };
     shapeNode.append(mkTable(["形", "判定", ""], SHAPE_ORDER.map((k) => [
-      SHAPE_INFO[k]?.name ?? k, k === sh.shape ? "● 該当" : "—", k === sh.shape ? extra(k) : "",
+      { t: SHAPE_INFO[k]?.name ?? k, tip: `shape:${k}` }, k === sh.shape ? "● 該当" : "—", k === sh.shape ? extra(k) : "",
     ])));
 
     // 重心。ルディアは個々の天体を見る前に「重みのバランス」と「重心」を掴めと説く。
@@ -404,9 +434,9 @@ function chartView(chart: Chart, birth: Birth | null | undefined, personId: stri
       const cs = SIGN_ORDER[Math.floor((((cl % 360) + 360) % 360) / 30) % 12];
       shapeNode.append(el("div", { className: "u-tbl-title", textContent: "重心（重みのバランス）" }));
       shapeNode.append(mkTable(["黄経", "ハウス", "集中度"], [[
-        `${SIGN_GLYPH[cs] ?? ""}︎ ${SIGN_NAME[cs] ?? cs} ${fmtDeg(((cl % 30) + 30) % 30)}`,
-        `${houseOf(cl)}室`,
-        `${sh.center.concentration.toFixed(3)}`,
+        { t: `${SIGN_GLYPH[cs] ?? ""}︎ ${SIGN_NAME[cs] ?? cs} ${fmtDeg(((cl % 30) + 30) % 30)}`, tip: `sign:${cs}` },
+        { t: `${houseOf(cl)}室`, tip: `house:house_${houseOf(cl)}` },
+        { t: `${sh.center.concentration.toFixed(3)}`, tip: "concentration:value" },
       ]]));
     }
 
@@ -415,7 +445,7 @@ function chartView(chart: Chart, birth: Birth | null | undefined, personId: stri
     const same = sh.singleton && sh.handle?.length === 1 && sh.handle[0] === sh.singleton.planet;
     shapeNode.append(el("div", { className: "u-tbl-title", textContent: "シングルトン" }));
     shapeNode.append(mkTable(["天体"], sh.singleton
-      ? [[`${bodyLabel(sh.singleton.planet)}（${AXIS_JA[sh.singleton.axis] ?? sh.singleton.axis}で分けた半球にただ1つ${same ? "。取っ手と同一" : ""}）`]]
+      ? [[{ t: `${bodyLabel(sh.singleton.planet)}（${AXIS_JA[sh.singleton.axis] ?? sh.singleton.axis}で分けた半球にただ1つ${same ? "。取っ手と同一" : ""}）`, tip: `planet:${sh.singleton.planet}` }]]
       : [["なし"]]));
   }
 
@@ -524,10 +554,19 @@ function chartView(chart: Chart, birth: Birth | null | undefined, personId: stri
   const quadOf = (n: number): string => `quadrant_${Math.floor((n - 1) / 3) + 1}`;
 
   // 各ステップの材料。既存タブの値と同じものを、読みの単位で束ね直す。
+  // 読み用のホイール。チャートのタブと同じ描画を使い回す（テーマ切替の再描画にも乗る）。
+  const wheelForRead = (): HTMLElement => {
+    const h = el("div", { className: "u-wheel" });
+    h.append(drawWheelPro(chart, enabled, nameMode));
+    h.addEventListener("u-redraw", () => { h.innerHTML = ""; h.append(drawWheelPro(chart, enabled, nameMode)); });
+    return h;
+  };
+
   const materialOf = (step: string): HTMLElement => {
     const box = el("div", {});
     const title = (t: string) => box.append(el("div", { className: "u-tbl-title", textContent: t }));
-    if (step === "shape" || step === "accent") { box.append(shapeNode); return box; }
+    // 全体の印象を掴むのが目的なので、材料の先頭にホイールを置く。
+    if (step === "shape" || step === "accent") { box.append(wheelForRead(), shapeNode); return box; }
     if (step === "aspects") { box.append(aspectNode); return box; }
     if (step === "center") {
       title("重心・ディグニティ・支配関係");
@@ -790,6 +829,44 @@ function chartView(chart: Chart, birth: Birth | null | undefined, personId: stri
     .then((r) => { notes = r.notes ?? []; selectStep(current); })
     .catch(() => { /* メモが取れなくても材料は見せる */ });
 
+  // 概念。自分の意味を書く場所。原典由来の意味と並べて出し、上書きではなく別に持つ。
+  const conceptNode = el("div", {});
+  const CONCEPT_TABS: Array<{ kind: string; label: string }> = [
+    { kind: "planet", label: "天体" }, { kind: "sign", label: "サイン" }, { kind: "house", label: "ハウス" },
+    { kind: "aspect_type", label: "アスペクト" }, { kind: "quadrant", label: "象限" },
+    { kind: "shape", label: "配置型" }, { kind: "dignity", label: "ディグニティ" }, { kind: "phase", label: "位相" },
+  ];
+  let conceptKind = "planet";
+  const renderConcepts = () => {
+    conceptNode.innerHTML = "";
+    const bar2 = el("div", { className: "u-tabs" });
+    for (const c of CONCEPT_TABS) {
+      const b2 = el("button", { className: "u-tab-btn" + (c.kind === conceptKind ? " on" : ""), type: "button", textContent: c.label });
+      b2.addEventListener("click", () => { conceptKind = c.kind; renderConcepts(); });
+      bar2.append(b2);
+    }
+    conceptNode.append(bar2);
+    const head = el("tr", {});
+    for (const h of ["概念", "自分の意味", "原典"]) head.append(el("th", { textContent: h, className: h === "概念" ? "" : "u-mean" }));
+    const tbl = el("table", { className: "u-tbl u-tbl-auto" }, [head]);
+    for (const o of optionsOf(conceptKind)) {
+      const tr = el("tr", {});
+      const nameTd = el("td", { className: "u-hit", textContent: o.label });
+      nameTd.setAttribute("data-tip", `${conceptKind}:${o.id}`);
+      tr.append(nameTd);
+      const ta = el("textarea", { className: "u-note u-note-sm" }) as HTMLTextAreaElement;
+      ta.value = ownOf(conceptKind, o.id);
+      ta.addEventListener("blur", () => {
+        void api(`/api/v1/uranai/astrology/concept-note`, { method: "PUT", body: JSON.stringify({ concept_kind: conceptKind, concept_id: o.id, value: ta.value }) })
+          .then(() => setOwn(conceptKind, o.id, ta.value));
+      });
+      tr.append(el("td", { className: "u-mean" }, [ta]));
+      tr.append(el("td", { className: "u-mean", textContent: meaningOf(conceptKind, o.id) }));
+      tbl.append(tr);
+    }
+    conceptNode.append(tbl);
+  };
+
   // 基本情報: 通常は表。各編集項目に編集アイコン、押すとその項目だけ編集モード（他はグレーアウト）、
   // 再計算(保存)またはキャンセル。
   const bm = (birth?.born_at ?? "").match(/^(\d{4}-\d{2}-\d{2})T(\d{2}:\d{2})/);
@@ -899,6 +976,7 @@ function chartView(chart: Chart, birth: Birth | null | undefined, personId: stri
   const dataSections: Array<{ label: string; node: HTMLElement }> = [
     { label: "基本情報", node: basicNode },
     { label: "チャート", node: chartNode },
+    { label: "概念", node: conceptNode },
     { label: "全体の形", node: shapeNode },
     ...(chart.tally === false ? [] : [{ label: "元素", node: elemNode }, { label: "クオリティ", node: qualNode }]),
     { label: "天体", node: planetTbl },
@@ -956,6 +1034,7 @@ function chartView(chart: Chart, birth: Birth | null | undefined, personId: stri
   const bar = el("div", {}, [groupBar, tabBar]);
   paint();
   wrap.append(bar, content);
+  renderConcepts();
   selectStep(READ_STEPS[0].id); // 読みは第1ステップから
   return wrap;
 }
@@ -1101,6 +1180,7 @@ export async function renderUranai(container: HTMLElement): Promise<void> {
     [data-theme=dark] .u-pick{border-color:#ffffff26;color:#8b95a3}
     /* 新規作成時に入るプロパティの予告 */
     .u-scope{display:flex;flex-wrap:wrap;gap:4px;margin:0 0 8px}
+    .u-note-sm{min-height:44px;font-size:12.5px}
     /* テーマ切替ボタン */
     .u-theme-btn{position:fixed;right:14px;bottom:14px;z-index:900;border:1px solid #0002;background:#fff;color:#666;
       border-radius:999px;width:36px;height:36px;font-size:16px;line-height:1;cursor:pointer;box-shadow:0 4px 12px #0002}
