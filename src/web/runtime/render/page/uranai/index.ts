@@ -551,6 +551,15 @@ function chartView(chart: Chart, birth: Birth | null | undefined, personId: stri
           ["支配星とその在住", rl?.ruler ? `${bodyLabel(rl.ruler)} → ${rl.ruler_sign ? SIGN_NAME[rl.ruler_sign] ?? rl.ruler_sign : "—"}${rl.ruler_house ? ` / ${rl.ruler_house.replace("house_", "")}室` : ""}` : "—"],
           ["インターセプト", (chart.interceptions ?? []).filter((x) => x.house === hid).map((x) => SIGN_NAME[x.sign] ?? x.sign).join("、") || "なし"],
         ], [1]));
+        // その室に紐づく解釈。参加者にその室を自動で付け、在住天体・カスプのサイン・支配星を候補に出す。
+        const suggest: Ray[] = [
+          ...bodies.map((k) => ({ concept_kind: "planet", concept_id: k })),
+          ...(rl ? [{ concept_kind: "sign", concept_id: rl.cusp_sign }] : []),
+          ...(rl?.ruler ? [{ concept_kind: "planet", concept_id: rl.ruler }] : []),
+          { concept_kind: "quadrant", concept_id: quadOf(i) },
+          { concept_kind: "reading_step", concept_id: "houses" },
+        ];
+        box.append(noteEditor([{ concept_kind: "house", concept_id: hid }], suggest));
       }
       return box;
     }
@@ -574,41 +583,87 @@ function chartView(chart: Chart, birth: Birth | null | undefined, personId: stri
   };
 
   // 解釈メモ。ステップごとに複数書ける。保存は暗号化してサーバへ。
-  type Note = { note_id: string; step_id: string; idx: number; value: string };
+  // メモはグラフのリレーションと同じ形。本文＋n項の参加者。読みのステップも参加者の1つ。
+  type Ray = { concept_kind: string; concept_id: string };
+  type Note = { note_id: string; idx: number; at: string | null; value: string; rays: Ray[] };
+  const hasRay = (n: Note, kind: string, id: string) => n.rays.some((r) => r.concept_kind === kind && r.concept_id === id);
+  const rayLabel = (r: Ray): string => {
+    if (r.concept_kind === "planet") return bodyLabel(r.concept_id);
+    if (r.concept_kind === "sign") return SIGN_NAME[r.concept_id] ?? r.concept_id;
+    if (r.concept_kind === "house") return `${r.concept_id.replace("house_", "")}室`;
+    if (r.concept_kind === "quadrant") return QUAD_JA[r.concept_id] ?? r.concept_id;
+    if (r.concept_kind === "reading_step") return READ_STEPS.find((x) => x.id === r.concept_id)?.label ?? r.concept_id;
+    if (r.concept_kind === "aspect_type") return ASPECT_INFO[r.concept_id]?.label ?? r.concept_id;
+    return `${r.concept_kind}:${r.concept_id}`;
+  };
   let notes: Note[] = [];
   const readNode = el("div", {});
   const matHost = el("div", {});
   let current = READ_STEPS[0].id;
+  // 指定の参加者を持つメモの一覧＋追加。ハウス単位でも、ステップ単位でも同じ器を使う。
+  const noteEditor = (rays: Ray[], suggest: Ray[] = []): HTMLElement => {
+    const host = el("div", {});
+    const draw = () => {
+      host.innerHTML = "";
+      const mine = notes.filter((n) => rays.every((r) => hasRay(n, r.concept_kind, r.concept_id)));
+      for (const n of mine) {
+        const ta = el("textarea", { className: "u-note" }) as HTMLTextAreaElement;
+        ta.value = n.value;
+        ta.addEventListener("blur", () => {
+          void api(`/api/v1/uranai/astrology/note/${n.note_id}`, { method: "PUT", body: JSON.stringify({ value: ta.value }) })
+            .then(() => { n.value = ta.value; });
+        });
+        // 参加者チップ。押すと外れる。候補を押すと足せる。
+        const chips = el("div", { className: "u-ray-chips" });
+        for (const r of n.rays) {
+          const c = el("button", { className: "u-ray on", textContent: rayLabel(r) });
+          c.addEventListener("click", () => {
+            const next = n.rays.filter((x) => !(x.concept_kind === r.concept_kind && x.concept_id === r.concept_id));
+            void api<{ rays: Ray[] }>(`/api/v1/uranai/astrology/note/${n.note_id}`, { method: "PUT", body: JSON.stringify({ rays: next }) })
+              .then((res) => { n.rays = res.rays ?? next; draw(); });
+          });
+          chips.append(c);
+        }
+        for (const r of suggest.filter((x) => !hasRay(n, x.concept_kind, x.concept_id))) {
+          const c = el("button", { className: "u-ray", textContent: `＋ ${rayLabel(r)}` });
+          c.addEventListener("click", () => {
+            const next = [...n.rays, r];
+            void api<{ rays: Ray[] }>(`/api/v1/uranai/astrology/note/${n.note_id}`, { method: "PUT", body: JSON.stringify({ rays: next }) })
+              .then((res) => { n.rays = res.rays ?? next; draw(); });
+          });
+          chips.append(c);
+        }
+        const del = el("button", { className: "u-btn-sm u-btn-ghost", textContent: "削除" });
+        del.addEventListener("click", () => {
+          void api(`/api/v1/uranai/astrology/note/${n.note_id}`, { method: "DELETE" }).then(() => {
+            notes = notes.filter((x) => x.note_id !== n.note_id); draw();
+          });
+        });
+        host.append(el("div", { className: "u-note-wrap" }, [ta, chips, del]));
+      }
+      const add = el("button", { className: "u-btn u-btn-sm", textContent: "＋ 解釈を追加" });
+      add.addEventListener("click", () => {
+        void api<{ note_id: string; idx: number; rays: Ray[] }>(`/api/v1/uranai/astrology/person/${personId}/notes`,
+          { method: "POST", body: JSON.stringify({ value: "", rays }) })
+          .then((r) => { notes.push({ note_id: r.note_id, idx: r.idx, at: null, value: "", rays: r.rays ?? rays }); draw(); });
+      });
+      host.append(add);
+    };
+    draw();
+    return host;
+  };
+
   const renderNotes = () => {
     if (!reportHost) return;
     reportHost.innerHTML = "";
-    const step = READ_STEPS.find((x) => x.id === current)!;
+    const step = READ_STEPS.find((x) => x.id === current);
+    if (!step) { reportHost.append(el("div", { className: "u-pat-comp", textContent: "このタブに解釈欄はありません。" })); return; }
     reportHost.append(el("div", { className: "u-tbl-title", textContent: `${step.label} の解釈` }));
     const mean = meaningOf("reading_step", current);
     if (mean) reportHost.append(el("div", { className: "u-pat-comp", textContent: mean }));
-    for (const n of notes.filter((x) => x.step_id === current)) {
-      const ta = el("textarea", { className: "u-note" }) as HTMLTextAreaElement;
-      ta.value = n.value;
-      ta.addEventListener("blur", () => {
-        void api(`/api/v1/uranai/astrology/note/${n.note_id}`, { method: "PUT", body: JSON.stringify({ value: ta.value }) })
-          .then(() => { n.value = ta.value; });
-      });
-      const del = el("button", { className: "u-btn-sm u-btn-ghost", textContent: "削除" });
-      del.addEventListener("click", () => {
-        void api(`/api/v1/uranai/astrology/note/${n.note_id}`, { method: "DELETE" }).then(() => {
-          notes = notes.filter((x) => x.note_id !== n.note_id); renderNotes();
-        });
-      });
-      reportHost.append(el("div", { className: "u-note-wrap" }, [ta, del]));
-    }
-    const add = el("button", { className: "u-btn u-btn-sm", textContent: "＋ 解釈を追加" });
-    add.addEventListener("click", () => {
-      void api<{ note_id: string; idx: number }>(`/api/v1/uranai/astrology/person/${personId}/notes`,
-        { method: "POST", body: JSON.stringify({ step_id: current, value: "" }) })
-        .then((r) => { notes.push({ note_id: r.note_id, step_id: current, idx: r.idx, value: "" }); renderNotes(); });
-    });
-    reportHost.append(add);
+    reportHost.append(noteEditor([{ concept_kind: "reading_step", concept_id: current }]));
   };
+
   const selectStep = (id: string) => {
     current = id;
     matHost.innerHTML = "";
@@ -627,7 +682,35 @@ function chartView(chart: Chart, birth: Birth | null | undefined, personId: stri
   }
   readNode.append(chips, matHost);
   void api<{ notes: Note[] }>(`/api/v1/uranai/astrology/person/${personId}/notes`)
-    .then((r) => { notes = r.notes ?? []; renderNotes(); }).catch(() => { /* メモが取れなくても材料は見せる */ });
+    .then((r) => { notes = r.notes ?? []; renderNotes(); renderCross(); selectStep(current); })
+    .catch(() => { /* メモが取れなくても材料は見せる */ });
+
+  // 横断ビュー。参加者ごとにメモを束ねて見る。参加者を持たせた価値はここに出る。
+  const crossNode = el("div", {});
+  const renderCross = () => {
+    crossNode.innerHTML = "";
+    const byKey = new Map<string, { ray: Ray; notes: Note[] }>();
+    for (const n of notes) {
+      for (const r of n.rays) {
+        const k = `${r.concept_kind}|${r.concept_id}`;
+        (byKey.get(k) ?? byKey.set(k, { ray: r, notes: [] }).get(k)!).notes.push(n);
+      }
+    }
+    if (!byKey.size) {
+      crossNode.append(el("div", { className: "u-pat-empty", textContent: "まだ解釈がありません。" }));
+      return;
+    }
+    const KIND_JA: Record<string, string> = { house: "ハウス", planet: "天体", sign: "サイン", quadrant: "象限", reading_step: "読みの手順", aspect_type: "アスペクト" };
+    const groups = [...byKey.values()].sort((a, b) =>
+      (a.ray.concept_kind.localeCompare(b.ray.concept_kind)) || a.ray.concept_id.localeCompare(b.ray.concept_id));
+    for (const g of groups) {
+      crossNode.append(el("div", { className: "u-tbl-title", textContent: `${KIND_JA[g.ray.concept_kind] ?? g.ray.concept_kind}: ${rayLabel(g.ray)}（${g.notes.length}）` }));
+      crossNode.append(mkTable(["解釈", "ほかの参加者"], g.notes.map((n) => [
+        n.value || "（空）",
+        n.rays.filter((r) => !(r.concept_kind === g.ray.concept_kind && r.concept_id === g.ray.concept_id)).map(rayLabel).join("　") || "—",
+      ]), [0, 1]));
+    }
+  };
 
   // 基本情報: 通常は表。各編集項目に編集アイコン、押すとその項目だけ編集モード（他はグレーアウト）、
   // 再計算(保存)またはキャンセル。
@@ -735,6 +818,7 @@ function chartView(chart: Chart, birth: Birth | null | undefined, personId: stri
   // タブ（可視切替）＋全表示
   const sections: Array<{ label: string; node: HTMLElement }> = [
     { label: "読み", node: readNode },
+    { label: "横断", node: crossNode },
     { label: "基本情報", node: basicNode },
     { label: "チャート", node: chartNode },
     { label: "全体の形", node: shapeNode },
@@ -893,6 +977,11 @@ export async function renderUranai(container: HTMLElement): Promise<void> {
     /* 解釈メモ（右ペイン） */
     .u-note{width:100%;box-sizing:border-box;min-height:110px;padding:7px 8px;border:1px solid #0002;border-radius:6px;font-size:13px;line-height:1.6;font-family:inherit;resize:vertical}
     .u-note-wrap{display:flex;flex-direction:column;gap:4px;align-items:flex-end;margin-bottom:10px}
+    .u-ray-chips{display:flex;flex-wrap:wrap;gap:4px;width:100%}
+    .u-ray{font-size:11px;border:1px solid #0002;background:#fff;color:#666;border-radius:999px;padding:2px 8px;cursor:pointer;line-height:1.5}
+    .u-ray.on{background:#4A90C218;border-color:#4A90C2aa;color:#1f2937}
+    [data-theme=dark] .u-ray{background:#1b1f26;border-color:#ffffff26;color:#b3bcc7}
+    [data-theme=dark] .u-ray.on{background:#4A90C233;border-color:#4A90C2aa;color:#e6e8eb}
     [data-theme=dark] .u-note{background:#1b1f26;border-color:#ffffff26;color:#e6e8eb}
     .u-step-chip{text-align:left}
     /* テーマ切替ボタン */
