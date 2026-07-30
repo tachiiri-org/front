@@ -562,15 +562,38 @@ function chartView(chart: Chart, birth: Birth | null | undefined, personId: stri
     return h;
   };
 
+  // 情報側に、いま見ている材料に紐づく解釈を出す。プロパティのいずれかが一致するものを拾う。
+  // 押すと右ペインでそのページが開く。ここでは読むだけ。
+  const notesFor = (rays: Ray[], heading = "この材料に紐づく解釈"): HTMLElement => {
+    const box = el("div", {});
+    const hit = notes.filter((n) => rays.some((r) => hasRay(n, r.concept_kind, r.concept_id)));
+    if (!hit.length) return box;
+    box.append(el("div", { className: "u-tbl-title", textContent: `${heading}（${hit.length}）` }));
+    for (const n of hit) {
+      const btn = el("button", { className: "u-row-btn" });
+      btn.append(el("div", { textContent: `▤ ${titleOf(n)}` }));
+      if (n.value) btn.append(el("div", { className: "u-row-sub", textContent: n.value.slice(0, 90) }));
+      if (n.rays.length) btn.append(el("div", { className: "u-row-sub", textContent: n.rays.map(rayLabel).join("　") }));
+      btn.addEventListener("click", () => { openNote = n.note_id; renderNotes(); });
+      box.append(btn);
+    }
+    return box;
+  };
+
   const materialOf = (step: string): HTMLElement => {
     const box = el("div", {});
     const title = (t: string) => box.append(el("div", { className: "u-tbl-title", textContent: t }));
+    if (step === "summary") {
+      // 統合ではここまでに書いた解釈を全部並べる。
+      box.append(notesFor(notes.flatMap((n) => n.rays), "ここまでの解釈"));
+      return box;
+    }
     // 全体の印象を掴むのが目的なので、材料の先頭にホイールを置く。
-    if (step === "shape" || step === "accent") { box.append(wheelForRead(), shapeNode); return box; }
-    if (step === "aspects") { box.append(aspectNode); return box; }
+    if (step === "shape" || step === "accent") { box.append(wheelForRead(), shapeNode, notesFor(contextRays())); return box; }
+    if (step === "aspects") { box.append(aspectNode, notesFor(contextRays())); return box; }
     if (step === "center") {
       title("重心・ディグニティ・支配関係");
-      box.append(digTbl, rulerTbl);
+      box.append(digTbl, rulerTbl, notesFor(contextRays()));
       return box;
     }
     if (step === "houses") {
@@ -598,6 +621,7 @@ function chartView(chart: Chart, birth: Birth | null | undefined, personId: stri
           renderNotes();
         });
         box.append(pick);
+        box.append(notesFor([{ concept_kind: "house", concept_id: hid }], `第${i}室の解釈`));
       }
       return box;
     }
@@ -610,6 +634,7 @@ function chartView(chart: Chart, birth: Birth | null | undefined, personId: stri
           return [bodyLabel(k), ROLE_JA[roleOf(k)] ?? "", meaningOf("planet", k) || "—",
             `${houseOf(lonOf(p))}室：${meaningOf("house", h) || "—"}`, meaningOf("sign", p.sign) || "—"];
         }), [2, 3, 4]));
+      box.append(notesFor(P10.filter((k) => place.has(k)).map((k) => ({ concept_kind: "planet", concept_id: k }))));
       return box;
     }
     if (step === "timeline") {
@@ -1162,6 +1187,8 @@ export async function renderUranai(container: HTMLElement): Promise<void> {
     .u-page-title{width:100%;box-sizing:border-box;border:0;background:transparent;font-size:19px;font-weight:700;color:#1f2937;padding:6px 0;margin-bottom:4px;font-family:inherit}
     .u-page-title:focus{outline:none;border-bottom:1px solid #4A90C2}
     [data-theme=dark] .u-page-title{color:#f3f5f7}
+    .u-row-sub{font-size:11px;color:#888;margin-top:2px;white-space:normal;line-height:1.5}
+    [data-theme=dark] .u-row-sub{color:#8b95a3}
     .u-row-btn{display:block;width:100%;text-align:left;border:1px solid #0002;background:#fff;color:#333;border-radius:6px;padding:6px 9px;margin-bottom:5px;font-size:12.5px;cursor:pointer}
     [data-theme=dark] .u-row-btn{background:#1b1f26;border-color:#ffffff26;color:#e6e8eb}
     .u-ray{font-size:11px;border:1px solid #0002;background:#fff;color:#666;border-radius:999px;padding:2px 8px;cursor:pointer;line-height:1.5}
@@ -1225,7 +1252,12 @@ export async function renderUranai(container: HTMLElement): Promise<void> {
       [data-theme=dark] .u-foot-btn{color:#8b95a3}
       [data-theme=dark] .u-foot-btn.on{color:#f3f5f7}
       /* 選んだペインだけ出す。人物一覧は縦積みに戻す（横スクロールのチップをやめる）。 */
-      .u-wrap{padding-bottom:60px}
+      /* 固定フッターに隠れないよう、表示中のペインの下に余白を取る。 */
+      .u-side,.u-main,.u-report{padding-bottom:76px}
+      .u-wrap[data-pane=report] .u-report{overflow-y:visible}
+      /* タブは折り返さず横スクロール。 */
+      .u-tabs{flex-wrap:nowrap;overflow-x:auto;-webkit-overflow-scrolling:touch;padding-bottom:2px}
+      .u-tabs .u-tab-btn{flex:none;white-space:nowrap}
       .u-wrap[data-pane=side] .u-main,.u-wrap[data-pane=side] .u-report{display:none}
       .u-wrap[data-pane=main] .u-side,.u-wrap[data-pane=main] .u-report{display:none}
       .u-wrap[data-pane=report] .u-side,.u-wrap[data-pane=report] .u-main{display:none}
