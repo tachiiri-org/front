@@ -377,6 +377,56 @@ function chartView(chart: Chart, birth: Birth | null | undefined, personId: stri
       d.mutual ? bodyLabel(d.mutual) : "",
     ]), [2]);
 
+  // チャートルーラー: アセンダントのサインの支配星。ルディアの体系には無い部品。
+  const cr = chart.chart_ruler;
+  const crTbl = mkTable(["項目", "値"], cr
+    ? [["アセンダントのサイン", `${SIGN_GLYPH[cr.asc_sign] ?? ""}︎ ${SIGN_NAME[cr.asc_sign] ?? cr.asc_sign}`],
+       ["チャートルーラー", cr.ruler ? bodyLabel(cr.ruler) : "—"],
+       ["ルーラーの在住", cr.ruler_sign ? `${SIGN_NAME[cr.ruler_sign] ?? cr.ruler_sign}${cr.ruler_house ? ` / ${cr.ruler_house.replace("house_", "")}室` : ""}` : "—"]]
+    : [["—", "—"]]);
+
+  // セクト: 太陽が地平線の上（7〜12室）なら昼のチャート。昼夜で天体の働きが変わるとする流派の部品。
+  const sc = chart.sect;
+  const sectTbl = mkTable(["項目", "値"], sc
+    ? [["区分", sc.day ? "昼のチャート" : "夜のチャート"],
+       ["セクトライト", bodyLabel(sc.light)],
+       ["セクト内", sc.in_sect.map((k) => bodyLabel(k)).join("、")],
+       ["セクト外", sc.out_of_sect.map((k) => bodyLabel(k)).join("、")]]
+    : [["—", "—"]]);
+
+  // 半球の偏り: 数え上げなのでルディアは採らないが、流派によっては読みの起点にする。
+  const hm = chart.hemisphere;
+  const hemiTbl = mkTable(["軸", "側", "天体数"], hm
+    ? [["地平線", "上（7〜12室）", String(hm.above)], ["地平線", "下（1〜6室）", String(hm.below)],
+       ["子午線", "東（10〜3室）", String(hm.east)], ["子午線", "西（4〜9室）", String(hm.west)]]
+    : [["—", "—", "—"]]);
+
+  // 留: 日運動が平均より極端に小さい天体。順行と逆行の折り返し点にあたる。
+  const stTbl = mkTable(["天体", "日運動", "状態"], (chart.stations ?? []).length
+    ? (chart.stations ?? []).map((s) => [{ t: bodyLabel(s.planet), tip: `planet:${s.planet}` }, `${s.speed.toFixed(4)}°/日`, "留"])
+    : [["—", "—", "留の天体なし"]]);
+
+  const dp = chart.derived_points ?? [];
+  const sgLbl = (id: string) => `${SIGN_GLYPH[id] ?? ""}︎ ${SIGN_NAME[id] ?? id}`;
+  // デーカン／フェイス: サインを10度ずつ3分した副支配。デーカンは三分区分、フェイスはカルデア順。
+  const decanTbl = mkTable(["天体", "デーカン", "デーカン支配星", "フェイス支配星"], dp.length
+    ? dp.map((d) => [{ t: bodyLabel(d.planet), tip: `planet:${d.planet}` }, sgLbl(d.decan.sign),
+        d.decan.ruler ? bodyLabel(d.decan.ruler) : "—", bodyLabel(d.face)])
+    : [["—", "—", "—", "—"]]);
+  // アンティシア: 至点の軸に対する鏡像。同じ日照長を持つ度数どうしを結ぶ。
+  const antiTbl = mkTable(["天体", "アンティシア", "コントラアンティシア"], dp.length
+    ? dp.map((d) => [{ t: bodyLabel(d.planet), tip: `planet:${d.planet}` },
+        `${sgLbl(d.antiscion.sign)} ${fmtDeg(d.antiscion.degree)}`,
+        `${sgLbl(d.contra_antiscion.sign)} ${fmtDeg(d.contra_antiscion.degree)}`])
+    : [["—", "—", "—"]]);
+  // ハーモニクス／ドラコニック: 黄経を n 倍する／ドラゴンヘッドを起点に測り直す。
+  const harmN = dp[0]?.harmonic.n ?? 5;
+  const harmTbl = mkTable(["天体", `第${harmN}ハーモニクス`, "ドラコニック"], dp.length
+    ? dp.map((d) => [{ t: bodyLabel(d.planet), tip: `planet:${d.planet}` },
+        `${sgLbl(d.harmonic.sign)} ${fmtDeg(d.harmonic.degree)}`,
+        d.draconic ? `${sgLbl(d.draconic.sign)} ${fmtDeg(d.draconic.degree)}` : "—"])
+    : [["—", "—", "—"]]);
+
   // 象限。地平線と子午線が作る4つのクォーター。ルディアはハウスをこの単位でも読む。
   const quadTbl = mkTable(["象限", "ハウス", "意味"], (chart.quadrants ?? []).map((q) => [
     QUAD_JA[q.id] ?? q.id,
@@ -981,6 +1031,13 @@ function chartView(chart: Chart, birth: Birth | null | undefined, personId: stri
     ...(usesPart("dignity") ? [{ label: "ディグニティ", node: digTbl }] : []),
     ...(usesPart("rulership") ? [{ label: "支配関係", node: rulerTbl }] : []),
     ...(usesPart("dispositor") ? [{ label: "ディスポジター", node: dispTbl }] : []),
+    ...(usesPart("chart_ruler") ? [{ label: "チャートルーラー", node: crTbl }] : []),
+    ...(usesPart("sect") ? [{ label: "セクト", node: sectTbl }] : []),
+    ...(usesPart("hemisphere") ? [{ label: "半球", node: hemiTbl }] : []),
+    ...(usesPart("station") ? [{ label: "留", node: stTbl }] : []),
+    ...(usesPart("decan") || usesPart("face") ? [{ label: "デーカン/フェイス", node: decanTbl }] : []),
+    ...(usesPart("antiscia") ? [{ label: "アンティシア", node: antiTbl }] : []),
+    ...(usesPart("harmonic") || usesPart("draconic") ? [{ label: "ハーモニクス", node: harmTbl }] : []),
     ...(usesPart("quadrant") ? [{ label: "象限", node: quadTbl }] : []),
     ...(usesPart("lunation") ? [{ label: "ルネーション", node: lunTbl }] : []),
     { label: `アスペクト(${chart.aspects.length})`, node: aspectNode },

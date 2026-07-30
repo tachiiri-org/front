@@ -109,6 +109,16 @@ export type Chart = {
                          ruler_sign: string | null; ruler_house: string | null }>;
   dispositors?: Array<{ planet: string; dispositor: string | null; chain: string[];
                         final: boolean; mutual: string | null }>;
+  chart_ruler?: { asc_sign: string; ruler: string | null; ruler_sign: string | null; ruler_house: string | null } | null;
+  sect?: { day: boolean; light: string; in_sect: string[]; out_of_sect: string[] } | null;
+  hemisphere?: { above: number; below: number; east: number; west: number } | null;
+  stations?: Array<{ planet: string; speed: number; stationary: boolean }>;
+  derived_points?: Array<{ planet: string;
+    decan: { sign: string; ruler: string | null }; face: string;
+    antiscion: { longitude: number; sign: string; degree: number };
+    contra_antiscion: { longitude: number; sign: string; degree: number };
+    draconic: { sign: string; degree: number } | null;
+    harmonic: { n: number; sign: string; degree: number } }>;
   placements: Placement[]; aspects: Aspect[];
   patterns?: Pattern[];
   dignities: Array<{ planet: string; dignity: string }>;
