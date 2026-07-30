@@ -1,6 +1,6 @@
 // ウラナイ画面のルート描画とフォーム類。定数・型・ヘルパは ./parts、ホイール描画は ./wheel に分割。
 import {
-  SIGN_ORDER, SIGN_GLYPH, SIGN_NAME, SIGN_ELEMENT, SIGN_QUALITY, ELEMENT_CHAR, QUALITY_CHAR, PLANET_GLYPH, PLANET_ORDER, PLANET_NAME_LINES, ASPECT_INFO, ASPECT_ORDER, PATTERN_INFO, PATTERN_ORDER, SHAPE_INFO, SHAPE_ORDER, Person, Prefill, Settings, SETTING_FIELDS, Chart, Derived, loadMeanings, meaningOf, roleOf, clearMeanings, UranaiView, api, lonOf, fmtDeg, Birth, HOUSE_SYSTEM_JA, IANA_ZONES, FALLBACK_ZONES, CC_ZONE, offsetFromZone, el, selectEl, loadSettings,
+  SIGN_ORDER, SIGN_GLYPH, SIGN_NAME, SIGN_ELEMENT, SIGN_QUALITY, ELEMENT_CHAR, QUALITY_CHAR, PLANET_GLYPH, PLANET_ORDER, PLANET_NAME_LINES, ASPECT_INFO, ASPECT_ORDER, PATTERN_INFO, PATTERN_ORDER, SHAPE_INFO, SHAPE_ORDER, Person, Prefill, Settings, SETTING_FIELDS, Chart, Derived, Cycles, loadMeanings, meaningOf, roleOf, clearMeanings, UranaiView, api, lonOf, fmtDeg, Birth, HOUSE_SYSTEM_JA, IANA_ZONES, FALLBACK_ZONES, CC_ZONE, offsetFromZone, el, selectEl, loadSettings,
 } from "./parts";
 import { drawWheelPro } from "./wheel";
 
@@ -447,6 +447,46 @@ function chartView(chart: Chart, birth: Birth | null | undefined, personId: stri
     return box;
   };
 
+  // 時間軸のサイクル。リターン図・進行のルネーションの節目・食。
+  const cyclesNode = (): HTMLElement => {
+    const box = el("div", {});
+    const dateIn = el("input", { type: "date", value: new Date().toISOString().slice(0, 10) }) as HTMLInputElement;
+    const out = el("div", {});
+    const fmt = (iso: string | null) => iso ? iso.slice(0, 16).replace("T", " ") + " UTC" : "算出できません";
+    const load = async () => {
+      out.innerHTML = "";
+      out.append(el("div", { className: "u-pat-empty", textContent: "算出中…" }));
+      try {
+        const c = await api<Cycles>(`/api/v1/uranai/astrology/person/${personId}/cycles?date=${dateIn.value}`);
+        out.innerHTML = "";
+        out.append(el("div", { className: "u-tbl-title", textContent: "リターン（対象日の直前）" }));
+        out.append(mkTable(["種別", "瞬間"], [
+          ["太陽回帰", fmt(c.returns.sun)], ["月回帰", fmt(c.returns.moon)],
+        ], [1]));
+        out.append(el("div", { className: "u-tbl-title", textContent: "進行のルネーションの節目（約30年で一巡）" }));
+        out.append(c.progressed_lunation.length
+          ? mkTable(["節目", "暦日"], c.progressed_lunation.map((e) => [e.kind === "new" ? "進行新月（合）" : "進行満月（衝）", e.at.slice(0, 10)]))
+          : el("div", { className: "u-pat-empty", textContent: "範囲内に節目はありません" }));
+        out.append(el("div", { className: "u-tbl-title", textContent: "食（対象日の前後400日）" }));
+        out.append(c.eclipses.length
+          ? mkTable(["種別", "日時", "出生図のハウス", "交点距離"], c.eclipses.map((e) =>
+              [e.kind === "solar" ? "日食" : "月食", e.at.slice(0, 16).replace("T", " "),
+               `${e.house.replace("house_", "")}室`, `${e.nodeDistance.toFixed(1)}°`]))
+          : el("div", { className: "u-pat-empty", textContent: "範囲内に食はありません" }));
+        out.append(el("div", { className: "u-pat-comp", textContent:
+          "食の判定は近似。朔望の瞬間に太陽が交点から日食18度・月食12度以内にあるものを食とみなす（月の黄緯を持たないため）。" }));
+      } catch (e) {
+        out.innerHTML = "";
+        out.append(el("div", { className: "u-status", textContent: `エラー: ${(e as Error).message}` }));
+      }
+    };
+    const btn = el("button", { className: "u-btn u-btn-sm", textContent: "算出" });
+    btn.addEventListener("click", () => void load());
+    box.append(el("div", { className: "u-row" }, [el("label", { textContent: "対象日" }), dateIn, btn]), out);
+    void load();
+    return box;
+  };
+
   // 基本情報: 通常は表。各編集項目に編集アイコン、押すとその項目だけ編集モード（他はグレーアウト）、
   // 再計算(保存)またはキャンセル。
   const bm = (birth?.born_at ?? "").match(/^(\d{4}-\d{2}-\d{2})T(\d{2}:\d{2})/);
@@ -566,9 +606,11 @@ function chartView(chart: Chart, birth: Birth | null | undefined, personId: stri
     { label: "象限", node: quadTbl },
     { label: "ルネーション", node: lunTbl },
     { label: `アスペクト(${chart.aspects.length})`, node: aspectNode },
-    { label: `配置(${majorCount})`, node: patternNode },
+    // 図形の固有名はルディアの用語ではないので、使わない流派では表示項目から外す。
+    ...(chart.aspect_figure === false ? [] : [{ label: `配置(${majorCount})`, node: patternNode }]),
     { label: "進行", node: derivedNode("progressed") },
     { label: "経過", node: derivedNode("transit") },
+    { label: "サイクル", node: cyclesNode() },
   ];
   const content = el("div", { className: "u-tab-content" });
   const secHeads = sections.map((s) => el("div", { className: "u-sec-head", textContent: s.label }));
