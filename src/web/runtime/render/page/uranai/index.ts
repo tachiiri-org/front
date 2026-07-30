@@ -1,6 +1,6 @@
 // ウラナイ画面のルート描画とフォーム類。定数・型・ヘルパは ./parts、ホイール描画は ./wheel に分割。
 import {
-  SIGN_ORDER, SIGN_GLYPH, SIGN_NAME, SIGN_ELEMENT, SIGN_QUALITY, ELEMENT_CHAR, QUALITY_CHAR, PLANET_GLYPH, PLANET_ORDER, PLANET_NAME_LINES, ASPECT_INFO, ASPECT_ORDER, PATTERN_INFO, PATTERN_ORDER, SHAPE_INFO, SHAPE_ORDER, Person, Prefill, Settings, SETTING_FIELDS, Chart, Derived, Cycles, optionsOf, nameOf, ownOf, setOwn, usesPart, partsOn, allParts, setParts, loadMeanings, meaningOf, roleOf, clearMeanings, UranaiView, api, lonOf, fmtDeg, Birth, HOUSE_SYSTEM_JA, IANA_ZONES, FALLBACK_ZONES, CC_ZONE, offsetFromZone, el, selectEl, loadSettings,
+  SIGN_ORDER, SIGN_GLYPH, SIGN_NAME, SIGN_ELEMENT, SIGN_QUALITY, ELEMENT_CHAR, QUALITY_CHAR, PLANET_GLYPH, PLANET_ORDER, PLANET_NAME_LINES, ASPECT_INFO, ASPECT_ORDER, PATTERN_INFO, PATTERN_ORDER, SHAPE_INFO, SHAPE_ORDER, Person, Prefill, Settings, SETTING_FIELDS, Chart, Derived, Cycles, optionsOf, nameOf, ownOf, setOwn, usesPart, partsOn, allParts, setParts, isImplemented, loadMeanings, meaningOf, roleOf, clearMeanings, UranaiView, api, lonOf, fmtDeg, Birth, HOUSE_SYSTEM_JA, IANA_ZONES, FALLBACK_ZONES, CC_ZONE, offsetFromZone, el, selectEl, loadSettings,
 } from "./parts";
 import { drawWheelPro } from "./wheel";
 
@@ -123,7 +123,11 @@ function settingsView(settings: Settings, onSaved: () => void | Promise<void>): 
           .then((r) => { setParts(r.parts ?? next); renderParts(); })
           .catch((e) => { status.textContent = `エラー: ${(e as Error).message}`; cb.checked = on.has(id); });
       });
-      grid.append(el("label", { className: "u-tg-chip" }, [cb, el("span", { textContent: nameOf("part", id) })]));
+      const impl = isImplemented(id);
+      const lb = el("label", { className: "u-tg-chip" + (impl ? "" : " u-part-todo") },
+        [cb, el("span", { textContent: nameOf("part", id) + (impl ? "" : "（未実装）") })]);
+      lb.title = meaningOf("part", id);
+      grid.append(lb);
     }
     partsBox.append(grid);
   };
@@ -1114,6 +1118,7 @@ export async function renderUranai(container: HTMLElement): Promise<void> {
     .u-settings{margin:12px 0 4px;padding:10px 12px;border:1px solid #0001;border-radius:8px;background:#0000000a;max-width:520px}
     .u-set-title{font-size:13px;font-weight:600;color:#555;margin-bottom:8px}
     .u-parts{margin:10px 0 4px}
+    .u-part-todo{opacity:.5}
     .u-parts-grid{display:grid;grid-template-columns:repeat(auto-fill,minmax(190px,1fr));gap:4px 12px}
     .u-set-grid{display:grid;grid-template-columns:1fr 1fr;gap:6px 14px}
     .u-set-row{display:flex;align-items:center;gap:8px}

@@ -191,7 +191,7 @@ export async function loadMeanings(): Promise<void> {
       meanings?: Array<{ concept_kind: string; concept_id: string; value: string }>;
       names?: Array<{ concept_kind: string; concept_id: string; value: string }>;
       concept_notes?: Array<{ concept_kind: string; concept_id: string; value: string }>;
-      parts?: string[]; all_parts?: string[];
+      parts?: string[]; all_parts?: string[]; implemented_parts?: string[];
       body_role?: Array<{ planet_id: string; body_role_id: string }>;
     }>(`/api/v1/uranai/astrology/reference`);
     const m: MeaningMap = {};
@@ -203,11 +203,11 @@ export async function loadMeanings(): Promise<void> {
     const ow: MeaningMap = {};
     for (const x of r.concept_notes ?? []) (ow[x.concept_kind] ??= {})[x.concept_id] = x.value;
     ownCache = ow;
-    partCache = { parts: (r.parts ?? []).slice(), all: (r.all_parts ?? []).slice() };
+    partCache = { parts: (r.parts ?? []).slice(), all: (r.all_parts ?? []).slice(), impl: (r.implemented_parts ?? []).slice() };
     const roles: Record<string, string> = {};
     for (const x of r.body_role ?? []) roles[x.planet_id] = m.body_role?.[x.body_role_id] ? x.body_role_id : x.body_role_id;
     roleCache = roles;
-  } catch { meaningCache = {}; roleCache = {}; nameCache = {}; ownCache = {}; partCache = { parts: [], all: [] }; }
+  } catch { meaningCache = {}; roleCache = {}; nameCache = {}; ownCache = {}; partCache = { parts: [], all: [], impl: [] }; }
 }
 export const meaningOf = (kind: string, id: string): string => meaningCache?.[kind]?.[id] ?? "";
 
@@ -224,11 +224,13 @@ export const setOwn = (kind: string, id: string, value: string): void => {
 let nameCache: MeaningMap | null = null;
 export const nameOf = (kind: string, id: string): string => nameCache?.[kind]?.[id] ?? id;
 // 採用している部品。画面はこれに従ってタブを出し分ける。
-let partCache: { parts: string[]; all: string[] } = { parts: [], all: [] };
+let partCache: { parts: string[]; all: string[]; impl: string[] } = { parts: [], all: [], impl: [] };
 export const partsOn = (): string[] => partCache.parts;
 export const allParts = (): string[] => partCache.all;
 export const usesPart = (id: string): boolean => partCache.parts.length === 0 || partCache.parts.includes(id);
 export const setParts = (list: string[]): void => { partCache = { ...partCache, parts: list.slice() }; };
+// 算出まで実装してある部品。枠だけのものは選んでも画面に出ない。
+export const isImplemented = (id: string): boolean => partCache.impl.includes(id);
 
 export const optionsOf = (kind: string): Array<{ id: string; label: string }> =>
   Object.entries(nameCache?.[kind] ?? {}).map(([id, label]) => ({ id, label }));
