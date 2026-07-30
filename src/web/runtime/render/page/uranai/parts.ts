@@ -103,7 +103,10 @@ export type Chart = {
   quadrants?: Array<{ id: string; houses: string[] }>;
   lunation?: Lunation | null;
   shape?: { shape: string; span: number; largestGap: number; handle?: string[]; leadingBody?: string;
-            singleton?: { planet: string; axis: "horizon" | "meridian" } };
+            singleton?: { planet: string; axis: "horizon" | "meridian" };
+            center?: { longitude: number; concentration: number } };
+  house_rulers?: Array<{ house: string; cusp_sign: string; ruler: string | null;
+                         ruler_sign: string | null; ruler_house: string | null }>;
   placements: Placement[]; aspects: Aspect[];
   patterns?: Pattern[];
   dignities: Array<{ planet: string; dignity: string }>;
