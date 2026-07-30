@@ -155,7 +155,7 @@ function settingsView(settings: Settings, onSaved: () => void | Promise<void>): 
 }
 
 // ───────────────────────── チャート表示（タブ: チャート/表/基本情報） ─────────────────────────
-function chartView(chart: Chart, birth: Birth | null | undefined, personId: string, label: string | null, onSaved: (newLabel: string | null) => void | Promise<void>): HTMLElement {
+function chartView(chart: Chart, birth: Birth | null | undefined, personId: string, label: string | null, onSaved: (newLabel: string | null) => void | Promise<void>, reportHost?: HTMLElement): HTMLElement {
   const wrap = el("div", { className: "u-chart" });
   // データ準備
   const storedCusps = (chart.cusps ?? []).filter((c) => c.system === (chart.house_system ?? "whole_sign")).sort((a, b) => a.index - b.index);
@@ -287,6 +287,16 @@ function chartView(chart: Chart, birth: Birth | null | undefined, personId: stri
     ? (chart.dignities ?? []).map((d) => [bodyLabel(d.planet), DIGNITY_JA[d.dignity] ?? d.dignity, meaningOf("dignity", d.dignity)])
     : [["なし", "—", ""]], [2]);
 
+  // ハウスの支配関係。ルディアは解釈のステップで支配関係を確認するよう指示している。
+  const rulerTbl = mkTable(["室", "カスプのサイン", "支配星", "支配星の在住"], (chart.house_rulers ?? []).length
+    ? (chart.house_rulers ?? []).map((r) => [
+        `${r.house.replace("house_", "")}室`,
+        `${SIGN_GLYPH[r.cusp_sign] ?? ""}︎ ${SIGN_NAME[r.cusp_sign] ?? r.cusp_sign}`,
+        r.ruler ? bodyLabel(r.ruler) : "—",
+        r.ruler_sign ? `${SIGN_NAME[r.ruler_sign] ?? r.ruler_sign}${r.ruler_house ? ` / ${r.ruler_house.replace("house_", "")}室` : ""}` : "—",
+      ])
+    : [["—", "—", "—", "—"]]);
+
   // 象限。地平線と子午線が作る4つのクォーター。ルディアはハウスをこの単位でも読む。
   const quadTbl = mkTable(["象限", "ハウス", "意味"], (chart.quadrants ?? []).map((q) => [
     QUAD_JA[q.id] ?? q.id,
@@ -389,6 +399,19 @@ function chartView(chart: Chart, birth: Birth | null | undefined, personId: stri
       SHAPE_INFO[k]?.name ?? k, k === sh.shape ? "● 該当" : "—", k === sh.shape ? extra(k) : "",
     ])));
 
+    // 重心。ルディアは個々の天体を見る前に「重みのバランス」と「重心」を掴めと説く。
+    // 集中度は 0（全周に均等）〜1（一点に集中）。対向する2群は打ち消して 0 に近づく。
+    if (sh.center) {
+      const cl = sh.center.longitude;
+      const cs = SIGN_ORDER[Math.floor((((cl % 360) + 360) % 360) / 30) % 12];
+      shapeNode.append(el("div", { className: "u-tbl-title", textContent: "重心（重みのバランス）" }));
+      shapeNode.append(mkTable(["黄経", "ハウス", "集中度"], [[
+        `${SIGN_GLYPH[cs] ?? ""}︎ ${SIGN_NAME[cs] ?? cs} ${fmtDeg(((cl % 30) + 30) % 30)}`,
+        `${houseOf(cl)}室`,
+        `${sh.center.concentration.toFixed(3)}`,
+      ]]));
+    }
+
     // シングルトンは7パターンとは別の概念（分布の形ではなく孤立というアクセント）なので別に出す。
     const AXIS_JA: Record<string, string> = { horizon: "地平線", meridian: "子午線" };
     const same = sh.singleton && sh.handle?.length === 1 && sh.handle[0] === sh.singleton.planet;
@@ -485,6 +508,208 @@ function chartView(chart: Chart, birth: Birth | null | undefined, personId: stri
     box.append(el("div", { className: "u-row" }, [el("label", { textContent: "対象日" }), dateIn, btn]), out);
     void load();
     return box;
+  };
+
+  // ───── 読み（ルディアの解釈手順） ─────
+  // 手順の順序そのものを画面の骨格にする。左に材料、右ペインに解釈を書く。
+  // 判断（焦点の見極め、解釈文）はシステムがやらない。材料を並べて記入欄を持つだけ。
+  const READ_STEPS: Array<{ id: string; label: string }> = [
+    { id: "shape", label: "① 全体の形" }, { id: "aspects", label: "② アスペクトの構成" },
+    { id: "center", label: "③ 中心点" }, { id: "accent", label: "④ アクセント" },
+    { id: "houses", label: "⑤ ハウスを通じた感じ取り" }, { id: "blueprint", label: "⑥ 潜在能力（設計図）" },
+    { id: "timeline", label: "⑦ 時間軸" }, { id: "summary", label: "⑧ 統合" },
+  ];
+  const P10 = ["sun", "moon", "mercury", "venus", "mars", "jupiter", "saturn", "uranus", "neptune", "pluto"];
+  const inHouse = (h: string): string[] => chart.placements
+    .filter((p) => !["asc", "mc", "dsc", "ic"].includes(p.planet) && `house_${houseOf(lonOf(p))}` === h)
+    .map((p) => p.planet);
+  const quadOf = (n: number): string => `quadrant_${Math.floor((n - 1) / 3) + 1}`;
+
+  // 各ステップの材料。既存タブの値と同じものを、読みの単位で束ね直す。
+  const materialOf = (step: string): HTMLElement => {
+    const box = el("div", {});
+    const title = (t: string) => box.append(el("div", { className: "u-tbl-title", textContent: t }));
+    if (step === "shape" || step === "accent") { box.append(shapeNode); return box; }
+    if (step === "aspects") { box.append(aspectNode); return box; }
+    if (step === "center") {
+      title("重心・ディグニティ・支配関係");
+      box.append(digTbl, rulerTbl);
+      return box;
+    }
+    if (step === "houses") {
+      // 12室を順に。各室で読む材料（経験のカテゴリー、在住天体、カスプの支配星の在住先）を集める。
+      for (let i = 1; i <= 12; i++) {
+        const hid = `house_${i}`;
+        const rl = (chart.house_rulers ?? []).find((r) => r.house === hid);
+        const bodies = inHouse(hid);
+        box.append(el("div", { className: "u-tbl-title", textContent: `第${i}室` }));
+        box.append(mkTable(["項目", "内容"], [
+          ["経験のカテゴリー", meaningOf("house", hid) || "—"],
+          ["象限", meaningOf("quadrant", quadOf(i)) || "—"],
+          ["在住天体", bodies.length ? bodies.map((k) => bodyLabel(k)).join("　") : "なし"],
+          ["カスプのサイン", rl ? `${SIGN_NAME[rl.cusp_sign] ?? rl.cusp_sign}（${meaningOf("sign", rl.cusp_sign) || "—"}）` : "—"],
+          ["支配星とその在住", rl?.ruler ? `${bodyLabel(rl.ruler)} → ${rl.ruler_sign ? SIGN_NAME[rl.ruler_sign] ?? rl.ruler_sign : "—"}${rl.ruler_house ? ` / ${rl.ruler_house.replace("house_", "")}室` : ""}` : "—"],
+          ["インターセプト", (chart.interceptions ?? []).filter((x) => x.house === hid).map((x) => SIGN_NAME[x.sign] ?? x.sign).join("、") || "なし"],
+        ], [1]));
+        // その室に紐づく解釈。参加者にその室を自動で付け、在住天体・カスプのサイン・支配星を候補に出す。
+        const suggest: Ray[] = [
+          ...bodies.map((k) => ({ concept_kind: "planet", concept_id: k })),
+          ...(rl ? [{ concept_kind: "sign", concept_id: rl.cusp_sign }] : []),
+          ...(rl?.ruler ? [{ concept_kind: "planet", concept_id: rl.ruler }] : []),
+          { concept_kind: "quadrant", concept_id: quadOf(i) },
+          { concept_kind: "reading_step", concept_id: "houses" },
+        ];
+        box.append(noteEditor([{ concept_kind: "house", concept_id: hid }], suggest));
+      }
+      return box;
+    }
+    if (step === "blueprint") {
+      title("10の基本的なエネルギーと、それをどこで使うか");
+      box.append(mkTable(["天体", "階層", "機能", "使う場（ハウス）", "位相（サイン）"],
+        P10.filter((k) => place.has(k)).map((k) => {
+          const p = place.get(k)!;
+          const h = `house_${houseOf(lonOf(p))}`;
+          return [bodyLabel(k), ROLE_JA[roleOf(k)] ?? "", meaningOf("planet", k) || "—",
+            `${houseOf(lonOf(p))}室：${meaningOf("house", h) || "—"}`, meaningOf("sign", p.sign) || "—"];
+        }), [2, 3, 4]));
+      return box;
+    }
+    if (step === "timeline") {
+      box.append(el("div", { className: "u-pat-comp", textContent: "進行・経過・サイクルの各タブで対象日を指定して算出する。" }));
+      return box;
+    }
+    box.append(el("div", { className: "u-pat-comp", textContent: "ここまでの材料を見直しながら、全体を一つのまとまりとして統合する。" }));
+    return box;
+  };
+
+  // 解釈メモ。ステップごとに複数書ける。保存は暗号化してサーバへ。
+  // メモはグラフのリレーションと同じ形。本文＋n項の参加者。読みのステップも参加者の1つ。
+  type Ray = { concept_kind: string; concept_id: string };
+  type Note = { note_id: string; idx: number; at: string | null; value: string; rays: Ray[] };
+  const hasRay = (n: Note, kind: string, id: string) => n.rays.some((r) => r.concept_kind === kind && r.concept_id === id);
+  const rayLabel = (r: Ray): string => {
+    if (r.concept_kind === "planet") return bodyLabel(r.concept_id);
+    if (r.concept_kind === "sign") return SIGN_NAME[r.concept_id] ?? r.concept_id;
+    if (r.concept_kind === "house") return `${r.concept_id.replace("house_", "")}室`;
+    if (r.concept_kind === "quadrant") return QUAD_JA[r.concept_id] ?? r.concept_id;
+    if (r.concept_kind === "reading_step") return READ_STEPS.find((x) => x.id === r.concept_id)?.label ?? r.concept_id;
+    if (r.concept_kind === "aspect_type") return ASPECT_INFO[r.concept_id]?.label ?? r.concept_id;
+    return `${r.concept_kind}:${r.concept_id}`;
+  };
+  let notes: Note[] = [];
+  const readNode = el("div", {});
+  const matHost = el("div", {});
+  let current = READ_STEPS[0].id;
+  // 指定の参加者を持つメモの一覧＋追加。ハウス単位でも、ステップ単位でも同じ器を使う。
+  const noteEditor = (rays: Ray[], suggest: Ray[] = []): HTMLElement => {
+    const host = el("div", {});
+    const draw = () => {
+      host.innerHTML = "";
+      const mine = notes.filter((n) => rays.every((r) => hasRay(n, r.concept_kind, r.concept_id)));
+      for (const n of mine) {
+        const ta = el("textarea", { className: "u-note" }) as HTMLTextAreaElement;
+        ta.value = n.value;
+        ta.addEventListener("blur", () => {
+          void api(`/api/v1/uranai/astrology/note/${n.note_id}`, { method: "PUT", body: JSON.stringify({ value: ta.value }) })
+            .then(() => { n.value = ta.value; });
+        });
+        // 参加者チップ。押すと外れる。候補を押すと足せる。
+        const chips = el("div", { className: "u-ray-chips" });
+        for (const r of n.rays) {
+          const c = el("button", { className: "u-ray on", textContent: rayLabel(r) });
+          c.addEventListener("click", () => {
+            const next = n.rays.filter((x) => !(x.concept_kind === r.concept_kind && x.concept_id === r.concept_id));
+            void api<{ rays: Ray[] }>(`/api/v1/uranai/astrology/note/${n.note_id}`, { method: "PUT", body: JSON.stringify({ rays: next }) })
+              .then((res) => { n.rays = res.rays ?? next; draw(); });
+          });
+          chips.append(c);
+        }
+        for (const r of suggest.filter((x) => !hasRay(n, x.concept_kind, x.concept_id))) {
+          const c = el("button", { className: "u-ray", textContent: `＋ ${rayLabel(r)}` });
+          c.addEventListener("click", () => {
+            const next = [...n.rays, r];
+            void api<{ rays: Ray[] }>(`/api/v1/uranai/astrology/note/${n.note_id}`, { method: "PUT", body: JSON.stringify({ rays: next }) })
+              .then((res) => { n.rays = res.rays ?? next; draw(); });
+          });
+          chips.append(c);
+        }
+        const del = el("button", { className: "u-btn-sm u-btn-ghost", textContent: "削除" });
+        del.addEventListener("click", () => {
+          void api(`/api/v1/uranai/astrology/note/${n.note_id}`, { method: "DELETE" }).then(() => {
+            notes = notes.filter((x) => x.note_id !== n.note_id); draw();
+          });
+        });
+        host.append(el("div", { className: "u-note-wrap" }, [ta, chips, del]));
+      }
+      const add = el("button", { className: "u-btn u-btn-sm", textContent: "＋ 解釈を追加" });
+      add.addEventListener("click", () => {
+        void api<{ note_id: string; idx: number; rays: Ray[] }>(`/api/v1/uranai/astrology/person/${personId}/notes`,
+          { method: "POST", body: JSON.stringify({ value: "", rays }) })
+          .then((r) => { notes.push({ note_id: r.note_id, idx: r.idx, at: null, value: "", rays: r.rays ?? rays }); draw(); });
+      });
+      host.append(add);
+    };
+    draw();
+    return host;
+  };
+
+  const renderNotes = () => {
+    if (!reportHost) return;
+    reportHost.innerHTML = "";
+    const step = READ_STEPS.find((x) => x.id === current);
+    if (!step) { reportHost.append(el("div", { className: "u-pat-comp", textContent: "このタブに解釈欄はありません。" })); return; }
+    reportHost.append(el("div", { className: "u-tbl-title", textContent: `${step.label} の解釈` }));
+    const mean = meaningOf("reading_step", current);
+    if (mean) reportHost.append(el("div", { className: "u-pat-comp", textContent: mean }));
+    reportHost.append(noteEditor([{ concept_kind: "reading_step", concept_id: current }]));
+  };
+
+  const selectStep = (id: string) => {
+    current = id;
+    matHost.innerHTML = "";
+    matHost.append(materialOf(id));
+    for (const c of Array.from(readNode.querySelectorAll<HTMLElement>(".u-step-chip"))) {
+      c.classList.toggle("on", c.dataset.step === id);
+    }
+    renderNotes();
+  };
+  const chips = el("div", { className: "u-tabs" });
+  for (const st of READ_STEPS) {
+    const c = el("button", { className: "u-tab-btn u-step-chip", type: "button", textContent: st.label });
+    c.dataset.step = st.id;
+    c.addEventListener("click", () => selectStep(st.id));
+    chips.append(c);
+  }
+  readNode.append(chips, matHost);
+  void api<{ notes: Note[] }>(`/api/v1/uranai/astrology/person/${personId}/notes`)
+    .then((r) => { notes = r.notes ?? []; renderNotes(); renderCross(); selectStep(current); })
+    .catch(() => { /* メモが取れなくても材料は見せる */ });
+
+  // 横断ビュー。参加者ごとにメモを束ねて見る。参加者を持たせた価値はここに出る。
+  const crossNode = el("div", {});
+  const renderCross = () => {
+    crossNode.innerHTML = "";
+    const byKey = new Map<string, { ray: Ray; notes: Note[] }>();
+    for (const n of notes) {
+      for (const r of n.rays) {
+        const k = `${r.concept_kind}|${r.concept_id}`;
+        (byKey.get(k) ?? byKey.set(k, { ray: r, notes: [] }).get(k)!).notes.push(n);
+      }
+    }
+    if (!byKey.size) {
+      crossNode.append(el("div", { className: "u-pat-empty", textContent: "まだ解釈がありません。" }));
+      return;
+    }
+    const KIND_JA: Record<string, string> = { house: "ハウス", planet: "天体", sign: "サイン", quadrant: "象限", reading_step: "読みの手順", aspect_type: "アスペクト" };
+    const groups = [...byKey.values()].sort((a, b) =>
+      (a.ray.concept_kind.localeCompare(b.ray.concept_kind)) || a.ray.concept_id.localeCompare(b.ray.concept_id));
+    for (const g of groups) {
+      crossNode.append(el("div", { className: "u-tbl-title", textContent: `${KIND_JA[g.ray.concept_kind] ?? g.ray.concept_kind}: ${rayLabel(g.ray)}（${g.notes.length}）` }));
+      crossNode.append(mkTable(["解釈", "ほかの参加者"], g.notes.map((n) => [
+        n.value || "（空）",
+        n.rays.filter((r) => !(r.concept_kind === g.ray.concept_kind && r.concept_id === g.ray.concept_id)).map(rayLabel).join("　") || "—",
+      ]), [0, 1]));
+    }
   };
 
   // 基本情報: 通常は表。各編集項目に編集アイコン、押すとその項目だけ編集モード（他はグレーアウト）、
@@ -592,6 +817,8 @@ function chartView(chart: Chart, birth: Birth | null | undefined, personId: stri
 
   // タブ（可視切替）＋全表示
   const sections: Array<{ label: string; node: HTMLElement }> = [
+    { label: "読み", node: readNode },
+    { label: "横断", node: crossNode },
     { label: "基本情報", node: basicNode },
     { label: "チャート", node: chartNode },
     { label: "全体の形", node: shapeNode },
@@ -603,6 +830,7 @@ function chartView(chart: Chart, birth: Birth | null | undefined, personId: stri
     { label: "サイン", node: signTbl },
     { label: "インターセプト", node: icptTbl },
     { label: "ディグニティ", node: digTbl },
+    { label: "支配関係", node: rulerTbl },
     { label: "象限", node: quadTbl },
     { label: "ルネーション", node: lunTbl },
     { label: `アスペクト(${chart.aspects.length})`, node: aspectNode },
@@ -631,6 +859,7 @@ function chartView(chart: Chart, birth: Birth | null | undefined, personId: stri
   for (const b of secBtns) bar.append(b);
   bar.append(allBtn);
   wrap.append(bar, content);
+  selectStep(READ_STEPS[0].id); // 読みは第1ステップから
   select(null); // 既定は全表示
   return wrap;
 }
@@ -745,6 +974,16 @@ export async function renderUranai(container: HTMLElement): Promise<void> {
     .u-set-row label{width:88px;flex:none;color:#666;font-size:12px}
     .u-set-sel{flex:1;min-width:0;padding:4px 6px;border:1px solid #0002;border-radius:5px;font-size:12px;background:#fff}
     .u-settings-note{font-size:12px;color:#888;margin-bottom:12px;max-width:520px}
+    /* 解釈メモ（右ペイン） */
+    .u-note{width:100%;box-sizing:border-box;min-height:110px;padding:7px 8px;border:1px solid #0002;border-radius:6px;font-size:13px;line-height:1.6;font-family:inherit;resize:vertical}
+    .u-note-wrap{display:flex;flex-direction:column;gap:4px;align-items:flex-end;margin-bottom:10px}
+    .u-ray-chips{display:flex;flex-wrap:wrap;gap:4px;width:100%}
+    .u-ray{font-size:11px;border:1px solid #0002;background:#fff;color:#666;border-radius:999px;padding:2px 8px;cursor:pointer;line-height:1.5}
+    .u-ray.on{background:#4A90C218;border-color:#4A90C2aa;color:#1f2937}
+    [data-theme=dark] .u-ray{background:#1b1f26;border-color:#ffffff26;color:#b3bcc7}
+    [data-theme=dark] .u-ray.on{background:#4A90C233;border-color:#4A90C2aa;color:#e6e8eb}
+    [data-theme=dark] .u-note{background:#1b1f26;border-color:#ffffff26;color:#e6e8eb}
+    .u-step-chip{text-align:left}
     /* テーマ切替ボタン */
     .u-theme-btn{position:fixed;right:14px;bottom:14px;z-index:900;border:1px solid #0002;background:#fff;color:#666;
       border-radius:999px;width:36px;height:36px;font-size:16px;line-height:1;cursor:pointer;box-shadow:0 4px 12px #0002}
@@ -856,7 +1095,7 @@ export async function renderUranai(container: HTMLElement): Promise<void> {
     if (push) history.pushState({ uranai: { kind: "chart", personId, label: label ?? null } as UranaiView }, "");
     // 保存後は一覧のラベル更新＋再描画（画面遷移せず反映）。
     const onSaved = async (newLabel: string | null) => { await refreshList(personId); void showChart(personId, newLabel ?? label, false); };
-    main.append(el("div", { className: "u-chart-head" }, [el("div", { className: "u-title", textContent: label ?? "" })]), chartView(chart, birth, personId, label ?? null, onSaved));
+    main.append(el("div", { className: "u-chart-head" }, [el("div", { className: "u-title", textContent: label ?? "" })]), chartView(chart, birth, personId, label ?? null, onSaved, report.querySelector(".u-report-body") as HTMLElement));
   };
 
   // 人物リスト（サイド）を再構築し selectId をハイライトするだけ。画面遷移はしない。
