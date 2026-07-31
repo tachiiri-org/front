@@ -113,6 +113,7 @@ function settingsView(settings: Settings, onSaved: () => void | Promise<void>): 
         { method: "POST", body: JSON.stringify({ from: base, name }) })
         .then(async (r) => {
           await api(`/api/v1/uranai/astrology/preference`, { method: "PUT", body: JSON.stringify({ ruleset_id: r.ruleset }) });
+          await recomputeAll();
           clearMeanings(); status.textContent = ""; await onSaved();
         })
         .catch((e) => { status.textContent = `エラー: ${(e as Error).message}`; rsSel.value = base; });
@@ -123,6 +124,8 @@ function settingsView(settings: Settings, onSaved: () => void | Promise<void>): 
     void (async () => {
       try {
         await api(`/api/v1/uranai/astrology/preference`, { method: "PUT", body: JSON.stringify({ ruleset_id: rsSel.value }) });
+        // 流派ごとに保存するファクトが違うので、切り替えたら計算し直す。
+        await recomputeAll();
         clearMeanings(); await onSaved();
       } catch (e) { status.textContent = `エラー: ${(e as Error).message}`; }
     })();
@@ -135,6 +138,8 @@ function settingsView(settings: Settings, onSaved: () => void | Promise<void>): 
         api<{ rulesets?: Array<{ id: string; name: string | null; editable?: boolean; lineage?: string | null }> }>(`/api/v1/uranai/astrology/reference`),
         api<{ ruleset_id?: string }>(`/api/v1/uranai/astrology/preference`),
       ]);
+      // 系統の名称は参照データから引くので、選択肢を組む前に読んでおく。
+      await loadMeanings();
       // 系統ごとにまとめる。流派は層が違うものが混ざる（ヘレニズムは系統、
       // ルディアは現代西洋の中の一潮流）ので、括らずに並べると規模を取り違える。
       const LINEAGE_ORDER = ["traditional", "modern_west", "midpoint", "indian"];
@@ -263,6 +268,30 @@ function settingsView(settings: Settings, onSaved: () => void | Promise<void>): 
   };
 
   const status = el("div", { className: "u-status" });
+  // 全人物の再計算。流派を変えると保存済みのファクトが別の流派のものになるので、
+  // 切り替えたら必ず走らせる。走らせないとチャートが空のまま出る。
+  const recomputeAll = async (): Promise<void> => {
+    const { persons } = await api<{ persons: Person[] }>(`/api/v1/uranai/person`);
+    let done = 0;
+    // 再計算の失敗は握り潰さない。サーバ側の例外で一部のファクトだけが欠けた状態になり得るため、
+    // 静かに成功したように見せるとデータの欠損に気づけない。
+    const failed: string[] = [];
+    const skipped: string[] = [];
+    for (const p of persons) {
+      status.textContent = `再計算中… (${++done}/${persons.length})`;
+      try {
+        await api(`/api/v1/uranai/astrology/person/${p.id}/compute`, { method: "POST", body: "{}" });
+      } catch (e) {
+        const msg = (e as Error).message;
+        // 400 は出生データ未入力など、その人物を計算できないという意味。設定保存の失敗ではない。
+        if (/^400\b/.test(msg)) skipped.push(p.label ?? p.id);
+        else failed.push(`${p.label ?? p.id}: ${msg}`);
+      }
+    }
+    if (failed.length) throw new Error(`再計算に失敗しました（${failed.length}/${persons.length}件）: ${failed.join(" / ")}`);
+    status.textContent = skipped.length ? `${skipped.length}件を対象外にしました（出生データ未入力）: ${skipped.join(", ")}` : "";
+  };
+
   const save = el("button", { className: "u-btn", textContent: "保存して全チャート再計算" });
   save.addEventListener("click", async () => {
     status.textContent = "保存中…";
@@ -281,26 +310,8 @@ function settingsView(settings: Settings, onSaved: () => void | Promise<void>): 
         rsInitial = rsSel.value;
       }
       // 設定は全人物のチャートに影響するため、保存済みの全チャートを再計算して反映。
-      const { persons } = await api<{ persons: Person[] }>(`/api/v1/uranai/person`);
-      let done = 0;
-      // 再計算の失敗は握り潰さない。サーバ側の例外で一部のファクトだけが欠けた状態になり得るため、
-      // 静かに成功したように見せるとデータの欠損に気づけない。
-      const failed: string[] = [];
-      const skipped: string[] = [];
-      for (const p of persons) {
-        status.textContent = `再計算中… (${++done}/${persons.length})`;
-        try {
-          await api(`/api/v1/uranai/astrology/person/${p.id}/compute`, { method: "POST", body: "{}" });
-        } catch (e) {
-          const msg = (e as Error).message;
-          // 400 は出生データ未入力など、その人物を計算できないという意味。設定保存の失敗ではない。
-          if (/^400\b/.test(msg)) skipped.push(p.label ?? p.id);
-          else failed.push(`${p.label ?? p.id}: ${msg}`);
-        }
-      }
+      await recomputeAll();
       clearMeanings(); // 流派が変わると意味も変わる
-      if (failed.length) throw new Error(`再計算に失敗しました（${failed.length}/${persons.length}件）: ${failed.join(" / ")}`);
-      status.textContent = skipped.length ? `${skipped.length}件を対象外にしました（出生データ未入力）: ${skipped.join(", ")}` : "";
       await onSaved();
     } catch (e) { status.textContent = `エラー: ${(e as Error).message}`; }
   });
