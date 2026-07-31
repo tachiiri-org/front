@@ -1,6 +1,6 @@
 // ウラナイ画面のルート描画とフォーム類。定数・型・ヘルパは ./parts、ホイール描画は ./wheel に分割。
 import {
-  SIGN_ORDER, SIGN_GLYPH, SIGN_NAME, SIGN_ELEMENT, SIGN_QUALITY, ELEMENT_CHAR, QUALITY_CHAR, PLANET_GLYPH, PLANET_ORDER, PLANET_NAME_LINES, ASPECT_INFO, ASPECT_ORDER, PATTERN_INFO, PATTERN_ORDER, SHAPE_INFO, SHAPE_ORDER, Person, Prefill, Settings, SETTING_FIELDS, Chart, Derived, Cycles, Profection, SolarArc, FixedStars, OutOfBounds, Firdaria, Synastry, Composite, Rectification, optionsOf, nameOf, ownOf, setOwn, usesPart, partsOn, allParts, setParts, isImplemented, loadMeanings, meaningOf, roleOf, clearMeanings, UranaiView, api, lonOf, fmtDeg, Birth, HOUSE_SYSTEM_JA, IANA_ZONES, FALLBACK_ZONES, CC_ZONE, offsetFromZone, el, selectEl, loadSettings,
+  SIGN_ORDER, SIGN_GLYPH, SIGN_NAME, SIGN_ELEMENT, SIGN_QUALITY, ELEMENT_CHAR, QUALITY_CHAR, PLANET_GLYPH, PLANET_ORDER, PLANET_NAME_LINES, ASPECT_INFO, ASPECT_ORDER, PATTERN_INFO, PATTERN_ORDER, SHAPE_INFO, SHAPE_ORDER, Person, Prefill, Settings, SETTING_FIELDS, Chart, Derived, Cycles, Profection, SolarArc, FixedStars, OutOfBounds, Firdaria, Synastry, Composite, Rectification, PlanetCycle, TransitSearch, optionsOf, nameOf, ownOf, setOwn, usesPart, partsOn, allParts, setParts, isImplemented, loadMeanings, meaningOf, roleOf, clearMeanings, UranaiView, api, lonOf, fmtDeg, Birth, HOUSE_SYSTEM_JA, IANA_ZONES, FALLBACK_ZONES, CC_ZONE, offsetFromZone, el, selectEl, loadSettings,
 } from "./parts";
 import { drawWheelPro } from "./wheel";
 
@@ -724,6 +724,70 @@ function chartView(chart: Chart, birth: Birth | null | undefined, personId: stri
     return box;
   };
 
+  // 天体の周期。ルディアが年齢の節目として用いる範囲。
+  const cycNode = (): HTMLElement => {
+    const box = el("div", {});
+    const out = el("div", {});
+    const load = async () => {
+      out.innerHTML = "";
+      out.append(el("div", { className: "u-pat-empty", textContent: "算出中…" }));
+      try {
+        const d = await api<PlanetCycle>(`/api/v1/uranai/astrology/person/${personId}/planet_cycle?until_age=90`);
+        out.innerHTML = "";
+        const tbl = (title: string, note: string, ms: PlanetCycle["saturn_stages"]) => {
+          out.append(el("div", { className: "u-tbl-title", textContent: title }));
+          if (note) out.append(el("div", { className: "u-pat-comp", textContent: note }));
+          out.append(ms.length
+            ? mkTable(["年齢", "日付", "内容"], ms.map((m) => [`${m.age.toFixed(1)}歳`, m.at, m.label]), [2])
+            : el("div", { className: "u-pat-empty", textContent: "該当なし" }));
+        };
+        tbl("土星の3段階", "土星の周期（約29.5年）は自己形成の3段階を区切る。第1周期は生物的なレベル、第2周期で個の自我が確立され、第3周期は霊的なレベルに向かう。", d.saturn_stages);
+        tbl("土星による象限の移り変わり", "運行の土星がチャートの4象限を渡るたび（平均で約7.4年ごと）、主観的な姿勢と社会との関係が組み直されるとされる。", d.saturn_quadrants);
+        tbl("天王星の12等分（7年期間）", "天王星の84年周期を12等分した7年ごとの区切り。黄経では出生の天王星から30度ずつにあたる。これがルディアの言う7年周期で、土星の4分の1ではない。", d.uranus_septenaries);
+        tbl("木星回帰", "社会的・経済的な浮き沈みの周期（約11.9年）。", d.jupiter_returns);
+        out.append(el("div", { className: "u-tbl-title", textContent: "回帰を持たない天体" }));
+        out.append(mkTable(["天体", "周期", "扱い"], d.no_return.map((x) =>
+          [bodyLabel(x.planet), `約${x.period_years}年`, x.reason]), [2]));
+      } catch (e) {
+        out.innerHTML = "";
+        out.append(el("div", { className: "u-status", textContent: `エラー: ${(e as Error).message}` }));
+      }
+    };
+    box.append(out); void load();
+    return box;
+  };
+
+  // 期間の探索。経過が「この日はどうか」なのに対し、こちらは「いつか」を探す。
+  const searchNode = (): HTMLElement => {
+    const box = el("div", {});
+    const y = new Date().getFullYear();
+    const fromIn = el("input", { type: "date", value: `${y}-01-01` }) as HTMLInputElement;
+    const toIn = el("input", { type: "date", value: `${y + 2}-12-31` }) as HTMLInputElement;
+    const out = el("div", {});
+    const load = async () => {
+      out.innerHTML = "";
+      out.append(el("div", { className: "u-pat-empty", textContent: "探索中…" }));
+      try {
+        const d = await api<TransitSearch>(`/api/v1/uranai/astrology/person/${personId}/transit_search?from=${fromIn.value}&to=${toIn.value}`);
+        out.innerHTML = "";
+        out.append(el("div", { className: "u-pat-comp", textContent: `${d.from} 〜 ${d.to} のうち、運行の木星・土星・天王星・海王星・冥王星が出生の太陽・月・アセンダント・MC に合／衝／スクエアで正確に当たる日。逆行で同じ角度を3回通ることがある。` }));
+        out.append(d.hits.length
+          ? mkTable(["日付", "運行", "出生", "種別"], d.hits.map((h) =>
+              [h.at, bodyLabel(h.transit), bodyLabel(h.natal), ASPECT_INFO[h.type]?.label ?? h.type]))
+          : el("div", { className: "u-pat-empty", textContent: "この期間に該当はありません" }));
+      } catch (e) {
+        out.innerHTML = "";
+        out.append(el("div", { className: "u-status", textContent: `エラー: ${(e as Error).message}` }));
+      }
+    };
+    const btn = el("button", { className: "u-btn u-btn-sm", textContent: "探索" });
+    btn.addEventListener("click", () => void load());
+    box.append(el("div", { className: "u-row" }, [el("label", { textContent: "開始" }), fromIn,
+      el("label", { textContent: "終了" }), toIn, btn]), out);
+    void load();
+    return box;
+  };
+
   // 象限。地平線と子午線が作る4つのクォーター。ルディアはハウスをこの単位でも読む。
   const quadTbl = mkTable(["象限", "ハウス", "意味"], (chart.quadrants ?? []).map((q) => [
     QUAD_JA[q.id] ?? q.id,
@@ -732,10 +796,16 @@ function chartView(chart: Chart, birth: Birth | null | undefined, personId: stri
   ]), [2]);
   // ルネーション: 太陽から測った月の離角。PoF の地平線上下がこれで決まる。
   const lun = chart.lunation;
+  // 位相の言い回しは原典どおり。上弦＝衝動を受け取る構造を構築する期間、
+  // 下弦＝経験から意味を抽出し同化させる期間。8分割は慣用なのでそう明記する。
+  const LUN_NODE: Record<string, string> = { new: "新月（目的の種まき）", first_quarter: "上弦（第1クォーター）",
+    full: "満月（構築された構造への目的の浸透と結実）", last_quarter: "下弦（最終クォーター）" };
   const lunTbl = mkTable(["項目", "値"], lun
     ? [["太陽から測った月の離角", `${lun.elongation.toFixed(1)}°`],
-       ["位相", lun.phase === "waxing" ? "上弦（合から衝へ向かう）" : "下弦（衝から合へ戻る）"],
-       ["クォーター", LUN_Q[lun.quarter] ?? String(lun.quarter)]]
+       ["位相", lun.phase === "waxing" ? "上弦（合から衝へ。衝動を受け取る構造や器官を構築する期間）" : "下弦（衝から合へ。経験から意味を抽出し同化させる期間）"],
+       ["節目", lun.node ? LUN_NODE[lun.node] ?? lun.node : "節目にはあたらない（前後6度以内が節目）"],
+       ["クォーター", LUN_Q[lun.quarter] ?? String(lun.quarter)],
+       ["8分割（慣用）", lun.octant ? `第${lun.octant}区分 ／ 原典には45度ごとの区切りは書かれていない。ルディアの定義ではなく占星術の慣用` : "—"]]
     : [["算出できません", "—"]], [1]);
   // インターセプト（どのカスプにも現れないサイン）。ホイールには描かず表で示す。
   const icptTbl = mkTable(["サイン", "収まるハウス"], (chart.interceptions ?? []).length
@@ -1348,6 +1418,8 @@ function chartView(chart: Chart, birth: Birth | null | undefined, personId: stri
     ...(usesPart("synastry") ? [{ label: "シナストリー", node: pairNode("synastry") }] : []),
     ...(usesPart("composite") ? [{ label: "コンポジット", node: pairNode("composite") }] : []),
     ...(usesPart("rectification") ? [{ label: "出生時刻の修正", node: rectNode() }] : []),
+    ...(usesPart("planet_cycle") ? [{ label: "天体の周期", node: cycNode() }] : []),
+    ...(usesPart("transit_search") ? [{ label: "期間の探索", node: searchNode() }] : []),
     ...(usesPart("quadrant") ? [{ label: "象限", node: quadTbl }] : []),
     ...(usesPart("lunation") ? [{ label: "ルネーション", node: lunTbl }] : []),
     { label: `アスペクト(${chart.aspects.length})`, node: aspectNode },

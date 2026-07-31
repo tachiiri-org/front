@@ -68,7 +68,13 @@ export type Derived = {
   internal: Array<{ a: string; b: string; type: string; orb: number; phase: "waxing" | "waning" }>;
   lunation: Lunation | null;
 };
-export type Lunation = { elongation: number; phase: "waxing" | "waning"; quarter: 1 | 2 | 3 | 4 };
+/**
+ * ルネーション。node はルディアが明示している4つの節目。
+ * octant は45度ずつの8分割で、これは占星術の慣用。原典に度数の区切りは書かれていない。
+ */
+export type Lunation = { elongation: number; phase: "waxing" | "waning"; quarter: 1 | 2 | 3 | 4;
+  node?: "new" | "first_quarter" | "full" | "last_quarter" | null;
+  octant?: number; octant_is_convention?: boolean };
 // 時間軸のサイクル。リターン図・進行のルネーションの節目・食。
 export type Cycles = {
   target: string;
@@ -302,3 +308,14 @@ export type Rectification = { recorded: string; span_minutes: number; step_minut
   candidates: Array<{ offset_minutes: number; ascendant: number; asc_sign: string;
     midheaven: number; mc_sign: string; score: number;
     hits: Array<{ date: string; directed: string; angle: string; type: string; orb: number }> }> };
+
+/** 天体の周期の節目。 */
+export type PlanetCycle = { birth: string;
+  saturn_stages: CycleMilestone[]; saturn_quadrants: CycleMilestone[];
+  uranus_septenaries: CycleMilestone[]; jupiter_returns: CycleMilestone[];
+  no_return: Array<{ planet: string; period_years: number; reason: string }> };
+export type CycleMilestone = { at: string; age: number; label: string; kind: string };
+
+/** 期間の探索。運行天体が出生の点に正確に当たる日。 */
+export type TransitSearch = { from: string; to: string;
+  hits: Array<{ at: string; transit: string; natal: string; type: string; exact_longitude: number }> };
