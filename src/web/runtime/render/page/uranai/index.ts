@@ -1,6 +1,6 @@
 // ウラナイ画面のルート描画とフォーム類。定数・型・ヘルパは ./parts、ホイール描画は ./wheel に分割。
 import {
-  SIGN_ORDER, SIGN_GLYPH, SIGN_NAME, SIGN_ELEMENT, SIGN_QUALITY, ELEMENT_CHAR, QUALITY_CHAR, PLANET_GLYPH, PLANET_ORDER, PLANET_NAME_LINES, ASPECT_INFO, ASPECT_ORDER, PATTERN_INFO, PATTERN_ORDER, SHAPE_INFO, SHAPE_ORDER, Person, Prefill, Settings, SETTING_FIELDS, Chart, Derived, Cycles, Profection, SolarArc, FixedStars, OutOfBounds, Firdaria, Synastry, Composite, Rectification, PlanetCycle, TransitSearch, PrimaryDirection, TimeLords, Dasha, optionsOf, nameOf, ownOf, setOwn, usesPart, partsOn, allParts, setParts, isImplemented, loadMeanings, meaningOf, conventionOf, sabianReady, sabianCountOf, usesTiming, timingPrimaryOf, allTimingShapes, setTiming, rulesetIsEditable, rulesetNoteOf, roleOf, clearMeanings, UranaiView, api, lonOf, fmtDeg, Birth, HOUSE_SYSTEM_JA, IANA_ZONES, FALLBACK_ZONES, CC_ZONE, offsetFromZone, el, selectEl, loadSettings,
+  SIGN_ORDER, SIGN_GLYPH, SIGN_NAME, SIGN_ELEMENT, SIGN_QUALITY, ELEMENT_CHAR, QUALITY_CHAR, PLANET_GLYPH, PLANET_ORDER, PLANET_NAME_LINES, ASPECT_INFO, ASPECT_ORDER, PATTERN_INFO, PATTERN_ORDER, SHAPE_INFO, SHAPE_ORDER, Person, Prefill, Settings, SETTING_FIELDS, Chart, Derived, Cycles, Profection, SolarArc, FixedStars, OutOfBounds, Firdaria, Synastry, Composite, Rectification, PlanetCycle, TransitSearch, PrimaryDirection, TimeLords, Dasha, VargaCharts, Yogas, optionsOf, nameOf, ownOf, setOwn, usesPart, partsOn, allParts, setParts, isImplemented, loadMeanings, meaningOf, conventionOf, sabianReady, sabianCountOf, usesTiming, timingPrimaryOf, allTimingShapes, setTiming, rulesetIsEditable, rulesetNoteOf, roleOf, clearMeanings, UranaiView, api, lonOf, fmtDeg, Birth, HOUSE_SYSTEM_JA, IANA_ZONES, FALLBACK_ZONES, CC_ZONE, offsetFromZone, el, selectEl, loadSettings,
 } from "./parts";
 import { drawWheelPro } from "./wheel";
 
@@ -1081,6 +1081,65 @@ function chartView(chart: Chart, birth: Birth | null | undefined, personId: stri
     return box;
   };
 
+  // 分割図（ヴァルガ）。サインをN等分して別のサインへ写した副次的な図。
+  const vargaNode = (): HTMLElement => {
+    const box = el("div", {});
+    const sel = el("select", { className: "u-fi" }) as HTMLSelectElement;
+    const out = el("div", {});
+    const SIGN_BY_INDEX = (i: number) => SIGN_NAME[SIGN_ORDER[i]] ?? String(i);
+    const load = async () => {
+      out.innerHTML = "";
+      out.append(el("div", { className: "u-pat-empty", textContent: "算出中…" }));
+      try {
+        const d = await api<VargaCharts>(`/api/v1/uranai/astrology/person/${personId}/varga${sel.value ? `?varga=${sel.value}` : ""}`);
+        if (!sel.options.length) {
+          for (const v of d.all_vargas) sel.append(el("option", { value: v.id, textContent: `${v.id} ${v.name}` }));
+          sel.value = "D9"; // ナヴァームシャは出生図に次いで重く見るので既定にする
+        }
+        out.innerHTML = "";
+        const c = d.charts[0];
+        const info = d.all_vargas.find((v) => v.id === c.varga);
+        out.append(el("div", { className: "u-pat-comp", textContent: `${info?.id} ${info?.name}（サインを${info?.divisions}等分）— ${info?.meaning}。アヤナムシャは ${d.ayanamsha}。ラグナは ${c.lagna === null ? "—" : SIGN_BY_INDEX(c.lagna)}。` }));
+        out.append(mkTable(["天体", "サイン", "室"], c.placements.map((p) =>
+          [bodyLabel(p.planet), SIGN_BY_INDEX(p.sign), p.house === null ? "—" : `${p.house}室`])));
+      } catch (e) {
+        out.innerHTML = "";
+        out.append(el("div", { className: "u-status", textContent: `エラー: ${(e as Error).message}` }));
+      }
+    };
+    sel.addEventListener("change", () => void load());
+    box.append(el("div", { className: "u-row" }, [el("label", { textContent: "分割図" }), sel]), out);
+    void load();
+    return box;
+  };
+
+  // ヨーガ。成立したものを先に出し、条件も併記する（何を判定したのかが分からないと使えない）。
+  const yogaNode = (): HTMLElement => {
+    const box = el("div", {});
+    const out = el("div", {});
+    const load = async () => {
+      out.innerHTML = "";
+      out.append(el("div", { className: "u-pat-empty", textContent: "算出中…" }));
+      try {
+        const d = await api<Yogas>(`/api/v1/uranai/astrology/person/${personId}/yoga`);
+        out.innerHTML = "";
+        const formed = d.yogas.filter((y) => y.formed), not = d.yogas.filter((y) => !y.formed);
+        out.append(el("div", { className: "u-pat-comp", textContent: `古典に載るヨーガは数百あり、成立条件も文献で異なる。ここで判定しているのは条件が一義に定まる ${d.yogas.length} 種のみで、網羅ではない。` }));
+        out.append(el("div", { className: "u-tbl-title", textContent: `成立しているもの（${formed.length}）` }));
+        out.append(formed.length
+          ? mkTable(["ヨーガ", "根拠", "成立条件"], formed.map((y) => [y.name, y.detail, y.condition]), [1, 2])
+          : el("div", { className: "u-pat-empty", textContent: "成立しているヨーガはありません" }));
+        out.append(el("div", { className: "u-tbl-title", textContent: `成立していないもの（${not.length}）` }));
+        out.append(mkTable(["ヨーガ", "理由", "成立条件"], not.map((y) => [y.name, y.detail, y.condition]), [1, 2]));
+      } catch (e) {
+        out.innerHTML = "";
+        out.append(el("div", { className: "u-status", textContent: `エラー: ${(e as Error).message}` }));
+      }
+    };
+    box.append(out); void load();
+    return box;
+  };
+
   // 象限。地平線と子午線が作る4つのクォーター。ルディアはハウスをこの単位でも読む。
   const quadTbl = mkTable(["象限", "ハウス", "意味"], (chart.quadrants ?? []).map((q) => [
     QUAD_JA[q.id] ?? q.id,
@@ -1743,6 +1802,8 @@ function chartView(chart: Chart, birth: Birth | null | undefined, personId: stri
     ...(usesPart("time_lord") ? [{ label: "時期支配星", node: lordNode() }] : []),
     ...(usesPart("nakshatra") ? [{ label: "ナクシャトラ", node: nakTbl }] : []),
     ...(usesPart("dasha") ? [{ label: "ダシャー", node: dashaNode() }] : []),
+    ...(usesPart("varga") ? [{ label: "分割図", node: vargaNode() }] : []),
+    ...(usesPart("yoga") ? [{ label: "ヨーガ", node: yogaNode() }] : []),
     ...(usesPart("quadrant") ? [{ label: "象限", node: quadTbl }] : []),
     ...(usesPart("lunation") ? [{ label: "ルネーション", node: lunTbl }] : []),
     { label: `アスペクト(${chart.aspects.length})`, node: aspectNode },

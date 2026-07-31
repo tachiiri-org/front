@@ -394,3 +394,13 @@ export type Dasha = { at: string; start_lord: string; balance_years: number;
   current: Array<{ level: number; lord: string; from: string; to: string }>;
   periods: Array<{ lord: string; from: string; to: string; level: number;
                    sub: Array<{ lord: string; from: string; to: string; level: number }> }> };
+
+/** 分割図（ヴァルガ）。 */
+export type VargaCharts = { ayanamsha: string;
+  all_vargas: Array<{ id: string; name: string; divisions: number; meaning: string }>;
+  charts: Array<{ varga: string; lagna: number | null;
+                  placements: Array<{ planet: string; sign: number; house: number | null }> }> };
+
+/** ヨーガ。条件が一義に定まるものだけを判定する。 */
+export type Yogas = { lagna: number;
+  yogas: Array<{ id: string; name: string; formed: boolean; detail: string; condition: string }> };
