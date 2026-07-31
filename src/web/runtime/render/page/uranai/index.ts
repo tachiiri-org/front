@@ -91,7 +91,6 @@ function rulesetControls(getRuleset: () => string | undefined, getStatus: () => 
     timingBox.innerHTML = "";
     if (!allTimingShapes().length) return;
     timingBox.append(el("div", { className: "u-set-title", textContent: "時期の読み方" }));
-    timingBox.append(el("div", { className: "u-pat-comp", textContent: "流派によって時期の主軸が違う。ルディアはサイクルの現在地、伝統派は時期支配星、現代西洋は接触の暦。主軸にした形のタブが時期のタブ群の先頭に出る。" }));
     const save = (shapes: string[], primary: string) =>
       api<{ shapes: string[]; primary: string }>(`/api/v1/uranai/astrology/timing`,
         { method: "PUT", body: JSON.stringify({ ruleset: getRuleset(), shapes, primary }) })
@@ -163,10 +162,6 @@ function settingsView(settings: Settings, onSaved: () => void | Promise<void>): 
   const NEW_RULESET = "__new__";
   let rsInitial = "default";
   let rsPrev = "default";
-  const lockNote = el("div", { className: "u-lock-note" });
-  // 流派の但し書き。実装が体系を満たしていない点をここで伝える。
-  const noteBox = el("div", { className: "u-part-disabled" });
-  noteBox.style.display = "none";
   // 自分で作った流派だけ消せる。組込みと出発点のカスタムには出さない。
   const delBtn = el("button", { className: "u-btn-sm u-btn-ghost", type: "button", textContent: "削除" });
   delBtn.style.display = "none";
@@ -185,7 +180,6 @@ function settingsView(settings: Settings, onSaved: () => void | Promise<void>): 
       .catch((e) => { status.textContent = `エラー: ${(e as Error).message}`; });
   });
   grid.append(el("div", { className: "u-set-row" }, [el("label", { textContent: "既定の流派" }), rsSel, delBtn]));
-  grid.append(el("div", { className: "u-lock-note", textContent: "ここで選ぶのは、人物ごとに流派を決めていない場合の既定です。人物ごとの流派はその人の基本情報から選べます。既定を変えても、人物ごとに設定済みの人は変わりません。" }));
   // 流派を切り替えたら、その流派の値で画面を組み直す（ロックされた項目の表示も変わる）。
   rsSel.addEventListener("change", () => {
     // 新規作成はいま選んでいる流派を土台にする。設定値をそのまま引き継ぐのが目的。
@@ -237,12 +231,7 @@ function settingsView(settings: Settings, onSaved: () => void | Promise<void>): 
         if (v) (settings as Record<string, string>)[f.key as string] = v;
       }
     } catch { /* 取れなければ前の値のまま出す */ }
-    noteBox.textContent = rulesetNoteOf();
-    noteBox.style.display = rulesetNoteOf() ? "" : "none";
     delBtn.style.display = editable && rsId !== "default" ? "" : "none";
-    lockNote.textContent = editable
-      ? "この流派は編集できます。下の項目・部品・時期の読み方を変えられます。"
-      : "この流派は組込みで、体系の定義そのものなので変更できません。変えたい場合は「＋ 新しい流派」を選んでください。";
     renderTiming();
     renderParts();
   };
@@ -292,19 +281,18 @@ function settingsView(settings: Settings, onSaved: () => void | Promise<void>): 
 
   // 流派が決める項目と、自分で決める項目を分ける。
   // 前者は教義そのものなので個人の好みで上書きさせない。実効値は見せる。
+  // 流派が決める項目だけを出す。天体暦は計算精度の選択で、読みの結果を変えるものでは
+  // ないので画面には出さない（流派の既定のまま使う）。
   const lockedGrid = el("div", { className: "u-set-grid" });
   const ownGrid = el("div", { className: "u-set-grid" });
   for (const f of SETTING_FIELDS) {
+    if (!f.byRuleset) continue;
     const sel = selectEl(f.options, settings[f.key]);
     sels[f.key] = sel;
-    if (f.byRuleset) {
-      sel.disabled = true;
-      lockedGrid.append(el("div", { className: "u-set-row u-set-locked" }, [
-        el("label", {}, [el("span", { className: "u-lock-ic", textContent: "固定" }), el("span", { textContent: f.label })]), sel,
-      ]));
-    } else {
-      ownGrid.append(el("div", { className: "u-set-row" }, [el("label", { textContent: f.label }), sel]));
-    }
+    sel.disabled = true;
+    lockedGrid.append(el("div", { className: "u-set-row u-set-locked" }, [
+      el("label", {}, [el("span", { className: "u-lock-ic", textContent: "固定" }), el("span", { textContent: f.label })]), sel,
+    ]));
   }
   const { timingBox, partsBox, renderTiming, renderParts } =
     rulesetControls(() => rsSel.value || undefined, () => status);
@@ -334,7 +322,7 @@ function settingsView(settings: Settings, onSaved: () => void | Promise<void>): 
     status.textContent = skipped.length ? `${skipped.length}件を対象外にしました（出生データ未入力）: ${skipped.join(", ")}` : "";
   };
 
-  const save = el("button", { className: "u-btn", textContent: "保存して全チャート再計算" });
+  const save = el("button", { className: "u-btn", textContent: "全チャートを再計算" });
   save.addEventListener("click", async () => {
     status.textContent = "保存中…";
     try {
@@ -359,11 +347,8 @@ function settingsView(settings: Settings, onSaved: () => void | Promise<void>): 
   });
   void initRuleset();
   wrap.append(
-    el("div", { className: "u-settings-note", textContent: "この設定はあなた（ユーザー）の既定です。人物ごとに流派を決めている場合は、そちらが優先されます。" }),
-    el("div", { className: "u-set-title", textContent: "既定の流派" }), grid, lockNote, noteBox,
-    el("div", { className: "u-set-title", textContent: "流派が決める（変更できない）" }), lockedGrid,
-    el("div", { className: "u-set-title", textContent: "自分で決める" }), ownGrid,
-    timingBox, partsBox, save, status,
+    el("div", { className: "u-set-title", textContent: "既定の流派" }), grid,
+    lockedGrid, ownGrid, timingBox, partsBox, save, status,
   );
   return wrap;
 }
@@ -1897,9 +1882,6 @@ function chartView(chart: Chart, birth: Birth | null | undefined, personId: stri
     const rsStatus = el("div", { className: "u-status" });
     const rsSel = el("select", { className: "u-set-sel" }) as HTMLSelectElement;
     const lockedGrid = el("div", { className: "u-set-grid" });
-    const noteBox = el("div", { className: "u-part-disabled" });
-    noteBox.style.display = "none";
-    const lockNote = el("div", { className: "u-lock-note" });
     const { timingBox, partsBox, renderTiming, renderParts } =
       rulesetControls(() => undefined, () => rsStatus); // 流派は人物の実効値（既定は送らない＝人物優先で解決される）
     const renderLocked = (eff: Settings) => {
@@ -1938,13 +1920,6 @@ function chartView(chart: Chart, birth: Birth | null | undefined, personId: stri
         for (const lg of LINEAGE_ORDER) { const og = groups.get(lg); if (og?.children.length) rsSel.append(og); }
         if (own.children.length) rsSel.append(own);
         rsSel.value = cur.ruleset_id ?? "";
-        const editable = (ref.rulesets ?? []).find((r) => r.id === cur.effective)?.editable !== false;
-        const effName = (ref.rulesets ?? []).find((r) => r.id === cur.effective)?.name ?? cur.effective;
-        lockNote.textContent = editable
-          ? `いま適用されているのは「${effName}」。この流派は編集できます。`
-          : `いま適用されているのは「${effName}」。組込みの流派なので、時期の読み方と部品は変更できません。`;
-        noteBox.textContent = rulesetNoteOf();
-        noteBox.style.display = rulesetNoteOf() ? "" : "none";
         renderLocked(await api<Settings>(`/api/v1/uranai/astrology/settings?ruleset=${encodeURIComponent(cur.effective)}`));
         renderTiming();
         renderParts();
@@ -1964,12 +1939,9 @@ function chartView(chart: Chart, birth: Birth | null | undefined, personId: stri
         .catch((e) => { rsStatus.textContent = `エラー: ${(e as Error).message}`; });
     });
     personSettingsNode.append(
-      el("div", { className: "u-settings-note", textContent: "流派の選択だけがこの人物ごとの設定です。時期の読み方と使う部品は流派そのものの設定なので、同じ流派を使う他の人物にも反映されます。" }),
       el("div", { className: "u-set-title", textContent: "この人物の流派" }),
       el("div", { className: "u-set-grid" }, [el("div", { className: "u-set-row" }, [el("label", { textContent: "流派" }), rsSel])]),
-      lockNote, noteBox,
-      el("div", { className: "u-set-title", textContent: "流派が決める（変更できない）" }), lockedGrid,
-      timingBox, partsBox, rsStatus,
+      lockedGrid, timingBox, partsBox, rsStatus,
     );
     void load();
   }
@@ -2205,7 +2177,13 @@ export async function renderUranai(container: HTMLElement): Promise<void> {
     .u-aspect-toggles{display:flex;flex-wrap:wrap;align-items:center;gap:6px 10px;margin:6px 0 10px;max-width:560px}
     .u-tg-title{font-size:12px;color:#666;margin-right:2px}
     .u-tg-chip{display:inline-flex;align-items:center;gap:5px;font-size:12px;color:#444;cursor:pointer;user-select:none}
-    .u-tg-chip input{cursor:pointer;margin:0}
+    .u-tg-chip input{cursor:pointer;margin:0;accent-color:#4A90C2}
+    /* 変更できない流派ではチェックが無効になる。ブラウザ既定の淡色だと選択の有無が
+       読み取れないので、色を落とさず背景と枠で選択状態を示す。 */
+    .u-tg-chip input:disabled{cursor:default;opacity:1}
+    .u-parts-grid .u-tg-chip{border:1px solid transparent;border-radius:11px;padding:2px 8px;margin:-2px 0}
+    .u-parts-grid .u-tg-chip:has(input:checked){background:#4A90C21f;border-color:#4A90C266;color:#1f2937;font-weight:600}
+    [data-theme=dark] .u-parts-grid .u-tg-chip:has(input:checked){background:#4A90C233;border-color:#4A90C2aa;color:#e8edf3}
     .u-tg-sw{width:14px;height:3px;border-radius:2px;display:inline-block}
     /* アスペクトはボタン風トグル。既定オフ（薄い枠）、オンで塗り。 */
     .u-tg-btn{display:inline-flex;align-items:center;gap:5px;font-size:12px;color:#888;cursor:pointer;user-select:none;
