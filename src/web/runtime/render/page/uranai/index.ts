@@ -111,15 +111,8 @@ function rulesetControls(getRuleset: () => string | undefined, getStatus: () => 
       grid.append(lb);
     }
     timingBox.append(grid);
-    const psel = el("select", { className: "u-fi" }) as HTMLSelectElement;
-    for (const id of allTimingShapes()) {
-      if (!usesTiming(id)) continue;
-      psel.append(el("option", { value: id, textContent: nameOf("timing_shape", id) }));
-    }
-    psel.value = timingPrimaryOf();
-    psel.disabled = !rulesetIsEditable();
-    psel.addEventListener("change", () => void save(allTimingShapes().filter((x) => usesTiming(x)), psel.value));
-    timingBox.append(el("div", { className: "u-set-row" }, [el("label", { textContent: "主軸" }), psel]));
+    // 主軸を選ぶ欄は置かない。タブの並び順を決めるだけの値で、流派の側に既定がある。
+    // 使う形から外れた場合はサーバ側が使っている形の先頭へ寄せる。
   };
   const renderParts = () => {
     partsBox.innerHTML = "";
@@ -1920,12 +1913,20 @@ function chartView(chart: Chart, birth: Birth | null | undefined, personId: stri
         for (const lg of LINEAGE_ORDER) { const og = groups.get(lg); if (og?.children.length) rsSel.append(og); }
         if (own.children.length) rsSel.append(own);
         rsSel.value = cur.ruleset_id ?? "";
+        rsSaved = rsSel.value;
+        rsSave.disabled = true;
         renderLocked(await api<Settings>(`/api/v1/uranai/astrology/settings?ruleset=${encodeURIComponent(cur.effective)}`));
         renderTiming();
         renderParts();
       } catch (e) { rsStatus.textContent = `エラー: ${(e as Error).message}`; }
     };
-    rsSel.addEventListener("change", () => {
+    // 流派は選んだ瞬間には切り替えない。計算とタブの入れ替えが走るので、保存で確定させる。
+    const rsSave = el("button", { className: "u-btn u-btn-sm", type: "button", textContent: "保存" });
+    rsSave.disabled = true;
+    let rsSaved = "";
+    rsSel.addEventListener("change", () => { rsSave.disabled = rsSel.value === rsSaved; rsStatus.textContent = ""; });
+    rsSave.addEventListener("click", () => {
+      rsSave.disabled = true;
       rsStatus.textContent = "切り替え中…";
       void api(`/api/v1/uranai/astrology/person/${personId}/ruleset`,
         { method: "PUT", body: JSON.stringify({ ruleset_id: rsSel.value || null }) })
@@ -1936,11 +1937,11 @@ function chartView(chart: Chart, birth: Birth | null | undefined, personId: stri
           rsStatus.textContent = "";
           await onSaved(label);
         })
-        .catch((e) => { rsStatus.textContent = `エラー: ${(e as Error).message}`; });
+        .catch((e) => { rsStatus.textContent = `エラー: ${(e as Error).message}`; rsSave.disabled = false; });
     });
     personSettingsNode.append(
       el("div", { className: "u-set-title", textContent: "この人物の流派" }),
-      el("div", { className: "u-set-grid" }, [el("div", { className: "u-set-row" }, [el("label", { textContent: "流派" }), rsSel])]),
+      el("div", { className: "u-set-grid" }, [el("div", { className: "u-set-row" }, [el("label", { textContent: "流派" }), rsSel, rsSave])]),
       lockedGrid, timingBox, partsBox, rsStatus,
     );
     void load();
