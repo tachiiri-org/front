@@ -217,7 +217,16 @@ export const selectEl = (options: Array<[string, string]>, value: string): HTMLS
 // 流派を切り替えると内容が変わるので、設定保存時に clearMeanings() で捨てる。
 type MeaningMap = Record<string, Record<string, string>>;
 let meaningCache: MeaningMap | null = null;
-export function clearMeanings(): void { meaningCache = null; roleCache = null; nameCache = null; ownCache = null; }
+/**
+ * 流派スコープのキャッシュを全部捨てる。流派を切り替えたら必ず呼ぶ。
+ * 意味だけ捨てて部品や時期の読み方を残すと、前の流派の選択が画面に残り続ける。
+ */
+export function clearMeanings(): void {
+  meaningCache = null; roleCache = null; nameCache = null; ownCache = null;
+  partCache = null; conventionCache = []; sabianCount = 0;
+  timingShapes = []; timingPrimary = "contact"; allTimingIds = [];
+  rulesetEditable = true; rulesetNote = "";
+}
 export async function loadMeanings(): Promise<void> {
   if (meaningCache) return;
   try {
@@ -297,13 +306,13 @@ export const setOwn = (kind: string, id: string, value: string): void => {
 let nameCache: MeaningMap | null = null;
 export const nameOf = (kind: string, id: string): string => nameCache?.[kind]?.[id] ?? id;
 // 採用している部品。画面はこれに従ってタブを出し分ける。
-let partCache: { parts: string[]; all: string[]; impl: string[] } = { parts: [], all: [], impl: [] };
-export const partsOn = (): string[] => partCache.parts;
-export const allParts = (): string[] => partCache.all;
-export const usesPart = (id: string): boolean => partCache.parts.length === 0 || partCache.parts.includes(id);
-export const setParts = (list: string[]): void => { partCache = { ...partCache, parts: list.slice() }; };
+let partCache: { parts: string[]; all: string[]; impl: string[] } | null = { parts: [], all: [], impl: [] };
+export const partsOn = (): string[] => partCache?.parts ?? [];
+export const allParts = (): string[] => partCache?.all ?? [];
+export const usesPart = (id: string): boolean => !partCache || partCache.parts.length === 0 || partCache.parts.includes(id);
+export const setParts = (list: string[]): void => { partCache = { all: [], impl: [], ...(partCache ?? {}), parts: list.slice() }; };
 // 算出まで実装してある部品。枠だけのものは選んでも画面に出ない。
-export const isImplemented = (id: string): boolean => partCache.impl.includes(id);
+export const isImplemented = (id: string): boolean => partCache?.impl.includes(id) ?? false;
 
 export const optionsOf = (kind: string): Array<{ id: string; label: string }> =>
   Object.entries(nameCache?.[kind] ?? {}).map(([id, label]) => ({ id, label }));
