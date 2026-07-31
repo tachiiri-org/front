@@ -97,7 +97,14 @@ function settingsView(settings: Settings, onSaved: () => void | Promise<void>): 
     if (!confirm(`流派「${nm}」を削除しますか？\n\nこの流派で計算した結果と、この流派で書いた解釈も一緒に消えます。元に戻せません。`)) return;
     status.textContent = "削除中…";
     void api(`/api/v1/uranai/astrology/ruleset/${encodeURIComponent(id)}`, { method: "DELETE" })
-      .then(async () => { clearMeanings(); status.textContent = ""; await onSaved(); })
+      .then(async () => {
+        // 消した流派を選択肢から外し、寄せ先（カスタム）の内容で描き直す。
+        rsSel.innerHTML = "";
+        await initRuleset();
+        await recomputeAll();
+        status.textContent = "";
+        await onSaved();
+      })
       .catch((e) => { status.textContent = `エラー: ${(e as Error).message}`; });
   });
   grid.append(el("div", { className: "u-set-row" }, [el("label", { textContent: "流派" }), rsSel, delBtn]));
@@ -114,22 +121,55 @@ function settingsView(settings: Settings, onSaved: () => void | Promise<void>): 
         .then(async (r) => {
           await api(`/api/v1/uranai/astrology/preference`, { method: "PUT", body: JSON.stringify({ ruleset_id: r.ruleset }) });
           await recomputeAll();
-          clearMeanings(); status.textContent = ""; await onSaved();
+          // 作った流派は選択肢に無いので、一覧から作り直す。
+          rsSel.innerHTML = "";
+          await initRuleset();
+          status.textContent = "";
+          await onSaved();
         })
         .catch((e) => { status.textContent = `エラー: ${(e as Error).message}`; rsSel.value = base; });
       return;
     }
     rsPrev = rsSel.value;
-    // 選び直した流派の値を読み直して、ロック項目の表示と編集可否を合わせる。
+    // 選び直した流派の値を読み直して、部品・時期・ロック項目の表示を合わせる。
     void (async () => {
       try {
-        await api(`/api/v1/uranai/astrology/preference`, { method: "PUT", body: JSON.stringify({ ruleset_id: rsSel.value }) });
+        const id = rsSel.value;
+        await api(`/api/v1/uranai/astrology/preference`, { method: "PUT", body: JSON.stringify({ ruleset_id: id }) });
         // 流派ごとに保存するファクトが違うので、切り替えたら計算し直す。
         await recomputeAll();
-        clearMeanings(); await onSaved();
+        await applyRuleset(id, rulesetEditableMap.get(id) !== false);
+        await onSaved();
       } catch (e) { status.textContent = `エラー: ${(e as Error).message}`; }
     })();
   });
+  /**
+   * 流派スコープの表示を、いま選ばれている流派の内容で描き直す。
+   * 部品・時期の読み方・ロックされた項目・但し書き・編集の可否は全て流派ごとに違うので、
+   * 流派を切り替えたら必ずここを通す。通さないと前の流派の選択が画面に残る。
+   */
+  const applyRuleset = async (rsId: string, editable: boolean) => {
+    clearMeanings();
+    await loadMeanings();
+    // 流派が決める項目は、その流派での実効値を出す。
+    try {
+      const eff = await api<Settings>(`/api/v1/uranai/astrology/settings?ruleset=${encodeURIComponent(rsId)}`);
+      for (const f of SETTING_FIELDS) {
+        const v = (eff as unknown as Record<string, string>)[f.key as string];
+        if (v && sels[f.key]) sels[f.key]!.value = v;
+        if (v) (settings as Record<string, string>)[f.key as string] = v;
+      }
+    } catch { /* 取れなければ前の値のまま出す */ }
+    noteBox.textContent = rulesetNoteOf();
+    noteBox.style.display = rulesetNoteOf() ? "" : "none";
+    delBtn.style.display = editable && rsId !== "default" ? "" : "none";
+    lockNote.textContent = editable
+      ? "この流派は編集できます。下の項目・部品・時期の読み方を変えられます。"
+      : "この流派は組込みで、体系の定義そのものなので変更できません。変えたい場合は「＋ 新しい流派」を選んでください。";
+    renderTiming();
+    renderParts();
+  };
+
   // 参照データを読んでから流派の一覧・ロックの注記・部品・時期の欄を描く。
   // 定義順の都合で、実際の呼び出しは renderParts / renderTiming を組んだ後で行う。
   const initRuleset = async () => {
@@ -167,19 +207,11 @@ function settingsView(settings: Settings, onSaved: () => void | Promise<void>): 
       rsSel.value = rsInitial;
       // 編集の可否はいま取った一覧から決める。意味のキャッシュは設定画面を直接開いた
       // 場合まだ読まれておらず、既定値の「編集できる」が残ってしまう。
-      const editable = (ref.rulesets ?? []).find((r) => r.id === rsInitial)?.editable !== false;
-      delBtn.style.display = editable && rsInitial !== "default" ? "" : "none";
-      noteBox.textContent = rulesetNoteOf();
-      noteBox.style.display = rulesetNoteOf() ? "" : "none";
-      lockNote.textContent = editable
-        ? "この流派は編集できます。下の項目・部品・時期の読み方を変えられます。"
-        : "この流派は組込みで、体系の定義そのものなので変更できません。変えたい場合は「＋ いまの設定を引き継いで新しい流派を作る」を選んでください。";
-      // 参照データ（部品・時期の読み方の一覧）を読んでから、その2つの欄を描く。
-      await loadMeanings();
-      renderTiming();
-      renderParts();
+      rulesetEditableMap = new Map((ref.rulesets ?? []).map((r) => [r.id, r.editable !== false]));
+      await applyRuleset(rsInitial, rulesetEditableMap.get(rsInitial) !== false);
     } catch { /* 参照が取れない時は流派を触らせない */ }
   };
+  let rulesetEditableMap = new Map<string, boolean>();
 
   // 流派が決める項目と、自分で決める項目を分ける。
   // 前者は教義そのものなので個人の好みで上書きさせない。実効値は見せる。
