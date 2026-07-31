@@ -1,6 +1,6 @@
 // ウラナイ画面のルート描画とフォーム類。定数・型・ヘルパは ./parts、ホイール描画は ./wheel に分割。
 import {
-  SIGN_ORDER, SIGN_GLYPH, SIGN_NAME, SIGN_ELEMENT, SIGN_QUALITY, ELEMENT_CHAR, QUALITY_CHAR, PLANET_GLYPH, PLANET_ORDER, PLANET_NAME_LINES, ASPECT_INFO, ASPECT_ORDER, PATTERN_INFO, PATTERN_ORDER, SHAPE_INFO, SHAPE_ORDER, Person, Prefill, Settings, SETTING_FIELDS, Chart, Derived, Cycles, Profection, SolarArc, FixedStars, OutOfBounds, Firdaria, Synastry, Composite, Rectification, PlanetCycle, TransitSearch, PrimaryDirection, TimeLords, Dasha, VargaCharts, Yogas, Jaimini, KpSubs, Muntha, optionsOf, nameOf, ownOf, setOwn, usesPart, partsOn, allParts, setParts, isImplemented, loadMeanings, meaningOf, conventionOf, sabianReady, sabianCountOf, usesTiming, timingPrimaryOf, allTimingShapes, setTiming, rulesetIsEditable, rulesetNoteOf, roleOf, clearMeanings, UranaiView, api, lonOf, fmtDeg, Birth, HOUSE_SYSTEM_JA, IANA_ZONES, FALLBACK_ZONES, CC_ZONE, offsetFromZone, el, selectEl, loadSettings,
+  SIGN_ORDER, SIGN_GLYPH, SIGN_NAME, SIGN_ELEMENT, SIGN_QUALITY, ELEMENT_CHAR, QUALITY_CHAR, PLANET_GLYPH, PLANET_ORDER, PLANET_NAME_LINES, ASPECT_INFO, ASPECT_ORDER, PATTERN_INFO, PATTERN_ORDER, SHAPE_INFO, SHAPE_ORDER, Person, Prefill, Settings, SETTING_FIELDS, Chart, Derived, Cycles, Profection, SolarArc, FixedStars, OutOfBounds, Firdaria, Synastry, Composite, Rectification, PlanetCycle, TransitSearch, PrimaryDirection, TimeLords, Dasha, VargaCharts, Yogas, Jaimini, KpSubs, Muntha, RulingPlanets, CharaDasha, Tajika, optionsOf, nameOf, ownOf, setOwn, usesPart, partsOn, allParts, setParts, isImplemented, loadMeanings, meaningOf, conventionOf, sabianReady, sabianCountOf, usesTiming, timingPrimaryOf, allTimingShapes, setTiming, rulesetIsEditable, rulesetNoteOf, roleOf, clearMeanings, UranaiView, api, lonOf, fmtDeg, Birth, HOUSE_SYSTEM_JA, IANA_ZONES, FALLBACK_ZONES, CC_ZONE, offsetFromZone, el, selectEl, loadSettings,
 } from "./parts";
 import { drawWheelPro } from "./wheel";
 
@@ -1184,9 +1184,16 @@ function chartView(chart: Chart, birth: Birth | null | undefined, personId: stri
         const d = await api<KpSubs>(`/api/v1/uranai/astrology/person/${personId}/kp?levels=3`);
         out.innerHTML = "";
         out.append(el("div", { className: "u-pat-comp", textContent: "ナクシャトラをヴィムショッタリの年数の比で9分割した区画がサブ。さらに同じ比で割ったものがサブのサブ。" }));
+        out.append(el("div", { className: "u-tbl-title", textContent: "天体" }));
         out.append(mkTable(["天体", "ナクシャトラ", "星座主", "サブ", "サブのサブ"], d.bodies.map((b) => [
           bodyLabel(b.planet), `${b.nakshatra.index}. ${b.nakshatra.name}`, bodyLabel(b.nakshatra.lord),
           b.subs[0] ? bodyLabel(b.subs[0].lord) : "—", b.subs[1] ? bodyLabel(b.subs[1].lord) : "—",
+        ])));
+        out.append(el("div", { className: "u-tbl-title", textContent: "カスプ（KP はここを読みの起点にする）" }));
+        out.append(mkTable(["室", "ナクシャトラ", "星座主", "サブ", "サブのサブ"], (d.cusps ?? []).map((c) => [
+          `${c.house.replace("house_", "")}室`, `${c.nakshatra.index}. ${c.nakshatra.name}`,
+          bodyLabel(c.nakshatra.lord),
+          c.subs[0] ? bodyLabel(c.subs[0].lord) : "—", c.subs[1] ? bodyLabel(c.subs[1].lord) : "—",
         ])));
       } catch (e) {
         out.innerHTML = "";
@@ -1214,6 +1221,89 @@ function chartView(chart: Chart, birth: Birth | null | undefined, personId: stri
           ["ムンタのサイン", sgIdx(d.sign)],
           ["ムンタの支配星", bodyLabel(d.lord)],
         ], [1]));
+      } catch (e) {
+        out.innerHTML = "";
+        out.append(el("div", { className: "u-status", textContent: `エラー: ${(e as Error).message}` }));
+      }
+    };
+    const btn = el("button", { className: "u-btn u-btn-sm", textContent: "算出" });
+    btn.addEventListener("click", () => void load());
+    box.append(el("div", { className: "u-row" }, [el("label", { textContent: "対象日" }), dateIn, btn]), out);
+    void load();
+    return box;
+  };
+
+  // ルーリング・プラネット。判断の瞬間に効いている天体。
+  const rpNode = (): HTMLElement => {
+    const box = el("div", {});
+    const out = el("div", {});
+    const load = async () => {
+      out.innerHTML = "";
+      out.append(el("div", { className: "u-pat-empty", textContent: "算出中…" }));
+      try {
+        const d = await api<RulingPlanets>(`/api/v1/uranai/astrology/person/${personId}/ruling_planets`);
+        out.innerHTML = "";
+        out.append(el("div", { className: "u-pat-comp", textContent: "曜日はインドの慣習では日の出で切り替わるが、ここでは暦日で数えている。日の出前の出生では1つ手前の曜日になる。" }));
+        out.append(mkTable(["起点", "サインの支配星", "星宿の支配星", "サブの支配星"], [
+          ["アセンダント", bodyLabel(d.ascendant.sign_lord), bodyLabel(d.ascendant.star_lord), bodyLabel(d.ascendant.sub_lord)],
+          ["月", bodyLabel(d.moon.sign_lord), bodyLabel(d.moon.star_lord), bodyLabel(d.moon.sub_lord)],
+        ]));
+        out.append(mkTable(["項目", "値"], [
+          ["曜日の支配星", bodyLabel(d.day_lord)],
+          ["ルーリング・プラネット", d.planets.map(bodyLabel).join("、")],
+        ], [1]));
+      } catch (e) {
+        out.innerHTML = "";
+        out.append(el("div", { className: "u-status", textContent: `エラー: ${(e as Error).message}` }));
+      }
+    };
+    box.append(out); void load();
+    return box;
+  };
+
+  // チャラ・ダシャー。サインを単位とする期間法。
+  const charaNode = (): HTMLElement => {
+    const box = el("div", {});
+    const out = el("div", {});
+    const load = async () => {
+      out.innerHTML = "";
+      out.append(el("div", { className: "u-pat-empty", textContent: "算出中…" }));
+      try {
+        const d = await api<CharaDasha>(`/api/v1/uranai/astrology/person/${personId}/chara_dasha?until_age=100`);
+        out.innerHTML = "";
+        out.append(el("div", { className: "u-pat-comp", textContent: `ラグナは ${sgIdx(d.lagna)}。${d.direction === "direct" ? "奇数足のサインなので順行" : "偶数足のサインなので逆行"}に進む。各サインの年数は、そのサインから支配星の在るサインまでを足の向きに数えた数。` }));
+        out.append(mkTable(["サイン", "支配星", "年数", "期間"], d.periods.map((p) =>
+          [sgIdx(p.sign), bodyLabel(p.lord), `${p.years}年`, `${p.from} 〜 ${p.to}`])));
+      } catch (e) {
+        out.innerHTML = "";
+        out.append(el("div", { className: "u-status", textContent: `エラー: ${(e as Error).message}` }));
+      }
+    };
+    box.append(out); void load();
+    return box;
+  };
+
+  // タージカのアスペクトとムッダ・ダシャー。
+  const tajikaNode = (): HTMLElement => {
+    const box = el("div", {});
+    const dateIn = el("input", { type: "date", value: new Date().toISOString().slice(0, 10) }) as HTMLInputElement;
+    const out = el("div", {});
+    const load = async () => {
+      out.innerHTML = "";
+      out.append(el("div", { className: "u-pat-empty", textContent: "算出中…" }));
+      try {
+        const d = await api<Tajika>(`/api/v1/uranai/astrology/person/${personId}/tajika?date=${dateIn.value}`);
+        out.innerHTML = "";
+        out.append(el("div", { className: "u-tbl-title", textContent: `出生図のタージカのアスペクト（${d.aspects.length}）` }));
+        out.append(d.aspects.length
+          ? mkTable(["速い方", "遅い方", "種別", "オーブ", "形"], d.aspects.map((a) =>
+              [bodyLabel(a.a), bodyLabel(a.b), ASPECT_INFO[a.type]?.label ?? a.type, `${a.orb.toFixed(2)}°`,
+               a.kind === "ithasala" ? "イッタサーラ（近づく）" : "イサラファ（離れる）"]))
+          : el("div", { className: "u-pat-empty", textContent: "該当するアスペクトはありません" }));
+        out.append(el("div", { className: "u-tbl-title", textContent: `ムッダ・ダシャー（年の図 ${d.solar_return ? d.solar_return.slice(0, 10) : "—"} から1年）` }));
+        out.append(d.mudda.length
+          ? mkTable(["主星", "期間"], d.mudda.map((m) => [bodyLabel(m.lord), `${m.from} 〜 ${m.to}`]))
+          : el("div", { className: "u-pat-empty", textContent: "年の図が求まりません" }));
       } catch (e) {
         out.innerHTML = "";
         out.append(el("div", { className: "u-status", textContent: `エラー: ${(e as Error).message}` }));
@@ -1893,6 +1983,9 @@ function chartView(chart: Chart, birth: Birth | null | undefined, personId: stri
     ...(usesPart("chara_karaka") || usesPart("rashi_drishti") || usesPart("arudha") ? [{ label: "ジャイミニ", node: jaiminiNode() }] : []),
     ...(usesPart("kp_sublord") ? [{ label: "サブロード", node: kpNode() }] : []),
     ...(usesPart("muntha") ? [{ label: "ムンタ", node: munthaNode() }] : []),
+    ...(usesPart("ruling_planet") ? [{ label: "ルーリング・プラネット", node: rpNode() }] : []),
+    ...(usesPart("chara_dasha") ? [{ label: "チャラ・ダシャー", node: charaNode() }] : []),
+    ...(usesPart("tajika_aspect") || usesPart("mudda_dasha") ? [{ label: "タージカ", node: tajikaNode() }] : []),
     ...(usesPart("quadrant") ? [{ label: "象限", node: quadTbl }] : []),
     ...(usesPart("lunation") ? [{ label: "ルネーション", node: lunTbl }] : []),
     { label: `アスペクト(${chart.aspects.length})`, node: aspectNode },
@@ -1907,7 +2000,7 @@ function chartView(chart: Chart, birth: Birth | null | undefined, personId: stri
   const TIMING_TABS: Record<string, string[]> = {
     // phase = サイクルの現在地
     phase: ["天体の周期", "サイクル"],
-    lord: ["時期支配星", "ダシャー", "プロフェクション", "ファルダール"],
+    lord: ["時期支配星", "ダシャー", "チャラ・ダシャー", "タージカ", "ムンタ", "プロフェクション", "ファルダール"],
     contact: ["期間の探索", "経過", "進行", "ソーラーアーク", "一次進行"],
   };
   {

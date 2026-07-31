@@ -414,7 +414,23 @@ export type Jaimini = { lagna: number;
 /** KP式のサブロード。 */
 export type KpSubs = { levels: number;
   bodies: Array<{ planet: string; nakshatra: { index: number; name: string; lord: string; pada: number };
-                  subs: Array<{ level: number; lord: string }> }> };
+                  subs: Array<{ level: number; lord: string }> }>;
+  cusps: Array<{ house: string; longitude: number; nakshatra: { index: number; name: string; lord: string };
+                 subs: Array<{ level: number; lord: string }> }> };
+
+/** KP のルーリング・プラネット。 */
+export type RulingPlanets = { day_lord: string; planets: string[];
+  ascendant: { sign_lord: string; star_lord: string; sub_lord: string };
+  moon: { sign_lord: string; star_lord: string; sub_lord: string } };
+
+/** チャラ・ダシャー。サインを単位とする期間法。 */
+export type CharaDasha = { direction: "direct" | "reverse"; lagna: number;
+  periods: Array<{ sign: number; lord: string; years: number; from: string; to: string }> };
+
+/** タージカのアスペクトとムッダ・ダシャー。 */
+export type Tajika = { at: string; solar_return: string | null;
+  aspects: Array<{ a: string; b: string; type: string; orb: number; kind: "ithasala" | "isarapha" }>;
+  mudda: Array<{ lord: string; from: string; to: string }> };
 
 /** タージカ式のムンタ。 */
 export type Muntha = { at: string; lagna: number; age: number; sign: number; lord: string };
