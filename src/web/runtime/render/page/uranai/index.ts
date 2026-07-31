@@ -92,7 +92,7 @@ function settingsView(settings: Settings, onSaved: () => void | Promise<void>): 
     // 新規作成はいま選んでいる流派を土台にする。設定値をそのまま引き継ぐのが目的。
     if (rsSel.value === NEW_RULESET) {
       const base = rsPrev;
-      const name = prompt("新しい流派の名前", `${rsSel.options[rsSel.selectedIndex - 1]?.textContent ?? ""}のコピー`);
+      const name = prompt("新しい流派の名前");
       if (!name) { rsSel.value = base; return; }
       status.textContent = "作成中…";
       void api<{ ruleset: string }>(`/api/v1/uranai/astrology/ruleset-copy`,
@@ -121,10 +121,11 @@ function settingsView(settings: Settings, onSaved: () => void | Promise<void>): 
         api<{ rulesets?: Array<{ id: string; name: string | null; editable?: boolean }> }>(`/api/v1/uranai/astrology/reference`),
         api<{ ruleset_id?: string }>(`/api/v1/uranai/astrology/preference`),
       ]);
-      for (const r of ref.rulesets ?? []) {
-        rsSel.append(el("option", { value: r.id, textContent: (r.name ?? r.id) + (r.editable === false ? "（組込み・変更不可）" : "") }));
-      }
-      rsSel.append(el("option", { value: NEW_RULESET, textContent: "＋ いまの設定を引き継いで新しい流派を作る" }));
+      // 組込みの流派が先、自分で作ったものは下にまとめる。
+      const list = (ref.rulesets ?? []).slice()
+        .sort((a, c) => Number(a.editable !== false) - Number(c.editable !== false));
+      for (const r of list) rsSel.append(el("option", { value: r.id, textContent: r.name ?? r.id }));
+      rsSel.append(el("option", { value: NEW_RULESET, textContent: "＋ 新しい流派" }));
       rsInitial = pref.ruleset_id ?? "default";
       rsPrev = rsInitial;
       rsSel.value = rsInitial;
@@ -164,7 +165,7 @@ function settingsView(settings: Settings, onSaved: () => void | Promise<void>): 
     timingBox.innerHTML = "";
     if (!allTimingShapes().length) return;
     timingBox.append(el("div", { className: "u-set-title", textContent: "時期の読み方" }));
-    timingBox.append(el("div", { className: "u-pat-comp", textContent: "流派によって時期の主軸が違う。ルディアは周期の局面、伝統派は時期支配星、現代西洋は接触の暦。主軸にした形のタブが時期のタブ群の先頭に出る。" }));
+    timingBox.append(el("div", { className: "u-pat-comp", textContent: "流派によって時期の主軸が違う。ルディアはサイクルの現在地、伝統派は時期支配星、現代西洋は接触の暦。主軸にした形のタブが時期のタブ群の先頭に出る。" }));
     const save = (shapes: string[], primary: string) =>
       api<{ shapes: string[]; primary: string }>(`/api/v1/uranai/astrology/timing`,
         { method: "PUT", body: JSON.stringify({ ruleset: rsSel.value || undefined, shapes, primary }) })
@@ -1667,6 +1668,7 @@ function chartView(chart: Chart, birth: Birth | null | undefined, personId: stri
   // 流派によって時期の読み方の主軸が違う。主軸のタブを時期のタブ群の先頭へ寄せる。
   // 並びを変えるだけで、どのタブを出すかは部品の選択が決める（別々の設定）。
   const TIMING_TABS: Record<string, string[]> = {
+    // phase = サイクルの現在地
     phase: ["天体の周期", "サイクル"],
     lord: ["時期支配星", "プロフェクション", "ファルダール"],
     contact: ["期間の探索", "経過", "進行", "ソーラーアーク", "一次進行"],
