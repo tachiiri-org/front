@@ -218,6 +218,7 @@ export async function loadMeanings(): Promise<void> {
       concept_notes?: Array<{ concept_kind: string; concept_id: string; value: string }>;
       parts?: string[]; all_parts?: string[]; implemented_parts?: string[];
       conventions?: Array<{ id: string; label: string; note: string }>;
+      sabian_count?: number;
       body_role?: Array<{ planet_id: string; body_role_id: string }>;
     }>(`/api/v1/uranai/astrology/reference`);
     const m: MeaningMap = {};
@@ -231,10 +232,11 @@ export async function loadMeanings(): Promise<void> {
     ownCache = ow;
     partCache = { parts: (r.parts ?? []).slice(), all: (r.all_parts ?? []).slice(), impl: (r.implemented_parts ?? []).slice() };
     conventionCache = (r.conventions ?? []).slice();
+    sabianCount = r.sabian_count ?? 0;
     const roles: Record<string, string> = {};
     for (const x of r.body_role ?? []) roles[x.planet_id] = m.body_role?.[x.body_role_id] ? x.body_role_id : x.body_role_id;
     roleCache = roles;
-  } catch { meaningCache = {}; roleCache = {}; nameCache = {}; ownCache = {}; partCache = { parts: [], all: [], impl: [] }; conventionCache = []; }
+  } catch { meaningCache = {}; roleCache = {}; nameCache = {}; ownCache = {}; partCache = { parts: [], all: [], impl: [] }; conventionCache = []; sabianCount = 0; }
 }
 export const meaningOf = (kind: string, id: string): string => meaningCache?.[kind]?.[id] ?? "";
 
@@ -242,6 +244,11 @@ export const meaningOf = (kind: string, id: string): string => meaningCache?.[ki
 // 「ルディアの定義」と取り違えられないよう、使っている画面に但し書きとして出す。
 let conventionCache: Array<{ id: string; label: string; note: string }> = [];
 export const conventionOf = (id: string): string => conventionCache.find((c) => c.id === id)?.note ?? "";
+
+// サビアンの文言の登録数。文言は著作物なのでこちらでは同梱できず、0件だと部品として成立しない。
+let sabianCount = 0;
+export const sabianReady = (): boolean => sabianCount > 0;
+export const sabianCountOf = (): number => sabianCount;
 
 // 自分の意味。原典由来とは別に持ち、画面では自分の意味を先に出す。
 let ownCache: MeaningMap | null = null;

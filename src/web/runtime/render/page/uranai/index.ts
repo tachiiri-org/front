@@ -1,6 +1,6 @@
 // ウラナイ画面のルート描画とフォーム類。定数・型・ヘルパは ./parts、ホイール描画は ./wheel に分割。
 import {
-  SIGN_ORDER, SIGN_GLYPH, SIGN_NAME, SIGN_ELEMENT, SIGN_QUALITY, ELEMENT_CHAR, QUALITY_CHAR, PLANET_GLYPH, PLANET_ORDER, PLANET_NAME_LINES, ASPECT_INFO, ASPECT_ORDER, PATTERN_INFO, PATTERN_ORDER, SHAPE_INFO, SHAPE_ORDER, Person, Prefill, Settings, SETTING_FIELDS, Chart, Derived, Cycles, Profection, SolarArc, FixedStars, OutOfBounds, Firdaria, Synastry, Composite, Rectification, PlanetCycle, TransitSearch, PrimaryDirection, optionsOf, nameOf, ownOf, setOwn, usesPart, partsOn, allParts, setParts, isImplemented, loadMeanings, meaningOf, conventionOf, roleOf, clearMeanings, UranaiView, api, lonOf, fmtDeg, Birth, HOUSE_SYSTEM_JA, IANA_ZONES, FALLBACK_ZONES, CC_ZONE, offsetFromZone, el, selectEl, loadSettings,
+  SIGN_ORDER, SIGN_GLYPH, SIGN_NAME, SIGN_ELEMENT, SIGN_QUALITY, ELEMENT_CHAR, QUALITY_CHAR, PLANET_GLYPH, PLANET_ORDER, PLANET_NAME_LINES, ASPECT_INFO, ASPECT_ORDER, PATTERN_INFO, PATTERN_ORDER, SHAPE_INFO, SHAPE_ORDER, Person, Prefill, Settings, SETTING_FIELDS, Chart, Derived, Cycles, Profection, SolarArc, FixedStars, OutOfBounds, Firdaria, Synastry, Composite, Rectification, PlanetCycle, TransitSearch, PrimaryDirection, optionsOf, nameOf, ownOf, setOwn, usesPart, partsOn, allParts, setParts, isImplemented, loadMeanings, meaningOf, conventionOf, sabianReady, sabianCountOf, roleOf, clearMeanings, UranaiView, api, lonOf, fmtDeg, Birth, HOUSE_SYSTEM_JA, IANA_ZONES, FALLBACK_ZONES, CC_ZONE, offsetFromZone, el, selectEl, loadSettings,
 } from "./parts";
 import { drawWheelPro } from "./wheel";
 
@@ -124,9 +124,12 @@ function settingsView(settings: Settings, onSaved: () => void | Promise<void>): 
           .catch((e) => { status.textContent = `エラー: ${(e as Error).message}`; cb.checked = on.has(id); });
       });
       const impl = isImplemented(id);
-      const lb = el("label", { className: "u-tg-chip" + (impl ? "" : " u-part-todo") },
-        [cb, el("span", { textContent: nameOf("part", id) + (impl ? "" : "（未実装）") })]);
-      lb.title = meaningOf("part", id);
+      // サビアンは文言が無いと度数しか出ず、部品として成立しない。文言はこちらでは
+      // 用意できない（著作物）ので、未登録であることを選択画面でも分かるようにする。
+      const noData = id === "sabian" && !sabianReady();
+      const lb = el("label", { className: "u-tg-chip" + (impl && !noData ? "" : " u-part-todo") },
+        [cb, el("span", { textContent: nameOf("part", id) + (!impl ? "（未実装）" : noData ? "（文言が未登録・無効）" : "") })]);
+      lb.title = noData ? "サビアンの文言は著作物のため同梱していない。サビアンのタブから手元の版を取り込むまで、度数しか出ない" : meaningOf("part", id);
       grid.append(lb);
     }
     partsBox.append(grid);
@@ -454,8 +457,17 @@ function chartView(chart: Chart, birth: Birth | null | undefined, personId: stri
     const box = el("div", {});
     const list = chart.sabian ?? [];
     const filled = list.filter((x) => x.text).length;
-    box.append(el("div", { className: "u-pat-comp", textContent:
-      `文言はこのアプリには入っていない。手元の版から取り込むと、この流派（${chart.ruleset ?? "default"}）のサビアンとして保存される。現在 ${filled}/${list.length} 件に文言がある。` }));
+    if (!sabianReady()) {
+      // 文言が1件も無い状態。度数だけを出しても読みには使えないので、まずそう明示する。
+      box.append(el("div", { className: "u-part-disabled" }, [
+        el("div", { className: "u-part-disabled-h", textContent: "この部品は現在使えません" }),
+        el("div", { textContent: "サビアンシンボルの文言は Marc Edmund Jones が記録しルディアが解説した著作物のため、このアプリには同梱していません。文言が無い状態では度数が出るだけで、読みには使えません。" }),
+        el("div", { textContent: "手元の版から下の欄に貼り込むと、この流派のサビアンとして保存され、表と進行の太陽に文言が出るようになります。" }),
+      ]));
+    } else {
+      box.append(el("div", { className: "u-pat-comp", textContent:
+        `この流派（${chart.ruleset ?? "default"}）に ${sabianCountOf()}/360 件の文言が登録されている。この人物の配置では ${filled}/${list.length} 件に文言がある。` }));
+    }
     box.append(mkTable(["天体", "サビアン度数", "通し番号", "文言"], list.length
       ? list.map((x) => [{ t: bodyLabel(x.planet), tip: `planet:${x.planet}` },
           `${SIGN_NAME[x.sign] ?? x.sign} ${x.degree}度`, String(x.index), x.text ?? "（未登録）"])
@@ -1603,6 +1615,9 @@ export async function renderUranai(container: HTMLElement): Promise<void> {
     .u-set-title{font-size:13px;font-weight:600;color:#555;margin-bottom:8px}
     .u-parts{margin:10px 0 4px}
     .u-part-todo{opacity:.5}
+    /* 使えない部品の説明。薄い注記ではなく、目に留まる枠で出す。 */
+    .u-part-disabled{border:1px solid #d9a441;background:#fdf6e6;border-radius:6px;padding:10px 12px;margin:4px 0 10px;font-size:12px;line-height:1.7}
+    .u-part-disabled-h{font-weight:600;margin-bottom:4px}
     .u-parts-grid{display:grid;grid-template-columns:repeat(auto-fill,minmax(190px,1fr));gap:4px 12px}
     .u-set-grid{display:grid;grid-template-columns:1fr 1fr;gap:6px 14px}
     .u-set-row{display:flex;align-items:center;gap:8px}
@@ -1648,6 +1663,7 @@ export async function renderUranai(container: HTMLElement): Promise<void> {
     [data-theme=dark] .u-report-head,[data-theme=dark] .u-sec-head,[data-theme=dark] .u-basic-v,
     [data-theme=dark] .u-data-v,[data-theme=dark] .u-pat-bodies,[data-theme=dark] .u-tbl td{color:#e6e8eb}
     [data-theme=dark] .u-pat-h b,[data-theme=dark] .u-tg-btn.on,[data-theme=dark] .u-tab-btn.on{color:#f3f5f7}
+    [data-theme=dark] .u-part-disabled{border-color:#7a5c1c;background:#2a2317;color:#e6ddc7}
     [data-theme=dark] .u-report-body,[data-theme=dark] .u-person-menu,[data-theme=dark] .u-pat-comp,
     [data-theme=dark] .u-settings-note,[data-theme=dark] .u-pat-empty,[data-theme=dark] .u-pat-aka,
     [data-theme=dark] .u-basic-k,[data-theme=dark] .u-tbl th,[data-theme=dark] .u-data-k,
