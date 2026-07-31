@@ -56,8 +56,9 @@ function birthForm(personId: string, onDone: (chart: Chart) => void, prefill?: P
       if (label.value.trim()) await api(`/api/v1/uranai/person/${personId}`, { method: "PATCH", body: JSON.stringify({ label: label.value.trim() }) }).catch(() => {});
       const born_at = `${date.value}T${time.value}:00${tz.value.trim() || "+00:00"}`;
       await api(`/api/v1/uranai/person/${personId}/birth`, { method: "PUT", body: JSON.stringify({ born_at, lat: String(lat), lng: String(lng), place: placeName, timezone: tz.value.trim() }) });
-      await loadMeanings();
       const chart = await api<Chart>(`/api/v1/uranai/astrology/person/${personId}/compute`, { method: "POST", body: "{}" });
+      // 参照データはその人物の流派で読む（表示は onDone → showChart 側でも読み直す）。
+      await loadMeanings(chart.ruleset);
       status.textContent = "";
       onDone(chart);
     } catch (e) { status.textContent = `エラー: ${(e as Error).message}`; }
@@ -214,7 +215,7 @@ function settingsView(settings: Settings, onSaved: () => void | Promise<void>): 
    */
   const applyRuleset = async (rsId: string, editable: boolean) => {
     clearMeanings();
-    await loadMeanings();
+    await loadMeanings(rsId);
     // 流派が決める項目は、その流派での実効値を出す。
     try {
       const eff = await api<Settings>(`/api/v1/uranai/astrology/settings?ruleset=${encodeURIComponent(rsId)}`);
@@ -237,8 +238,9 @@ function settingsView(settings: Settings, onSaved: () => void | Promise<void>): 
         api<{ rulesets?: Array<{ id: string; name: string | null; editable?: boolean; lineage?: string | null }> }>(`/api/v1/uranai/astrology/reference`),
         api<{ ruleset_id?: string }>(`/api/v1/uranai/astrology/preference`),
       ]);
+      rsInitial = pref.ruleset_id ?? "default";
       // 系統の名称は参照データから引くので、選択肢を組む前に読んでおく。
-      await loadMeanings();
+      await loadMeanings(rsInitial);
       // 系統ごとにまとめる。流派は層が違うものが混ざる（ヘレニズムは系統、
       // ルディアは現代西洋の中の一潮流）ので、括らずに並べると規模を取り違える。
       const LINEAGE_ORDER = ["traditional", "modern_west", "midpoint", "indian"];
@@ -261,7 +263,6 @@ function settingsView(settings: Settings, onSaved: () => void | Promise<void>): 
       }
       if (own.children.length) rsSel.append(own);
       rsSel.append(el("option", { value: NEW_RULESET, textContent: "＋ 新しい流派" }));
-      rsInitial = pref.ruleset_id ?? "default";
       rsPrev = rsInitial;
       rsSel.value = rsInitial;
       // 編集の可否はいま取った一覧から決める。意味のキャッシュは設定画面を直接開いた
@@ -1873,10 +1874,11 @@ function chartView(chart: Chart, birth: Birth | null | undefined, personId: stri
   const personSettingsNode = el("div", { className: "u-form" });
   {
     const rsStatus = el("div", { className: "u-status" });
+    let effectiveRuleset: string | undefined;
     const rsSel = el("select", { className: "u-set-sel" }) as HTMLSelectElement;
     const lockedGrid = el("div", { className: "u-set-grid" });
     const { timingBox, partsBox, renderTiming, renderParts } =
-      rulesetControls(() => undefined, () => rsStatus); // 流派は人物の実効値（既定は送らない＝人物優先で解決される）
+      rulesetControls(() => effectiveRuleset, () => rsStatus);
     const renderLocked = (eff: Settings) => {
       lockedGrid.innerHTML = "";
       for (const f of SETTING_FIELDS) {
@@ -1913,9 +1915,13 @@ function chartView(chart: Chart, birth: Birth | null | undefined, personId: stri
         for (const lg of LINEAGE_ORDER) { const og = groups.get(lg); if (og?.children.length) rsSel.append(og); }
         if (own.children.length) rsSel.append(own);
         rsSel.value = cur.ruleset_id ?? "";
+        effectiveRuleset = cur.effective;
         rsSaved = rsSel.value;
         rsSave.disabled = true;
         renderLocked(await api<Settings>(`/api/v1/uranai/astrology/settings?ruleset=${encodeURIComponent(cur.effective)}`));
+        // 部品と時期の読み方は、この人物に適用されている流派のものを出す。
+        clearMeanings();
+        await loadMeanings(cur.effective);
         renderTiming();
         renderParts();
       } catch (e) { rsStatus.textContent = `エラー: ${(e as Error).message}`; }
@@ -2450,7 +2456,6 @@ export async function renderUranai(container: HTMLElement): Promise<void> {
   // 既存人物の出生データを取得して編集フォームを事前入力で開く。
   const showChart = async (personId: string, label?: string | null, push = true) => {
     main.innerHTML = ""; main.append(el("div", { textContent: "読み込み中…" }));
-    await loadMeanings();
     let chart = await api<Chart>(`/api/v1/uranai/astrology/person/${personId}/chart`);
     const birth = await api<Birth>(`/api/v1/uranai/person/${personId}/birth`).catch(() => null);
     // 流派を切り替えた直後は、その流派での計算がまだ無く配置が空になる。
@@ -2462,6 +2467,9 @@ export async function renderUranai(container: HTMLElement): Promise<void> {
     }
     main.innerHTML = "";
     if (chart.placements.length === 0) { showForm(personId, { label }, push); return; }
+    // 参照データはその人物の流派で読む。全体の既定で読むと、人物ごとに別の流派を
+    // 選んでいる場合にタブが前の流派のまま出る。
+    await loadMeanings(chart.ruleset);
     if (push) history.pushState({ uranai: { kind: "chart", personId, label: label ?? null } as UranaiView }, "");
     // 保存後は一覧のラベル更新＋再描画（画面遷移せず反映）。
     const onSaved = async (newLabel: string | null) => { await refreshList(personId); void showChart(personId, newLabel ?? label, false); };
