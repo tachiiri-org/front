@@ -1,6 +1,6 @@
 // ウラナイ画面のルート描画とフォーム類。定数・型・ヘルパは ./parts、ホイール描画は ./wheel に分割。
 import {
-  SIGN_ORDER, SIGN_GLYPH, SIGN_NAME, SIGN_ELEMENT, SIGN_QUALITY, ELEMENT_CHAR, QUALITY_CHAR, PLANET_GLYPH, PLANET_ORDER, PLANET_NAME_LINES, ASPECT_INFO, ASPECT_ORDER, PATTERN_INFO, PATTERN_ORDER, SHAPE_INFO, SHAPE_ORDER, Person, Prefill, Settings, SETTING_FIELDS, Chart, Derived, Cycles, optionsOf, nameOf, ownOf, setOwn, usesPart, partsOn, allParts, setParts, isImplemented, loadMeanings, meaningOf, roleOf, clearMeanings, UranaiView, api, lonOf, fmtDeg, Birth, HOUSE_SYSTEM_JA, IANA_ZONES, FALLBACK_ZONES, CC_ZONE, offsetFromZone, el, selectEl, loadSettings,
+  SIGN_ORDER, SIGN_GLYPH, SIGN_NAME, SIGN_ELEMENT, SIGN_QUALITY, ELEMENT_CHAR, QUALITY_CHAR, PLANET_GLYPH, PLANET_ORDER, PLANET_NAME_LINES, ASPECT_INFO, ASPECT_ORDER, PATTERN_INFO, PATTERN_ORDER, SHAPE_INFO, SHAPE_ORDER, Person, Prefill, Settings, SETTING_FIELDS, Chart, Derived, Cycles, Profection, SolarArc, FixedStars, OutOfBounds, Firdaria, Synastry, Composite, Rectification, PlanetCycle, TransitSearch, PrimaryDirection, TimeLords, Dasha, VargaCharts, Yogas, Jaimini, KpSubs, Muntha, RulingPlanets, CharaDasha, Tajika, optionsOf, nameOf, ownOf, setOwn, usesPart, partsOn, allParts, setParts, isImplemented, loadMeanings, meaningOf, conventionOf, sabianReady, sabianCountOf, usesTiming, timingPrimaryOf, allTimingShapes, setTiming, rulesetIsEditable, rulesetNoteOf, roleOf, clearMeanings, UranaiView, api, lonOf, fmtDeg, Birth, HOUSE_SYSTEM_JA, IANA_ZONES, FALLBACK_ZONES, CC_ZONE, offsetFromZone, el, selectEl, loadSettings,
 } from "./parts";
 import { drawWheelPro } from "./wheel";
 
@@ -82,29 +82,160 @@ function settingsView(settings: Settings, onSaved: () => void | Promise<void>): 
   // 流派（ruleset）。ハウス・使用天体・アスペクト・意味・描画規約をまとめて決めるので先頭に置く。
   // 保存先は計算方式(p_user_setting)ではなく占う人の設定(p_reading_preference)。
   const rsSel = el("select", { className: "u-set-sel" });
+  const NEW_RULESET = "__new__";
   let rsInitial = "default";
-  grid.append(el("div", { className: "u-set-row" }, [el("label", { textContent: "流派" }), rsSel]));
-  void (async () => {
+  let rsPrev = "default";
+  const lockNote = el("div", { className: "u-lock-note" });
+  // 流派の但し書き。実装が体系を満たしていない点をここで伝える。
+  const noteBox = el("div", { className: "u-part-disabled" });
+  noteBox.style.display = "none";
+  // 自分で作った流派だけ消せる。組込みと出発点のカスタムには出さない。
+  const delBtn = el("button", { className: "u-btn-sm u-btn-ghost", type: "button", textContent: "削除" });
+  delBtn.style.display = "none";
+  delBtn.addEventListener("click", () => {
+    const id = rsSel.value, nm = rsSel.options[rsSel.selectedIndex]?.textContent ?? id;
+    if (!confirm(`流派「${nm}」を削除しますか？\n\nこの流派で計算した結果と、この流派で書いた解釈も一緒に消えます。元に戻せません。`)) return;
+    status.textContent = "削除中…";
+    void api(`/api/v1/uranai/astrology/ruleset/${encodeURIComponent(id)}`, { method: "DELETE" })
+      .then(async () => { clearMeanings(); status.textContent = ""; await onSaved(); })
+      .catch((e) => { status.textContent = `エラー: ${(e as Error).message}`; });
+  });
+  grid.append(el("div", { className: "u-set-row" }, [el("label", { textContent: "流派" }), rsSel, delBtn]));
+  // 流派を切り替えたら、その流派の値で画面を組み直す（ロックされた項目の表示も変わる）。
+  rsSel.addEventListener("change", () => {
+    // 新規作成はいま選んでいる流派を土台にする。設定値をそのまま引き継ぐのが目的。
+    if (rsSel.value === NEW_RULESET) {
+      const base = rsPrev;
+      const name = prompt("新しい流派の名前");
+      if (!name) { rsSel.value = base; return; }
+      status.textContent = "作成中…";
+      void api<{ ruleset: string }>(`/api/v1/uranai/astrology/ruleset-copy`,
+        { method: "POST", body: JSON.stringify({ from: base, name }) })
+        .then(async (r) => {
+          await api(`/api/v1/uranai/astrology/preference`, { method: "PUT", body: JSON.stringify({ ruleset_id: r.ruleset }) });
+          await recomputeAll();
+          clearMeanings(); status.textContent = ""; await onSaved();
+        })
+        .catch((e) => { status.textContent = `エラー: ${(e as Error).message}`; rsSel.value = base; });
+      return;
+    }
+    rsPrev = rsSel.value;
+    // 選び直した流派の値を読み直して、ロック項目の表示と編集可否を合わせる。
+    void (async () => {
+      try {
+        await api(`/api/v1/uranai/astrology/preference`, { method: "PUT", body: JSON.stringify({ ruleset_id: rsSel.value }) });
+        // 流派ごとに保存するファクトが違うので、切り替えたら計算し直す。
+        await recomputeAll();
+        clearMeanings(); await onSaved();
+      } catch (e) { status.textContent = `エラー: ${(e as Error).message}`; }
+    })();
+  });
+  // 参照データを読んでから流派の一覧・ロックの注記・部品・時期の欄を描く。
+  // 定義順の都合で、実際の呼び出しは renderParts / renderTiming を組んだ後で行う。
+  const initRuleset = async () => {
     try {
       const [ref, pref] = await Promise.all([
-        api<{ rulesets?: Array<{ id: string; name: string | null }> }>(`/api/v1/uranai/astrology/reference`),
+        api<{ rulesets?: Array<{ id: string; name: string | null; editable?: boolean; lineage?: string | null }> }>(`/api/v1/uranai/astrology/reference`),
         api<{ ruleset_id?: string }>(`/api/v1/uranai/astrology/preference`),
       ]);
-      for (const r of ref.rulesets ?? []) rsSel.append(el("option", { value: r.id, textContent: r.name ?? r.id }));
+      // 系統の名称は参照データから引くので、選択肢を組む前に読んでおく。
+      await loadMeanings();
+      // 系統ごとにまとめる。流派は層が違うものが混ざる（ヘレニズムは系統、
+      // ルディアは現代西洋の中の一潮流）ので、括らずに並べると規模を取り違える。
+      const LINEAGE_ORDER = ["traditional", "modern_west", "midpoint", "indian"];
+      const groups = new Map<string, HTMLElement>();
+      for (const lg of LINEAGE_ORDER) {
+        const og = document.createElement("optgroup");
+        og.label = nameOf("lineage", lg);
+        groups.set(lg, og);
+      }
+      const own = document.createElement("optgroup");
+      own.label = "自分の流派";
+      for (const r of ref.rulesets ?? []) {
+        const opt = el("option", { value: r.id, textContent: r.name ?? r.id });
+        const host = r.editable !== false ? own : groups.get(r.lineage ?? "") ?? own;
+        host.append(opt);
+      }
+      for (const lg of LINEAGE_ORDER) {
+        const og = groups.get(lg);
+        if (og && og.children.length) rsSel.append(og);
+      }
+      if (own.children.length) rsSel.append(own);
+      rsSel.append(el("option", { value: NEW_RULESET, textContent: "＋ 新しい流派" }));
       rsInitial = pref.ruleset_id ?? "default";
+      rsPrev = rsInitial;
       rsSel.value = rsInitial;
+      // 編集の可否はいま取った一覧から決める。意味のキャッシュは設定画面を直接開いた
+      // 場合まだ読まれておらず、既定値の「編集できる」が残ってしまう。
+      const editable = (ref.rulesets ?? []).find((r) => r.id === rsInitial)?.editable !== false;
+      delBtn.style.display = editable && rsInitial !== "default" ? "" : "none";
+      noteBox.textContent = rulesetNoteOf();
+      noteBox.style.display = rulesetNoteOf() ? "" : "none";
+      lockNote.textContent = editable
+        ? "この流派は編集できます。下の項目・部品・時期の読み方を変えられます。"
+        : "この流派は組込みで、体系の定義そのものなので変更できません。変えたい場合は「＋ いまの設定を引き継いで新しい流派を作る」を選んでください。";
+      // 参照データ（部品・時期の読み方の一覧）を読んでから、その2つの欄を描く。
+      await loadMeanings();
+      renderTiming();
+      renderParts();
     } catch { /* 参照が取れない時は流派を触らせない */ }
-  })();
+  };
+
+  // 流派が決める項目と、自分で決める項目を分ける。
+  // 前者は教義そのものなので個人の好みで上書きさせない。実効値は見せる。
+  const lockedGrid = el("div", { className: "u-set-grid" });
+  const ownGrid = el("div", { className: "u-set-grid" });
   for (const f of SETTING_FIELDS) {
     const sel = selectEl(f.options, settings[f.key]);
     sels[f.key] = sel;
-    // ハウスは流派が決める（空間の分割方式は教義そのもの）。実効値を見せるが編集はさせない。
-    const derived = f.key === "house_system_id";
-    if (derived) sel.disabled = true;
-    grid.append(el("div", { className: "u-set-row" }, [
-      el("label", { textContent: derived ? `${f.label}（流派で決まる）` : f.label }), sel,
-    ]));
+    if (f.byRuleset) {
+      sel.disabled = true;
+      lockedGrid.append(el("div", { className: "u-set-row u-set-locked" }, [
+        el("label", {}, [el("span", { className: "u-lock-ic", textContent: "固定" }), el("span", { textContent: f.label })]), sel,
+      ]));
+    } else {
+      ownGrid.append(el("div", { className: "u-set-row" }, [el("label", { textContent: f.label }), sel]));
+    }
   }
+  // 時期の読み方の形。流派によって主軸が違うので、使う形と主軸をここで切り替える。
+  // どのタブを出すかは部品の選択が決め、こちらは並び順（どれを先に見るか）を決める。
+  const timingBox = el("div", { className: "u-parts" });
+  const renderTiming = () => {
+    timingBox.innerHTML = "";
+    if (!allTimingShapes().length) return;
+    timingBox.append(el("div", { className: "u-set-title", textContent: "時期の読み方" }));
+    timingBox.append(el("div", { className: "u-pat-comp", textContent: "流派によって時期の主軸が違う。ルディアはサイクルの現在地、伝統派は時期支配星、現代西洋は接触の暦。主軸にした形のタブが時期のタブ群の先頭に出る。" }));
+    const save = (shapes: string[], primary: string) =>
+      api<{ shapes: string[]; primary: string }>(`/api/v1/uranai/astrology/timing`,
+        { method: "PUT", body: JSON.stringify({ ruleset: rsSel.value || undefined, shapes, primary }) })
+        .then((r) => { setTiming(r.shapes ?? shapes, r.primary ?? primary); renderTiming(); })
+        .catch((e) => { status.textContent = `エラー: ${(e as Error).message}`; renderTiming(); });
+    const grid = el("div", { className: "u-parts-grid" });
+    for (const id of allTimingShapes()) {
+      const cb = el("input", { type: "checkbox" }) as HTMLInputElement;
+      cb.checked = usesTiming(id);
+      cb.disabled = !rulesetIsEditable();
+      cb.addEventListener("change", () => {
+        const next = allTimingShapes().filter((x) => x === id ? cb.checked : usesTiming(x));
+        if (!next.length) { status.textContent = "時期の読み方は1つ以上必要です"; renderTiming(); return; }
+        void save(next, next.includes(timingPrimaryOf()) ? timingPrimaryOf() : next[0]);
+      });
+      const lb = el("label", { className: "u-tg-chip" }, [cb, el("span", { textContent: nameOf("timing_shape", id) })]);
+      lb.title = meaningOf("timing_shape", id);
+      grid.append(lb);
+    }
+    timingBox.append(grid);
+    const psel = el("select", { className: "u-fi" }) as HTMLSelectElement;
+    for (const id of allTimingShapes()) {
+      if (!usesTiming(id)) continue;
+      psel.append(el("option", { value: id, textContent: nameOf("timing_shape", id) }));
+    }
+    psel.value = timingPrimaryOf();
+    psel.disabled = !rulesetIsEditable();
+    psel.addEventListener("change", () => void save(allTimingShapes().filter((x) => usesTiming(x)), psel.value));
+    timingBox.append(el("div", { className: "u-set-row" }, [el("label", { textContent: "主軸" }), psel]));
+  };
+
   // 部品の採用。流派を切り替えると既定が読み込まれ、そこから自分用に変えられる。
   const partsBox = el("div", { className: "u-parts" });
   const renderParts = () => {
@@ -116,6 +247,7 @@ function settingsView(settings: Settings, onSaved: () => void | Promise<void>): 
     for (const id of allParts()) {
       const cb = el("input", { type: "checkbox" }) as HTMLInputElement;
       cb.checked = on.has(id);
+      cb.disabled = !rulesetIsEditable();
       cb.addEventListener("change", () => {
         const next = allParts().filter((x) => x === id ? cb.checked : on.has(x));
         void api<{ parts: string[] }>(`/api/v1/uranai/astrology/parts`,
@@ -124,27 +256,42 @@ function settingsView(settings: Settings, onSaved: () => void | Promise<void>): 
           .catch((e) => { status.textContent = `エラー: ${(e as Error).message}`; cb.checked = on.has(id); });
       });
       const impl = isImplemented(id);
-      const lb = el("label", { className: "u-tg-chip" + (impl ? "" : " u-part-todo") },
-        [cb, el("span", { textContent: nameOf("part", id) + (impl ? "" : "（未実装）") })]);
-      lb.title = meaningOf("part", id);
+      // サビアンは文言が無いと度数しか出ず、部品として成立しない。文言はこちらでは
+      // 用意できない（著作物）ので、未登録であることを選択画面でも分かるようにする。
+      const noData = id === "sabian" && !sabianReady();
+      const lb = el("label", { className: "u-tg-chip" + (impl && !noData ? "" : " u-part-todo") },
+        [cb, el("span", { textContent: nameOf("part", id) + (!impl ? "（未実装）" : noData ? "（なし）" : "") })]);
+      lb.title = noData ? "サビアンの文言は著作物のため同梱していない。サビアンのタブから手元の版を取り込むまで、度数しか出ない" : meaningOf("part", id);
       grid.append(lb);
     }
     partsBox.append(grid);
   };
 
   const status = el("div", { className: "u-status" });
-  // 既定の流派をそのまま書き換えないよう、自分用に複製してから変える。
-  const copyBtn = el("button", { className: "u-btn-sm u-btn-ghost", textContent: "この流派を自分用に複製" });
-  copyBtn.addEventListener("click", () => {
-    status.textContent = "複製中…";
-    void api<{ ruleset: string }>(`/api/v1/uranai/astrology/ruleset-copy`,
-      { method: "POST", body: JSON.stringify({ from: rsSel.value, to: "custom", name: "自分用" }) })
-      .then(async (r) => {
-        await api(`/api/v1/uranai/astrology/preference`, { method: "PUT", body: JSON.stringify({ ruleset_id: r.ruleset }) });
-        clearMeanings(); status.textContent = ""; await onSaved();
-      })
-      .catch((e) => { status.textContent = `エラー: ${(e as Error).message}`; });
-  });
+  // 全人物の再計算。流派を変えると保存済みのファクトが別の流派のものになるので、
+  // 切り替えたら必ず走らせる。走らせないとチャートが空のまま出る。
+  const recomputeAll = async (): Promise<void> => {
+    const { persons } = await api<{ persons: Person[] }>(`/api/v1/uranai/person`);
+    let done = 0;
+    // 再計算の失敗は握り潰さない。サーバ側の例外で一部のファクトだけが欠けた状態になり得るため、
+    // 静かに成功したように見せるとデータの欠損に気づけない。
+    const failed: string[] = [];
+    const skipped: string[] = [];
+    for (const p of persons) {
+      status.textContent = `再計算中… (${++done}/${persons.length})`;
+      try {
+        await api(`/api/v1/uranai/astrology/person/${p.id}/compute`, { method: "POST", body: "{}" });
+      } catch (e) {
+        const msg = (e as Error).message;
+        // 400 は出生データ未入力など、その人物を計算できないという意味。設定保存の失敗ではない。
+        if (/^400\b/.test(msg)) skipped.push(p.label ?? p.id);
+        else failed.push(`${p.label ?? p.id}: ${msg}`);
+      }
+    }
+    if (failed.length) throw new Error(`再計算に失敗しました（${failed.length}/${persons.length}件）: ${failed.join(" / ")}`);
+    status.textContent = skipped.length ? `${skipped.length}件を対象外にしました（出生データ未入力）: ${skipped.join(", ")}` : "";
+  };
+
   const save = el("button", { className: "u-btn", textContent: "保存して全チャート再計算" });
   save.addEventListener("click", async () => {
     status.textContent = "保存中…";
@@ -152,7 +299,7 @@ function settingsView(settings: Settings, onSaved: () => void | Promise<void>): 
       const payload: Record<string, string> = {};
       // 流派由来の項目は送らない。送るとユーザー設定として保存され、流派を切り替えても残ってしまう。
       for (const f of SETTING_FIELDS) {
-        if (f.key === "house_system_id") continue;
+        if (f.byRuleset) continue;
         const v = sels[f.key]?.value;
         if (v) { payload[f.key as string] = v; (settings as Record<string, string>)[f.key as string] = v; }
       }
@@ -163,33 +310,18 @@ function settingsView(settings: Settings, onSaved: () => void | Promise<void>): 
         rsInitial = rsSel.value;
       }
       // 設定は全人物のチャートに影響するため、保存済みの全チャートを再計算して反映。
-      const { persons } = await api<{ persons: Person[] }>(`/api/v1/uranai/person`);
-      let done = 0;
-      // 再計算の失敗は握り潰さない。サーバ側の例外で一部のファクトだけが欠けた状態になり得るため、
-      // 静かに成功したように見せるとデータの欠損に気づけない。
-      const failed: string[] = [];
-      const skipped: string[] = [];
-      for (const p of persons) {
-        status.textContent = `再計算中… (${++done}/${persons.length})`;
-        try {
-          await api(`/api/v1/uranai/astrology/person/${p.id}/compute`, { method: "POST", body: "{}" });
-        } catch (e) {
-          const msg = (e as Error).message;
-          // 400 は出生データ未入力など、その人物を計算できないという意味。設定保存の失敗ではない。
-          if (/^400\b/.test(msg)) skipped.push(p.label ?? p.id);
-          else failed.push(`${p.label ?? p.id}: ${msg}`);
-        }
-      }
+      await recomputeAll();
       clearMeanings(); // 流派が変わると意味も変わる
-      if (failed.length) throw new Error(`再計算に失敗しました（${failed.length}/${persons.length}件）: ${failed.join(" / ")}`);
-      status.textContent = skipped.length ? `${skipped.length}件を対象外にしました（出生データ未入力）: ${skipped.join(", ")}` : "";
       await onSaved();
     } catch (e) { status.textContent = `エラー: ${(e as Error).message}`; }
   });
-  renderParts();
+  void initRuleset();
   wrap.append(
     el("div", { className: "u-settings-note", textContent: "この設定はあなた（ユーザー）の既定として保存され、全チャートに適用されます。" }),
-    el("div", { className: "u-set-title", textContent: "計算方式" }), grid, copyBtn, partsBox, save, status,
+    el("div", { className: "u-set-title", textContent: "流派" }), grid, lockNote, noteBox,
+    el("div", { className: "u-set-title", textContent: "流派が決める（変更できない）" }), lockedGrid,
+    el("div", { className: "u-set-title", textContent: "自分で決める" }), ownGrid,
+    timingBox, partsBox, save, status,
   );
   return wrap;
 }
@@ -427,6 +559,763 @@ function chartView(chart: Chart, birth: Birth | null | undefined, personId: stri
         d.draconic ? `${sgLbl(d.draconic.sign)} ${fmtDeg(d.draconic.degree)}` : "—"])
     : [["—", "—", "—"]]);
 
+  // ── 伝統的な技法。ルディアの体系には無い ──
+  // ターム: サインを不等分した区画とその支配星（エジプト式）。
+  const termTbl = mkTable(["天体", "タームの支配星", "区画"], (chart.terms ?? []).length
+    ? (chart.terms ?? []).map((t) => [{ t: bodyLabel(t.planet), tip: `planet:${t.planet}` },
+        bodyLabel(t.ruler), `${t.from}°〜${t.to}°`])
+    : [["—", "—", "—"]]);
+
+  // アルムーテン: 5つの品位の持ち点の合計。同点なら勝者を立てない。
+  const DIG_JA: Record<string, string> = { domicile: "ドミサイル", exaltation: "高揚", triplicity: "三分", term: "ターム", face: "フェイス" };
+  const almTbl = mkTable(["天体", "アルムーテン", "得点の内訳"], (chart.almutens ?? []).length
+    ? (chart.almutens ?? []).map((a) => [{ t: bodyLabel(a.planet), tip: `planet:${a.planet}` },
+        a.winner ? bodyLabel(a.winner) : "同点",
+        a.scores.map((x) => `${bodyLabel(x.planet)} ${x.score}（${x.from.map((f) => DIG_JA[f] ?? f).join("・")}）`).join(" / ")])
+    : [["—", "—", "—"]], [2]);
+
+  // アラビックパーツ: ヘルメス由来の7つのロット。昼夜で式が入れ替わる。
+  const lotTbl = mkTable(["ロット", "サイン", "度数"], (chart.arabic_parts ?? []).length
+    ? (chart.arabic_parts ?? []).map((l) => [l.name, sgLbl(l.sign), fmtDeg(l.degree)])
+    : [["—", "—", "—"]]);
+
+  // サビアン: 度数と、流派ごとに入れた文言。文言は著作物なので同梱しない。
+  // 手元の版から貼り込んでもらう。ジョーンズの記録とルディアの言い換えは別物なので、
+  // 流派ごとに別々に持てるようにしてある。
+  const sabNode = (): HTMLElement => {
+    const box = el("div", {});
+    const list = chart.sabian ?? [];
+    const filled = list.filter((x) => x.text).length;
+    if (!sabianReady()) {
+      // 文言が1件も無い状態。度数だけを出しても読みには使えないので、まずそう明示する。
+      box.append(el("div", { className: "u-part-disabled" }, [
+        el("div", { className: "u-part-disabled-h", textContent: "この部品は現在使えません" }),
+        el("div", { textContent: "サビアンシンボルの文言は Marc Edmund Jones が記録しルディアが解説した著作物のため、このアプリには同梱していません。文言が無い状態では度数が出るだけで、読みには使えません。" }),
+        el("div", { textContent: "手元の版から下の欄に貼り込むと、この流派のサビアンとして保存され、表と進行の太陽に文言が出るようになります。" }),
+      ]));
+    } else {
+      box.append(el("div", { className: "u-pat-comp", textContent:
+        `この流派（${chart.ruleset ?? "default"}）に ${sabianCountOf()}/360 件の文言が登録されている。この人物の配置では ${filled}/${list.length} 件に文言がある。` }));
+    }
+    box.append(mkTable(["天体", "サビアン度数", "通し番号", "文言"], list.length
+      ? list.map((x) => [{ t: bodyLabel(x.planet), tip: `planet:${x.planet}` },
+          `${SIGN_NAME[x.sign] ?? x.sign} ${x.degree}度`, String(x.index), x.text ?? "（未登録）"])
+      : [["—", "—", "—", "—"]], [3]));
+
+    // 取り込み。「通し番号<タブまたはコロン>文言」を1行に1つ。360行まとめて貼れる。
+    const det = el("details", {});
+    det.append(el("summary", { textContent: "文言を取り込む" }));
+    const ta = el("textarea", { className: "u-fi", rows: 6,
+      placeholder: "1\t牡羊座の1度の文言\n2\t牡羊座の2度の文言\n…（通し番号1〜360。区切りはタブ・コロン・全角コロンのいずれか）" }) as HTMLTextAreaElement;
+    const status = el("div", { className: "u-status" });
+    const btn = el("button", { className: "u-btn u-btn-sm", textContent: "取り込む" });
+    btn.addEventListener("click", async () => {
+      const symbols: Array<{ index: number; text: string }> = [];
+      let skipped = 0;
+      for (const line of ta.value.split("\n")) {
+        const m = line.match(/^\s*(\d{1,3})\s*[\t:：.。、]\s*(.+?)\s*$/);
+        if (!m) { if (line.trim()) skipped++; continue; }
+        const i = Number(m[1]);
+        if (i < 1 || i > 360) { skipped++; continue; }
+        symbols.push({ index: i, text: m[2] });
+      }
+      if (!symbols.length) { status.textContent = "取り込める行がありません（「番号<タブ>文言」の形にしてください）"; return; }
+      status.textContent = "保存中…";
+      try {
+        const r = await api<{ saved: number; total: number }>(`/api/v1/uranai/astrology/sabian?ruleset=${encodeURIComponent(chart.ruleset ?? "default")}`,
+          { method: "PUT", body: JSON.stringify({ symbols }) });
+        status.textContent = `${r.saved}件を保存しました（この流派の合計 ${r.total}/360）。${skipped ? `${skipped}行は形式が合わず読み飛ばしました。` : ""}表示に反映するには再読み込みしてください。`;
+      } catch (e) { status.textContent = `エラー: ${(e as Error).message}`; }
+    });
+    det.append(ta, el("div", { className: "u-row" }, [btn]), status);
+    box.append(det);
+    return box;
+  };
+
+  // 年運のプロフェクション。出生からの満年齢だけで決まる。
+  const profNode = (): HTMLElement => {
+    const box = el("div", {});
+    const dateIn = el("input", { type: "date", value: new Date().toISOString().slice(0, 10) }) as HTMLInputElement;
+    const out = el("div", {});
+    const load = async () => {
+      out.innerHTML = "";
+      out.append(el("div", { className: "u-pat-empty", textContent: "算出中…" }));
+      try {
+        const p = await api<Profection>(`/api/v1/uranai/astrology/person/${personId}/profection?date=${dateIn.value}`);
+        out.innerHTML = "";
+        out.append(el("div", { className: "u-pat-comp", textContent: `出生から満 ${p.age} 年。アセンダントのサインを1室として1年に1室ずつ進める。` }));
+        out.append(mkTable(["区分", "室", "サイン", "主星"], [
+          ["年運", `${p.house}室`, sgLbl(p.sign), bodyLabel(p.lord)],
+          ["月運", `${p.month_house}室`, sgLbl(p.month_sign), bodyLabel(p.month_lord)],
+        ]));
+      } catch (e) {
+        out.innerHTML = "";
+        out.append(el("div", { className: "u-status", textContent: `エラー: ${(e as Error).message}` }));
+      }
+    };
+    const btn = el("button", { className: "u-btn u-btn-sm", textContent: "算出" });
+    btn.addEventListener("click", () => void load());
+    box.append(el("div", { className: "u-row" }, [el("label", { textContent: "対象日" }), dateIn, btn]), out);
+    void load();
+    return box;
+  };
+
+  // ソーラーアーク方向法。進行の太陽の移動量を全天体に一律で加える。
+  const arcNode = (): HTMLElement => {
+    const box = el("div", {});
+    const dateIn = el("input", { type: "date", value: new Date().toISOString().slice(0, 10) }) as HTMLInputElement;
+    const out = el("div", {});
+    const load = async () => {
+      out.innerHTML = "";
+      out.append(el("div", { className: "u-pat-empty", textContent: "算出中…" }));
+      try {
+        const d = await api<SolarArc>(`/api/v1/uranai/astrology/person/${personId}/solar_arc?date=${dateIn.value}`);
+        out.innerHTML = "";
+        out.append(el("div", { className: "u-pat-comp", textContent: `アーク ${d.arc.toFixed(4)}°（進行の太陽が出生の太陽から進んだ角度）を全天体に加える。` }));
+        out.append(el("div", { className: "u-tbl-title", textContent: "方向後の位置" }));
+        out.append(mkTable(["天体", "サイン", "度数"], d.positions.map((p) =>
+          [bodyLabel(p.planet), sgLbl(p.sign), fmtDeg(p.degree)])));
+        out.append(el("div", { className: "u-tbl-title", textContent: `出生図との接触（オーブ1度以内・${d.contacts.length}）` }));
+        out.append(d.contacts.length
+          ? mkTable(["方向", "出生", "種別", "オーブ"], d.contacts.map((c) =>
+              [bodyLabel(c.directed), bodyLabel(c.natal), ASPECT_INFO[c.type]?.label ?? c.type, `${c.orb.toFixed(2)}°`]))
+          : el("div", { className: "u-pat-empty", textContent: "該当する接触はありません" }));
+      } catch (e) {
+        out.innerHTML = "";
+        out.append(el("div", { className: "u-status", textContent: `エラー: ${(e as Error).message}` }));
+      }
+    };
+    const btn = el("button", { className: "u-btn u-btn-sm", textContent: "算出" });
+    btn.addEventListener("click", () => void load());
+    box.append(el("div", { className: "u-row" }, [el("label", { textContent: "対象日" }), dateIn, btn]), out);
+    void load();
+    return box;
+  };
+
+  // ミッドポイント: 天体が乗っているものだけ。全組合せを出しても読めない。
+  const mpTbl = mkTable(["組", "中点", "乗っている天体"], (chart.midpoints ?? []).length
+    ? (chart.midpoints ?? []).map((m) => [`${bodyLabel(m.a)} / ${bodyLabel(m.b)}`,
+        `${sgLbl(m.sign)} ${fmtDeg(m.degree)}`,
+        m.occupants.map((o) => `${bodyLabel(o.planet)}（${o.orb.toFixed(2)}°）`).join("、")])
+    : [["—", "—", "天体が乗っている中点はありません"]], [2]);
+
+  // ── 重い技法 ──
+  // 恒星との合。ルディアの体系には無い。
+  const starNode = (): HTMLElement => {
+    const box = el("div", {});
+    const out = el("div", {});
+    const load = async () => {
+      out.innerHTML = "";
+      out.append(el("div", { className: "u-pat-empty", textContent: "算出中…" }));
+      try {
+        const d = await api<FixedStars>(`/api/v1/uranai/astrology/person/${personId}/fixed_stars`);
+        out.innerHTML = "";
+        out.append(el("div", { className: "u-pat-comp", textContent: "恒星は合だけを見る。オーブは等級で変えている（1.5等以下1.5°／2.5等以下1.0°／それ以外0.5°）。固有運動は入れていない。" }));
+        out.append(el("div", { className: "u-tbl-title", textContent: `天体との合（${d.conjunctions.length}）` }));
+        out.append(d.conjunctions.length
+          ? mkTable(["天体", "恒星", "等級", "オーブ"], d.conjunctions.map((c) =>
+              [bodyLabel(c.planet), c.star_name, c.magnitude.toFixed(2), `${c.orb.toFixed(2)}°`]))
+          : el("div", { className: "u-pat-empty", textContent: "合はありません" }));
+        out.append(el("div", { className: "u-tbl-title", textContent: `恒星の位置（${d.stars.length}）` }));
+        out.append(mkTable(["恒星", "サイン", "度数", "黄緯", "等級"], d.stars.map((x) =>
+          [x.name, sgLbl(x.sign), fmtDeg(x.degree), `${x.latitude.toFixed(2)}°`, x.magnitude.toFixed(2)])));
+      } catch (e) {
+        out.innerHTML = "";
+        out.append(el("div", { className: "u-status", textContent: `エラー: ${(e as Error).message}` }));
+      }
+    };
+    box.append(out); void load();
+    return box;
+  };
+
+  // アウトオブバウンズ: 赤緯が黄道傾斜角を超えた天体。
+  const oobNode = (): HTMLElement => {
+    const box = el("div", {});
+    const out = el("div", {});
+    const load = async () => {
+      out.innerHTML = "";
+      out.append(el("div", { className: "u-pat-empty", textContent: "算出中…" }));
+      try {
+        const d = await api<OutOfBounds>(`/api/v1/uranai/astrology/person/${personId}/out_of_bounds`);
+        out.innerHTML = "";
+        out.append(el("div", { className: "u-pat-comp", textContent: `出生時の黄道傾斜角は ${d.obliquity.toFixed(3)}°。これを超えた赤緯を持つ天体が「境界の外」。太陽とノードは定義上あり得ない。` }));
+        out.append(mkTable(["天体", "赤緯", "判定", "超過"], d.bodies.map((b) =>
+          [bodyLabel(b.planet), `${b.declination.toFixed(3)}°`, b.out ? "境界の外" : "", b.out ? `${b.excess.toFixed(3)}°` : ""])));
+      } catch (e) {
+        out.innerHTML = "";
+        out.append(el("div", { className: "u-status", textContent: `エラー: ${(e as Error).message}` }));
+      }
+    };
+    box.append(out); void load();
+    return box;
+  };
+
+  // ファルダール: 天体が順に主星となる期間法。75年で一巡する。
+  const firNode = (): HTMLElement => {
+    const box = el("div", {});
+    const dateIn = el("input", { type: "date", value: new Date().toISOString().slice(0, 10) }) as HTMLInputElement;
+    const out = el("div", {});
+    const load = async () => {
+      out.innerHTML = "";
+      out.append(el("div", { className: "u-pat-empty", textContent: "算出中…" }));
+      try {
+        const d = await api<Firdaria>(`/api/v1/uranai/astrology/person/${personId}/firdaria?date=${dateIn.value}&years=95`);
+        out.innerHTML = "";
+        out.append(el("div", { className: "u-pat-comp", textContent: `${d.day ? "昼" : "夜"}生まれなので ${d.day ? "太陽" : "月"} から始まる。七曜で70年、ノードで5年、合わせて75年で一巡する。` }));
+        if (d.current.lord) {
+          out.append(el("div", { className: "u-tbl-title", textContent: "指定日に効いている期間" }));
+          out.append(mkTable(["主星", "副主星", "期間"], [[bodyLabel(d.current.lord),
+            d.current.sub_lord ? bodyLabel(d.current.sub_lord) : "—", `${d.current.from} 〜 ${d.current.to}`]]));
+        }
+        out.append(el("div", { className: "u-tbl-title", textContent: "全期間" }));
+        out.append(mkTable(["主星", "期間", "副主星"], d.periods.map((p) => [bodyLabel(p.lord),
+          `${p.from} 〜 ${p.to}`,
+          p.sub.length ? p.sub.map((x) => `${bodyLabel(x.lord)} ${x.from}`).join(" / ") : "—"]), [2]));
+      } catch (e) {
+        out.innerHTML = "";
+        out.append(el("div", { className: "u-status", textContent: `エラー: ${(e as Error).message}` }));
+      }
+    };
+    const btn = el("button", { className: "u-btn u-btn-sm", textContent: "算出" });
+    btn.addEventListener("click", () => void load());
+    box.append(el("div", { className: "u-row" }, [el("label", { textContent: "対象日" }), dateIn, btn]), out);
+    void load();
+    return box;
+  };
+
+  // シナストリー／コンポジット: 相手を選んで2人を並べる。
+  const pairNode = (kind: "synastry" | "composite"): HTMLElement => {
+    const box = el("div", {});
+    const sel = el("select", { className: "u-fi" }) as HTMLSelectElement;
+    const out = el("div", {});
+    const load = async () => {
+      if (!sel.value) { out.innerHTML = ""; out.append(el("div", { className: "u-pat-empty", textContent: "相手を選んでください" })); return; }
+      out.innerHTML = "";
+      out.append(el("div", { className: "u-pat-empty", textContent: "算出中…" }));
+      try {
+        if (kind === "synastry") {
+          const d = await api<Synastry>(`/api/v1/uranai/astrology/person/${personId}/synastry?with=${encodeURIComponent(sel.value)}`);
+          out.innerHTML = "";
+          out.append(el("div", { className: "u-tbl-title", textContent: `2人の間のアスペクト（${d.aspects.length}）` }));
+          out.append(d.aspects.length
+            ? mkTable(["この人", "相手", "種別", "オーブ"], d.aspects.map((a) =>
+                [bodyLabel(a.a), bodyLabel(a.b), ASPECT_INFO[a.type]?.label ?? a.type, `${a.orb.toFixed(2)}°`]))
+            : el("div", { className: "u-pat-empty", textContent: "該当するアスペクトはありません" }));
+        } else {
+          const d = await api<Composite>(`/api/v1/uranai/astrology/person/${personId}/composite?with=${encodeURIComponent(sel.value)}`);
+          out.innerHTML = "";
+          out.append(el("div", { className: "u-pat-comp", textContent: "中点合成図。両方のチャートに在る点だけを、近い側の弧の中点で合成する。この作り方ではアセンダントと MC が直交しないことがある。" }));
+          out.append(el("div", { className: "u-tbl-title", textContent: "合成後の位置" }));
+          out.append(mkTable(["天体", "サイン", "度数"], d.placements.map((p) =>
+            [bodyLabel(p.planet), sgLbl(p.sign), fmtDeg(p.degree)])));
+          out.append(el("div", { className: "u-tbl-title", textContent: `合成図の中のアスペクト（${d.aspects.length}）` }));
+          out.append(d.aspects.length
+            ? mkTable(["天体", "天体", "種別", "オーブ"], d.aspects.map((a) =>
+                [bodyLabel(a.a), bodyLabel(a.b), ASPECT_INFO[a.type]?.label ?? a.type, `${a.orb.toFixed(2)}°`]))
+            : el("div", { className: "u-pat-empty", textContent: "該当するアスペクトはありません" }));
+        }
+      } catch (e) {
+        out.innerHTML = "";
+        out.append(el("div", { className: "u-status", textContent: `エラー: ${(e as Error).message}` }));
+      }
+    };
+    sel.addEventListener("change", () => void load());
+    void (async () => {
+      const { persons } = await api<{ persons: Person[] }>(`/api/v1/uranai/person`);
+      sel.append(el("option", { value: "", textContent: "相手を選択" }));
+      for (const p of persons) if (p.id !== personId) sel.append(el("option", { value: p.id, textContent: p.label ?? "(名称未設定)" }));
+    })();
+    box.append(el("div", { className: "u-row" }, [el("label", { textContent: "相手" }), sel]), out);
+    return box;
+  };
+
+  // 出生時刻の修正: 時刻を動かして変わるのはアングルとハウスだけなので、
+  // 手がかりは出来事に対するアングルへの接触に限られる。候補を並べるだけ。
+  const rectNode = (): HTMLElement => {
+    const box = el("div", {});
+    const ev = el("textarea", { className: "u-fi", rows: 3, placeholder: "出来事の日付を1行に1つ（YYYY-MM-DD）" }) as HTMLTextAreaElement;
+    const spanIn = el("input", { type: "number", className: "u-fi u-fi-num", value: "60", min: "1", max: "720" }) as HTMLInputElement;
+    const stepIn = el("input", { type: "number", className: "u-fi u-fi-num", value: "4", min: "1", max: "60" }) as HTMLInputElement;
+    const out = el("div", {});
+    const load = async () => {
+      const dates = ev.value.split(/[\n,]/).map((x) => x.trim()).filter(Boolean);
+      if (!dates.length) { out.innerHTML = ""; out.append(el("div", { className: "u-pat-empty", textContent: "出来事の日付を入れてください" })); return; }
+      out.innerHTML = "";
+      out.append(el("div", { className: "u-pat-empty", textContent: "算出中…" }));
+      try {
+        const d = await api<Rectification>(`/api/v1/uranai/astrology/person/${personId}/rectification?span=${spanIn.value}&step=${stepIn.value}&events=${encodeURIComponent(dates.join(","))}`);
+        out.innerHTML = "";
+        out.append(el("div", { className: "u-pat-comp", textContent: `記録された出生時刻 ${d.recorded.slice(0, 16).replace("T", " ")} UTC の前後 ${d.span_minutes} 分を ${d.step_minutes} 分刻みで見る。時刻で動くのはアングルとハウスだけなので、手がかりはアングルへの接触に限られる。どの候補を採るかは人が決める。` }));
+        out.append(mkTable(["ずれ", "Asc", "MC", "接触の合計", "内訳"], d.candidates.slice(0, 30).map((c) => [
+          `${c.offset_minutes > 0 ? "+" : ""}${c.offset_minutes}分`,
+          `${SIGN_NAME[c.asc_sign] ?? c.asc_sign} ${fmtDeg(c.ascendant % 30)}`,
+          `${SIGN_NAME[c.mc_sign] ?? c.mc_sign} ${fmtDeg(c.midheaven % 30)}`,
+          `${c.score.toFixed(2)}°`,
+          c.hits.map((h) => `${h.date}: ${bodyLabel(h.directed)}→${h.angle.toUpperCase()} ${h.orb.toFixed(2)}°`).join(" / "),
+        ]), [4]));
+      } catch (e) {
+        out.innerHTML = "";
+        out.append(el("div", { className: "u-status", textContent: `エラー: ${(e as Error).message}` }));
+      }
+    };
+    const btn = el("button", { className: "u-btn u-btn-sm", textContent: "算出" });
+    btn.addEventListener("click", () => void load());
+    box.append(el("div", { className: "u-row" }, [el("label", { textContent: "前後(分)" }), spanIn,
+      el("label", { textContent: "刻み(分)" }), stepIn, btn]), ev, out);
+    return box;
+  };
+
+  // 天体の周期。ルディアが年齢の節目として用いる範囲。
+  const cycNode = (): HTMLElement => {
+    const box = el("div", {});
+    const out = el("div", {});
+    const load = async () => {
+      out.innerHTML = "";
+      out.append(el("div", { className: "u-pat-empty", textContent: "算出中…" }));
+      try {
+        const d = await api<PlanetCycle>(`/api/v1/uranai/astrology/person/${personId}/planet_cycle?until_age=90`);
+        out.innerHTML = "";
+        // いまどの区間に居るか。周期の局面を主軸に読む流派はここが本体で、
+        // 境目の一覧はその裏付けにすぎない。だから現在地を先に出す。
+        const cur = d.current;
+        if (cur) {
+          out.append(el("div", { className: "u-tbl-title", textContent: `現在地（${cur.at} 時点）` }));
+          const posRow = (name: string, p: PlanetCycle["current"] extends null ? never : NonNullable<PlanetCycle["current"]>["saturn_stage"]) => p
+            ? [name, p.total ? `${p.index} / ${p.total}` : `第${p.index}期`,
+               `${p.from ?? "—"} 〜 ${p.to ?? "以降"}`,
+               `${p.elapsed_years.toFixed(1)}年経過` + (p.remaining_years !== null ? ` ／ 残り${p.remaining_years.toFixed(1)}年` : ""),
+               p.elapsed_ratio !== null ? `${Math.round(p.elapsed_ratio * 100)}%` : "—"]
+            : [name, "—", "—", "—", "—"];
+          out.append(mkTable(["周期", "区間", "期間", "経過", "進み"], [
+            posRow("土星の段階", cur.saturn_stage),
+            posRow("天王星の7年期間", cur.uranus_septenary),
+            posRow("土星の象限", cur.saturn_quadrant),
+            posRow("木星の周期", cur.jupiter_period),
+          ], [2]));
+        }
+        const tbl = (title: string, note: string, ms: PlanetCycle["saturn_stages"]) => {
+          out.append(el("div", { className: "u-tbl-title", textContent: title }));
+          if (note) out.append(el("div", { className: "u-pat-comp", textContent: note }));
+          out.append(ms.length
+            ? mkTable(["年齢", "日付", "内容"], ms.map((m) => [`${m.age.toFixed(1)}歳`, m.at, m.label]), [2])
+            : el("div", { className: "u-pat-empty", textContent: "該当なし" }));
+        };
+        tbl("土星の3段階", "土星の周期（約29.5年）は自己形成の3段階を区切る。第1周期は生物的なレベル、第2周期で個の自我が確立され、第3周期は霊的なレベルに向かう。", d.saturn_stages);
+        tbl("土星による象限の移り変わり", "運行の土星がチャートの4象限を渡るたび（平均で約7.4年ごと）、主観的な姿勢と社会との関係が組み直されるとされる。", d.saturn_quadrants);
+        tbl("天王星の12等分（7年期間）", "天王星の84年周期を12等分した7年ごとの区切り。黄経では出生の天王星から30度ずつにあたる。これがルディアの言う7年周期で、土星の4分の1ではない。", d.uranus_septenaries);
+        tbl("木星回帰", "社会的・経済的な浮き沈みの周期（約11.9年）。", d.jupiter_returns);
+        out.append(el("div", { className: "u-tbl-title", textContent: "回帰を持たない天体" }));
+        out.append(mkTable(["天体", "周期", "扱い"], d.no_return.map((x) =>
+          [bodyLabel(x.planet), `約${x.period_years}年`, x.reason]), [2]));
+      } catch (e) {
+        out.innerHTML = "";
+        out.append(el("div", { className: "u-status", textContent: `エラー: ${(e as Error).message}` }));
+      }
+    };
+    box.append(out); void load();
+    return box;
+  };
+
+  // 期間の探索。経過が「この日はどうか」なのに対し、こちらは「いつか」を探す。
+  const searchNode = (): HTMLElement => {
+    const box = el("div", {});
+    const y = new Date().getFullYear();
+    const fromIn = el("input", { type: "date", value: `${y}-01-01` }) as HTMLInputElement;
+    const toIn = el("input", { type: "date", value: `${y + 2}-12-31` }) as HTMLInputElement;
+    const out = el("div", {});
+    const load = async () => {
+      out.innerHTML = "";
+      out.append(el("div", { className: "u-pat-empty", textContent: "探索中…" }));
+      try {
+        const d = await api<TransitSearch>(`/api/v1/uranai/astrology/person/${personId}/transit_search?from=${fromIn.value}&to=${toIn.value}`);
+        out.innerHTML = "";
+        out.append(el("div", { className: "u-pat-comp", textContent: `${d.from} 〜 ${d.to} のうち、運行の木星・土星・天王星・海王星・冥王星が出生の太陽・月・アセンダント・MC に合／衝／スクエアで正確に当たる日。逆行で同じ角度を3回通ることがある。` }));
+        // 実務で使うのは「いつからいつまで」の方なので、窓を先に出して正確日はその中に畳む。
+        out.append(el("div", { className: "u-tbl-title", textContent: `オーブに入っている期間（${d.windows.length}）` }));
+        out.append(d.windows.length
+          ? mkTable(["期間", "運行", "出生", "種別", "正確になる日"], d.windows.map((w) =>
+              [`${w.enter} 〜 ${w.leave}${w.clipped ? "（端は4年先まで追っても抜けず）" : ""}`,
+               bodyLabel(w.transit), bodyLabel(w.natal),
+               ASPECT_INFO[w.type]?.label ?? w.type, w.exact.join(" / ")]), [4])
+          : el("div", { className: "u-pat-empty", textContent: "この期間に該当はありません" }));
+        if (d.hits.length) {
+          out.append(el("div", { className: "u-tbl-title", textContent: `正確になる日だけの一覧（${d.hits.length}）` }));
+          out.append(mkTable(["日付", "運行", "出生", "種別"], d.hits.map((h) =>
+            [h.at, bodyLabel(h.transit), bodyLabel(h.natal), ASPECT_INFO[h.type]?.label ?? h.type])));
+        }
+      } catch (e) {
+        out.innerHTML = "";
+        out.append(el("div", { className: "u-status", textContent: `エラー: ${(e as Error).message}` }));
+      }
+    };
+    const btn = el("button", { className: "u-btn u-btn-sm", textContent: "探索" });
+    btn.addEventListener("click", () => void load());
+    box.append(el("div", { className: "u-row" }, [el("label", { textContent: "開始" }), fromIn,
+      el("label", { textContent: "終了" }), toIn, btn]), out);
+    void load();
+    return box;
+  };
+
+  // 一次進行。ルディアの技法ではない（彼は他流派のものとして紹介するにとどまる）。
+  const pdNode = (): HTMLElement => {
+    const box = el("div", {});
+    const sel = el("select", { className: "u-fi" }) as HTMLSelectElement;
+    const out = el("div", {});
+    const load = async () => {
+      out.innerHTML = "";
+      out.append(el("div", { className: "u-pat-empty", textContent: "算出中…" }));
+      try {
+        const d = await api<PrimaryDirection>(`/api/v1/uranai/astrology/person/${personId}/primary_direction?key=${sel.value || "naibod"}&until_age=90`);
+        if (!sel.options.length) {
+          for (const k of d.keys) sel.append(el("option", { value: k.id, textContent: k.label }));
+          sel.value = d.key;
+        }
+        out.innerHTML = "";
+        out.append(el("div", { className: "u-pat-comp", textContent: `天球の日周回転を年に換算する方向法。弧を年に換算する鍵は流儀が分かれ、ここでは${d.key_label}を使っている（赤経1度あたり ${d.years_per_degree.toFixed(6)} 年）。鍵を変えると年齢が数年ずれる。ルディアの体系には無く、彼は他流派の技法として紹介するにとどまっている。` }));
+        out.append(el("div", { className: "u-pat-comp", textContent: "MC・IC への弧は赤経の差、アセンダント・ディセンダントへの弧は斜升の差で測る。順方向のみで、逆方向（コンバース）は扱わない。" }));
+        out.append(d.directions.length
+          ? mkTable(["年齢", "天体", "到達するアングル", "弧"], d.directions.map((x) =>
+              [`${x.age.toFixed(1)}歳`, bodyLabel(x.planet), x.angle.toUpperCase(), `${x.arc.toFixed(2)}°`]))
+          : el("div", { className: "u-pat-empty", textContent: "該当する方向はありません" }));
+      } catch (e) {
+        out.innerHTML = "";
+        out.append(el("div", { className: "u-status", textContent: `エラー: ${(e as Error).message}` }));
+      }
+    };
+    sel.addEventListener("change", () => void load());
+    box.append(el("div", { className: "u-row" }, [el("label", { textContent: "鍵" }), sel]), out);
+    void load();
+    return box;
+  };
+
+  // 時期支配星。伝統派はこの形を主軸に読む。主星の一覧そのものより、
+  // その主星が出生図でどういう状態かが本体なので、条件を横に並べる。
+  const lordNode = (): HTMLElement => {
+    const box = el("div", {});
+    const dateIn = el("input", { type: "date", value: new Date().toISOString().slice(0, 10) }) as HTMLInputElement;
+    const out = el("div", {});
+    const SECT_JA: Record<string, string> = { in_sect: "セクト内", out_of_sect: "セクト外" };
+    const load = async () => {
+      out.innerHTML = "";
+      out.append(el("div", { className: "u-pat-empty", textContent: "算出中…" }));
+      try {
+        const d = await api<TimeLords>(`/api/v1/uranai/astrology/person/${personId}/time_lords?date=${dateIn.value}`);
+        out.innerHTML = "";
+        out.append(el("div", { className: "u-pat-comp", textContent: `${d.at} 時点で担当している主星。${d.day ? "昼" : "夜"}生まれ。期間は入れ子になっていて、上ほど長い。` }));
+        out.append(mkTable(["階層", "主星", "期間", "出生図での状態"], d.stack.map((x) => [
+          x.label,
+          x.lord ? { t: bodyLabel(x.lord), tip: `planet:${x.lord}` } : "—",
+          x.from ? `${x.from} 〜 ${x.to}` : "—",
+          x.condition
+            ? [`${SIGN_NAME[x.condition.sign] ?? x.condition.sign} ${fmtDeg(x.condition.degree)}`,
+               x.condition.house ? `${x.condition.house.replace("house_", "")}室` : "",
+               x.condition.retrograde ? "℞" : "",
+               x.condition.dignity ? meaningOf("dignity", x.condition.dignity) ? nameOf("dignity", x.condition.dignity) : x.condition.dignity : "",
+               x.condition.sect ? SECT_JA[x.condition.sect] ?? "" : ""].filter(Boolean).join(" ／ ")
+            : "—",
+        ]), [3]));
+        // 主星が出生図で結んでいるアスペクト。主星の状態を測る材料。
+        for (const x of d.stack) {
+          if (!x.lord || !x.condition?.aspects.length) continue;
+          out.append(el("div", { className: "u-tbl-title", textContent: `${bodyLabel(x.lord)} が出生図で結ぶアスペクト（${x.condition.aspects.length}）` }));
+          out.append(mkTable(["相手", "種別", "オーブ", "位相"], x.condition.aspects.map((a) =>
+            [bodyLabel(a.with), ASPECT_INFO[a.type]?.label ?? a.type, `${a.orb.toFixed(2)}°`,
+             a.phase === "waxing" ? "上弦" : "下弦"])));
+        }
+        // 伝統派はトランジットを主星に来るものだけに絞って見る。
+        out.append(el("div", { className: "u-tbl-title", textContent: `主星に来ている運行（前後${Math.round(d.span_days / 2)}日・${d.transits_on_lords.length}）` }));
+        out.append(d.transits_on_lords.length
+          ? mkTable(["期間", "運行", "主星", "種別", "正確になる日"], d.transits_on_lords.map((w) =>
+              [`${w.enter} 〜 ${w.leave}`, bodyLabel(w.transit), bodyLabel(w.natal),
+               ASPECT_INFO[w.type]?.label ?? w.type, w.exact.join(" / ")]), [4])
+          : el("div", { className: "u-pat-empty", textContent: "この期間に主星へ来ている運行はありません" }));
+      } catch (e) {
+        out.innerHTML = "";
+        out.append(el("div", { className: "u-status", textContent: `エラー: ${(e as Error).message}` }));
+      }
+    };
+    const btn = el("button", { className: "u-btn u-btn-sm", textContent: "算出" });
+    btn.addEventListener("click", () => void load());
+    box.append(el("div", { className: "u-row" }, [el("label", { textContent: "対象日" }), dateIn, btn]), out);
+    void load();
+    return box;
+  };
+
+  // ナクシャトラ（黄道の27分割）。インド占星術の基本単位。
+  const nakTbl = mkTable(["天体", "ナクシャトラ", "支配星", "パダ", "区画内の度数"], (chart.nakshatra ?? []).length
+    ? (chart.nakshatra ?? []).map((n) => [{ t: bodyLabel(n.planet), tip: `planet:${n.planet}` },
+        `${n.index}. ${n.name}`, bodyLabel(n.lord), `第${n.pada}`, `${n.degree_in_nakshatra.toFixed(2)}°`])
+    : [["—", "—", "—", "—", "—"]], [1]);
+
+  // ヴィムショッタリ・ダシャー。時期支配星の形そのもので、120年を一巡する。
+  const dashaNode = (): HTMLElement => {
+    const box = el("div", {});
+    const dateIn = el("input", { type: "date", value: new Date().toISOString().slice(0, 10) }) as HTMLInputElement;
+    const out = el("div", {});
+    const load = async () => {
+      out.innerHTML = "";
+      out.append(el("div", { className: "u-pat-empty", textContent: "算出中…" }));
+      try {
+        const d = await api<Dasha>(`/api/v1/uranai/astrology/person/${personId}/dasha?date=${dateIn.value}&levels=2`);
+        out.innerHTML = "";
+        out.append(el("div", { className: "u-pat-comp", textContent: `出生時の月は ${d.moon_nakshatra.index}. ${d.moon_nakshatra.name}（第${d.moon_nakshatra.pada}パダ・支配星 ${bodyLabel(d.moon_nakshatra.lord)}）。ここから ${bodyLabel(d.start_lord)} 期の残り ${d.balance_years} 年で始まる。全体で120年を一巡する。` }));
+        out.append(el("div", { className: "u-tbl-title", textContent: "指定日に効いている期間" }));
+        out.append(d.current.length
+          ? mkTable(["階層", "主星", "期間"], d.current.map((c) =>
+              [c.level === 1 ? "マハーダシャー" : c.level === 2 ? "アンタルダシャー" : "プラティアンタルダシャー",
+               bodyLabel(c.lord), `${c.from} 〜 ${c.to}`]))
+          : el("div", { className: "u-pat-empty", textContent: "該当する期間がありません" }));
+        out.append(el("div", { className: "u-tbl-title", textContent: "マハーダシャーの全期間" }));
+        out.append(mkTable(["主星", "期間", "アンタルダシャー"], d.periods.map((p) => [bodyLabel(p.lord),
+          `${p.from} 〜 ${p.to}`,
+          p.sub.length ? p.sub.map((x) => `${bodyLabel(x.lord)} ${x.from}`).join(" / ") : "—"]), [2]));
+      } catch (e) {
+        out.innerHTML = "";
+        out.append(el("div", { className: "u-status", textContent: `エラー: ${(e as Error).message}` }));
+      }
+    };
+    const btn = el("button", { className: "u-btn u-btn-sm", textContent: "算出" });
+    btn.addEventListener("click", () => void load());
+    box.append(el("div", { className: "u-row" }, [el("label", { textContent: "対象日" }), dateIn, btn]), out);
+    void load();
+    return box;
+  };
+
+  // 分割図（ヴァルガ）。サインをN等分して別のサインへ写した副次的な図。
+  const vargaNode = (): HTMLElement => {
+    const box = el("div", {});
+    const sel = el("select", { className: "u-fi" }) as HTMLSelectElement;
+    const out = el("div", {});
+    const SIGN_BY_INDEX = sgIdx;
+    const load = async () => {
+      out.innerHTML = "";
+      out.append(el("div", { className: "u-pat-empty", textContent: "算出中…" }));
+      try {
+        const d = await api<VargaCharts>(`/api/v1/uranai/astrology/person/${personId}/varga${sel.value ? `?varga=${sel.value}` : ""}`);
+        if (!sel.options.length) {
+          for (const v of d.all_vargas) sel.append(el("option", { value: v.id, textContent: `${v.id} ${v.name}` }));
+          sel.value = "D9"; // ナヴァームシャは出生図に次いで重く見るので既定にする
+        }
+        out.innerHTML = "";
+        const c = d.charts[0];
+        const info = d.all_vargas.find((v) => v.id === c.varga);
+        out.append(el("div", { className: "u-pat-comp", textContent: `${info?.id} ${info?.name}（サインを${info?.divisions}等分）— ${info?.meaning}。アヤナムシャは ${d.ayanamsha}。ラグナは ${c.lagna === null ? "—" : SIGN_BY_INDEX(c.lagna)}。` }));
+        out.append(mkTable(["天体", "サイン", "室"], c.placements.map((p) =>
+          [bodyLabel(p.planet), SIGN_BY_INDEX(p.sign), p.house === null ? "—" : `${p.house}室`])));
+      } catch (e) {
+        out.innerHTML = "";
+        out.append(el("div", { className: "u-status", textContent: `エラー: ${(e as Error).message}` }));
+      }
+    };
+    sel.addEventListener("change", () => void load());
+    box.append(el("div", { className: "u-row" }, [el("label", { textContent: "分割図" }), sel]), out);
+    void load();
+    return box;
+  };
+
+  // ヨーガ。成立したものを先に出し、条件も併記する（何を判定したのかが分からないと使えない）。
+  const yogaNode = (): HTMLElement => {
+    const box = el("div", {});
+    const out = el("div", {});
+    const load = async () => {
+      out.innerHTML = "";
+      out.append(el("div", { className: "u-pat-empty", textContent: "算出中…" }));
+      try {
+        const d = await api<Yogas>(`/api/v1/uranai/astrology/person/${personId}/yoga`);
+        out.innerHTML = "";
+        const formed = d.yogas.filter((y) => y.formed), not = d.yogas.filter((y) => !y.formed);
+        out.append(el("div", { className: "u-pat-comp", textContent: `古典に載るヨーガは数百あり、成立条件も文献で異なる。ここで判定しているのは条件が一義に定まる ${d.yogas.length} 種のみで、網羅ではない。` }));
+        out.append(el("div", { className: "u-tbl-title", textContent: `成立しているもの（${formed.length}）` }));
+        out.append(formed.length
+          ? mkTable(["ヨーガ", "根拠", "成立条件"], formed.map((y) => [y.name, y.detail, y.condition]), [1, 2])
+          : el("div", { className: "u-pat-empty", textContent: "成立しているヨーガはありません" }));
+        out.append(el("div", { className: "u-tbl-title", textContent: `成立していないもの（${not.length}）` }));
+        out.append(mkTable(["ヨーガ", "理由", "成立条件"], not.map((y) => [y.name, y.detail, y.condition]), [1, 2]));
+      } catch (e) {
+        out.innerHTML = "";
+        out.append(el("div", { className: "u-status", textContent: `エラー: ${(e as Error).message}` }));
+      }
+    };
+    box.append(out); void load();
+    return box;
+  };
+
+  const sgIdx = (i: number) => SIGN_NAME[SIGN_ORDER[i]] ?? String(i);
+
+  // ジャイミニ式。天体は度数の高さで役割が決まり、アスペクトはサイン同士で結ぶ。
+  const jaiminiNode = (): HTMLElement => {
+    const box = el("div", {});
+    const out = el("div", {});
+    const load = async () => {
+      out.innerHTML = "";
+      out.append(el("div", { className: "u-pat-empty", textContent: "算出中…" }));
+      try {
+        const d = await api<Jaimini>(`/api/v1/uranai/astrology/person/${personId}/jaimini`);
+        out.innerHTML = "";
+        out.append(el("div", { className: "u-tbl-title", textContent: "チャラ・カーラカ（サイン内の度数の高い順）" }));
+        out.append(mkTable(["役割", "天体", "サイン内の度数"], d.karakas.map((k) =>
+          [k.role_name, bodyLabel(k.planet), `${k.degree_in_sign.toFixed(2)}°`]), [0]));
+        out.append(el("div", { className: "u-tbl-title", textContent: "アルダ・ラグナ" }));
+        out.append(mkTable(["項目", "値"], [
+          ["ラグナ", sgIdx(d.arudha.lagna)],
+          ["ラグナの支配星", `${bodyLabel(d.arudha.lord)}${d.arudha.lord_sign === null ? "" : `（${sgIdx(d.arudha.lord_sign)}）`}`],
+          ["アルダ・ラグナ", d.arudha.arudha === null ? "—" : sgIdx(d.arudha.arudha) + (d.arudha.adjusted ? "（ラグナか第7室に重なるため第10室へ移した）" : "")],
+        ], [1]));
+        out.append(el("div", { className: "u-tbl-title", textContent: "ラーシ・ドリシュティ（サイン同士のアスペクト）" }));
+        out.append(mkTable(["サイン", "見るサイン"], d.drishti.map((x) =>
+          [sgIdx(x.sign), x.aspects.map(sgIdx).join("、")]), [1]));
+      } catch (e) {
+        out.innerHTML = "";
+        out.append(el("div", { className: "u-status", textContent: `エラー: ${(e as Error).message}` }));
+      }
+    };
+    box.append(out); void load();
+    return box;
+  };
+
+  // KP式のサブロード。ナクシャトラをヴィムショッタリの年数の比で9分割した区画。
+  const kpNode = (): HTMLElement => {
+    const box = el("div", {});
+    const out = el("div", {});
+    const load = async () => {
+      out.innerHTML = "";
+      out.append(el("div", { className: "u-pat-empty", textContent: "算出中…" }));
+      try {
+        const d = await api<KpSubs>(`/api/v1/uranai/astrology/person/${personId}/kp?levels=3`);
+        out.innerHTML = "";
+        out.append(el("div", { className: "u-pat-comp", textContent: "ナクシャトラをヴィムショッタリの年数の比で9分割した区画がサブ。さらに同じ比で割ったものがサブのサブ。" }));
+        out.append(el("div", { className: "u-tbl-title", textContent: "天体" }));
+        out.append(mkTable(["天体", "ナクシャトラ", "星座主", "サブ", "サブのサブ"], d.bodies.map((b) => [
+          bodyLabel(b.planet), `${b.nakshatra.index}. ${b.nakshatra.name}`, bodyLabel(b.nakshatra.lord),
+          b.subs[0] ? bodyLabel(b.subs[0].lord) : "—", b.subs[1] ? bodyLabel(b.subs[1].lord) : "—",
+        ])));
+        out.append(el("div", { className: "u-tbl-title", textContent: "カスプ（KP はここを読みの起点にする）" }));
+        out.append(mkTable(["室", "ナクシャトラ", "星座主", "サブ", "サブのサブ"], (d.cusps ?? []).map((c) => [
+          `${c.house.replace("house_", "")}室`, `${c.nakshatra.index}. ${c.nakshatra.name}`,
+          bodyLabel(c.nakshatra.lord),
+          c.subs[0] ? bodyLabel(c.subs[0].lord) : "—", c.subs[1] ? bodyLabel(c.subs[1].lord) : "—",
+        ])));
+      } catch (e) {
+        out.innerHTML = "";
+        out.append(el("div", { className: "u-status", textContent: `エラー: ${(e as Error).message}` }));
+      }
+    };
+    box.append(out); void load();
+    return box;
+  };
+
+  // ムンタ。出生のラグナから1年に1サインずつ進める年運の指示。
+  const munthaNode = (): HTMLElement => {
+    const box = el("div", {});
+    const dateIn = el("input", { type: "date", value: new Date().toISOString().slice(0, 10) }) as HTMLInputElement;
+    const out = el("div", {});
+    const load = async () => {
+      out.innerHTML = "";
+      out.append(el("div", { className: "u-pat-empty", textContent: "算出中…" }));
+      try {
+        const d = await api<Muntha>(`/api/v1/uranai/astrology/person/${personId}/muntha?date=${dateIn.value}`);
+        out.innerHTML = "";
+        out.append(mkTable(["項目", "値"], [
+          ["出生のラグナ", sgIdx(d.lagna)],
+          ["満年齢", `${d.age}歳`],
+          ["ムンタのサイン", sgIdx(d.sign)],
+          ["ムンタの支配星", bodyLabel(d.lord)],
+        ], [1]));
+      } catch (e) {
+        out.innerHTML = "";
+        out.append(el("div", { className: "u-status", textContent: `エラー: ${(e as Error).message}` }));
+      }
+    };
+    const btn = el("button", { className: "u-btn u-btn-sm", textContent: "算出" });
+    btn.addEventListener("click", () => void load());
+    box.append(el("div", { className: "u-row" }, [el("label", { textContent: "対象日" }), dateIn, btn]), out);
+    void load();
+    return box;
+  };
+
+  // ルーリング・プラネット。判断の瞬間に効いている天体。
+  const rpNode = (): HTMLElement => {
+    const box = el("div", {});
+    const out = el("div", {});
+    const load = async () => {
+      out.innerHTML = "";
+      out.append(el("div", { className: "u-pat-empty", textContent: "算出中…" }));
+      try {
+        const d = await api<RulingPlanets>(`/api/v1/uranai/astrology/person/${personId}/ruling_planets`);
+        out.innerHTML = "";
+        out.append(el("div", { className: "u-pat-comp", textContent: "曜日はインドの慣習では日の出で切り替わるが、ここでは暦日で数えている。日の出前の出生では1つ手前の曜日になる。" }));
+        out.append(mkTable(["起点", "サインの支配星", "星宿の支配星", "サブの支配星"], [
+          ["アセンダント", bodyLabel(d.ascendant.sign_lord), bodyLabel(d.ascendant.star_lord), bodyLabel(d.ascendant.sub_lord)],
+          ["月", bodyLabel(d.moon.sign_lord), bodyLabel(d.moon.star_lord), bodyLabel(d.moon.sub_lord)],
+        ]));
+        out.append(mkTable(["項目", "値"], [
+          ["曜日の支配星", bodyLabel(d.day_lord)],
+          ["ルーリング・プラネット", d.planets.map(bodyLabel).join("、")],
+        ], [1]));
+      } catch (e) {
+        out.innerHTML = "";
+        out.append(el("div", { className: "u-status", textContent: `エラー: ${(e as Error).message}` }));
+      }
+    };
+    box.append(out); void load();
+    return box;
+  };
+
+  // チャラ・ダシャー。サインを単位とする期間法。
+  const charaNode = (): HTMLElement => {
+    const box = el("div", {});
+    const out = el("div", {});
+    const load = async () => {
+      out.innerHTML = "";
+      out.append(el("div", { className: "u-pat-empty", textContent: "算出中…" }));
+      try {
+        const d = await api<CharaDasha>(`/api/v1/uranai/astrology/person/${personId}/chara_dasha?until_age=100`);
+        out.innerHTML = "";
+        out.append(el("div", { className: "u-pat-comp", textContent: `ラグナは ${sgIdx(d.lagna)}。${d.direction === "direct" ? "奇数足のサインなので順行" : "偶数足のサインなので逆行"}に進む。各サインの年数は、そのサインから支配星の在るサインまでを足の向きに数えた数。` }));
+        out.append(mkTable(["サイン", "支配星", "年数", "期間"], d.periods.map((p) =>
+          [sgIdx(p.sign), bodyLabel(p.lord), `${p.years}年`, `${p.from} 〜 ${p.to}`])));
+      } catch (e) {
+        out.innerHTML = "";
+        out.append(el("div", { className: "u-status", textContent: `エラー: ${(e as Error).message}` }));
+      }
+    };
+    box.append(out); void load();
+    return box;
+  };
+
+  // タージカのアスペクトとムッダ・ダシャー。
+  const tajikaNode = (): HTMLElement => {
+    const box = el("div", {});
+    const dateIn = el("input", { type: "date", value: new Date().toISOString().slice(0, 10) }) as HTMLInputElement;
+    const out = el("div", {});
+    const load = async () => {
+      out.innerHTML = "";
+      out.append(el("div", { className: "u-pat-empty", textContent: "算出中…" }));
+      try {
+        const d = await api<Tajika>(`/api/v1/uranai/astrology/person/${personId}/tajika?date=${dateIn.value}`);
+        out.innerHTML = "";
+        out.append(el("div", { className: "u-tbl-title", textContent: `出生図のタージカのアスペクト（${d.aspects.length}）` }));
+        out.append(d.aspects.length
+          ? mkTable(["速い方", "遅い方", "種別", "オーブ", "形"], d.aspects.map((a) =>
+              [bodyLabel(a.a), bodyLabel(a.b), ASPECT_INFO[a.type]?.label ?? a.type, `${a.orb.toFixed(2)}°`,
+               a.kind === "ithasala" ? "イッタサーラ（近づく）" : "イサラファ（離れる）"]))
+          : el("div", { className: "u-pat-empty", textContent: "該当するアスペクトはありません" }));
+        out.append(el("div", { className: "u-tbl-title", textContent: `ムッダ・ダシャー（年の図 ${d.solar_return ? d.solar_return.slice(0, 10) : "—"} から1年）` }));
+        out.append(d.mudda.length
+          ? mkTable(["主星", "期間"], d.mudda.map((m) => [bodyLabel(m.lord), `${m.from} 〜 ${m.to}`]))
+          : el("div", { className: "u-pat-empty", textContent: "年の図が求まりません" }));
+      } catch (e) {
+        out.innerHTML = "";
+        out.append(el("div", { className: "u-status", textContent: `エラー: ${(e as Error).message}` }));
+      }
+    };
+    const btn = el("button", { className: "u-btn u-btn-sm", textContent: "算出" });
+    btn.addEventListener("click", () => void load());
+    box.append(el("div", { className: "u-row" }, [el("label", { textContent: "対象日" }), dateIn, btn]), out);
+    void load();
+    return box;
+  };
+
   // 象限。地平線と子午線が作る4つのクォーター。ルディアはハウスをこの単位でも読む。
   const quadTbl = mkTable(["象限", "ハウス", "意味"], (chart.quadrants ?? []).map((q) => [
     QUAD_JA[q.id] ?? q.id,
@@ -435,10 +1324,16 @@ function chartView(chart: Chart, birth: Birth | null | undefined, personId: stri
   ]), [2]);
   // ルネーション: 太陽から測った月の離角。PoF の地平線上下がこれで決まる。
   const lun = chart.lunation;
+  // 位相の言い回しは原典どおり。上弦＝衝動を受け取る構造を構築する期間、
+  // 下弦＝経験から意味を抽出し同化させる期間。8分割は慣用なのでそう明記する。
+  const LUN_NODE: Record<string, string> = { new: "新月（目的の種まき）", first_quarter: "上弦（第1クォーター）",
+    full: "満月（構築された構造への目的の浸透と結実）", last_quarter: "下弦（最終クォーター）" };
   const lunTbl = mkTable(["項目", "値"], lun
     ? [["太陽から測った月の離角", `${lun.elongation.toFixed(1)}°`],
-       ["位相", lun.phase === "waxing" ? "上弦（合から衝へ向かう）" : "下弦（衝から合へ戻る）"],
-       ["クォーター", LUN_Q[lun.quarter] ?? String(lun.quarter)]]
+       ["位相", lun.phase === "waxing" ? "上弦（合から衝へ。衝動を受け取る構造や器官を構築する期間）" : "下弦（衝から合へ。経験から意味を抽出し同化させる期間）"],
+       ["節目", lun.node ? LUN_NODE[lun.node] ?? lun.node : "節目にはあたらない（前後6度以内が節目）"],
+       ["クォーター", LUN_Q[lun.quarter] ?? String(lun.quarter)],
+       ["8分割（慣用）", lun.octant ? `第${lun.octant}区分 ／ ${conventionOf("lunation_octant")}` : "—"]]
     : [["算出できません", "—"]], [1]);
   // インターセプト（どのカスプにも現れないサイン）。ホイールには描かず表で示す。
   const icptTbl = mkTable(["サイン", "収まるハウス"], (chart.interceptions ?? []).length
@@ -447,6 +1342,8 @@ function chartView(chart: Chart, birth: Birth | null | undefined, personId: stri
 
   // アスペクト（種類ごとにグループ化）
   const aspectNode = el("div", {});
+  // オーブは原典に記述が無い。こちらの取り決めであることを表の先頭に出す。
+  if (conventionOf("orb")) aspectNode.append(el("div", { className: "u-pat-comp", textContent: `オーブについて: ${conventionOf("orb")}` }));
   // 位相の意味は上弦/下弦で共通なので、表ごとに繰り返さず先頭に凡例として置く。
   if (meaningOf("phase", "waxing")) {
     aspectNode.append(el("div", { className: "u-tbl-title", textContent: "位相" }));
@@ -516,6 +1413,7 @@ function chartView(chart: Chart, birth: Birth | null | undefined, personId: stri
     // 7パターンを常に全部並べ、該当するものだけ印を付ける。該当しないものも「—」で残すことで、
     // 何が判定されなかったのかが読み取れるようにする。
     shapeNode.append(el("div", { className: "u-tbl-title", textContent: "惑星配置型（判定対象は10天体。キロン・小惑星・ノード・感受点は含めない）" }));
+    if (conventionOf("shape_threshold")) shapeNode.append(el("div", { className: "u-pat-comp", textContent: `判定条件について: ${conventionOf("shape_threshold")}` }));
     // 形ごとの固有要素（バケットの取っ手、ロコモーティブの先頭）は同じ行に入れる。
     // その形にしか無い概念なので、別表に切り出すと「なし」ばかりの表になる。
     const extra = (k: string): string => {
@@ -569,6 +1467,15 @@ function chartView(chart: Chart, birth: Birth | null | undefined, personId: stri
           out.append(mkTable(["離角", "位相", "クォーター"], [[`${d.lunation.elongation.toFixed(1)}°`,
             d.lunation.phase === "waxing" ? "上弦" : "下弦", LUN_Q[d.lunation.quarter] ?? ""]], [2]));
         }
+        // 進行の太陽のサビアン。ルディアはこの度数のシンボルを重要とする。
+        if (kind === "progressed" && d.sun_sabian) {
+          out.append(el("div", { className: "u-tbl-title", textContent: "進行の太陽のサビアン" }));
+          out.append(mkTable(["度数", "通し番号", "文言"], [[
+            `${SIGN_NAME[d.sun_sabian.sign] ?? d.sun_sabian.sign} ${d.sun_sabian.degree}度`,
+            String(d.sun_sabian.index),
+            d.sun_sabian.text ?? "（未登録。サビアンのタブから手元の版を取り込む）",
+          ]], [2]));
+        }
         out.append(el("div", { className: "u-tbl-title", textContent: "天体" }));
         out.append(mkTable(["天体", "サイン", "度数", "逆行", "室"], d.placements.map((p) =>
           [bodyLabel(p.planet), SIGN_NAME[p.sign] ?? p.sign, fmtDeg(p.degree), p.retrograde ? "℞" : "", p.house.replace("house_", "") + "室"])));
@@ -614,6 +1521,20 @@ function chartView(chart: Chart, birth: Birth | null | undefined, personId: stri
         out.append(mkTable(["種別", "瞬間"], [
           ["太陽回帰", fmt(c.returns.sun)], ["月回帰", fmt(c.returns.moon)],
         ], [1]));
+        // ルディアが「基本スケジュール」と呼ぶ周期。節目の一覧だけでは
+        // いまどの局面かに答えられないので、現在地を先に出す。
+        const ln = c.progressed_lunation_now;
+        if (ln) {
+          out.append(el("div", { className: "u-tbl-title", textContent: "進行のルネーションの現在地（基本スケジュール）" }));
+          const kindJa = (k?: string) => k === "new" ? "進行新月（合）" : k === "full" ? "進行満月（衝）" : "—";
+          out.append(mkTable(["項目", "値"], [
+            ["直前の節目", ln.last ? `${kindJa(ln.last.kind)} ${ln.last.at.slice(0, 10)}（${ln.years_since_last?.toFixed(1)}年前）` : "—"],
+            ["次の節目", ln.next ? `${kindJa(ln.next.kind)} ${ln.next.at.slice(0, 10)}（${ln.years_to_next?.toFixed(1)}年後）` : "—"],
+            ["いまの相", ln.last?.kind === "new" ? "上弦（合から衝へ。衝動を受け取る構造や器官を構築する期間）"
+              : ln.last?.kind === "full" ? "下弦（衝から合へ。経験から意味を抽出し同化させる期間）" : "—"],
+            ["区間の進み", ln.elapsed_ratio !== null && ln.elapsed_ratio !== undefined ? `${Math.round(ln.elapsed_ratio * 100)}%` : "—"],
+          ], [1]));
+        }
         out.append(el("div", { className: "u-tbl-title", textContent: "進行のルネーションの節目（約30年で一巡）" }));
         out.append(c.progressed_lunation.length
           ? mkTable(["節目", "暦日"], c.progressed_lunation.map((e) => [e.kind === "new" ? "進行新月（合）" : "進行満月（衝）", e.at.slice(0, 10)]))
@@ -1038,6 +1959,33 @@ function chartView(chart: Chart, birth: Birth | null | undefined, personId: stri
     ...(usesPart("decan") || usesPart("face") ? [{ label: "デーカン/フェイス", node: decanTbl }] : []),
     ...(usesPart("antiscia") ? [{ label: "アンティシア", node: antiTbl }] : []),
     ...(usesPart("harmonic") || usesPart("draconic") ? [{ label: "ハーモニクス", node: harmTbl }] : []),
+    ...(usesPart("term") ? [{ label: "ターム", node: termTbl }] : []),
+    ...(usesPart("almuten") ? [{ label: "アルムーテン", node: almTbl }] : []),
+    ...(usesPart("arabic_part") ? [{ label: "アラビックパーツ", node: lotTbl }] : []),
+    ...(usesPart("sabian") ? [{ label: "サビアン", node: sabNode() }] : []),
+    ...(usesPart("profection") ? [{ label: "プロフェクション", node: profNode() }] : []),
+    ...(usesPart("solar_arc") ? [{ label: "ソーラーアーク", node: arcNode() }] : []),
+    ...(usesPart("midpoint") ? [{ label: "ミッドポイント", node: mpTbl }] : []),
+    ...(usesPart("fixed_star") ? [{ label: "恒星", node: starNode() }] : []),
+    ...(usesPart("out_of_bounds") ? [{ label: "アウトオブバウンズ", node: oobNode() }] : []),
+    ...(usesPart("firdaria") ? [{ label: "ファルダール", node: firNode() }] : []),
+    ...(usesPart("synastry") ? [{ label: "シナストリー", node: pairNode("synastry") }] : []),
+    ...(usesPart("composite") ? [{ label: "コンポジット", node: pairNode("composite") }] : []),
+    ...(usesPart("rectification") ? [{ label: "出生時刻の修正", node: rectNode() }] : []),
+    ...(usesPart("planet_cycle") ? [{ label: "天体の周期", node: cycNode() }] : []),
+    ...(usesPart("transit_search") ? [{ label: "期間の探索", node: searchNode() }] : []),
+    ...(usesPart("primary_direction") ? [{ label: "一次進行", node: pdNode() }] : []),
+    ...(usesPart("time_lord") ? [{ label: "時期支配星", node: lordNode() }] : []),
+    ...(usesPart("nakshatra") ? [{ label: "ナクシャトラ", node: nakTbl }] : []),
+    ...(usesPart("dasha") ? [{ label: "ダシャー", node: dashaNode() }] : []),
+    ...(usesPart("varga") ? [{ label: "分割図", node: vargaNode() }] : []),
+    ...(usesPart("yoga") ? [{ label: "ヨーガ", node: yogaNode() }] : []),
+    ...(usesPart("chara_karaka") || usesPart("rashi_drishti") || usesPart("arudha") ? [{ label: "ジャイミニ", node: jaiminiNode() }] : []),
+    ...(usesPart("kp_sublord") ? [{ label: "サブロード", node: kpNode() }] : []),
+    ...(usesPart("muntha") ? [{ label: "ムンタ", node: munthaNode() }] : []),
+    ...(usesPart("ruling_planet") ? [{ label: "ルーリング・プラネット", node: rpNode() }] : []),
+    ...(usesPart("chara_dasha") ? [{ label: "チャラ・ダシャー", node: charaNode() }] : []),
+    ...(usesPart("tajika_aspect") || usesPart("mudda_dasha") ? [{ label: "タージカ", node: tajikaNode() }] : []),
     ...(usesPart("quadrant") ? [{ label: "象限", node: quadTbl }] : []),
     ...(usesPart("lunation") ? [{ label: "ルネーション", node: lunTbl }] : []),
     { label: `アスペクト(${chart.aspects.length})`, node: aspectNode },
@@ -1046,6 +1994,34 @@ function chartView(chart: Chart, birth: Birth | null | undefined, personId: stri
     ...(usesPart("transit") ? [{ label: "経過", node: derivedNode("transit") }] : []),
     ...(usesPart("cycles") ? [{ label: "サイクル", node: cyclesNode() }] : []),
   ];
+
+  // 流派によって時期の読み方の主軸が違う。主軸のタブを時期のタブ群の先頭へ寄せる。
+  // 並びを変えるだけで、どのタブを出すかは部品の選択が決める（別々の設定）。
+  const TIMING_TABS: Record<string, string[]> = {
+    // phase = サイクルの現在地
+    phase: ["天体の周期", "サイクル"],
+    lord: ["時期支配星", "ダシャー", "チャラ・ダシャー", "タージカ", "ムンタ", "プロフェクション", "ファルダール"],
+    contact: ["期間の探索", "経過", "進行", "ソーラーアーク", "一次進行"],
+  };
+  {
+    const primary = timingPrimaryOf();
+    const head = TIMING_TABS[primary] ?? [];
+    const rank = (label: string): number => {
+      const i = head.indexOf(label);
+      if (i >= 0) return i;                       // 主軸のタブが先
+      for (const [k, v] of Object.entries(TIMING_TABS)) {
+        if (k === primary) continue;
+        if (v.includes(label)) return 100 + v.indexOf(label); // 他の形は後ろ
+      }
+      return 50;                                   // 時期に関係ないタブは元の位置のまま
+    };
+    const timingLabels = new Set(Object.values(TIMING_TABS).flat());
+    const idx = dataSections.map((s, i) => i).filter((i) => timingLabels.has(dataSections[i].label));
+    if (idx.length > 1) {
+      const picked = idx.map((i) => dataSections[i]).sort((a, b) => rank(a.label) - rank(b.label));
+      idx.forEach((slot, n) => { dataSections[slot] = picked[n]; });
+    }
+  }
 
   const content = el("div", { className: "u-tab-content" });
   const dataWraps = dataSections.map((sec) => el("div", { className: "u-section" }, [sec.node]));
@@ -1176,6 +2152,15 @@ export async function renderUranai(container: HTMLElement): Promise<void> {
     .u-set-title{font-size:13px;font-weight:600;color:#555;margin-bottom:8px}
     .u-parts{margin:10px 0 4px}
     .u-part-todo{opacity:.5}
+    /* 流派が決める項目。錠前と背景で、変更できないことを一目で分かるようにする。 */
+    .u-set-locked select{opacity:.65;cursor:not-allowed}
+    .u-set-locked label{color:#6b7280}
+    .u-lock-ic{margin-right:5px;font-size:10px;border:1px solid currentColor;border-radius:3px;padding:0 3px;opacity:.7}
+    .u-lock-note{font-size:11px;color:#888;margin:2px 0 10px;line-height:1.6}
+    [data-theme=dark] .u-set-locked label{color:#9aa3af}
+    /* 使えない部品の説明。薄い注記ではなく、目に留まる枠で出す。 */
+    .u-part-disabled{border:1px solid #d9a441;background:#fdf6e6;border-radius:6px;padding:10px 12px;margin:4px 0 10px;font-size:12px;line-height:1.7}
+    .u-part-disabled-h{font-weight:600;margin-bottom:4px}
     .u-parts-grid{display:grid;grid-template-columns:repeat(auto-fill,minmax(190px,1fr));gap:4px 12px}
     .u-set-grid{display:grid;grid-template-columns:1fr 1fr;gap:6px 14px}
     .u-set-row{display:flex;align-items:center;gap:8px}
@@ -1221,6 +2206,7 @@ export async function renderUranai(container: HTMLElement): Promise<void> {
     [data-theme=dark] .u-report-head,[data-theme=dark] .u-sec-head,[data-theme=dark] .u-basic-v,
     [data-theme=dark] .u-data-v,[data-theme=dark] .u-pat-bodies,[data-theme=dark] .u-tbl td{color:#e6e8eb}
     [data-theme=dark] .u-pat-h b,[data-theme=dark] .u-tg-btn.on,[data-theme=dark] .u-tab-btn.on{color:#f3f5f7}
+    [data-theme=dark] .u-part-disabled{border-color:#7a5c1c;background:#2a2317;color:#e6ddc7}
     [data-theme=dark] .u-report-body,[data-theme=dark] .u-person-menu,[data-theme=dark] .u-pat-comp,
     [data-theme=dark] .u-settings-note,[data-theme=dark] .u-pat-empty,[data-theme=dark] .u-pat-aka,
     [data-theme=dark] .u-basic-k,[data-theme=dark] .u-tbl th,[data-theme=dark] .u-data-k,
@@ -1324,6 +2310,11 @@ export async function renderUranai(container: HTMLElement): Promise<void> {
     b.addEventListener("click", () => setPane(pn.id));
     foot.append(b);
   }
+  // 設定は人物リストの中にしか入口が無く、モバイルでは人物ペインを開かないと辿り着けない。
+  // ペインの切替ではないので dataset.pane は持たせず、押しても選択状態にしない。
+  const footSet = el("button", { className: "u-foot-btn", type: "button", textContent: "設定" });
+  footSet.addEventListener("click", () => { setPane("main"); showSettings(); });
+  foot.append(footSet);
   setPane("main");
   wrap.append(side, main, report, themeBtn, foot); container.append(wrap);
 
