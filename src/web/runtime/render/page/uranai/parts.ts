@@ -404,3 +404,17 @@ export type VargaCharts = { ayanamsha: string;
 /** ヨーガ。条件が一義に定まるものだけを判定する。 */
 export type Yogas = { lagna: number;
   yogas: Array<{ id: string; name: string; formed: boolean; detail: string; condition: string }> };
+
+/** ジャイミニ式。カーラカ・アルダ・サイン同士のアスペクト。 */
+export type Jaimini = { lagna: number;
+  karakas: Array<{ role: string; role_name: string; planet: string; degree_in_sign: number }>;
+  arudha: { lagna: number; lord: string; lord_sign: number | null; arudha: number | null; adjusted: boolean };
+  drishti: Array<{ sign: number; aspects: number[] }> };
+
+/** KP式のサブロード。 */
+export type KpSubs = { levels: number;
+  bodies: Array<{ planet: string; nakshatra: { index: number; name: string; lord: string; pada: number };
+                  subs: Array<{ level: number; lord: string }> }> };
+
+/** タージカ式のムンタ。 */
+export type Muntha = { at: string; lagna: number; age: number; sign: number; lord: string };

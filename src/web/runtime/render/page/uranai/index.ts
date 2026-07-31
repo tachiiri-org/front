@@ -1,6 +1,6 @@
 // ウラナイ画面のルート描画とフォーム類。定数・型・ヘルパは ./parts、ホイール描画は ./wheel に分割。
 import {
-  SIGN_ORDER, SIGN_GLYPH, SIGN_NAME, SIGN_ELEMENT, SIGN_QUALITY, ELEMENT_CHAR, QUALITY_CHAR, PLANET_GLYPH, PLANET_ORDER, PLANET_NAME_LINES, ASPECT_INFO, ASPECT_ORDER, PATTERN_INFO, PATTERN_ORDER, SHAPE_INFO, SHAPE_ORDER, Person, Prefill, Settings, SETTING_FIELDS, Chart, Derived, Cycles, Profection, SolarArc, FixedStars, OutOfBounds, Firdaria, Synastry, Composite, Rectification, PlanetCycle, TransitSearch, PrimaryDirection, TimeLords, Dasha, VargaCharts, Yogas, optionsOf, nameOf, ownOf, setOwn, usesPart, partsOn, allParts, setParts, isImplemented, loadMeanings, meaningOf, conventionOf, sabianReady, sabianCountOf, usesTiming, timingPrimaryOf, allTimingShapes, setTiming, rulesetIsEditable, rulesetNoteOf, roleOf, clearMeanings, UranaiView, api, lonOf, fmtDeg, Birth, HOUSE_SYSTEM_JA, IANA_ZONES, FALLBACK_ZONES, CC_ZONE, offsetFromZone, el, selectEl, loadSettings,
+  SIGN_ORDER, SIGN_GLYPH, SIGN_NAME, SIGN_ELEMENT, SIGN_QUALITY, ELEMENT_CHAR, QUALITY_CHAR, PLANET_GLYPH, PLANET_ORDER, PLANET_NAME_LINES, ASPECT_INFO, ASPECT_ORDER, PATTERN_INFO, PATTERN_ORDER, SHAPE_INFO, SHAPE_ORDER, Person, Prefill, Settings, SETTING_FIELDS, Chart, Derived, Cycles, Profection, SolarArc, FixedStars, OutOfBounds, Firdaria, Synastry, Composite, Rectification, PlanetCycle, TransitSearch, PrimaryDirection, TimeLords, Dasha, VargaCharts, Yogas, Jaimini, KpSubs, Muntha, optionsOf, nameOf, ownOf, setOwn, usesPart, partsOn, allParts, setParts, isImplemented, loadMeanings, meaningOf, conventionOf, sabianReady, sabianCountOf, usesTiming, timingPrimaryOf, allTimingShapes, setTiming, rulesetIsEditable, rulesetNoteOf, roleOf, clearMeanings, UranaiView, api, lonOf, fmtDeg, Birth, HOUSE_SYSTEM_JA, IANA_ZONES, FALLBACK_ZONES, CC_ZONE, offsetFromZone, el, selectEl, loadSettings,
 } from "./parts";
 import { drawWheelPro } from "./wheel";
 
@@ -1086,7 +1086,7 @@ function chartView(chart: Chart, birth: Birth | null | undefined, personId: stri
     const box = el("div", {});
     const sel = el("select", { className: "u-fi" }) as HTMLSelectElement;
     const out = el("div", {});
-    const SIGN_BY_INDEX = (i: number) => SIGN_NAME[SIGN_ORDER[i]] ?? String(i);
+    const SIGN_BY_INDEX = sgIdx;
     const load = async () => {
       out.innerHTML = "";
       out.append(el("div", { className: "u-pat-empty", textContent: "算出中…" }));
@@ -1137,6 +1137,92 @@ function chartView(chart: Chart, birth: Birth | null | undefined, personId: stri
       }
     };
     box.append(out); void load();
+    return box;
+  };
+
+  const sgIdx = (i: number) => SIGN_NAME[SIGN_ORDER[i]] ?? String(i);
+
+  // ジャイミニ式。天体は度数の高さで役割が決まり、アスペクトはサイン同士で結ぶ。
+  const jaiminiNode = (): HTMLElement => {
+    const box = el("div", {});
+    const out = el("div", {});
+    const load = async () => {
+      out.innerHTML = "";
+      out.append(el("div", { className: "u-pat-empty", textContent: "算出中…" }));
+      try {
+        const d = await api<Jaimini>(`/api/v1/uranai/astrology/person/${personId}/jaimini`);
+        out.innerHTML = "";
+        out.append(el("div", { className: "u-tbl-title", textContent: "チャラ・カーラカ（サイン内の度数の高い順）" }));
+        out.append(mkTable(["役割", "天体", "サイン内の度数"], d.karakas.map((k) =>
+          [k.role_name, bodyLabel(k.planet), `${k.degree_in_sign.toFixed(2)}°`]), [0]));
+        out.append(el("div", { className: "u-tbl-title", textContent: "アルダ・ラグナ" }));
+        out.append(mkTable(["項目", "値"], [
+          ["ラグナ", sgIdx(d.arudha.lagna)],
+          ["ラグナの支配星", `${bodyLabel(d.arudha.lord)}${d.arudha.lord_sign === null ? "" : `（${sgIdx(d.arudha.lord_sign)}）`}`],
+          ["アルダ・ラグナ", d.arudha.arudha === null ? "—" : sgIdx(d.arudha.arudha) + (d.arudha.adjusted ? "（ラグナか第7室に重なるため第10室へ移した）" : "")],
+        ], [1]));
+        out.append(el("div", { className: "u-tbl-title", textContent: "ラーシ・ドリシュティ（サイン同士のアスペクト）" }));
+        out.append(mkTable(["サイン", "見るサイン"], d.drishti.map((x) =>
+          [sgIdx(x.sign), x.aspects.map(sgIdx).join("、")]), [1]));
+      } catch (e) {
+        out.innerHTML = "";
+        out.append(el("div", { className: "u-status", textContent: `エラー: ${(e as Error).message}` }));
+      }
+    };
+    box.append(out); void load();
+    return box;
+  };
+
+  // KP式のサブロード。ナクシャトラをヴィムショッタリの年数の比で9分割した区画。
+  const kpNode = (): HTMLElement => {
+    const box = el("div", {});
+    const out = el("div", {});
+    const load = async () => {
+      out.innerHTML = "";
+      out.append(el("div", { className: "u-pat-empty", textContent: "算出中…" }));
+      try {
+        const d = await api<KpSubs>(`/api/v1/uranai/astrology/person/${personId}/kp?levels=3`);
+        out.innerHTML = "";
+        out.append(el("div", { className: "u-pat-comp", textContent: "ナクシャトラをヴィムショッタリの年数の比で9分割した区画がサブ。さらに同じ比で割ったものがサブのサブ。" }));
+        out.append(mkTable(["天体", "ナクシャトラ", "星座主", "サブ", "サブのサブ"], d.bodies.map((b) => [
+          bodyLabel(b.planet), `${b.nakshatra.index}. ${b.nakshatra.name}`, bodyLabel(b.nakshatra.lord),
+          b.subs[0] ? bodyLabel(b.subs[0].lord) : "—", b.subs[1] ? bodyLabel(b.subs[1].lord) : "—",
+        ])));
+      } catch (e) {
+        out.innerHTML = "";
+        out.append(el("div", { className: "u-status", textContent: `エラー: ${(e as Error).message}` }));
+      }
+    };
+    box.append(out); void load();
+    return box;
+  };
+
+  // ムンタ。出生のラグナから1年に1サインずつ進める年運の指示。
+  const munthaNode = (): HTMLElement => {
+    const box = el("div", {});
+    const dateIn = el("input", { type: "date", value: new Date().toISOString().slice(0, 10) }) as HTMLInputElement;
+    const out = el("div", {});
+    const load = async () => {
+      out.innerHTML = "";
+      out.append(el("div", { className: "u-pat-empty", textContent: "算出中…" }));
+      try {
+        const d = await api<Muntha>(`/api/v1/uranai/astrology/person/${personId}/muntha?date=${dateIn.value}`);
+        out.innerHTML = "";
+        out.append(mkTable(["項目", "値"], [
+          ["出生のラグナ", sgIdx(d.lagna)],
+          ["満年齢", `${d.age}歳`],
+          ["ムンタのサイン", sgIdx(d.sign)],
+          ["ムンタの支配星", bodyLabel(d.lord)],
+        ], [1]));
+      } catch (e) {
+        out.innerHTML = "";
+        out.append(el("div", { className: "u-status", textContent: `エラー: ${(e as Error).message}` }));
+      }
+    };
+    const btn = el("button", { className: "u-btn u-btn-sm", textContent: "算出" });
+    btn.addEventListener("click", () => void load());
+    box.append(el("div", { className: "u-row" }, [el("label", { textContent: "対象日" }), dateIn, btn]), out);
+    void load();
     return box;
   };
 
@@ -1804,6 +1890,9 @@ function chartView(chart: Chart, birth: Birth | null | undefined, personId: stri
     ...(usesPart("dasha") ? [{ label: "ダシャー", node: dashaNode() }] : []),
     ...(usesPart("varga") ? [{ label: "分割図", node: vargaNode() }] : []),
     ...(usesPart("yoga") ? [{ label: "ヨーガ", node: yogaNode() }] : []),
+    ...(usesPart("chara_karaka") || usesPart("rashi_drishti") || usesPart("arudha") ? [{ label: "ジャイミニ", node: jaiminiNode() }] : []),
+    ...(usesPart("kp_sublord") ? [{ label: "サブロード", node: kpNode() }] : []),
+    ...(usesPart("muntha") ? [{ label: "ムンタ", node: munthaNode() }] : []),
     ...(usesPart("quadrant") ? [{ label: "象限", node: quadTbl }] : []),
     ...(usesPart("lunation") ? [{ label: "ルネーション", node: lunTbl }] : []),
     { label: `アスペクト(${chart.aspects.length})`, node: aspectNode },
