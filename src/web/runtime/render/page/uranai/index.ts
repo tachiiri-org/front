@@ -1,6 +1,6 @@
 // ウラナイ画面のルート描画とフォーム類。定数・型・ヘルパは ./parts、ホイール描画は ./wheel に分割。
 import {
-  SIGN_ORDER, SIGN_GLYPH, SIGN_NAME, SIGN_ELEMENT, SIGN_QUALITY, ELEMENT_CHAR, QUALITY_CHAR, PLANET_GLYPH, PLANET_ORDER, PLANET_NAME_LINES, ASPECT_INFO, ASPECT_ORDER, PATTERN_INFO, PATTERN_ORDER, SHAPE_INFO, SHAPE_ORDER, Person, Prefill, Settings, SETTING_FIELDS, Chart, Derived, Cycles, Profection, SolarArc, FixedStars, OutOfBounds, Firdaria, Synastry, Composite, Rectification, PlanetCycle, TransitSearch, PrimaryDirection, TimeLords, optionsOf, nameOf, ownOf, setOwn, usesPart, partsOn, allParts, setParts, isImplemented, loadMeanings, meaningOf, conventionOf, sabianReady, sabianCountOf, usesTiming, timingPrimaryOf, allTimingShapes, setTiming, rulesetIsEditable, roleOf, clearMeanings, UranaiView, api, lonOf, fmtDeg, Birth, HOUSE_SYSTEM_JA, IANA_ZONES, FALLBACK_ZONES, CC_ZONE, offsetFromZone, el, selectEl, loadSettings,
+  SIGN_ORDER, SIGN_GLYPH, SIGN_NAME, SIGN_ELEMENT, SIGN_QUALITY, ELEMENT_CHAR, QUALITY_CHAR, PLANET_GLYPH, PLANET_ORDER, PLANET_NAME_LINES, ASPECT_INFO, ASPECT_ORDER, PATTERN_INFO, PATTERN_ORDER, SHAPE_INFO, SHAPE_ORDER, Person, Prefill, Settings, SETTING_FIELDS, Chart, Derived, Cycles, Profection, SolarArc, FixedStars, OutOfBounds, Firdaria, Synastry, Composite, Rectification, PlanetCycle, TransitSearch, PrimaryDirection, TimeLords, Dasha, optionsOf, nameOf, ownOf, setOwn, usesPart, partsOn, allParts, setParts, isImplemented, loadMeanings, meaningOf, conventionOf, sabianReady, sabianCountOf, usesTiming, timingPrimaryOf, allTimingShapes, setTiming, rulesetIsEditable, rulesetNoteOf, roleOf, clearMeanings, UranaiView, api, lonOf, fmtDeg, Birth, HOUSE_SYSTEM_JA, IANA_ZONES, FALLBACK_ZONES, CC_ZONE, offsetFromZone, el, selectEl, loadSettings,
 } from "./parts";
 import { drawWheelPro } from "./wheel";
 
@@ -86,6 +86,9 @@ function settingsView(settings: Settings, onSaved: () => void | Promise<void>): 
   let rsInitial = "default";
   let rsPrev = "default";
   const lockNote = el("div", { className: "u-lock-note" });
+  // 流派の但し書き。実装が体系を満たしていない点をここで伝える。
+  const noteBox = el("div", { className: "u-part-disabled" });
+  noteBox.style.display = "none";
   // 自分で作った流派だけ消せる。組込みと出発点のカスタムには出さない。
   const delBtn = el("button", { className: "u-btn-sm u-btn-ghost", type: "button", textContent: "削除" });
   delBtn.style.display = "none";
@@ -129,13 +132,30 @@ function settingsView(settings: Settings, onSaved: () => void | Promise<void>): 
   const initRuleset = async () => {
     try {
       const [ref, pref] = await Promise.all([
-        api<{ rulesets?: Array<{ id: string; name: string | null; editable?: boolean }> }>(`/api/v1/uranai/astrology/reference`),
+        api<{ rulesets?: Array<{ id: string; name: string | null; editable?: boolean; lineage?: string | null }> }>(`/api/v1/uranai/astrology/reference`),
         api<{ ruleset_id?: string }>(`/api/v1/uranai/astrology/preference`),
       ]);
-      // 組込みの流派が先、自分で作ったものは下にまとめる。
-      const list = (ref.rulesets ?? []).slice()
-        .sort((a, c) => Number(a.editable !== false) - Number(c.editable !== false));
-      for (const r of list) rsSel.append(el("option", { value: r.id, textContent: r.name ?? r.id }));
+      // 系統ごとにまとめる。流派は層が違うものが混ざる（ヘレニズムは系統、
+      // ルディアは現代西洋の中の一潮流）ので、括らずに並べると規模を取り違える。
+      const LINEAGE_ORDER = ["traditional", "modern_west", "midpoint", "indian"];
+      const groups = new Map<string, HTMLElement>();
+      for (const lg of LINEAGE_ORDER) {
+        const og = document.createElement("optgroup");
+        og.label = nameOf("lineage", lg);
+        groups.set(lg, og);
+      }
+      const own = document.createElement("optgroup");
+      own.label = "自分の流派";
+      for (const r of ref.rulesets ?? []) {
+        const opt = el("option", { value: r.id, textContent: r.name ?? r.id });
+        const host = r.editable !== false ? own : groups.get(r.lineage ?? "") ?? own;
+        host.append(opt);
+      }
+      for (const lg of LINEAGE_ORDER) {
+        const og = groups.get(lg);
+        if (og && og.children.length) rsSel.append(og);
+      }
+      if (own.children.length) rsSel.append(own);
       rsSel.append(el("option", { value: NEW_RULESET, textContent: "＋ 新しい流派" }));
       rsInitial = pref.ruleset_id ?? "default";
       rsPrev = rsInitial;
@@ -144,6 +164,8 @@ function settingsView(settings: Settings, onSaved: () => void | Promise<void>): 
       // 場合まだ読まれておらず、既定値の「編集できる」が残ってしまう。
       const editable = (ref.rulesets ?? []).find((r) => r.id === rsInitial)?.editable !== false;
       delBtn.style.display = editable && rsInitial !== "default" ? "" : "none";
+      noteBox.textContent = rulesetNoteOf();
+      noteBox.style.display = rulesetNoteOf() ? "" : "none";
       lockNote.textContent = editable
         ? "この流派は編集できます。下の項目・部品・時期の読み方を変えられます。"
         : "この流派は組込みで、体系の定義そのものなので変更できません。変えたい場合は「＋ いまの設定を引き継いで新しい流派を作る」を選んでください。";
@@ -285,7 +307,7 @@ function settingsView(settings: Settings, onSaved: () => void | Promise<void>): 
   void initRuleset();
   wrap.append(
     el("div", { className: "u-settings-note", textContent: "この設定はあなた（ユーザー）の既定として保存され、全チャートに適用されます。" }),
-    el("div", { className: "u-set-title", textContent: "流派" }), grid, lockNote,
+    el("div", { className: "u-set-title", textContent: "流派" }), grid, lockNote, noteBox,
     el("div", { className: "u-set-title", textContent: "流派が決める（変更できない）" }), lockedGrid,
     el("div", { className: "u-set-title", textContent: "自分で決める" }), ownGrid,
     timingBox, partsBox, save, status,
@@ -1008,6 +1030,46 @@ function chartView(chart: Chart, birth: Birth | null | undefined, personId: stri
     return box;
   };
 
+  // ナクシャトラ（黄道の27分割）。インド占星術の基本単位。
+  const nakTbl = mkTable(["天体", "ナクシャトラ", "支配星", "パダ", "区画内の度数"], (chart.nakshatra ?? []).length
+    ? (chart.nakshatra ?? []).map((n) => [{ t: bodyLabel(n.planet), tip: `planet:${n.planet}` },
+        `${n.index}. ${n.name}`, bodyLabel(n.lord), `第${n.pada}`, `${n.degree_in_nakshatra.toFixed(2)}°`])
+    : [["—", "—", "—", "—", "—"]], [1]);
+
+  // ヴィムショッタリ・ダシャー。時期支配星の形そのもので、120年を一巡する。
+  const dashaNode = (): HTMLElement => {
+    const box = el("div", {});
+    const dateIn = el("input", { type: "date", value: new Date().toISOString().slice(0, 10) }) as HTMLInputElement;
+    const out = el("div", {});
+    const load = async () => {
+      out.innerHTML = "";
+      out.append(el("div", { className: "u-pat-empty", textContent: "算出中…" }));
+      try {
+        const d = await api<Dasha>(`/api/v1/uranai/astrology/person/${personId}/dasha?date=${dateIn.value}&levels=2`);
+        out.innerHTML = "";
+        out.append(el("div", { className: "u-pat-comp", textContent: `出生時の月は ${d.moon_nakshatra.index}. ${d.moon_nakshatra.name}（第${d.moon_nakshatra.pada}パダ・支配星 ${bodyLabel(d.moon_nakshatra.lord)}）。ここから ${bodyLabel(d.start_lord)} 期の残り ${d.balance_years} 年で始まる。全体で120年を一巡する。` }));
+        out.append(el("div", { className: "u-tbl-title", textContent: "指定日に効いている期間" }));
+        out.append(d.current.length
+          ? mkTable(["階層", "主星", "期間"], d.current.map((c) =>
+              [c.level === 1 ? "マハーダシャー" : c.level === 2 ? "アンタルダシャー" : "プラティアンタルダシャー",
+               bodyLabel(c.lord), `${c.from} 〜 ${c.to}`]))
+          : el("div", { className: "u-pat-empty", textContent: "該当する期間がありません" }));
+        out.append(el("div", { className: "u-tbl-title", textContent: "マハーダシャーの全期間" }));
+        out.append(mkTable(["主星", "期間", "アンタルダシャー"], d.periods.map((p) => [bodyLabel(p.lord),
+          `${p.from} 〜 ${p.to}`,
+          p.sub.length ? p.sub.map((x) => `${bodyLabel(x.lord)} ${x.from}`).join(" / ") : "—"]), [2]));
+      } catch (e) {
+        out.innerHTML = "";
+        out.append(el("div", { className: "u-status", textContent: `エラー: ${(e as Error).message}` }));
+      }
+    };
+    const btn = el("button", { className: "u-btn u-btn-sm", textContent: "算出" });
+    btn.addEventListener("click", () => void load());
+    box.append(el("div", { className: "u-row" }, [el("label", { textContent: "対象日" }), dateIn, btn]), out);
+    void load();
+    return box;
+  };
+
   // 象限。地平線と子午線が作る4つのクォーター。ルディアはハウスをこの単位でも読む。
   const quadTbl = mkTable(["象限", "ハウス", "意味"], (chart.quadrants ?? []).map((q) => [
     QUAD_JA[q.id] ?? q.id,
@@ -1668,6 +1730,8 @@ function chartView(chart: Chart, birth: Birth | null | undefined, personId: stri
     ...(usesPart("transit_search") ? [{ label: "期間の探索", node: searchNode() }] : []),
     ...(usesPart("primary_direction") ? [{ label: "一次進行", node: pdNode() }] : []),
     ...(usesPart("time_lord") ? [{ label: "時期支配星", node: lordNode() }] : []),
+    ...(usesPart("nakshatra") ? [{ label: "ナクシャトラ", node: nakTbl }] : []),
+    ...(usesPart("dasha") ? [{ label: "ダシャー", node: dashaNode() }] : []),
     ...(usesPart("quadrant") ? [{ label: "象限", node: quadTbl }] : []),
     ...(usesPart("lunation") ? [{ label: "ルネーション", node: lunTbl }] : []),
     { label: `アスペクト(${chart.aspects.length})`, node: aspectNode },
@@ -1682,7 +1746,7 @@ function chartView(chart: Chart, birth: Birth | null | undefined, personId: stri
   const TIMING_TABS: Record<string, string[]> = {
     // phase = サイクルの現在地
     phase: ["天体の周期", "サイクル"],
-    lord: ["時期支配星", "プロフェクション", "ファルダール"],
+    lord: ["時期支配星", "ダシャー", "プロフェクション", "ファルダール"],
     contact: ["期間の探索", "経過", "進行", "ソーラーアーク", "一次進行"],
   };
   {

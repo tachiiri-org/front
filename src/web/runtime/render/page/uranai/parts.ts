@@ -55,7 +55,7 @@ export type Settings = { zodiac: string; house_system_id: string; ephemeris: str
  * それ以外 = 自分で決める項目。計算の精度など、どの流派でも同じ意味を持つもの。
  */
 export const SETTING_FIELDS: Array<{ key: keyof Settings; label: string; byRuleset: boolean; options: Array<[string, string]> }> = [
-  { key: "house_system_id", label: "ハウス", byRuleset: true, options: [["whole_sign", "ホールサイン"], ["placidus", "プラシダス"], ["campanus", "カンパヌス"]] },
+  { key: "house_system_id", label: "ハウス", byRuleset: true, options: [["whole_sign", "ホールサイン"], ["placidus", "プラシダス"], ["campanus", "カンパヌス"], ["regiomontanus", "レギオモンタヌス"]] },
   { key: "zodiac", label: "黄道帯", byRuleset: true, options: [["tropical", "トロピカル（回帰）"], ["sidereal", "サイデリアル（恒星）"]] },
   { key: "ayanamsha", label: "アヤナムシャ", byRuleset: true, options: [["lahiri", "ラヒリ"], ["fagan_bradley", "フェイガン/ブラッドレー"]] },
   { key: "ephemeris", label: "天体暦", byRuleset: false, options: [["vsop87", "VSOP87（高精度）"], ["standard", "簡易（Standard）"]] },
@@ -141,6 +141,8 @@ export type Chart = {
   sabian?: Array<{ planet: string; index: number; sign: string; degree: number; text: string | null }>;
   midpoints?: Array<{ a: string; b: string; longitude: number; sign: string; degree: number;
                       occupants: Array<{ planet: string; orb: number }> }>;
+  nakshatra?: Array<{ planet: string; sidereal: boolean; index: number; name: string; lord: string;
+                      pada: number; degree_in_nakshatra: number }>;
   placements: Placement[]; aspects: Aspect[];
   patterns?: Pattern[];
   dignities: Array<{ planet: string; dignity: string }>;
@@ -227,7 +229,7 @@ export async function loadMeanings(): Promise<void> {
       conventions?: Array<{ id: string; label: string; note: string }>;
       sabian_count?: number;
       timing_shapes?: string[]; timing_primary?: string; all_timing_shapes?: string[];
-      editable?: boolean;
+      editable?: boolean; ruleset_note?: string | null;
       body_role?: Array<{ planet_id: string; body_role_id: string }>;
     }>(`/api/v1/uranai/astrology/reference`);
     const m: MeaningMap = {};
@@ -246,10 +248,11 @@ export async function loadMeanings(): Promise<void> {
     timingPrimary = r.timing_primary ?? "contact";
     allTimingIds = (r.all_timing_shapes ?? []).slice();
     rulesetEditable = r.editable !== false;
+    rulesetNote = r.ruleset_note ?? "";
     const roles: Record<string, string> = {};
     for (const x of r.body_role ?? []) roles[x.planet_id] = m.body_role?.[x.body_role_id] ? x.body_role_id : x.body_role_id;
     roleCache = roles;
-  } catch { meaningCache = {}; roleCache = {}; nameCache = {}; ownCache = {}; partCache = { parts: [], all: [], impl: [] }; conventionCache = []; sabianCount = 0; timingShapes = []; timingPrimary = "contact"; allTimingIds = []; rulesetEditable = true; }
+  } catch { meaningCache = {}; roleCache = {}; nameCache = {}; ownCache = {}; partCache = { parts: [], all: [], impl: [] }; conventionCache = []; sabianCount = 0; timingShapes = []; timingPrimary = "contact"; allTimingIds = []; rulesetEditable = true; rulesetNote = ""; }
 }
 export const meaningOf = (kind: string, id: string): string => meaningCache?.[kind]?.[id] ?? "";
 
@@ -273,6 +276,10 @@ export const timingPrimaryOf = (): string => timingPrimary;
 // 組込みの流派は読み取り専用。変えたい場合は複製して自分の流派として持つ。
 let rulesetEditable = true;
 export const rulesetIsEditable = (): boolean => rulesetEditable;
+
+// 流派の但し書き。実装が体系を満たしていない点をここで伝える。
+let rulesetNote = "";
+export const rulesetNoteOf = (): string => rulesetNote;
 export const allTimingShapes = (): string[] => allTimingIds.slice();
 export const setTiming = (shapes: string[], primary: string): void => { timingShapes = shapes.slice(); timingPrimary = primary; };
 let allTimingIds: string[] = [];
@@ -380,3 +387,10 @@ export type TimeLords = { at: string; day: boolean; span_days: number;
 export type PrimaryDirection = { key: string; key_label: string; years_per_degree: number;
   keys: Array<{ id: string; label: string }>;
   directions: Array<{ planet: string; angle: string; arc: number; age: number }> };
+
+/** ヴィムショッタリ・ダシャー。120年を一巡する入れ子の期間法。 */
+export type Dasha = { at: string; start_lord: string; balance_years: number;
+  moon_nakshatra: { index: number; name: string; lord: string; pada: number };
+  current: Array<{ level: number; lord: string; from: string; to: string }>;
+  periods: Array<{ lord: string; from: string; to: string; level: number;
+                   sub: Array<{ lord: string; from: string; to: string; level: number }> }> };
