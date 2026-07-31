@@ -81,6 +81,9 @@ export type Cycles = {
   target: string;
   returns: { sun: string | null; moon: string | null };
   progressed_lunation: Array<{ kind: "new" | "full"; at: string }>;
+  // いまどの局面か。節目の一覧だけでは「基本スケジュール」のどこに居るかに答えられない。
+  progressed_lunation_now?: { last: { kind: string; at: string } | null; next: { kind: string; at: string } | null;
+    years_since_last: number | null; years_to_next: number | null; elapsed_ratio: number | null };
   eclipses: Array<{ kind: "solar" | "lunar"; at: string; moonLatitude: number; house: string }>;
 };
 // アスペクトパターン（バックエンド detectPatterns の出力）。bodies は構成天体。
@@ -219,6 +222,7 @@ export async function loadMeanings(): Promise<void> {
       parts?: string[]; all_parts?: string[]; implemented_parts?: string[];
       conventions?: Array<{ id: string; label: string; note: string }>;
       sabian_count?: number;
+      timing_shapes?: string[]; timing_primary?: string; all_timing_shapes?: string[];
       body_role?: Array<{ planet_id: string; body_role_id: string }>;
     }>(`/api/v1/uranai/astrology/reference`);
     const m: MeaningMap = {};
@@ -233,10 +237,13 @@ export async function loadMeanings(): Promise<void> {
     partCache = { parts: (r.parts ?? []).slice(), all: (r.all_parts ?? []).slice(), impl: (r.implemented_parts ?? []).slice() };
     conventionCache = (r.conventions ?? []).slice();
     sabianCount = r.sabian_count ?? 0;
+    timingShapes = (r.timing_shapes ?? []).slice();
+    timingPrimary = r.timing_primary ?? "contact";
+    allTimingIds = (r.all_timing_shapes ?? []).slice();
     const roles: Record<string, string> = {};
     for (const x of r.body_role ?? []) roles[x.planet_id] = m.body_role?.[x.body_role_id] ? x.body_role_id : x.body_role_id;
     roleCache = roles;
-  } catch { meaningCache = {}; roleCache = {}; nameCache = {}; ownCache = {}; partCache = { parts: [], all: [], impl: [] }; conventionCache = []; sabianCount = 0; }
+  } catch { meaningCache = {}; roleCache = {}; nameCache = {}; ownCache = {}; partCache = { parts: [], all: [], impl: [] }; conventionCache = []; sabianCount = 0; timingShapes = []; timingPrimary = "contact"; allTimingIds = []; }
 }
 export const meaningOf = (kind: string, id: string): string => meaningCache?.[kind]?.[id] ?? "";
 
@@ -249,6 +256,16 @@ export const conventionOf = (id: string): string => conventionCache.find((c) => 
 let sabianCount = 0;
 export const sabianReady = (): boolean => sabianCount > 0;
 export const sabianCountOf = (): number => sabianCount;
+
+// 時期の読み方の形。流派によって主軸が違う。画面は主軸のタブを先に出す。
+//  phase = 周期の局面 / lord = 時期支配星 / contact = 接触の暦
+let timingShapes: string[] = [];
+let timingPrimary = "contact";
+export const usesTiming = (id: string): boolean => timingShapes.includes(id);
+export const timingPrimaryOf = (): string => timingPrimary;
+export const allTimingShapes = (): string[] => allTimingIds.slice();
+export const setTiming = (shapes: string[], primary: string): void => { timingShapes = shapes.slice(); timingPrimary = primary; };
+let allTimingIds: string[] = [];
 
 // 自分の意味。原典由来とは別に持ち、画面では自分の意味を先に出す。
 let ownCache: MeaningMap | null = null;
@@ -325,15 +342,29 @@ export type Rectification = { recorded: string; span_minutes: number; step_minut
     hits: Array<{ date: string; directed: string; angle: string; type: string; orb: number }> }> };
 
 /** 天体の周期の節目。 */
+export type CyclePosition = { index: number; total: number | null; from: string | null; to: string | null;
+  label: string; elapsed_years: number; remaining_years: number | null; elapsed_ratio: number | null };
 export type PlanetCycle = { birth: string;
   saturn_stages: CycleMilestone[]; saturn_quadrants: CycleMilestone[];
   uranus_septenaries: CycleMilestone[]; jupiter_returns: CycleMilestone[];
-  no_return: Array<{ planet: string; period_years: number; reason: string }> };
+  no_return: Array<{ planet: string; period_years: number; reason: string }>;
+  current: { at: string; saturn_stage: CyclePosition | null; saturn_quadrant: CyclePosition | null;
+             uranus_septenary: CyclePosition | null; jupiter_period: CyclePosition | null } | null };
 export type CycleMilestone = { at: string; age: number; label: string; kind: string };
 
 /** 期間の探索。運行天体が出生の点に正確に当たる日。 */
 export type TransitSearch = { from: string; to: string;
-  hits: Array<{ at: string; transit: string; natal: string; type: string; exact_longitude: number }> };
+  hits: Array<{ at: string; transit: string; natal: string; type: string; exact_longitude: number }>;
+  windows: Array<{ transit: string; natal: string; type: string; enter: string; exact: string[]; leave: string }> };
+
+/** 時期支配星。主星の出生図での状態が読みの本体。 */
+export type LordCondition = { sign: string; degree: number; retrograde: boolean; house: string | null;
+  dignity: string | null; sect: string | null;
+  aspects: Array<{ with: string; type: string; orb: number; phase: string }> };
+export type TimeLords = { at: string; day: boolean; span_days: number;
+  stack: Array<{ level: string; label: string; lord: string | null; from: string | null; to: string | null;
+                 condition: LordCondition | null }>;
+  transits_on_lords: Array<{ transit: string; natal: string; type: string; enter: string; exact: string[]; leave: string }> };
 
 /** 一次進行。弧を年に換算する鍵は流儀が分かれる。 */
 export type PrimaryDirection = { key: string; key_label: string; years_per_degree: number;
