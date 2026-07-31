@@ -1890,6 +1890,19 @@ function chartView(chart: Chart, birth: Birth | null | undefined, personId: stri
         ]));
       }
     };
+    /**
+     * 指定の流派の内容を出す。保存前でも、選んだ流派の技法がその場で見えるようにする。
+     * ここで編むチェックはその流派の定義なので、保存していなくても変更は流派側に効く。
+     */
+    const showRuleset = async (rsId: string) => {
+      effectiveRuleset = rsId;
+      renderLocked(await api<Settings>(`/api/v1/uranai/astrology/settings?ruleset=${encodeURIComponent(rsId)}`));
+      clearMeanings();
+      await loadMeanings(rsId);
+      renderTiming();
+      renderParts();
+    };
+    let defaultRuleset = "default";
     const load = async () => {
       try {
         const [ref, cur] = await Promise.all([
@@ -1915,22 +1928,23 @@ function chartView(chart: Chart, birth: Birth | null | undefined, personId: stri
         for (const lg of LINEAGE_ORDER) { const og = groups.get(lg); if (og?.children.length) rsSel.append(og); }
         if (own.children.length) rsSel.append(own);
         rsSel.value = cur.ruleset_id ?? "";
-        effectiveRuleset = cur.effective;
+        defaultRuleset = cur.default;
         rsSaved = rsSel.value;
         rsSave.disabled = true;
-        renderLocked(await api<Settings>(`/api/v1/uranai/astrology/settings?ruleset=${encodeURIComponent(cur.effective)}`));
-        // 部品と時期の読み方は、この人物に適用されている流派のものを出す。
-        clearMeanings();
-        await loadMeanings(cur.effective);
-        renderTiming();
-        renderParts();
+        await showRuleset(cur.effective);
       } catch (e) { rsStatus.textContent = `エラー: ${(e as Error).message}`; }
     };
     // 流派は選んだ瞬間には切り替えない。計算とタブの入れ替えが走るので、保存で確定させる。
     const rsSave = el("button", { className: "u-btn u-btn-sm", type: "button", textContent: "保存" });
     rsSave.disabled = true;
     let rsSaved = "";
-    rsSel.addEventListener("change", () => { rsSave.disabled = rsSel.value === rsSaved; rsStatus.textContent = ""; });
+    rsSel.addEventListener("change", () => {
+      rsSave.disabled = rsSel.value === rsSaved;
+      rsStatus.textContent = "";
+      // 選んだ流派の技法をその場で出す。保存するまで人物への適用はしない。
+      void showRuleset(rsSel.value || defaultRuleset)
+        .catch((e) => { rsStatus.textContent = `エラー: ${(e as Error).message}`; });
+    });
     rsSave.addEventListener("click", () => {
       rsSave.disabled = true;
       rsStatus.textContent = "切り替え中…";
