@@ -1,6 +1,6 @@
 // ウラナイ画面のルート描画とフォーム類。定数・型・ヘルパは ./parts、ホイール描画は ./wheel に分割。
 import {
-  SIGN_ORDER, SIGN_GLYPH, SIGN_NAME, SIGN_ELEMENT, SIGN_QUALITY, ELEMENT_CHAR, QUALITY_CHAR, PLANET_GLYPH, PLANET_ORDER, PLANET_NAME_LINES, ASPECT_INFO, ASPECT_ORDER, PATTERN_INFO, PATTERN_ORDER, SHAPE_INFO, SHAPE_ORDER, Person, Prefill, Settings, SETTING_FIELDS, Chart, Derived, Cycles, optionsOf, nameOf, ownOf, setOwn, questionsOf, principles, loadMeanings, meaningOf, roleOf, clearMeanings, UranaiView, api, lonOf, fmtDeg, Birth, HOUSE_SYSTEM_JA, IANA_ZONES, FALLBACK_ZONES, CC_ZONE, offsetFromZone, el, selectEl, loadSettings,
+  SIGN_ORDER, SIGN_GLYPH, SIGN_NAME, SIGN_ELEMENT, SIGN_QUALITY, ELEMENT_CHAR, QUALITY_CHAR, PLANET_GLYPH, PLANET_ORDER, PLANET_NAME_LINES, ASPECT_INFO, ASPECT_ORDER, PATTERN_INFO, PATTERN_ORDER, SHAPE_INFO, SHAPE_ORDER, Person, Prefill, Settings, SETTING_FIELDS, Chart, Derived, Cycles, optionsOf, nameOf, ownOf, setOwn, usesPart, partsOn, allParts, setParts, isImplemented, loadMeanings, meaningOf, roleOf, clearMeanings, UranaiView, api, lonOf, fmtDeg, Birth, HOUSE_SYSTEM_JA, IANA_ZONES, FALLBACK_ZONES, CC_ZONE, offsetFromZone, el, selectEl, loadSettings,
 } from "./parts";
 import { drawWheelPro } from "./wheel";
 
@@ -105,7 +105,46 @@ function settingsView(settings: Settings, onSaved: () => void | Promise<void>): 
       el("label", { textContent: derived ? `${f.label}（流派で決まる）` : f.label }), sel,
     ]));
   }
+  // 部品の採用。流派を切り替えると既定が読み込まれ、そこから自分用に変えられる。
+  const partsBox = el("div", { className: "u-parts" });
+  const renderParts = () => {
+    partsBox.innerHTML = "";
+    if (!allParts().length) return;
+    partsBox.append(el("div", { className: "u-set-title", textContent: "使う部品" }));
+    const on = new Set(partsOn());
+    const grid = el("div", { className: "u-parts-grid" });
+    for (const id of allParts()) {
+      const cb = el("input", { type: "checkbox" }) as HTMLInputElement;
+      cb.checked = on.has(id);
+      cb.addEventListener("change", () => {
+        const next = allParts().filter((x) => x === id ? cb.checked : on.has(x));
+        void api<{ parts: string[] }>(`/api/v1/uranai/astrology/parts`,
+          { method: "PUT", body: JSON.stringify({ ruleset: rsSel.value || undefined, parts: next }) })
+          .then((r) => { setParts(r.parts ?? next); renderParts(); })
+          .catch((e) => { status.textContent = `エラー: ${(e as Error).message}`; cb.checked = on.has(id); });
+      });
+      const impl = isImplemented(id);
+      const lb = el("label", { className: "u-tg-chip" + (impl ? "" : " u-part-todo") },
+        [cb, el("span", { textContent: nameOf("part", id) + (impl ? "" : "（未実装）") })]);
+      lb.title = meaningOf("part", id);
+      grid.append(lb);
+    }
+    partsBox.append(grid);
+  };
+
   const status = el("div", { className: "u-status" });
+  // 既定の流派をそのまま書き換えないよう、自分用に複製してから変える。
+  const copyBtn = el("button", { className: "u-btn-sm u-btn-ghost", textContent: "この流派を自分用に複製" });
+  copyBtn.addEventListener("click", () => {
+    status.textContent = "複製中…";
+    void api<{ ruleset: string }>(`/api/v1/uranai/astrology/ruleset-copy`,
+      { method: "POST", body: JSON.stringify({ from: rsSel.value, to: "custom", name: "自分用" }) })
+      .then(async (r) => {
+        await api(`/api/v1/uranai/astrology/preference`, { method: "PUT", body: JSON.stringify({ ruleset_id: r.ruleset }) });
+        clearMeanings(); status.textContent = ""; await onSaved();
+      })
+      .catch((e) => { status.textContent = `エラー: ${(e as Error).message}`; });
+  });
   const save = el("button", { className: "u-btn", textContent: "保存して全チャート再計算" });
   save.addEventListener("click", async () => {
     status.textContent = "保存中…";
@@ -147,9 +186,10 @@ function settingsView(settings: Settings, onSaved: () => void | Promise<void>): 
       await onSaved();
     } catch (e) { status.textContent = `エラー: ${(e as Error).message}`; }
   });
+  renderParts();
   wrap.append(
     el("div", { className: "u-settings-note", textContent: "この設定はあなた（ユーザー）の既定として保存され、全チャートに適用されます。" }),
-    el("div", { className: "u-set-title", textContent: "計算方式" }), grid, save, status,
+    el("div", { className: "u-set-title", textContent: "計算方式" }), grid, copyBtn, partsBox, save, status,
   );
   return wrap;
 }
@@ -326,6 +366,66 @@ function chartView(chart: Chart, birth: Birth | null | undefined, personId: stri
         r.ruler_sign ? `${SIGN_NAME[r.ruler_sign] ?? r.ruler_sign}${r.ruler_house ? ` / ${r.ruler_house.replace("house_", "")}室` : ""}` : "—",
       ])
     : [["—", "—", "—", "—"]]);
+
+  // ディスポジター連鎖。天体が在るサインの支配星を辿る。ルディアの体系には無い部品。
+  const dispTbl = mkTable(["天体", "ディスポジター", "連鎖", "最終", "相互受容"],
+    (chart.dispositors ?? []).map((d) => [
+      { t: bodyLabel(d.planet), tip: `planet:${d.planet}` },
+      d.dispositor ? { t: bodyLabel(d.dispositor), tip: `planet:${d.dispositor}` } : "—",
+      d.chain.map((k) => bodyLabel(k)).join(" → ") || "—",
+      d.final ? "●" : "",
+      d.mutual ? bodyLabel(d.mutual) : "",
+    ]), [2]);
+
+  // チャートルーラー: アセンダントのサインの支配星。ルディアの体系には無い部品。
+  const cr = chart.chart_ruler;
+  const crTbl = mkTable(["項目", "値"], cr
+    ? [["アセンダントのサイン", `${SIGN_GLYPH[cr.asc_sign] ?? ""}︎ ${SIGN_NAME[cr.asc_sign] ?? cr.asc_sign}`],
+       ["チャートルーラー", cr.ruler ? bodyLabel(cr.ruler) : "—"],
+       ["ルーラーの在住", cr.ruler_sign ? `${SIGN_NAME[cr.ruler_sign] ?? cr.ruler_sign}${cr.ruler_house ? ` / ${cr.ruler_house.replace("house_", "")}室` : ""}` : "—"]]
+    : [["—", "—"]]);
+
+  // セクト: 太陽が地平線の上（7〜12室）なら昼のチャート。昼夜で天体の働きが変わるとする流派の部品。
+  const sc = chart.sect;
+  const sectTbl = mkTable(["項目", "値"], sc
+    ? [["区分", sc.day ? "昼のチャート" : "夜のチャート"],
+       ["セクトライト", bodyLabel(sc.light)],
+       ["セクト内", sc.in_sect.map((k) => bodyLabel(k)).join("、")],
+       ["セクト外", sc.out_of_sect.map((k) => bodyLabel(k)).join("、")]]
+    : [["—", "—"]]);
+
+  // 半球の偏り: 数え上げなのでルディアは採らないが、流派によっては読みの起点にする。
+  const hm = chart.hemisphere;
+  const hemiTbl = mkTable(["軸", "側", "天体数"], hm
+    ? [["地平線", "上（7〜12室）", String(hm.above)], ["地平線", "下（1〜6室）", String(hm.below)],
+       ["子午線", "東（10〜3室）", String(hm.east)], ["子午線", "西（4〜9室）", String(hm.west)]]
+    : [["—", "—", "—"]]);
+
+  // 留: 日運動が平均より極端に小さい天体。順行と逆行の折り返し点にあたる。
+  const stTbl = mkTable(["天体", "日運動", "状態"], (chart.stations ?? []).length
+    ? (chart.stations ?? []).map((s) => [{ t: bodyLabel(s.planet), tip: `planet:${s.planet}` }, `${s.speed.toFixed(4)}°/日`, "留"])
+    : [["—", "—", "留の天体なし"]]);
+
+  const dp = chart.derived_points ?? [];
+  const sgLbl = (id: string) => `${SIGN_GLYPH[id] ?? ""}︎ ${SIGN_NAME[id] ?? id}`;
+  // デーカン／フェイス: サインを10度ずつ3分した副支配。デーカンは三分区分、フェイスはカルデア順。
+  const decanTbl = mkTable(["天体", "デーカン", "デーカン支配星", "フェイス支配星"], dp.length
+    ? dp.map((d) => [{ t: bodyLabel(d.planet), tip: `planet:${d.planet}` }, sgLbl(d.decan.sign),
+        d.decan.ruler ? bodyLabel(d.decan.ruler) : "—", bodyLabel(d.face)])
+    : [["—", "—", "—", "—"]]);
+  // アンティシア: 至点の軸に対する鏡像。同じ日照長を持つ度数どうしを結ぶ。
+  const antiTbl = mkTable(["天体", "アンティシア", "コントラアンティシア"], dp.length
+    ? dp.map((d) => [{ t: bodyLabel(d.planet), tip: `planet:${d.planet}` },
+        `${sgLbl(d.antiscion.sign)} ${fmtDeg(d.antiscion.degree)}`,
+        `${sgLbl(d.contra_antiscion.sign)} ${fmtDeg(d.contra_antiscion.degree)}`])
+    : [["—", "—", "—"]]);
+  // ハーモニクス／ドラコニック: 黄経を n 倍する／ドラゴンヘッドを起点に測り直す。
+  const harmN = dp[0]?.harmonic.n ?? 5;
+  const harmTbl = mkTable(["天体", `第${harmN}ハーモニクス`, "ドラコニック"], dp.length
+    ? dp.map((d) => [{ t: bodyLabel(d.planet), tip: `planet:${d.planet}` },
+        `${sgLbl(d.harmonic.sign)} ${fmtDeg(d.harmonic.degree)}`,
+        d.draconic ? `${sgLbl(d.draconic.sign)} ${fmtDeg(d.draconic.degree)}` : "—"])
+    : [["—", "—", "—"]]);
 
   // 象限。地平線と子午線が作る4つのクォーター。ルディアはハウスをこの単位でも読む。
   const quadTbl = mkTable(["象限", "ハウス", "意味"], (chart.quadrants ?? []).map((q) => [
@@ -538,32 +638,16 @@ function chartView(chart: Chart, birth: Birth | null | undefined, personId: stri
     return box;
   };
 
-  // ───── 読み（ルディアの解釈手順） ─────
-  // 手順の順序そのものを画面の骨格にする。左に材料、右ペインに解釈を書く。
-  // 判断（焦点の見極め、解釈文）はシステムがやらない。材料を並べて記入欄を持つだけ。
-  const READ_STEPS: Array<{ id: string; label: string }> = [
-    { id: "shape", label: "① 全体の形" }, { id: "aspects", label: "② アスペクトの構成" },
-    { id: "center", label: "③ 中心点" }, { id: "accent", label: "④ アクセント" },
-    { id: "houses", label: "⑤ ハウスを通じた感じ取り" }, { id: "blueprint", label: "⑥ 潜在能力（設計図）" },
-    { id: "timeline", label: "⑦ 時間軸" }, { id: "summary", label: "⑧ 統合" },
-  ];
+  // ───── 解釈の部品 ─────
+  // 読みの手順はシステムで定義しない（プロセス自体に特別なものがないという判断）。
+  // 個々の部品を並べ、材料の隣に自分の解釈を出すことだけをする。
   const P10 = ["sun", "moon", "mercury", "venus", "mars", "jupiter", "saturn", "uranus", "neptune", "pluto"];
   const inHouse = (h: string): string[] => chart.placements
     .filter((p) => !["asc", "mc", "dsc", "ic"].includes(p.planet) && `house_${houseOf(lonOf(p))}` === h)
     .map((p) => p.planet);
   const quadOf = (n: number): string => `quadrant_${Math.floor((n - 1) / 3) + 1}`;
 
-  // 各ステップの材料。既存タブの値と同じものを、読みの単位で束ね直す。
-  // 読み用のホイール。チャートのタブと同じ描画を使い回す（テーマ切替の再描画にも乗る）。
-  const wheelForRead = (): HTMLElement => {
-    const h = el("div", { className: "u-wheel" });
-    h.append(drawWheelPro(chart, enabled, nameMode));
-    h.addEventListener("u-redraw", () => { h.innerHTML = ""; h.append(drawWheelPro(chart, enabled, nameMode)); });
-    return h;
-  };
-
-  // 情報側に、いま見ている材料に紐づく解釈を出す。プロパティのいずれかが一致するものを拾う。
-  // 押すと右ペインでそのページが開く。ここでは読むだけ。
+  // 材料に紐づく解釈。プロパティのいずれかが一致するものを拾い、押すと右ペインでページが開く。
   const notesFor = (rays: Ray[], heading = "この材料に紐づく解釈"): HTMLElement => {
     const box = el("div", {});
     const hit = notes.filter((n) => !hasRay(n, "note_type", "question")
@@ -581,118 +665,61 @@ function chartView(chart: Chart, birth: Birth | null | undefined, personId: stri
     return box;
   };
 
-  // 問いの欄。原典由来の問い（共通）と、この人物向けに書いた問い（種別=問い かつ その手順）。
-  const questionBox = (step: string): HTMLElement => {
+  // ハウス詳細。12室を順に、その室で読む材料を1つの表に束ねる。手順から独立した部品として残す。
+  const houseDetail = (): HTMLElement => {
     const box = el("div", {});
-    const common = questionsOf(step);
-    const mine = notes.filter((n) => hasRay(n, "reading_step", step) && hasRay(n, "note_type", "question"));
-    if (!common.length && !mine.length) return box;
-    box.append(el("div", { className: "u-tbl-title", textContent: "問い" }));
-    for (const q of common) box.append(el("div", { className: "u-q", textContent: q }));
-    for (const n of mine) {
-      const btn = el("button", { className: "u-row-btn u-q-own" });
-      btn.append(el("div", { textContent: titleOf(n) }));
-      if (n.value) btn.append(el("div", { className: "u-row-sub", textContent: n.value.slice(0, 90) }));
-      btn.addEventListener("click", () => { openNote = n.note_id; renderNotes(); });
-      box.append(btn);
+    for (let i = 1; i <= 12; i++) {
+      const hid = `house_${i}`;
+      const rl = (chart.house_rulers ?? []).find((r) => r.house === hid);
+      const bodies = inHouse(hid);
+      box.append(el("div", { className: "u-tbl-title", textContent: `第${i}室` }));
+      box.append(mkTable(["項目", "内容"], [
+        ["経験のカテゴリー", ownOf("house", hid) || meaningOf("house", hid) || "—"],
+        ["象限", ownOf("quadrant", quadOf(i)) || meaningOf("quadrant", quadOf(i)) || "—"],
+        ["在住天体", bodies.length ? bodies.map((k) => bodyLabel(k)).join("　") : "なし"],
+        ["カスプのサイン", rl ? SIGN_NAME[rl.cusp_sign] ?? rl.cusp_sign : "—"],
+        ["支配星とその在住", rl?.ruler ? `${bodyLabel(rl.ruler)} → ${rl.ruler_sign ? SIGN_NAME[rl.ruler_sign] ?? rl.ruler_sign : "—"}${rl.ruler_house ? ` / ${rl.ruler_house.replace("house_", "")}室` : ""}` : "—"],
+        ["インターセプト", (chart.interceptions ?? []).filter((x) => x.house === hid).map((x) => SIGN_NAME[x.sign] ?? x.sign).join("、") || "なし"],
+      ], [1]));
+      const pick = el("button", { className: "u-pick" + (houseFilter === hid ? " on" : ""), textContent: `第${i}室を選択` });
+      pick.addEventListener("click", () => {
+        houseFilter = houseFilter === hid ? null : hid;
+        openNote = null;
+        matHost.innerHTML = ""; matHost.append(houseDetail());
+        renderNotes();
+      });
+      box.append(pick);
+      box.append(notesFor([{ concept_kind: "house", concept_id: hid }], `第${i}室の解釈`));
     }
     return box;
   };
 
-  const materialOf = (step: string): HTMLElement => {
-    const box = el("div", {});
-    box.append(questionBox(step)); // 問いを先に置く。何を見て何を問うかの入口。
-    const title = (t: string) => box.append(el("div", { className: "u-tbl-title", textContent: t }));
-    if (step === "summary") {
-      // 統合ではここまでに書いた解釈を全部並べる。
-      box.append(notesFor(notes.flatMap((n) => n.rays), "ここまでの解釈"));
-      return box;
-    }
-    // 全体の印象を掴むのが目的なので、材料の先頭にホイールを置く。
-    if (step === "shape" || step === "accent") { box.append(wheelForRead(), shapeNode, notesFor(contextRays())); return box; }
-    if (step === "aspects") { box.append(aspectNode, notesFor(contextRays())); return box; }
-    if (step === "center") {
-      title("重心・ディグニティ・支配関係");
-      box.append(digTbl, rulerTbl, notesFor(contextRays()));
-      return box;
-    }
-    if (step === "houses") {
-      // 12室を順に。各室で読む材料（経験のカテゴリー、在住天体、カスプの支配星の在住先）を集める。
-      for (let i = 1; i <= 12; i++) {
-        const hid = `house_${i}`;
-        const rl = (chart.house_rulers ?? []).find((r) => r.house === hid);
-        const bodies = inHouse(hid);
-        box.append(el("div", { className: "u-tbl-title", textContent: `第${i}室` }));
-        box.append(mkTable(["項目", "内容"], [
-          ["経験のカテゴリー", meaningOf("house", hid) || "—"],
-          ["象限", meaningOf("quadrant", quadOf(i)) || "—"],
-          ["在住天体", bodies.length ? bodies.map((k) => bodyLabel(k)).join("　") : "なし"],
-          ["カスプのサイン", rl ? `${SIGN_NAME[rl.cusp_sign] ?? rl.cusp_sign}（${meaningOf("sign", rl.cusp_sign) || "—"}）` : "—"],
-          ["支配星とその在住", rl?.ruler ? `${bodyLabel(rl.ruler)} → ${rl.ruler_sign ? SIGN_NAME[rl.ruler_sign] ?? rl.ruler_sign : "—"}${rl.ruler_house ? ` / ${rl.ruler_house.replace("house_", "")}室` : ""}` : "—"],
-          ["インターセプト", (chart.interceptions ?? []).filter((x) => x.house === hid).map((x) => SIGN_NAME[x.sign] ?? x.sign).join("、") || "なし"],
-        ], [1]));
-        // その室を選ぶと右ペインの一覧をその室で絞る。書くのは右ペインに集約する。
-        // 選択中の室は枠で示す。プロパティの初期反映がどの選択から来るかを見えるようにする。
-        const pick = el("button", { className: "u-pick" + (houseFilter === hid ? " on" : ""), textContent: `第${i}室を選択` });
-        pick.addEventListener("click", () => {
-          houseFilter = houseFilter === hid ? null : hid;
-          openNote = null;
-          matHost.innerHTML = ""; matHost.append(materialOf("houses"));
-          renderNotes();
-        });
-        box.append(pick);
-        box.append(notesFor([{ concept_kind: "house", concept_id: hid }], `第${i}室の解釈`));
-      }
-      return box;
-    }
-    if (step === "blueprint") {
-      title("10の基本的なエネルギーと、それをどこで使うか");
-      box.append(mkTable(["天体", "階層", "機能", "使う場（ハウス）", "位相（サイン）"],
-        P10.filter((k) => place.has(k)).map((k) => {
-          const p = place.get(k)!;
-          const h = `house_${houseOf(lonOf(p))}`;
-          return [bodyLabel(k), ROLE_JA[roleOf(k)] ?? "", meaningOf("planet", k) || "—",
-            `${houseOf(lonOf(p))}室：${meaningOf("house", h) || "—"}`, meaningOf("sign", p.sign) || "—"];
-        }), [2, 3, 4]));
-      box.append(notesFor(P10.filter((k) => place.has(k)).map((k) => ({ concept_kind: "planet", concept_id: k }))));
-      return box;
-    }
-    if (step === "timeline") {
-      return box;
-    }
-    return box;
-  };
-
-  // 解釈メモ。ステップごとに複数書ける。保存は暗号化してサーバへ。
-  // メモはグラフのリレーションと同じ形。本文＋n項の参加者。読みのステップも参加者の1つ。
-  type Ray = { concept_kind: string; concept_id: string };
-  type Note = { note_id: string; idx: number; at: string | null; title: string; value: string; rays: Ray[]; links: string[] };
-  const hasRay = (n: Note, kind: string, id: string) => n.rays.some((r) => r.concept_kind === kind && r.concept_id === id);
   const rayLabel = (r: Ray): string => {
     if (r.concept_kind === "planet") return bodyLabel(r.concept_id);
     if (r.concept_kind === "sign") return SIGN_NAME[r.concept_id] ?? r.concept_id;
     if (r.concept_kind === "house") return `${r.concept_id.replace("house_", "")}室`;
     if (r.concept_kind === "quadrant") return QUAD_JA[r.concept_id] ?? r.concept_id;
-    if (r.concept_kind === "reading_step") return READ_STEPS.find((x) => x.id === r.concept_id)?.label ?? r.concept_id;
     if (r.concept_kind === "aspect_type") return ASPECT_INFO[r.concept_id]?.label ?? r.concept_id;
     if (r.concept_kind === "shape") return nameOf("shape", r.concept_id);
     if (r.concept_kind === "note_type") return nameOf("note_type", r.concept_id);
     return `${r.concept_kind}:${r.concept_id}`;
   };
+  // メモはグラフのリレーションと同じ形。本文＋n項の参加者。
+  type Ray = { concept_kind: string; concept_id: string };
+  type Note = { note_id: string; idx: number; at: string | null; title: string; value: string; rays: Ray[]; links: string[] };
+  const hasRay = (n: Note, kind: string, id: string) => n.rays.some((r) => r.concept_kind === kind && r.concept_id === id);
   let notes: Note[] = [];
   const matHost = el("div", {});
-  let current = READ_STEPS[0].id;
   // 解釈はデータベース。1行が1ページ。列は概念の種類で分けず、プロパティとして付ける。
   // ページはタイトル・プロパティ・本文の構成。ページ間のリンクも張れる。
   const PROP_KINDS: Array<{ kind: string; label: string }> = [
     { kind: "house", label: "ハウス" }, { kind: "planet", label: "天体" }, { kind: "sign", label: "サイン" },
     { kind: "aspect_type", label: "アスペクト" }, { kind: "quadrant", label: "象限" },
-    { kind: "reading_step", label: "手順" }, { kind: "shape", label: "配置型" },
+    { kind: "shape", label: "配置型" },
     { kind: "note_type", label: "種別" },
   ];
   const titleOf = (n: Note): string => n.title || n.value.split("\n")[0] || "無題";
   let openNote: string | null = null;
-  let stepFilter: string | null = null;
   let houseFilter: string | null = null;
 
   // いま見ている材料から決まるプロパティ。手順に加えて、その手順で焦点になっている対象を付ける。
@@ -707,26 +734,6 @@ function chartView(chart: Chart, birth: Birth | null | undefined, personId: stri
       for (const k of inHouse(houseFilter)) out.push({ concept_kind: "planet", concept_id: k });
       out.push({ concept_kind: "quadrant", concept_id: quadOf(Number(houseFilter.replace("house_", ""))) });
       return out;
-    }
-    if (!stepFilter) return out;
-    out.push({ concept_kind: "reading_step", concept_id: stepFilter });
-    const sh = chart.shape;
-    if ((stepFilter === "shape" || stepFilter === "accent") && sh) {
-      out.push({ concept_kind: "shape", concept_id: sh.shape });
-      for (const k of sh.handle ?? []) out.push({ concept_kind: "planet", concept_id: k });
-      if (sh.leadingBody) out.push({ concept_kind: "planet", concept_id: sh.leadingBody });
-      if (sh.singleton) out.push({ concept_kind: "planet", concept_id: sh.singleton.planet });
-    }
-    if (stepFilter === "accent") {
-      for (const x of chart.interceptions ?? []) out.push({ concept_kind: "sign", concept_id: x.sign });
-    }
-    if (stepFilter === "center" && sh?.center) {
-      const cs = SIGN_ORDER[Math.floor((((sh.center.longitude % 360) + 360) % 360) / 30) % 12];
-      out.push({ concept_kind: "sign", concept_id: cs });
-      out.push({ concept_kind: "house", concept_id: `house_${houseOf(sh.center.longitude)}` });
-    }
-    if (stepFilter === "aspects") {
-      for (const t of [...new Set(chart.aspects.map((a) => a.type))]) out.push({ concept_kind: "aspect_type", concept_id: t });
     }
     // 重複を落とす。
     const seen = new Set<string>();
@@ -828,8 +835,7 @@ function chartView(chart: Chart, birth: Birth | null | undefined, personId: stri
     reportHost.innerHTML = "";
     const open = openNote ? notes.find((x) => x.note_id === openNote) : null;
     if (open) { reportHost.append(pageView(open, renderNotes)); return; }
-    const shown = houseFilter ? notes.filter((n) => hasRay(n, "house", houseFilter as string))
-      : stepFilter ? notes.filter((n) => hasRay(n, "reading_step", stepFilter as string)) : notes;
+    const shown = houseFilter ? notes.filter((n) => hasRay(n, "house", houseFilter as string)) : notes;
     // 何で絞っているかと、新規作成時に入るプロパティを先に見せる。
     const ctx = contextRays();
     if (ctx.length) {
@@ -863,17 +869,8 @@ function chartView(chart: Chart, birth: Birth | null | undefined, personId: stri
     reportHost.append(add);
   };
 
-  const selectStep = (id: string) => {
-    current = id;
-    stepFilter = id;
-    houseFilter = null;
-    openNote = null;
-    matHost.innerHTML = "";
-    matHost.append(materialOf(id));
-    renderNotes();
-  };
   void api<{ notes: Note[] }>(`/api/v1/uranai/astrology/person/${personId}/notes`)
-    .then((r) => { notes = r.notes ?? []; selectStep(current); })
+    .then((r) => { notes = r.notes ?? []; matHost.innerHTML = ""; matHost.append(houseDetail()); renderNotes(); })
     .catch(() => { /* メモが取れなくても材料は見せる */ });
 
   // 概念。自分の意味を書く場所。原典由来の意味と並べて出し、上書きではなく別に持つ。
@@ -1024,69 +1021,51 @@ function chartView(chart: Chart, birth: Birth | null | undefined, personId: stri
     { label: "基本情報", node: basicNode },
     { label: "チャート", node: chartNode },
     { label: "概念", node: conceptNode },
-    { label: "全体の形", node: shapeNode },
-    ...(chart.tally === false ? [] : [{ label: "元素", node: elemNode }, { label: "クオリティ", node: qualNode }]),
+    ...(usesPart("shape") || usesPart("singleton") || usesPart("center") ? [{ label: "全体の形", node: shapeNode }] : []),
+    ...(chart.tally === false || !usesPart("tally") ? [] : [{ label: "元素", node: elemNode }, { label: "クオリティ", node: qualNode }]),
     { label: "天体", node: planetTbl },
     { label: "カスプ", node: cuspTbl },
+    { label: "ハウス詳細", node: matHost },
     { label: "サイン", node: signTbl },
-    { label: "インターセプト", node: icptTbl },
-    { label: "ディグニティ", node: digTbl },
-    { label: "支配関係", node: rulerTbl },
-    { label: "象限", node: quadTbl },
-    { label: "ルネーション", node: lunTbl },
+    ...(usesPart("interception") ? [{ label: "インターセプト", node: icptTbl }] : []),
+    ...(usesPart("dignity") ? [{ label: "ディグニティ", node: digTbl }] : []),
+    ...(usesPart("rulership") ? [{ label: "支配関係", node: rulerTbl }] : []),
+    ...(usesPart("dispositor") ? [{ label: "ディスポジター", node: dispTbl }] : []),
+    ...(usesPart("chart_ruler") ? [{ label: "チャートルーラー", node: crTbl }] : []),
+    ...(usesPart("sect") ? [{ label: "セクト", node: sectTbl }] : []),
+    ...(usesPart("hemisphere") ? [{ label: "半球", node: hemiTbl }] : []),
+    ...(usesPart("station") ? [{ label: "留", node: stTbl }] : []),
+    ...(usesPart("decan") || usesPart("face") ? [{ label: "デーカン/フェイス", node: decanTbl }] : []),
+    ...(usesPart("antiscia") ? [{ label: "アンティシア", node: antiTbl }] : []),
+    ...(usesPart("harmonic") || usesPart("draconic") ? [{ label: "ハーモニクス", node: harmTbl }] : []),
+    ...(usesPart("quadrant") ? [{ label: "象限", node: quadTbl }] : []),
+    ...(usesPart("lunation") ? [{ label: "ルネーション", node: lunTbl }] : []),
     { label: `アスペクト(${chart.aspects.length})`, node: aspectNode },
-    ...(chart.aspect_figure === false ? [] : [{ label: `配置(${majorCount})`, node: patternNode }]),
-    { label: "進行", node: derivedNode("progressed") },
-    { label: "経過", node: derivedNode("transit") },
-    { label: "サイクル", node: cyclesNode() },
+    ...(chart.aspect_figure === false || !usesPart("aspect_figure") ? [] : [{ label: `配置(${majorCount})`, node: patternNode }]),
+    ...(usesPart("progression") ? [{ label: "進行", node: derivedNode("progressed") }] : []),
+    ...(usesPart("transit") ? [{ label: "経過", node: derivedNode("transit") }] : []),
+    ...(usesPart("cycles") ? [{ label: "サイクル", node: cyclesNode() }] : []),
   ];
 
   const content = el("div", { className: "u-tab-content" });
   const dataWraps = dataSections.map((sec) => el("div", { className: "u-section" }, [sec.node]));
   for (const w of dataWraps) content.append(w);
-  // 全体を通して立ち返る問い。常に見えると邪魔なので折りたたんで置く。
-  const princ = el("details", { className: "u-princ" });
-  princ.append(el("summary", { textContent: "常に立ち返る問い" }));
-  for (const q of principles()) princ.append(el("div", { className: "u-q", textContent: q }));
-  content.append(el("div", { className: "u-section" }, [...(principles().length ? [princ] : []), matHost]));
-  const readWrap = content.lastElementChild as HTMLElement;
 
-  const groupBar = el("div", { className: "u-tabs u-groups" });
   const tabBar = el("div", { className: "u-tabs" });
-  const GROUPS = [{ id: "data", label: "基本情報" }, { id: "read", label: "読み" }] as const;
-  let group: "data" | "read" = "read";
   let dataIdx = 0;
-
   const paint = () => {
-    for (const b of Array.from(groupBar.children) as HTMLElement[]) b.classList.toggle("on", b.dataset.g === group);
     tabBar.innerHTML = "";
-    if (group === "data") {
-      dataSections.forEach((sec, i) => {
-        const b = el("button", { className: "u-tab-btn" + (i === dataIdx ? " on" : ""), type: "button", textContent: sec.label });
-        b.addEventListener("click", () => { dataIdx = i; paint(); });
-        tabBar.append(b);
-      });
-    } else {
-      for (const st of READ_STEPS) {
-        const b = el("button", { className: "u-tab-btn u-step-chip" + (st.id === current ? " on" : ""), type: "button", textContent: st.label });
-        b.addEventListener("click", () => { selectStep(st.id); paint(); });
-        tabBar.append(b);
-      }
-    }
-    dataWraps.forEach((w, i) => { w.style.display = group === "data" && i === dataIdx ? "" : "none"; });
-    readWrap.style.display = group === "read" ? "" : "none";
+    dataSections.forEach((sec, i) => {
+      const btn = el("button", { className: "u-tab-btn" + (i === dataIdx ? " on" : ""), type: "button", textContent: sec.label });
+      btn.addEventListener("click", () => { dataIdx = i; paint(); });
+      tabBar.append(btn);
+    });
+    dataWraps.forEach((w, i) => { w.style.display = i === dataIdx ? "" : "none"; });
   };
-  for (const g of GROUPS) {
-    const b = el("button", { className: "u-tab-btn u-group-btn", type: "button", textContent: g.label });
-    b.dataset.g = g.id;
-    b.addEventListener("click", () => { group = g.id; paint(); });
-    groupBar.append(b);
-  }
-  const bar = el("div", {}, [groupBar, tabBar]);
+  const bar = el("div", {}, [tabBar]);
   paint();
   wrap.append(bar, content);
   renderConcepts();
-  selectStep(READ_STEPS[0].id); // 読みは第1ステップから
   return wrap;
 }
 
@@ -1195,6 +1174,9 @@ export async function renderUranai(container: HTMLElement): Promise<void> {
     .u-btn-sm:hover{background:#00000014}
     .u-settings{margin:12px 0 4px;padding:10px 12px;border:1px solid #0001;border-radius:8px;background:#0000000a;max-width:520px}
     .u-set-title{font-size:13px;font-weight:600;color:#555;margin-bottom:8px}
+    .u-parts{margin:10px 0 4px}
+    .u-part-todo{opacity:.5}
+    .u-parts-grid{display:grid;grid-template-columns:repeat(auto-fill,minmax(190px,1fr));gap:4px 12px}
     .u-set-grid{display:grid;grid-template-columns:1fr 1fr;gap:6px 14px}
     .u-set-row{display:flex;align-items:center;gap:8px}
     .u-set-row label{width:88px;flex:none;color:#666;font-size:12px}
@@ -1213,12 +1195,6 @@ export async function renderUranai(container: HTMLElement): Promise<void> {
     .u-page-title{width:100%;box-sizing:border-box;border:0;background:transparent;font-size:19px;font-weight:700;color:#1f2937;padding:6px 0;margin-bottom:4px;font-family:inherit}
     .u-page-title:focus{outline:none;border-bottom:1px solid #4A90C2}
     [data-theme=dark] .u-page-title{color:#f3f5f7}
-    .u-princ{margin:4px 0 10px}
-    .u-princ>summary{font-size:12px;color:#888;cursor:pointer}
-    [data-theme=dark] .u-princ>summary{color:#8b95a3}
-    .u-q{font-size:12.5px;color:#555;border-left:2px solid #4A90C2;padding:3px 0 3px 9px;margin:3px 0;line-height:1.6}
-    [data-theme=dark] .u-q{color:#c3c9d1}
-    .u-q-own{border-left:2px solid #4A90C2}
     .u-row-sub{font-size:11px;color:#888;margin-top:2px;white-space:normal;line-height:1.5}
     [data-theme=dark] .u-row-sub{color:#8b95a3}
     .u-row-btn{display:block;width:100%;text-align:left;border:1px solid #0002;background:#fff;color:#333;border-radius:6px;padding:6px 9px;margin-bottom:5px;font-size:12.5px;cursor:pointer}
@@ -1228,11 +1204,6 @@ export async function renderUranai(container: HTMLElement): Promise<void> {
     [data-theme=dark] .u-ray{background:#1b1f26;border-color:#ffffff26;color:#b3bcc7}
     [data-theme=dark] .u-ray.on{background:#4A90C233;border-color:#4A90C2aa;color:#e6e8eb}
     [data-theme=dark] .u-note{background:#1b1f26;border-color:#ffffff26;color:#e6e8eb}
-    .u-step-chip{text-align:left}
-    /* 大分類（T の上）とタブ（T の下）を横線で分ける */
-    .u-groups{margin:6px 0 0;padding-bottom:6px;border-bottom:1px solid #0002}
-    .u-group-btn{font-weight:700}
-    [data-theme=dark] .u-groups{border-bottom-color:#ffffff26}
     /* 選択中であることを枠で示す */
     .u-pick{font-size:11.5px;border:1px solid #0002;background:transparent;color:#888;border-radius:6px;padding:3px 9px;cursor:pointer;margin:2px 0 8px}
     .u-pick.on{border-color:#4A90C2;color:#4A90C2;box-shadow:0 0 0 2px #4A90C233}

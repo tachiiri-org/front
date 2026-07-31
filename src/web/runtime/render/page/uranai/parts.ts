@@ -107,6 +107,18 @@ export type Chart = {
             center?: { longitude: number; concentration: number } };
   house_rulers?: Array<{ house: string; cusp_sign: string; ruler: string | null;
                          ruler_sign: string | null; ruler_house: string | null }>;
+  dispositors?: Array<{ planet: string; dispositor: string | null; chain: string[];
+                        final: boolean; mutual: string | null }>;
+  chart_ruler?: { asc_sign: string; ruler: string | null; ruler_sign: string | null; ruler_house: string | null } | null;
+  sect?: { day: boolean; light: string; in_sect: string[]; out_of_sect: string[] } | null;
+  hemisphere?: { above: number; below: number; east: number; west: number } | null;
+  stations?: Array<{ planet: string; speed: number; stationary: boolean }>;
+  derived_points?: Array<{ planet: string;
+    decan: { sign: string; ruler: string | null }; face: string;
+    antiscion: { longitude: number; sign: string; degree: number };
+    contra_antiscion: { longitude: number; sign: string; degree: number };
+    draconic: { sign: string; degree: number } | null;
+    harmonic: { n: number; sign: string; degree: number } }>;
   placements: Placement[]; aspects: Aspect[];
   patterns?: Pattern[];
   dignities: Array<{ planet: string; dignity: string }>;
@@ -189,8 +201,7 @@ export async function loadMeanings(): Promise<void> {
       meanings?: Array<{ concept_kind: string; concept_id: string; value: string }>;
       names?: Array<{ concept_kind: string; concept_id: string; value: string }>;
       concept_notes?: Array<{ concept_kind: string; concept_id: string; value: string }>;
-      reading_questions?: Array<{ step_id: string; idx: number; value: string }>;
-      reading_principles?: Array<{ idx: number; value: string }>;
+      parts?: string[]; all_parts?: string[]; implemented_parts?: string[];
       body_role?: Array<{ planet_id: string; body_role_id: string }>;
     }>(`/api/v1/uranai/astrology/reference`);
     const m: MeaningMap = {};
@@ -202,12 +213,11 @@ export async function loadMeanings(): Promise<void> {
     const ow: MeaningMap = {};
     for (const x of r.concept_notes ?? []) (ow[x.concept_kind] ??= {})[x.concept_id] = x.value;
     ownCache = ow;
-    questionCache = (r.reading_questions ?? []).slice();
-    principleCache = (r.reading_principles ?? []).sort((a, b) => a.idx - b.idx).map((x) => x.value);
+    partCache = { parts: (r.parts ?? []).slice(), all: (r.all_parts ?? []).slice(), impl: (r.implemented_parts ?? []).slice() };
     const roles: Record<string, string> = {};
     for (const x of r.body_role ?? []) roles[x.planet_id] = m.body_role?.[x.body_role_id] ? x.body_role_id : x.body_role_id;
     roleCache = roles;
-  } catch { meaningCache = {}; roleCache = {}; nameCache = {}; ownCache = {}; questionCache = []; principleCache = []; }
+  } catch { meaningCache = {}; roleCache = {}; nameCache = {}; ownCache = {}; partCache = { parts: [], all: [], impl: [] }; }
 }
 export const meaningOf = (kind: string, id: string): string => meaningCache?.[kind]?.[id] ?? "";
 
@@ -215,14 +225,6 @@ export const meaningOf = (kind: string, id: string): string => meaningCache?.[ki
 let ownCache: MeaningMap | null = null;
 export const ownOf = (kind: string, id: string): string => ownCache?.[kind]?.[id] ?? "";
 
-// 手順ごとの問い（原典由来・共通）。
-let questionCache: Array<{ step_id: string; idx: number; value: string }> = [];
-// 段階に紐づかず、全体を通して立ち返る問い。
-let principleCache: string[] = [];
-export const principles = (): string[] => principleCache;
-
-export const questionsOf = (stepId: string): string[] =>
-  questionCache.filter((q) => q.step_id === stepId).sort((a, b) => a.idx - b.idx).map((q) => q.value);
 export const setOwn = (kind: string, id: string, value: string): void => {
   if (!ownCache) ownCache = {};
   (ownCache[kind] ??= {})[id] = value;
@@ -231,6 +233,15 @@ export const setOwn = (kind: string, id: string, value: string): void => {
 // 概念の名称。プロパティの選択肢（既定の選択肢）としても使う。
 let nameCache: MeaningMap | null = null;
 export const nameOf = (kind: string, id: string): string => nameCache?.[kind]?.[id] ?? id;
+// 採用している部品。画面はこれに従ってタブを出し分ける。
+let partCache: { parts: string[]; all: string[]; impl: string[] } = { parts: [], all: [], impl: [] };
+export const partsOn = (): string[] => partCache.parts;
+export const allParts = (): string[] => partCache.all;
+export const usesPart = (id: string): boolean => partCache.parts.length === 0 || partCache.parts.includes(id);
+export const setParts = (list: string[]): void => { partCache = { ...partCache, parts: list.slice() }; };
+// 算出まで実装してある部品。枠だけのものは選んでも画面に出ない。
+export const isImplemented = (id: string): boolean => partCache.impl.includes(id);
+
 export const optionsOf = (kind: string): Array<{ id: string; label: string }> =>
   Object.entries(nameCache?.[kind] ?? {}).map(([id, label]) => ({ id, label }));
 
