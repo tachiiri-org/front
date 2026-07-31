@@ -327,3 +327,8 @@ export type CycleMilestone = { at: string; age: number; label: string; kind: str
 /** 期間の探索。運行天体が出生の点に正確に当たる日。 */
 export type TransitSearch = { from: string; to: string;
   hits: Array<{ at: string; transit: string; natal: string; type: string; exact_longitude: number }> };
+
+/** 一次進行。弧を年に換算する鍵は流儀が分かれる。 */
+export type PrimaryDirection = { key: string; key_label: string; years_per_degree: number;
+  keys: Array<{ id: string; label: string }>;
+  directions: Array<{ planet: string; angle: string; arc: number; age: number }> };

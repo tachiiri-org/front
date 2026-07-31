@@ -1,6 +1,6 @@
 // ウラナイ画面のルート描画とフォーム類。定数・型・ヘルパは ./parts、ホイール描画は ./wheel に分割。
 import {
-  SIGN_ORDER, SIGN_GLYPH, SIGN_NAME, SIGN_ELEMENT, SIGN_QUALITY, ELEMENT_CHAR, QUALITY_CHAR, PLANET_GLYPH, PLANET_ORDER, PLANET_NAME_LINES, ASPECT_INFO, ASPECT_ORDER, PATTERN_INFO, PATTERN_ORDER, SHAPE_INFO, SHAPE_ORDER, Person, Prefill, Settings, SETTING_FIELDS, Chart, Derived, Cycles, Profection, SolarArc, FixedStars, OutOfBounds, Firdaria, Synastry, Composite, Rectification, PlanetCycle, TransitSearch, optionsOf, nameOf, ownOf, setOwn, usesPart, partsOn, allParts, setParts, isImplemented, loadMeanings, meaningOf, conventionOf, roleOf, clearMeanings, UranaiView, api, lonOf, fmtDeg, Birth, HOUSE_SYSTEM_JA, IANA_ZONES, FALLBACK_ZONES, CC_ZONE, offsetFromZone, el, selectEl, loadSettings,
+  SIGN_ORDER, SIGN_GLYPH, SIGN_NAME, SIGN_ELEMENT, SIGN_QUALITY, ELEMENT_CHAR, QUALITY_CHAR, PLANET_GLYPH, PLANET_ORDER, PLANET_NAME_LINES, ASPECT_INFO, ASPECT_ORDER, PATTERN_INFO, PATTERN_ORDER, SHAPE_INFO, SHAPE_ORDER, Person, Prefill, Settings, SETTING_FIELDS, Chart, Derived, Cycles, Profection, SolarArc, FixedStars, OutOfBounds, Firdaria, Synastry, Composite, Rectification, PlanetCycle, TransitSearch, PrimaryDirection, optionsOf, nameOf, ownOf, setOwn, usesPart, partsOn, allParts, setParts, isImplemented, loadMeanings, meaningOf, conventionOf, roleOf, clearMeanings, UranaiView, api, lonOf, fmtDeg, Birth, HOUSE_SYSTEM_JA, IANA_ZONES, FALLBACK_ZONES, CC_ZONE, offsetFromZone, el, selectEl, loadSettings,
 } from "./parts";
 import { drawWheelPro } from "./wheel";
 
@@ -788,6 +788,38 @@ function chartView(chart: Chart, birth: Birth | null | undefined, personId: stri
     return box;
   };
 
+  // 一次進行。ルディアの技法ではない（彼は他流派のものとして紹介するにとどまる）。
+  const pdNode = (): HTMLElement => {
+    const box = el("div", {});
+    const sel = el("select", { className: "u-fi" }) as HTMLSelectElement;
+    const out = el("div", {});
+    const load = async () => {
+      out.innerHTML = "";
+      out.append(el("div", { className: "u-pat-empty", textContent: "算出中…" }));
+      try {
+        const d = await api<PrimaryDirection>(`/api/v1/uranai/astrology/person/${personId}/primary_direction?key=${sel.value || "naibod"}&until_age=90`);
+        if (!sel.options.length) {
+          for (const k of d.keys) sel.append(el("option", { value: k.id, textContent: k.label }));
+          sel.value = d.key;
+        }
+        out.innerHTML = "";
+        out.append(el("div", { className: "u-pat-comp", textContent: `天球の日周回転を年に換算する方向法。弧を年に換算する鍵は流儀が分かれ、ここでは${d.key_label}を使っている（赤経1度あたり ${d.years_per_degree.toFixed(6)} 年）。鍵を変えると年齢が数年ずれる。ルディアの体系には無く、彼は他流派の技法として紹介するにとどまっている。` }));
+        out.append(el("div", { className: "u-pat-comp", textContent: "MC・IC への弧は赤経の差、アセンダント・ディセンダントへの弧は斜升の差で測る。順方向のみで、逆方向（コンバース）は扱わない。" }));
+        out.append(d.directions.length
+          ? mkTable(["年齢", "天体", "到達するアングル", "弧"], d.directions.map((x) =>
+              [`${x.age.toFixed(1)}歳`, bodyLabel(x.planet), x.angle.toUpperCase(), `${x.arc.toFixed(2)}°`]))
+          : el("div", { className: "u-pat-empty", textContent: "該当する方向はありません" }));
+      } catch (e) {
+        out.innerHTML = "";
+        out.append(el("div", { className: "u-status", textContent: `エラー: ${(e as Error).message}` }));
+      }
+    };
+    sel.addEventListener("change", () => void load());
+    box.append(el("div", { className: "u-row" }, [el("label", { textContent: "鍵" }), sel]), out);
+    void load();
+    return box;
+  };
+
   // 象限。地平線と子午線が作る4つのクォーター。ルディアはハウスをこの単位でも読む。
   const quadTbl = mkTable(["象限", "ハウス", "意味"], (chart.quadrants ?? []).map((q) => [
     QUAD_JA[q.id] ?? q.id,
@@ -1432,6 +1464,7 @@ function chartView(chart: Chart, birth: Birth | null | undefined, personId: stri
     ...(usesPart("rectification") ? [{ label: "出生時刻の修正", node: rectNode() }] : []),
     ...(usesPart("planet_cycle") ? [{ label: "天体の周期", node: cycNode() }] : []),
     ...(usesPart("transit_search") ? [{ label: "期間の探索", node: searchNode() }] : []),
+    ...(usesPart("primary_direction") ? [{ label: "一次進行", node: pdNode() }] : []),
     ...(usesPart("quadrant") ? [{ label: "象限", node: quadTbl }] : []),
     ...(usesPart("lunation") ? [{ label: "ルネーション", node: lunTbl }] : []),
     { label: `アスペクト(${chart.aspects.length})`, node: aspectNode },
