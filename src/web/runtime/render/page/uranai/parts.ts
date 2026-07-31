@@ -50,11 +50,15 @@ export type Person = { id: string; label: string | null };
 export type Prefill = { label?: string | null; date?: string; time?: string; place?: string; lat?: number; lng?: number; tz?: string };
 export type Settings = { zodiac: string; house_system_id: string; ephemeris: string; ayanamsha: string };
 // ユーザーごとの方式デフォルト（設定画面）の選択肢。[key, ラベル, 選択肢[[値,表示]]]。
-export const SETTING_FIELDS: Array<{ key: keyof Settings; label: string; options: Array<[string, string]> }> = [
-  { key: "house_system_id", label: "ハウス", options: [["whole_sign", "ホールサイン"], ["placidus", "プラシダス"], ["campanus", "カンパヌス"]] },
-  { key: "zodiac", label: "黄道帯", options: [["tropical", "トロピカル（回帰）"], ["sidereal", "サイデリアル（恒星）"]] },
-  { key: "ephemeris", label: "天体暦", options: [["vsop87", "VSOP87（高精度）"], ["standard", "簡易（Standard）"]] },
-  { key: "ayanamsha", label: "アヤナムシャ", options: [["lahiri", "ラヒリ"], ["fagan_bradley", "フェイガン/ブラッドレー"]] },
+/**
+ * byRuleset = 流派が決める項目。教義そのものなので個人の好みで上書きさせない。
+ * それ以外 = 自分で決める項目。計算の精度など、どの流派でも同じ意味を持つもの。
+ */
+export const SETTING_FIELDS: Array<{ key: keyof Settings; label: string; byRuleset: boolean; options: Array<[string, string]> }> = [
+  { key: "house_system_id", label: "ハウス", byRuleset: true, options: [["whole_sign", "ホールサイン"], ["placidus", "プラシダス"], ["campanus", "カンパヌス"], ["regiomontanus", "レギオモンタヌス"]] },
+  { key: "zodiac", label: "黄道帯", byRuleset: true, options: [["tropical", "トロピカル（回帰）"], ["sidereal", "サイデリアル（恒星）"]] },
+  { key: "ayanamsha", label: "アヤナムシャ", byRuleset: true, options: [["lahiri", "ラヒリ"], ["fagan_bradley", "フェイガン/ブラッドレー"]] },
+  { key: "ephemeris", label: "天体暦", byRuleset: false, options: [["vsop87", "VSOP87（高精度）"], ["standard", "簡易（Standard）"]] },
 ];
 export type Placement = { planet: string; sign: string; degree: number; retrograde?: boolean };
 export type Aspect = { a: string; b: string; type: string; orb: number; phase?: "waxing" | "waning" };
@@ -63,17 +67,27 @@ export type Cusp = { system: string; index: number; longitude: number };
 export type Derived = {
   kind: "progressed" | "transit";
   at: string; target: string; house_system?: string;
+  sun_sabian?: { index: number; sign: string; degree: number; text: string | null } | null;
   placements: Array<{ planet: string; sign: string; degree: number; retrograde: boolean; house: string }>;
   aspects: Array<{ a: string; b: string; type: string; orb: number; phase: "waxing" | "waning" }>;
   internal: Array<{ a: string; b: string; type: string; orb: number; phase: "waxing" | "waning" }>;
   lunation: Lunation | null;
 };
-export type Lunation = { elongation: number; phase: "waxing" | "waning"; quarter: 1 | 2 | 3 | 4 };
+/**
+ * ルネーション。node はルディアが明示している4つの節目。
+ * octant は45度ずつの8分割で、これは占星術の慣用。原典に度数の区切りは書かれていない。
+ */
+export type Lunation = { elongation: number; phase: "waxing" | "waning"; quarter: 1 | 2 | 3 | 4;
+  node?: "new" | "first_quarter" | "full" | "last_quarter" | null;
+  octant?: number; octant_is_convention?: boolean };
 // 時間軸のサイクル。リターン図・進行のルネーションの節目・食。
 export type Cycles = {
   target: string;
   returns: { sun: string | null; moon: string | null };
   progressed_lunation: Array<{ kind: "new" | "full"; at: string }>;
+  // いまどの局面か。節目の一覧だけでは「基本スケジュール」のどこに居るかに答えられない。
+  progressed_lunation_now?: { last: { kind: string; at: string } | null; next: { kind: string; at: string } | null;
+    years_since_last: number | null; years_to_next: number | null; elapsed_ratio: number | null };
   eclipses: Array<{ kind: "solar" | "lunar"; at: string; moonLatitude: number; house: string }>;
 };
 // アスペクトパターン（バックエンド detectPatterns の出力）。bodies は構成天体。
@@ -96,6 +110,7 @@ export const PATTERN_ORDER = ["grand_sextile", "grand_cross", "kite", "mystic_re
 export type Chart = {
   ascendant: number; midheaven: number;
   house_system?: string; cusps?: Cusp[];
+  ruleset?: string;
   wheel_layout?: "sign_fixed" | "mandala"; // 流派が指定する描画規約（バックエンドが返す）
   interceptions?: Array<{ house: string; sign: string }>; // どのカスプにも現れないサイン
   tally?: boolean; // エレメント/クオリティの数え上げを使う流派か
@@ -119,6 +134,15 @@ export type Chart = {
     contra_antiscion: { longitude: number; sign: string; degree: number };
     draconic: { sign: string; degree: number } | null;
     harmonic: { n: number; sign: string; degree: number } }>;
+  terms?: Array<{ planet: string; ruler: string; from: number; to: number }>;
+  almutens?: Array<{ planet: string; winner: string | null;
+                     scores: Array<{ planet: string; score: number; from: string[] }> }>;
+  arabic_parts?: Array<{ id: string; name: string; longitude: number; sign: string; degree: number }>;
+  sabian?: Array<{ planet: string; index: number; sign: string; degree: number; text: string | null }>;
+  midpoints?: Array<{ a: string; b: string; longitude: number; sign: string; degree: number;
+                      occupants: Array<{ planet: string; orb: number }> }>;
+  nakshatra?: Array<{ planet: string; sidereal: boolean; index: number; name: string; lord: string;
+                      pada: number; degree_in_nakshatra: number }>;
   placements: Placement[]; aspects: Aspect[];
   patterns?: Pattern[];
   dignities: Array<{ planet: string; dignity: string }>;
@@ -202,6 +226,10 @@ export async function loadMeanings(): Promise<void> {
       names?: Array<{ concept_kind: string; concept_id: string; value: string }>;
       concept_notes?: Array<{ concept_kind: string; concept_id: string; value: string }>;
       parts?: string[]; all_parts?: string[]; implemented_parts?: string[];
+      conventions?: Array<{ id: string; label: string; note: string }>;
+      sabian_count?: number;
+      timing_shapes?: string[]; timing_primary?: string; all_timing_shapes?: string[];
+      editable?: boolean; ruleset_note?: string | null;
       body_role?: Array<{ planet_id: string; body_role_id: string }>;
     }>(`/api/v1/uranai/astrology/reference`);
     const m: MeaningMap = {};
@@ -214,12 +242,47 @@ export async function loadMeanings(): Promise<void> {
     for (const x of r.concept_notes ?? []) (ow[x.concept_kind] ??= {})[x.concept_id] = x.value;
     ownCache = ow;
     partCache = { parts: (r.parts ?? []).slice(), all: (r.all_parts ?? []).slice(), impl: (r.implemented_parts ?? []).slice() };
+    conventionCache = (r.conventions ?? []).slice();
+    sabianCount = r.sabian_count ?? 0;
+    timingShapes = (r.timing_shapes ?? []).slice();
+    timingPrimary = r.timing_primary ?? "contact";
+    allTimingIds = (r.all_timing_shapes ?? []).slice();
+    rulesetEditable = r.editable !== false;
+    rulesetNote = r.ruleset_note ?? "";
     const roles: Record<string, string> = {};
     for (const x of r.body_role ?? []) roles[x.planet_id] = m.body_role?.[x.body_role_id] ? x.body_role_id : x.body_role_id;
     roleCache = roles;
-  } catch { meaningCache = {}; roleCache = {}; nameCache = {}; ownCache = {}; partCache = { parts: [], all: [], impl: [] }; }
+  } catch { meaningCache = {}; roleCache = {}; nameCache = {}; ownCache = {}; partCache = { parts: [], all: [], impl: [] }; conventionCache = []; sabianCount = 0; timingShapes = []; timingPrimary = "contact"; allTimingIds = []; rulesetEditable = true; rulesetNote = ""; }
 }
 export const meaningOf = (kind: string, id: string): string => meaningCache?.[kind]?.[id] ?? "";
+
+// 原典に度数の記述が無く、こちらで決めている取り決め。
+// 「ルディアの定義」と取り違えられないよう、使っている画面に但し書きとして出す。
+let conventionCache: Array<{ id: string; label: string; note: string }> = [];
+export const conventionOf = (id: string): string => conventionCache.find((c) => c.id === id)?.note ?? "";
+
+// サビアンの文言の登録数。文言は著作物なのでこちらでは同梱できず、0件だと部品として成立しない。
+let sabianCount = 0;
+export const sabianReady = (): boolean => sabianCount > 0;
+export const sabianCountOf = (): number => sabianCount;
+
+// 時期の読み方の形。流派によって主軸が違う。画面は主軸のタブを先に出す。
+//  phase = 周期の局面 / lord = 時期支配星 / contact = 接触の暦
+let timingShapes: string[] = [];
+let timingPrimary = "contact";
+export const usesTiming = (id: string): boolean => timingShapes.includes(id);
+export const timingPrimaryOf = (): string => timingPrimary;
+
+// 組込みの流派は読み取り専用。変えたい場合は複製して自分の流派として持つ。
+let rulesetEditable = true;
+export const rulesetIsEditable = (): boolean => rulesetEditable;
+
+// 流派の但し書き。実装が体系を満たしていない点をここで伝える。
+let rulesetNote = "";
+export const rulesetNoteOf = (): string => rulesetNote;
+export const allTimingShapes = (): string[] => allTimingIds.slice();
+export const setTiming = (shapes: string[], primary: string): void => { timingShapes = shapes.slice(); timingPrimary = primary; };
+let allTimingIds: string[] = [];
 
 // 自分の意味。原典由来とは別に持ち、画面では自分の意味を先に出す。
 let ownCache: MeaningMap | null = null;
@@ -256,3 +319,118 @@ export async function loadSettings(): Promise<Settings> {
     return { zodiac: s.zodiac ?? d.zodiac, house_system_id: s.house_system_id ?? d.house_system_id, ephemeris: s.ephemeris ?? d.ephemeris, ayanamsha: s.ayanamsha ?? d.ayanamsha };
   } catch { return d; }
 }
+
+/** 年運のプロフェクション。1年に1室ずつ進める。 */
+export type Profection = { target: string; age: number; house: number; sign: string; lord: string;
+  month_house: number; month_sign: string; month_lord: string };
+
+/** ソーラーアーク方向法。進行の太陽が進んだ角度を全天体に加える。 */
+export type SolarArc = { target: string; arc: number;
+  positions: Array<{ planet: string; longitude: number; sign: string; degree: number }>;
+  contacts: Array<{ directed: string; natal: string; type: string; orb: number }> };
+
+/** 恒星と天体の合。伝統的に恒星は合だけを見る。 */
+export type FixedStars = { conjunctions: Array<{ planet: string; star: string; star_name: string;
+  magnitude: number; orb: number; star_longitude: number }>;
+  stars: Array<{ id: string; name: string; magnitude: number; longitude: number; latitude: number;
+                 sign: string; degree: number }> };
+
+/** 赤緯が黄道傾斜角を超える天体。 */
+export type OutOfBounds = { obliquity: number;
+  bodies: Array<{ planet: string; declination: number; out: boolean; excess: number }> };
+
+/** ファルダール。主星の期間と副主星。 */
+export type Firdaria = { day: boolean;
+  periods: Array<{ lord: string; from: string; to: string; sub: Array<{ lord: string; from: string; to: string }> }>;
+  current: { lord: string | null; sub_lord: string | null; from: string | null; to: string | null } };
+
+/** シナストリー。2人のチャート間のアスペクト。 */
+export type Synastry = { with: string; aspects: Array<{ a: string; b: string; type: string; orb: number }> };
+
+/** コンポジット（中点合成図）。 */
+export type Composite = { with: string;
+  placements: Array<{ planet: string; longitude: number; sign: string; degree: number }>;
+  aspects: Array<{ a: string; b: string; type: string; orb: number }> };
+
+/** 出生時刻の修正。候補ごとのアングルと、出来事に対する接触の近さ。 */
+export type Rectification = { recorded: string; span_minutes: number; step_minutes: number;
+  candidates: Array<{ offset_minutes: number; ascendant: number; asc_sign: string;
+    midheaven: number; mc_sign: string; score: number;
+    hits: Array<{ date: string; directed: string; angle: string; type: string; orb: number }> }> };
+
+/** 天体の周期の節目。 */
+export type CyclePosition = { index: number; total: number | null; from: string | null; to: string | null;
+  label: string; elapsed_years: number; remaining_years: number | null; elapsed_ratio: number | null };
+export type PlanetCycle = { birth: string;
+  saturn_stages: CycleMilestone[]; saturn_quadrants: CycleMilestone[];
+  uranus_septenaries: CycleMilestone[]; jupiter_returns: CycleMilestone[];
+  no_return: Array<{ planet: string; period_years: number; reason: string }>;
+  current: { at: string; saturn_stage: CyclePosition | null; saturn_quadrant: CyclePosition | null;
+             uranus_septenary: CyclePosition | null; jupiter_period: CyclePosition | null } | null };
+export type CycleMilestone = { at: string; age: number; label: string; kind: string };
+
+/** 期間の探索。運行天体が出生の点に正確に当たる日。 */
+export type TransitSearch = { from: string; to: string;
+  hits: Array<{ at: string; transit: string; natal: string; type: string; exact_longitude: number }>;
+  windows: Array<{ transit: string; natal: string; type: string; enter: string; exact: string[]; leave: string; clipped?: boolean }> };
+
+/** 時期支配星。主星の出生図での状態が読みの本体。 */
+export type LordCondition = { sign: string; degree: number; retrograde: boolean; house: string | null;
+  dignity: string | null; sect: string | null;
+  aspects: Array<{ with: string; type: string; orb: number; phase: string }> };
+export type TimeLords = { at: string; day: boolean; span_days: number;
+  stack: Array<{ level: string; label: string; lord: string | null; from: string | null; to: string | null;
+                 condition: LordCondition | null }>;
+  transits_on_lords: Array<{ transit: string; natal: string; type: string; enter: string; exact: string[]; leave: string; clipped?: boolean }> };
+
+/** 一次進行。弧を年に換算する鍵は流儀が分かれる。 */
+export type PrimaryDirection = { key: string; key_label: string; years_per_degree: number;
+  keys: Array<{ id: string; label: string }>;
+  directions: Array<{ planet: string; angle: string; arc: number; age: number }> };
+
+/** ヴィムショッタリ・ダシャー。120年を一巡する入れ子の期間法。 */
+export type Dasha = { at: string; start_lord: string; balance_years: number;
+  moon_nakshatra: { index: number; name: string; lord: string; pada: number };
+  current: Array<{ level: number; lord: string; from: string; to: string }>;
+  periods: Array<{ lord: string; from: string; to: string; level: number;
+                   sub: Array<{ lord: string; from: string; to: string; level: number }> }> };
+
+/** 分割図（ヴァルガ）。 */
+export type VargaCharts = { ayanamsha: string;
+  all_vargas: Array<{ id: string; name: string; divisions: number; meaning: string }>;
+  charts: Array<{ varga: string; lagna: number | null;
+                  placements: Array<{ planet: string; sign: number; house: number | null }> }> };
+
+/** ヨーガ。条件が一義に定まるものだけを判定する。 */
+export type Yogas = { lagna: number;
+  yogas: Array<{ id: string; name: string; formed: boolean; detail: string; condition: string }> };
+
+/** ジャイミニ式。カーラカ・アルダ・サイン同士のアスペクト。 */
+export type Jaimini = { lagna: number;
+  karakas: Array<{ role: string; role_name: string; planet: string; degree_in_sign: number }>;
+  arudha: { lagna: number; lord: string; lord_sign: number | null; arudha: number | null; adjusted: boolean };
+  drishti: Array<{ sign: number; aspects: number[] }> };
+
+/** KP式のサブロード。 */
+export type KpSubs = { levels: number;
+  bodies: Array<{ planet: string; nakshatra: { index: number; name: string; lord: string; pada: number };
+                  subs: Array<{ level: number; lord: string }> }>;
+  cusps: Array<{ house: string; longitude: number; nakshatra: { index: number; name: string; lord: string };
+                 subs: Array<{ level: number; lord: string }> }> };
+
+/** KP のルーリング・プラネット。 */
+export type RulingPlanets = { day_lord: string; planets: string[];
+  ascendant: { sign_lord: string; star_lord: string; sub_lord: string };
+  moon: { sign_lord: string; star_lord: string; sub_lord: string } };
+
+/** チャラ・ダシャー。サインを単位とする期間法。 */
+export type CharaDasha = { direction: "direct" | "reverse"; lagna: number;
+  periods: Array<{ sign: number; lord: string; years: number; from: string; to: string }> };
+
+/** タージカのアスペクトとムッダ・ダシャー。 */
+export type Tajika = { at: string; solar_return: string | null;
+  aspects: Array<{ a: string; b: string; type: string; orb: number; kind: "ithasala" | "isarapha" }>;
+  mudda: Array<{ lord: string; from: string; to: string }> };
+
+/** タージカ式のムンタ。 */
+export type Muntha = { at: string; lagna: number; age: number; sign: number; lord: string };
