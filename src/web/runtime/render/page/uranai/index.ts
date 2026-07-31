@@ -91,7 +91,7 @@ function settingsView(settings: Settings, onSaved: () => void | Promise<void>): 
   delBtn.style.display = "none";
   delBtn.addEventListener("click", () => {
     const id = rsSel.value, nm = rsSel.options[rsSel.selectedIndex]?.textContent ?? id;
-    if (!confirm(`流派「${nm}」を削除しますか？（この流派で計算した結果も消えます。元に戻せません）`)) return;
+    if (!confirm(`流派「${nm}」を削除しますか？\n\nこの流派で計算した結果と、この流派で書いた解釈も一緒に消えます。元に戻せません。`)) return;
     status.textContent = "削除中…";
     void api(`/api/v1/uranai/astrology/ruleset/${encodeURIComponent(id)}`, { method: "DELETE" })
       .then(async () => { clearMeanings(); status.textContent = ""; await onSaved(); })
