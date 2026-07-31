@@ -355,7 +355,7 @@ export type CycleMilestone = { at: string; age: number; label: string; kind: str
 /** 期間の探索。運行天体が出生の点に正確に当たる日。 */
 export type TransitSearch = { from: string; to: string;
   hits: Array<{ at: string; transit: string; natal: string; type: string; exact_longitude: number }>;
-  windows: Array<{ transit: string; natal: string; type: string; enter: string; exact: string[]; leave: string }> };
+  windows: Array<{ transit: string; natal: string; type: string; enter: string; exact: string[]; leave: string; clipped?: boolean }> };
 
 /** 時期支配星。主星の出生図での状態が読みの本体。 */
 export type LordCondition = { sign: string; degree: number; retrograde: boolean; house: string | null;
@@ -364,7 +364,7 @@ export type LordCondition = { sign: string; degree: number; retrograde: boolean;
 export type TimeLords = { at: string; day: boolean; span_days: number;
   stack: Array<{ level: string; label: string; lord: string | null; from: string | null; to: string | null;
                  condition: LordCondition | null }>;
-  transits_on_lords: Array<{ transit: string; natal: string; type: string; enter: string; exact: string[]; leave: string }> };
+  transits_on_lords: Array<{ transit: string; natal: string; type: string; enter: string; exact: string[]; leave: string; clipped?: boolean }> };
 
 /** 一次進行。弧を年に換算する鍵は流儀が分かれる。 */
 export type PrimaryDirection = { key: string; key_label: string; years_per_degree: number;

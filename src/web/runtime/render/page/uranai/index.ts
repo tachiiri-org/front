@@ -843,7 +843,8 @@ function chartView(chart: Chart, birth: Birth | null | undefined, personId: stri
         out.append(el("div", { className: "u-tbl-title", textContent: `オーブに入っている期間（${d.windows.length}）` }));
         out.append(d.windows.length
           ? mkTable(["期間", "運行", "出生", "種別", "正確になる日"], d.windows.map((w) =>
-              [`${w.enter} 〜 ${w.leave}`, bodyLabel(w.transit), bodyLabel(w.natal),
+              [`${w.enter} 〜 ${w.leave}${w.clipped ? "（端は4年先まで追っても抜けず）" : ""}`,
+               bodyLabel(w.transit), bodyLabel(w.natal),
                ASPECT_INFO[w.type]?.label ?? w.type, w.exact.join(" / ")]), [4])
           : el("div", { className: "u-pat-empty", textContent: "この期間に該当はありません" }));
         if (d.hits.length) {
