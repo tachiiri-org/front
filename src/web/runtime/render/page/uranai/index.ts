@@ -1,6 +1,6 @@
 // ウラナイ画面のルート描画とフォーム類。定数・型・ヘルパは ./parts、ホイール描画は ./wheel に分割。
 import {
-  SIGN_ORDER, SIGN_GLYPH, SIGN_NAME, SIGN_ELEMENT, SIGN_QUALITY, ELEMENT_CHAR, QUALITY_CHAR, PLANET_GLYPH, PLANET_ORDER, PLANET_NAME_LINES, ASPECT_INFO, ASPECT_ORDER, PATTERN_INFO, PATTERN_ORDER, SHAPE_INFO, SHAPE_ORDER, Person, Prefill, Settings, SETTING_FIELDS, Chart, Derived, Cycles, Profection, SolarArc, FixedStars, OutOfBounds, Firdaria, Synastry, Composite, Rectification, PlanetCycle, TransitSearch, optionsOf, nameOf, ownOf, setOwn, usesPart, partsOn, allParts, setParts, isImplemented, loadMeanings, meaningOf, roleOf, clearMeanings, UranaiView, api, lonOf, fmtDeg, Birth, HOUSE_SYSTEM_JA, IANA_ZONES, FALLBACK_ZONES, CC_ZONE, offsetFromZone, el, selectEl, loadSettings,
+  SIGN_ORDER, SIGN_GLYPH, SIGN_NAME, SIGN_ELEMENT, SIGN_QUALITY, ELEMENT_CHAR, QUALITY_CHAR, PLANET_GLYPH, PLANET_ORDER, PLANET_NAME_LINES, ASPECT_INFO, ASPECT_ORDER, PATTERN_INFO, PATTERN_ORDER, SHAPE_INFO, SHAPE_ORDER, Person, Prefill, Settings, SETTING_FIELDS, Chart, Derived, Cycles, Profection, SolarArc, FixedStars, OutOfBounds, Firdaria, Synastry, Composite, Rectification, PlanetCycle, TransitSearch, optionsOf, nameOf, ownOf, setOwn, usesPart, partsOn, allParts, setParts, isImplemented, loadMeanings, meaningOf, conventionOf, roleOf, clearMeanings, UranaiView, api, lonOf, fmtDeg, Birth, HOUSE_SYSTEM_JA, IANA_ZONES, FALLBACK_ZONES, CC_ZONE, offsetFromZone, el, selectEl, loadSettings,
 } from "./parts";
 import { drawWheelPro } from "./wheel";
 
@@ -805,7 +805,7 @@ function chartView(chart: Chart, birth: Birth | null | undefined, personId: stri
        ["位相", lun.phase === "waxing" ? "上弦（合から衝へ。衝動を受け取る構造や器官を構築する期間）" : "下弦（衝から合へ。経験から意味を抽出し同化させる期間）"],
        ["節目", lun.node ? LUN_NODE[lun.node] ?? lun.node : "節目にはあたらない（前後6度以内が節目）"],
        ["クォーター", LUN_Q[lun.quarter] ?? String(lun.quarter)],
-       ["8分割（慣用）", lun.octant ? `第${lun.octant}区分 ／ 原典には45度ごとの区切りは書かれていない。ルディアの定義ではなく占星術の慣用` : "—"]]
+       ["8分割（慣用）", lun.octant ? `第${lun.octant}区分 ／ ${conventionOf("lunation_octant")}` : "—"]]
     : [["算出できません", "—"]], [1]);
   // インターセプト（どのカスプにも現れないサイン）。ホイールには描かず表で示す。
   const icptTbl = mkTable(["サイン", "収まるハウス"], (chart.interceptions ?? []).length
@@ -814,6 +814,8 @@ function chartView(chart: Chart, birth: Birth | null | undefined, personId: stri
 
   // アスペクト（種類ごとにグループ化）
   const aspectNode = el("div", {});
+  // オーブは原典に記述が無い。こちらの取り決めであることを表の先頭に出す。
+  if (conventionOf("orb")) aspectNode.append(el("div", { className: "u-pat-comp", textContent: `オーブについて: ${conventionOf("orb")}` }));
   // 位相の意味は上弦/下弦で共通なので、表ごとに繰り返さず先頭に凡例として置く。
   if (meaningOf("phase", "waxing")) {
     aspectNode.append(el("div", { className: "u-tbl-title", textContent: "位相" }));
@@ -883,6 +885,7 @@ function chartView(chart: Chart, birth: Birth | null | undefined, personId: stri
     // 7パターンを常に全部並べ、該当するものだけ印を付ける。該当しないものも「—」で残すことで、
     // 何が判定されなかったのかが読み取れるようにする。
     shapeNode.append(el("div", { className: "u-tbl-title", textContent: "惑星配置型（判定対象は10天体。キロン・小惑星・ノード・感受点は含めない）" }));
+    if (conventionOf("shape_threshold")) shapeNode.append(el("div", { className: "u-pat-comp", textContent: `判定条件について: ${conventionOf("shape_threshold")}` }));
     // 形ごとの固有要素（バケットの取っ手、ロコモーティブの先頭）は同じ行に入れる。
     // その形にしか無い概念なので、別表に切り出すと「なし」ばかりの表になる。
     const extra = (k: string): string => {
@@ -935,6 +938,15 @@ function chartView(chart: Chart, birth: Birth | null | undefined, personId: stri
             ? "進行のルネーション（約30年で一巡。パーソナリティ発達の基本スケジュール）" : "ルネーション" }));
           out.append(mkTable(["離角", "位相", "クォーター"], [[`${d.lunation.elongation.toFixed(1)}°`,
             d.lunation.phase === "waxing" ? "上弦" : "下弦", LUN_Q[d.lunation.quarter] ?? ""]], [2]));
+        }
+        // 進行の太陽のサビアン。ルディアはこの度数のシンボルを重要とする。
+        if (kind === "progressed" && d.sun_sabian) {
+          out.append(el("div", { className: "u-tbl-title", textContent: "進行の太陽のサビアン" }));
+          out.append(mkTable(["度数", "通し番号", "文言"], [[
+            `${SIGN_NAME[d.sun_sabian.sign] ?? d.sun_sabian.sign} ${d.sun_sabian.degree}度`,
+            String(d.sun_sabian.index),
+            d.sun_sabian.text ?? "（未登録。サビアンのタブから手元の版を取り込む）",
+          ]], [2]));
         }
         out.append(el("div", { className: "u-tbl-title", textContent: "天体" }));
         out.append(mkTable(["天体", "サイン", "度数", "逆行", "室"], d.placements.map((p) =>

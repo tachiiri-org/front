@@ -63,6 +63,7 @@ export type Cusp = { system: string; index: number; longitude: number };
 export type Derived = {
   kind: "progressed" | "transit";
   at: string; target: string; house_system?: string;
+  sun_sabian?: { index: number; sign: string; degree: number; text: string | null } | null;
   placements: Array<{ planet: string; sign: string; degree: number; retrograde: boolean; house: string }>;
   aspects: Array<{ a: string; b: string; type: string; orb: number; phase: "waxing" | "waning" }>;
   internal: Array<{ a: string; b: string; type: string; orb: number; phase: "waxing" | "waning" }>;
@@ -216,6 +217,7 @@ export async function loadMeanings(): Promise<void> {
       names?: Array<{ concept_kind: string; concept_id: string; value: string }>;
       concept_notes?: Array<{ concept_kind: string; concept_id: string; value: string }>;
       parts?: string[]; all_parts?: string[]; implemented_parts?: string[];
+      conventions?: Array<{ id: string; label: string; note: string }>;
       body_role?: Array<{ planet_id: string; body_role_id: string }>;
     }>(`/api/v1/uranai/astrology/reference`);
     const m: MeaningMap = {};
@@ -228,12 +230,18 @@ export async function loadMeanings(): Promise<void> {
     for (const x of r.concept_notes ?? []) (ow[x.concept_kind] ??= {})[x.concept_id] = x.value;
     ownCache = ow;
     partCache = { parts: (r.parts ?? []).slice(), all: (r.all_parts ?? []).slice(), impl: (r.implemented_parts ?? []).slice() };
+    conventionCache = (r.conventions ?? []).slice();
     const roles: Record<string, string> = {};
     for (const x of r.body_role ?? []) roles[x.planet_id] = m.body_role?.[x.body_role_id] ? x.body_role_id : x.body_role_id;
     roleCache = roles;
-  } catch { meaningCache = {}; roleCache = {}; nameCache = {}; ownCache = {}; partCache = { parts: [], all: [], impl: [] }; }
+  } catch { meaningCache = {}; roleCache = {}; nameCache = {}; ownCache = {}; partCache = { parts: [], all: [], impl: [] }; conventionCache = []; }
 }
 export const meaningOf = (kind: string, id: string): string => meaningCache?.[kind]?.[id] ?? "";
+
+// 原典に度数の記述が無く、こちらで決めている取り決め。
+// 「ルディアの定義」と取り違えられないよう、使っている画面に但し書きとして出す。
+let conventionCache: Array<{ id: string; label: string; note: string }> = [];
+export const conventionOf = (id: string): string => conventionCache.find((c) => c.id === id)?.note ?? "";
 
 // 自分の意味。原典由来とは別に持ち、画面では自分の意味を先に出す。
 let ownCache: MeaningMap | null = null;
