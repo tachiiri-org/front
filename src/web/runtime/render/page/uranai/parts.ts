@@ -96,6 +96,7 @@ export const PATTERN_ORDER = ["grand_sextile", "grand_cross", "kite", "mystic_re
 export type Chart = {
   ascendant: number; midheaven: number;
   house_system?: string; cusps?: Cusp[];
+  ruleset?: string;
   wheel_layout?: "sign_fixed" | "mandala"; // 流派が指定する描画規約（バックエンドが返す）
   interceptions?: Array<{ house: string; sign: string }>; // どのカスプにも現れないサイン
   tally?: boolean; // エレメント/クオリティの数え上げを使う流派か
@@ -123,7 +124,9 @@ export type Chart = {
   almutens?: Array<{ planet: string; winner: string | null;
                      scores: Array<{ planet: string; score: number; from: string[] }> }>;
   arabic_parts?: Array<{ id: string; name: string; longitude: number; sign: string; degree: number }>;
-  sabian?: Array<{ planet: string; index: number; sign: string; degree: number }>;
+  sabian?: Array<{ planet: string; index: number; sign: string; degree: number; text: string | null }>;
+  midpoints?: Array<{ a: string; b: string; longitude: number; sign: string; degree: number;
+                      occupants: Array<{ planet: string; orb: number }> }>;
   placements: Placement[]; aspects: Aspect[];
   patterns?: Pattern[];
   dignities: Array<{ planet: string; dignity: string }>;
@@ -270,3 +273,32 @@ export type Profection = { target: string; age: number; house: number; sign: str
 export type SolarArc = { target: string; arc: number;
   positions: Array<{ planet: string; longitude: number; sign: string; degree: number }>;
   contacts: Array<{ directed: string; natal: string; type: string; orb: number }> };
+
+/** 恒星と天体の合。伝統的に恒星は合だけを見る。 */
+export type FixedStars = { conjunctions: Array<{ planet: string; star: string; star_name: string;
+  magnitude: number; orb: number; star_longitude: number }>;
+  stars: Array<{ id: string; name: string; magnitude: number; longitude: number; latitude: number;
+                 sign: string; degree: number }> };
+
+/** 赤緯が黄道傾斜角を超える天体。 */
+export type OutOfBounds = { obliquity: number;
+  bodies: Array<{ planet: string; declination: number; out: boolean; excess: number }> };
+
+/** ファルダール。主星の期間と副主星。 */
+export type Firdaria = { day: boolean;
+  periods: Array<{ lord: string; from: string; to: string; sub: Array<{ lord: string; from: string; to: string }> }>;
+  current: { lord: string | null; sub_lord: string | null; from: string | null; to: string | null } };
+
+/** シナストリー。2人のチャート間のアスペクト。 */
+export type Synastry = { with: string; aspects: Array<{ a: string; b: string; type: string; orb: number }> };
+
+/** コンポジット（中点合成図）。 */
+export type Composite = { with: string;
+  placements: Array<{ planet: string; longitude: number; sign: string; degree: number }>;
+  aspects: Array<{ a: string; b: string; type: string; orb: number }> };
+
+/** 出生時刻の修正。候補ごとのアングルと、出来事に対する接触の近さ。 */
+export type Rectification = { recorded: string; span_minutes: number; step_minutes: number;
+  candidates: Array<{ offset_minutes: number; ascendant: number; asc_sign: string;
+    midheaven: number; mc_sign: string; score: number;
+    hits: Array<{ date: string; directed: string; angle: string; type: string; orb: number }> }> };

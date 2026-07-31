@@ -1,6 +1,6 @@
 // ウラナイ画面のルート描画とフォーム類。定数・型・ヘルパは ./parts、ホイール描画は ./wheel に分割。
 import {
-  SIGN_ORDER, SIGN_GLYPH, SIGN_NAME, SIGN_ELEMENT, SIGN_QUALITY, ELEMENT_CHAR, QUALITY_CHAR, PLANET_GLYPH, PLANET_ORDER, PLANET_NAME_LINES, ASPECT_INFO, ASPECT_ORDER, PATTERN_INFO, PATTERN_ORDER, SHAPE_INFO, SHAPE_ORDER, Person, Prefill, Settings, SETTING_FIELDS, Chart, Derived, Cycles, Profection, SolarArc, optionsOf, nameOf, ownOf, setOwn, usesPart, partsOn, allParts, setParts, isImplemented, loadMeanings, meaningOf, roleOf, clearMeanings, UranaiView, api, lonOf, fmtDeg, Birth, HOUSE_SYSTEM_JA, IANA_ZONES, FALLBACK_ZONES, CC_ZONE, offsetFromZone, el, selectEl, loadSettings,
+  SIGN_ORDER, SIGN_GLYPH, SIGN_NAME, SIGN_ELEMENT, SIGN_QUALITY, ELEMENT_CHAR, QUALITY_CHAR, PLANET_GLYPH, PLANET_ORDER, PLANET_NAME_LINES, ASPECT_INFO, ASPECT_ORDER, PATTERN_INFO, PATTERN_ORDER, SHAPE_INFO, SHAPE_ORDER, Person, Prefill, Settings, SETTING_FIELDS, Chart, Derived, Cycles, Profection, SolarArc, FixedStars, OutOfBounds, Firdaria, Synastry, Composite, Rectification, optionsOf, nameOf, ownOf, setOwn, usesPart, partsOn, allParts, setParts, isImplemented, loadMeanings, meaningOf, roleOf, clearMeanings, UranaiView, api, lonOf, fmtDeg, Birth, HOUSE_SYSTEM_JA, IANA_ZONES, FALLBACK_ZONES, CC_ZONE, offsetFromZone, el, selectEl, loadSettings,
 } from "./parts";
 import { drawWheelPro } from "./wheel";
 
@@ -447,11 +447,49 @@ function chartView(chart: Chart, birth: Birth | null | undefined, personId: stri
     ? (chart.arabic_parts ?? []).map((l) => [l.name, sgLbl(l.sign), fmtDeg(l.degree)])
     : [["—", "—", "—"]]);
 
-  // サビアン: 度数だけを出す。象徴の文言は原典なので、解釈の欄に人が置く。
-  const sabTbl = mkTable(["天体", "サビアン度数", "通し番号"], (chart.sabian ?? []).length
-    ? (chart.sabian ?? []).map((x) => [{ t: bodyLabel(x.planet), tip: `planet:${x.planet}` },
-        `${SIGN_NAME[x.sign] ?? x.sign} ${x.degree}度`, String(x.index)])
-    : [["—", "—", "—"]]);
+  // サビアン: 度数と、流派ごとに入れた文言。文言は著作物なので同梱しない。
+  // 手元の版から貼り込んでもらう。ジョーンズの記録とルディアの言い換えは別物なので、
+  // 流派ごとに別々に持てるようにしてある。
+  const sabNode = (): HTMLElement => {
+    const box = el("div", {});
+    const list = chart.sabian ?? [];
+    const filled = list.filter((x) => x.text).length;
+    box.append(el("div", { className: "u-pat-comp", textContent:
+      `文言はこのアプリには入っていない。手元の版から取り込むと、この流派（${chart.ruleset ?? "default"}）のサビアンとして保存される。現在 ${filled}/${list.length} 件に文言がある。` }));
+    box.append(mkTable(["天体", "サビアン度数", "通し番号", "文言"], list.length
+      ? list.map((x) => [{ t: bodyLabel(x.planet), tip: `planet:${x.planet}` },
+          `${SIGN_NAME[x.sign] ?? x.sign} ${x.degree}度`, String(x.index), x.text ?? "（未登録）"])
+      : [["—", "—", "—", "—"]], [3]));
+
+    // 取り込み。「通し番号<タブまたはコロン>文言」を1行に1つ。360行まとめて貼れる。
+    const det = el("details", {});
+    det.append(el("summary", { textContent: "文言を取り込む" }));
+    const ta = el("textarea", { className: "u-fi", rows: 6,
+      placeholder: "1\t牡羊座の1度の文言\n2\t牡羊座の2度の文言\n…（通し番号1〜360。区切りはタブ・コロン・全角コロンのいずれか）" }) as HTMLTextAreaElement;
+    const status = el("div", { className: "u-status" });
+    const btn = el("button", { className: "u-btn u-btn-sm", textContent: "取り込む" });
+    btn.addEventListener("click", async () => {
+      const symbols: Array<{ index: number; text: string }> = [];
+      let skipped = 0;
+      for (const line of ta.value.split("\n")) {
+        const m = line.match(/^\s*(\d{1,3})\s*[\t:：.。、]\s*(.+?)\s*$/);
+        if (!m) { if (line.trim()) skipped++; continue; }
+        const i = Number(m[1]);
+        if (i < 1 || i > 360) { skipped++; continue; }
+        symbols.push({ index: i, text: m[2] });
+      }
+      if (!symbols.length) { status.textContent = "取り込める行がありません（「番号<タブ>文言」の形にしてください）"; return; }
+      status.textContent = "保存中…";
+      try {
+        const r = await api<{ saved: number; total: number }>(`/api/v1/uranai/astrology/sabian?ruleset=${encodeURIComponent(chart.ruleset ?? "default")}`,
+          { method: "PUT", body: JSON.stringify({ symbols }) });
+        status.textContent = `${r.saved}件を保存しました（この流派の合計 ${r.total}/360）。${skipped ? `${skipped}行は形式が合わず読み飛ばしました。` : ""}表示に反映するには再読み込みしてください。`;
+      } catch (e) { status.textContent = `エラー: ${(e as Error).message}`; }
+    });
+    det.append(ta, el("div", { className: "u-row" }, [btn]), status);
+    box.append(det);
+    return box;
+  };
 
   // 年運のプロフェクション。出生からの満年齢だけで決まる。
   const profNode = (): HTMLElement => {
@@ -510,6 +548,179 @@ function chartView(chart: Chart, birth: Birth | null | undefined, personId: stri
     btn.addEventListener("click", () => void load());
     box.append(el("div", { className: "u-row" }, [el("label", { textContent: "対象日" }), dateIn, btn]), out);
     void load();
+    return box;
+  };
+
+  // ミッドポイント: 天体が乗っているものだけ。全組合せを出しても読めない。
+  const mpTbl = mkTable(["組", "中点", "乗っている天体"], (chart.midpoints ?? []).length
+    ? (chart.midpoints ?? []).map((m) => [`${bodyLabel(m.a)} / ${bodyLabel(m.b)}`,
+        `${sgLbl(m.sign)} ${fmtDeg(m.degree)}`,
+        m.occupants.map((o) => `${bodyLabel(o.planet)}（${o.orb.toFixed(2)}°）`).join("、")])
+    : [["—", "—", "天体が乗っている中点はありません"]], [2]);
+
+  // ── 重い技法 ──
+  // 恒星との合。ルディアの体系には無い。
+  const starNode = (): HTMLElement => {
+    const box = el("div", {});
+    const out = el("div", {});
+    const load = async () => {
+      out.innerHTML = "";
+      out.append(el("div", { className: "u-pat-empty", textContent: "算出中…" }));
+      try {
+        const d = await api<FixedStars>(`/api/v1/uranai/astrology/person/${personId}/fixed_stars`);
+        out.innerHTML = "";
+        out.append(el("div", { className: "u-pat-comp", textContent: "恒星は合だけを見る。オーブは等級で変えている（1.5等以下1.5°／2.5等以下1.0°／それ以外0.5°）。固有運動は入れていない。" }));
+        out.append(el("div", { className: "u-tbl-title", textContent: `天体との合（${d.conjunctions.length}）` }));
+        out.append(d.conjunctions.length
+          ? mkTable(["天体", "恒星", "等級", "オーブ"], d.conjunctions.map((c) =>
+              [bodyLabel(c.planet), c.star_name, c.magnitude.toFixed(2), `${c.orb.toFixed(2)}°`]))
+          : el("div", { className: "u-pat-empty", textContent: "合はありません" }));
+        out.append(el("div", { className: "u-tbl-title", textContent: `恒星の位置（${d.stars.length}）` }));
+        out.append(mkTable(["恒星", "サイン", "度数", "黄緯", "等級"], d.stars.map((x) =>
+          [x.name, sgLbl(x.sign), fmtDeg(x.degree), `${x.latitude.toFixed(2)}°`, x.magnitude.toFixed(2)])));
+      } catch (e) {
+        out.innerHTML = "";
+        out.append(el("div", { className: "u-status", textContent: `エラー: ${(e as Error).message}` }));
+      }
+    };
+    box.append(out); void load();
+    return box;
+  };
+
+  // アウトオブバウンズ: 赤緯が黄道傾斜角を超えた天体。
+  const oobNode = (): HTMLElement => {
+    const box = el("div", {});
+    const out = el("div", {});
+    const load = async () => {
+      out.innerHTML = "";
+      out.append(el("div", { className: "u-pat-empty", textContent: "算出中…" }));
+      try {
+        const d = await api<OutOfBounds>(`/api/v1/uranai/astrology/person/${personId}/out_of_bounds`);
+        out.innerHTML = "";
+        out.append(el("div", { className: "u-pat-comp", textContent: `出生時の黄道傾斜角は ${d.obliquity.toFixed(3)}°。これを超えた赤緯を持つ天体が「境界の外」。太陽とノードは定義上あり得ない。` }));
+        out.append(mkTable(["天体", "赤緯", "判定", "超過"], d.bodies.map((b) =>
+          [bodyLabel(b.planet), `${b.declination.toFixed(3)}°`, b.out ? "境界の外" : "", b.out ? `${b.excess.toFixed(3)}°` : ""])));
+      } catch (e) {
+        out.innerHTML = "";
+        out.append(el("div", { className: "u-status", textContent: `エラー: ${(e as Error).message}` }));
+      }
+    };
+    box.append(out); void load();
+    return box;
+  };
+
+  // ファルダール: 天体が順に主星となる期間法。75年で一巡する。
+  const firNode = (): HTMLElement => {
+    const box = el("div", {});
+    const dateIn = el("input", { type: "date", value: new Date().toISOString().slice(0, 10) }) as HTMLInputElement;
+    const out = el("div", {});
+    const load = async () => {
+      out.innerHTML = "";
+      out.append(el("div", { className: "u-pat-empty", textContent: "算出中…" }));
+      try {
+        const d = await api<Firdaria>(`/api/v1/uranai/astrology/person/${personId}/firdaria?date=${dateIn.value}&years=95`);
+        out.innerHTML = "";
+        out.append(el("div", { className: "u-pat-comp", textContent: `${d.day ? "昼" : "夜"}生まれなので ${d.day ? "太陽" : "月"} から始まる。七曜で70年、ノードで5年、合わせて75年で一巡する。` }));
+        if (d.current.lord) {
+          out.append(el("div", { className: "u-tbl-title", textContent: "指定日に効いている期間" }));
+          out.append(mkTable(["主星", "副主星", "期間"], [[bodyLabel(d.current.lord),
+            d.current.sub_lord ? bodyLabel(d.current.sub_lord) : "—", `${d.current.from} 〜 ${d.current.to}`]]));
+        }
+        out.append(el("div", { className: "u-tbl-title", textContent: "全期間" }));
+        out.append(mkTable(["主星", "期間", "副主星"], d.periods.map((p) => [bodyLabel(p.lord),
+          `${p.from} 〜 ${p.to}`,
+          p.sub.length ? p.sub.map((x) => `${bodyLabel(x.lord)} ${x.from}`).join(" / ") : "—"]), [2]));
+      } catch (e) {
+        out.innerHTML = "";
+        out.append(el("div", { className: "u-status", textContent: `エラー: ${(e as Error).message}` }));
+      }
+    };
+    const btn = el("button", { className: "u-btn u-btn-sm", textContent: "算出" });
+    btn.addEventListener("click", () => void load());
+    box.append(el("div", { className: "u-row" }, [el("label", { textContent: "対象日" }), dateIn, btn]), out);
+    void load();
+    return box;
+  };
+
+  // シナストリー／コンポジット: 相手を選んで2人を並べる。
+  const pairNode = (kind: "synastry" | "composite"): HTMLElement => {
+    const box = el("div", {});
+    const sel = el("select", { className: "u-fi" }) as HTMLSelectElement;
+    const out = el("div", {});
+    const load = async () => {
+      if (!sel.value) { out.innerHTML = ""; out.append(el("div", { className: "u-pat-empty", textContent: "相手を選んでください" })); return; }
+      out.innerHTML = "";
+      out.append(el("div", { className: "u-pat-empty", textContent: "算出中…" }));
+      try {
+        if (kind === "synastry") {
+          const d = await api<Synastry>(`/api/v1/uranai/astrology/person/${personId}/synastry?with=${encodeURIComponent(sel.value)}`);
+          out.innerHTML = "";
+          out.append(el("div", { className: "u-tbl-title", textContent: `2人の間のアスペクト（${d.aspects.length}）` }));
+          out.append(d.aspects.length
+            ? mkTable(["この人", "相手", "種別", "オーブ"], d.aspects.map((a) =>
+                [bodyLabel(a.a), bodyLabel(a.b), ASPECT_INFO[a.type]?.label ?? a.type, `${a.orb.toFixed(2)}°`]))
+            : el("div", { className: "u-pat-empty", textContent: "該当するアスペクトはありません" }));
+        } else {
+          const d = await api<Composite>(`/api/v1/uranai/astrology/person/${personId}/composite?with=${encodeURIComponent(sel.value)}`);
+          out.innerHTML = "";
+          out.append(el("div", { className: "u-pat-comp", textContent: "中点合成図。両方のチャートに在る点だけを、近い側の弧の中点で合成する。この作り方ではアセンダントと MC が直交しないことがある。" }));
+          out.append(el("div", { className: "u-tbl-title", textContent: "合成後の位置" }));
+          out.append(mkTable(["天体", "サイン", "度数"], d.placements.map((p) =>
+            [bodyLabel(p.planet), sgLbl(p.sign), fmtDeg(p.degree)])));
+          out.append(el("div", { className: "u-tbl-title", textContent: `合成図の中のアスペクト（${d.aspects.length}）` }));
+          out.append(d.aspects.length
+            ? mkTable(["天体", "天体", "種別", "オーブ"], d.aspects.map((a) =>
+                [bodyLabel(a.a), bodyLabel(a.b), ASPECT_INFO[a.type]?.label ?? a.type, `${a.orb.toFixed(2)}°`]))
+            : el("div", { className: "u-pat-empty", textContent: "該当するアスペクトはありません" }));
+        }
+      } catch (e) {
+        out.innerHTML = "";
+        out.append(el("div", { className: "u-status", textContent: `エラー: ${(e as Error).message}` }));
+      }
+    };
+    sel.addEventListener("change", () => void load());
+    void (async () => {
+      const { persons } = await api<{ persons: Person[] }>(`/api/v1/uranai/person`);
+      sel.append(el("option", { value: "", textContent: "相手を選択" }));
+      for (const p of persons) if (p.id !== personId) sel.append(el("option", { value: p.id, textContent: p.label ?? "(名称未設定)" }));
+    })();
+    box.append(el("div", { className: "u-row" }, [el("label", { textContent: "相手" }), sel]), out);
+    return box;
+  };
+
+  // 出生時刻の修正: 時刻を動かして変わるのはアングルとハウスだけなので、
+  // 手がかりは出来事に対するアングルへの接触に限られる。候補を並べるだけ。
+  const rectNode = (): HTMLElement => {
+    const box = el("div", {});
+    const ev = el("textarea", { className: "u-fi", rows: 3, placeholder: "出来事の日付を1行に1つ（YYYY-MM-DD）" }) as HTMLTextAreaElement;
+    const spanIn = el("input", { type: "number", className: "u-fi u-fi-num", value: "60", min: "1", max: "720" }) as HTMLInputElement;
+    const stepIn = el("input", { type: "number", className: "u-fi u-fi-num", value: "4", min: "1", max: "60" }) as HTMLInputElement;
+    const out = el("div", {});
+    const load = async () => {
+      const dates = ev.value.split(/[\n,]/).map((x) => x.trim()).filter(Boolean);
+      if (!dates.length) { out.innerHTML = ""; out.append(el("div", { className: "u-pat-empty", textContent: "出来事の日付を入れてください" })); return; }
+      out.innerHTML = "";
+      out.append(el("div", { className: "u-pat-empty", textContent: "算出中…" }));
+      try {
+        const d = await api<Rectification>(`/api/v1/uranai/astrology/person/${personId}/rectification?span=${spanIn.value}&step=${stepIn.value}&events=${encodeURIComponent(dates.join(","))}`);
+        out.innerHTML = "";
+        out.append(el("div", { className: "u-pat-comp", textContent: `記録された出生時刻 ${d.recorded.slice(0, 16).replace("T", " ")} UTC の前後 ${d.span_minutes} 分を ${d.step_minutes} 分刻みで見る。時刻で動くのはアングルとハウスだけなので、手がかりはアングルへの接触に限られる。どの候補を採るかは人が決める。` }));
+        out.append(mkTable(["ずれ", "Asc", "MC", "接触の合計", "内訳"], d.candidates.slice(0, 30).map((c) => [
+          `${c.offset_minutes > 0 ? "+" : ""}${c.offset_minutes}分`,
+          `${SIGN_NAME[c.asc_sign] ?? c.asc_sign} ${fmtDeg(c.ascendant % 30)}`,
+          `${SIGN_NAME[c.mc_sign] ?? c.mc_sign} ${fmtDeg(c.midheaven % 30)}`,
+          `${c.score.toFixed(2)}°`,
+          c.hits.map((h) => `${h.date}: ${bodyLabel(h.directed)}→${h.angle.toUpperCase()} ${h.orb.toFixed(2)}°`).join(" / "),
+        ]), [4]));
+      } catch (e) {
+        out.innerHTML = "";
+        out.append(el("div", { className: "u-status", textContent: `エラー: ${(e as Error).message}` }));
+      }
+    };
+    const btn = el("button", { className: "u-btn u-btn-sm", textContent: "算出" });
+    btn.addEventListener("click", () => void load());
+    box.append(el("div", { className: "u-row" }, [el("label", { textContent: "前後(分)" }), spanIn,
+      el("label", { textContent: "刻み(分)" }), stepIn, btn]), ev, out);
     return box;
   };
 
@@ -1127,9 +1338,16 @@ function chartView(chart: Chart, birth: Birth | null | undefined, personId: stri
     ...(usesPart("term") ? [{ label: "ターム", node: termTbl }] : []),
     ...(usesPart("almuten") ? [{ label: "アルムーテン", node: almTbl }] : []),
     ...(usesPart("arabic_part") ? [{ label: "アラビックパーツ", node: lotTbl }] : []),
-    ...(usesPart("sabian") ? [{ label: "サビアン", node: sabTbl }] : []),
+    ...(usesPart("sabian") ? [{ label: "サビアン", node: sabNode() }] : []),
     ...(usesPart("profection") ? [{ label: "プロフェクション", node: profNode() }] : []),
     ...(usesPart("solar_arc") ? [{ label: "ソーラーアーク", node: arcNode() }] : []),
+    ...(usesPart("midpoint") ? [{ label: "ミッドポイント", node: mpTbl }] : []),
+    ...(usesPart("fixed_star") ? [{ label: "恒星", node: starNode() }] : []),
+    ...(usesPart("out_of_bounds") ? [{ label: "アウトオブバウンズ", node: oobNode() }] : []),
+    ...(usesPart("firdaria") ? [{ label: "ファルダール", node: firNode() }] : []),
+    ...(usesPart("synastry") ? [{ label: "シナストリー", node: pairNode("synastry") }] : []),
+    ...(usesPart("composite") ? [{ label: "コンポジット", node: pairNode("composite") }] : []),
+    ...(usesPart("rectification") ? [{ label: "出生時刻の修正", node: rectNode() }] : []),
     ...(usesPart("quadrant") ? [{ label: "象限", node: quadTbl }] : []),
     ...(usesPart("lunation") ? [{ label: "ルネーション", node: lunTbl }] : []),
     { label: `アスペクト(${chart.aspects.length})`, node: aspectNode },
