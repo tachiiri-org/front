@@ -86,7 +86,18 @@ function settingsView(settings: Settings, onSaved: () => void | Promise<void>): 
   let rsInitial = "default";
   let rsPrev = "default";
   const lockNote = el("div", { className: "u-lock-note" });
-  grid.append(el("div", { className: "u-set-row" }, [el("label", { textContent: "流派" }), rsSel]));
+  // 自分で作った流派だけ消せる。組込みと出発点のカスタムには出さない。
+  const delBtn = el("button", { className: "u-btn-sm u-btn-ghost", type: "button", textContent: "削除" });
+  delBtn.style.display = "none";
+  delBtn.addEventListener("click", () => {
+    const id = rsSel.value, nm = rsSel.options[rsSel.selectedIndex]?.textContent ?? id;
+    if (!confirm(`流派「${nm}」を削除しますか？（この流派で計算した結果も消えます。元に戻せません）`)) return;
+    status.textContent = "削除中…";
+    void api(`/api/v1/uranai/astrology/ruleset/${encodeURIComponent(id)}`, { method: "DELETE" })
+      .then(async () => { clearMeanings(); status.textContent = ""; await onSaved(); })
+      .catch((e) => { status.textContent = `エラー: ${(e as Error).message}`; });
+  });
+  grid.append(el("div", { className: "u-set-row" }, [el("label", { textContent: "流派" }), rsSel, delBtn]));
   // 流派を切り替えたら、その流派の値で画面を組み直す（ロックされた項目の表示も変わる）。
   rsSel.addEventListener("change", () => {
     // 新規作成はいま選んでいる流派を土台にする。設定値をそのまま引き継ぐのが目的。
@@ -132,6 +143,7 @@ function settingsView(settings: Settings, onSaved: () => void | Promise<void>): 
       // 編集の可否はいま取った一覧から決める。意味のキャッシュは設定画面を直接開いた
       // 場合まだ読まれておらず、既定値の「編集できる」が残ってしまう。
       const editable = (ref.rulesets ?? []).find((r) => r.id === rsInitial)?.editable !== false;
+      delBtn.style.display = editable && rsInitial !== "default" ? "" : "none";
       lockNote.textContent = editable
         ? "この流派は編集できます。下の項目・部品・時期の読み方を変えられます。"
         : "この流派は組込みで、体系の定義そのものなので変更できません。変えたい場合は「＋ いまの設定を引き継いで新しい流派を作る」を選んでください。";
