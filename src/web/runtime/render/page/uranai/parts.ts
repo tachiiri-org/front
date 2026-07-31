@@ -50,11 +50,15 @@ export type Person = { id: string; label: string | null };
 export type Prefill = { label?: string | null; date?: string; time?: string; place?: string; lat?: number; lng?: number; tz?: string };
 export type Settings = { zodiac: string; house_system_id: string; ephemeris: string; ayanamsha: string };
 // ユーザーごとの方式デフォルト（設定画面）の選択肢。[key, ラベル, 選択肢[[値,表示]]]。
-export const SETTING_FIELDS: Array<{ key: keyof Settings; label: string; options: Array<[string, string]> }> = [
-  { key: "house_system_id", label: "ハウス", options: [["whole_sign", "ホールサイン"], ["placidus", "プラシダス"], ["campanus", "カンパヌス"]] },
-  { key: "zodiac", label: "黄道帯", options: [["tropical", "トロピカル（回帰）"], ["sidereal", "サイデリアル（恒星）"]] },
-  { key: "ephemeris", label: "天体暦", options: [["vsop87", "VSOP87（高精度）"], ["standard", "簡易（Standard）"]] },
-  { key: "ayanamsha", label: "アヤナムシャ", options: [["lahiri", "ラヒリ"], ["fagan_bradley", "フェイガン/ブラッドレー"]] },
+/**
+ * byRuleset = 流派が決める項目。教義そのものなので個人の好みで上書きさせない。
+ * それ以外 = 自分で決める項目。計算の精度など、どの流派でも同じ意味を持つもの。
+ */
+export const SETTING_FIELDS: Array<{ key: keyof Settings; label: string; byRuleset: boolean; options: Array<[string, string]> }> = [
+  { key: "house_system_id", label: "ハウス", byRuleset: true, options: [["whole_sign", "ホールサイン"], ["placidus", "プラシダス"], ["campanus", "カンパヌス"]] },
+  { key: "zodiac", label: "黄道帯", byRuleset: true, options: [["tropical", "トロピカル（回帰）"], ["sidereal", "サイデリアル（恒星）"]] },
+  { key: "ayanamsha", label: "アヤナムシャ", byRuleset: true, options: [["lahiri", "ラヒリ"], ["fagan_bradley", "フェイガン/ブラッドレー"]] },
+  { key: "ephemeris", label: "天体暦", byRuleset: false, options: [["vsop87", "VSOP87（高精度）"], ["standard", "簡易（Standard）"]] },
 ];
 export type Placement = { planet: string; sign: string; degree: number; retrograde?: boolean };
 export type Aspect = { a: string; b: string; type: string; orb: number; phase?: "waxing" | "waning" };
@@ -223,6 +227,7 @@ export async function loadMeanings(): Promise<void> {
       conventions?: Array<{ id: string; label: string; note: string }>;
       sabian_count?: number;
       timing_shapes?: string[]; timing_primary?: string; all_timing_shapes?: string[];
+      editable?: boolean;
       body_role?: Array<{ planet_id: string; body_role_id: string }>;
     }>(`/api/v1/uranai/astrology/reference`);
     const m: MeaningMap = {};
@@ -240,10 +245,11 @@ export async function loadMeanings(): Promise<void> {
     timingShapes = (r.timing_shapes ?? []).slice();
     timingPrimary = r.timing_primary ?? "contact";
     allTimingIds = (r.all_timing_shapes ?? []).slice();
+    rulesetEditable = r.editable !== false;
     const roles: Record<string, string> = {};
     for (const x of r.body_role ?? []) roles[x.planet_id] = m.body_role?.[x.body_role_id] ? x.body_role_id : x.body_role_id;
     roleCache = roles;
-  } catch { meaningCache = {}; roleCache = {}; nameCache = {}; ownCache = {}; partCache = { parts: [], all: [], impl: [] }; conventionCache = []; sabianCount = 0; timingShapes = []; timingPrimary = "contact"; allTimingIds = []; }
+  } catch { meaningCache = {}; roleCache = {}; nameCache = {}; ownCache = {}; partCache = { parts: [], all: [], impl: [] }; conventionCache = []; sabianCount = 0; timingShapes = []; timingPrimary = "contact"; allTimingIds = []; rulesetEditable = true; }
 }
 export const meaningOf = (kind: string, id: string): string => meaningCache?.[kind]?.[id] ?? "";
 
@@ -263,6 +269,10 @@ let timingShapes: string[] = [];
 let timingPrimary = "contact";
 export const usesTiming = (id: string): boolean => timingShapes.includes(id);
 export const timingPrimaryOf = (): string => timingPrimary;
+
+// 組込みの流派は読み取り専用。変えたい場合は複製して自分の流派として持つ。
+let rulesetEditable = true;
+export const rulesetIsEditable = (): boolean => rulesetEditable;
 export const allTimingShapes = (): string[] => allTimingIds.slice();
 export const setTiming = (shapes: string[], primary: string): void => { timingShapes = shapes.slice(); timingPrimary = primary; };
 let allTimingIds: string[] = [];
