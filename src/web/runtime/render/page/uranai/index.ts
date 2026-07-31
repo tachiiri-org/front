@@ -1,6 +1,6 @@
 // ウラナイ画面のルート描画とフォーム類。定数・型・ヘルパは ./parts、ホイール描画は ./wheel に分割。
 import {
-  SIGN_ORDER, SIGN_GLYPH, SIGN_NAME, SIGN_ELEMENT, SIGN_QUALITY, ELEMENT_CHAR, QUALITY_CHAR, PLANET_GLYPH, PLANET_ORDER, PLANET_NAME_LINES, ASPECT_INFO, ASPECT_ORDER, PATTERN_INFO, PATTERN_ORDER, SHAPE_INFO, SHAPE_ORDER, Person, Prefill, Settings, SETTING_FIELDS, Chart, Derived, Cycles, optionsOf, nameOf, ownOf, setOwn, usesPart, partsOn, allParts, setParts, isImplemented, loadMeanings, meaningOf, roleOf, clearMeanings, UranaiView, api, lonOf, fmtDeg, Birth, HOUSE_SYSTEM_JA, IANA_ZONES, FALLBACK_ZONES, CC_ZONE, offsetFromZone, el, selectEl, loadSettings,
+  SIGN_ORDER, SIGN_GLYPH, SIGN_NAME, SIGN_ELEMENT, SIGN_QUALITY, ELEMENT_CHAR, QUALITY_CHAR, PLANET_GLYPH, PLANET_ORDER, PLANET_NAME_LINES, ASPECT_INFO, ASPECT_ORDER, PATTERN_INFO, PATTERN_ORDER, SHAPE_INFO, SHAPE_ORDER, Person, Prefill, Settings, SETTING_FIELDS, Chart, Derived, Cycles, Profection, SolarArc, optionsOf, nameOf, ownOf, setOwn, usesPart, partsOn, allParts, setParts, isImplemented, loadMeanings, meaningOf, roleOf, clearMeanings, UranaiView, api, lonOf, fmtDeg, Birth, HOUSE_SYSTEM_JA, IANA_ZONES, FALLBACK_ZONES, CC_ZONE, offsetFromZone, el, selectEl, loadSettings,
 } from "./parts";
 import { drawWheelPro } from "./wheel";
 
@@ -426,6 +426,92 @@ function chartView(chart: Chart, birth: Birth | null | undefined, personId: stri
         `${sgLbl(d.harmonic.sign)} ${fmtDeg(d.harmonic.degree)}`,
         d.draconic ? `${sgLbl(d.draconic.sign)} ${fmtDeg(d.draconic.degree)}` : "—"])
     : [["—", "—", "—"]]);
+
+  // ── 伝統的な技法。ルディアの体系には無い ──
+  // ターム: サインを不等分した区画とその支配星（エジプト式）。
+  const termTbl = mkTable(["天体", "タームの支配星", "区画"], (chart.terms ?? []).length
+    ? (chart.terms ?? []).map((t) => [{ t: bodyLabel(t.planet), tip: `planet:${t.planet}` },
+        bodyLabel(t.ruler), `${t.from}°〜${t.to}°`])
+    : [["—", "—", "—"]]);
+
+  // アルムーテン: 5つの品位の持ち点の合計。同点なら勝者を立てない。
+  const DIG_JA: Record<string, string> = { domicile: "ドミサイル", exaltation: "高揚", triplicity: "三分", term: "ターム", face: "フェイス" };
+  const almTbl = mkTable(["天体", "アルムーテン", "得点の内訳"], (chart.almutens ?? []).length
+    ? (chart.almutens ?? []).map((a) => [{ t: bodyLabel(a.planet), tip: `planet:${a.planet}` },
+        a.winner ? bodyLabel(a.winner) : "同点",
+        a.scores.map((x) => `${bodyLabel(x.planet)} ${x.score}（${x.from.map((f) => DIG_JA[f] ?? f).join("・")}）`).join(" / ")])
+    : [["—", "—", "—"]], [2]);
+
+  // アラビックパーツ: ヘルメス由来の7つのロット。昼夜で式が入れ替わる。
+  const lotTbl = mkTable(["ロット", "サイン", "度数"], (chart.arabic_parts ?? []).length
+    ? (chart.arabic_parts ?? []).map((l) => [l.name, sgLbl(l.sign), fmtDeg(l.degree)])
+    : [["—", "—", "—"]]);
+
+  // サビアン: 度数だけを出す。象徴の文言は原典なので、解釈の欄に人が置く。
+  const sabTbl = mkTable(["天体", "サビアン度数", "通し番号"], (chart.sabian ?? []).length
+    ? (chart.sabian ?? []).map((x) => [{ t: bodyLabel(x.planet), tip: `planet:${x.planet}` },
+        `${SIGN_NAME[x.sign] ?? x.sign} ${x.degree}度`, String(x.index)])
+    : [["—", "—", "—"]]);
+
+  // 年運のプロフェクション。出生からの満年齢だけで決まる。
+  const profNode = (): HTMLElement => {
+    const box = el("div", {});
+    const dateIn = el("input", { type: "date", value: new Date().toISOString().slice(0, 10) }) as HTMLInputElement;
+    const out = el("div", {});
+    const load = async () => {
+      out.innerHTML = "";
+      out.append(el("div", { className: "u-pat-empty", textContent: "算出中…" }));
+      try {
+        const p = await api<Profection>(`/api/v1/uranai/astrology/person/${personId}/profection?date=${dateIn.value}`);
+        out.innerHTML = "";
+        out.append(el("div", { className: "u-pat-comp", textContent: `出生から満 ${p.age} 年。アセンダントのサインを1室として1年に1室ずつ進める。` }));
+        out.append(mkTable(["区分", "室", "サイン", "主星"], [
+          ["年運", `${p.house}室`, sgLbl(p.sign), bodyLabel(p.lord)],
+          ["月運", `${p.month_house}室`, sgLbl(p.month_sign), bodyLabel(p.month_lord)],
+        ]));
+      } catch (e) {
+        out.innerHTML = "";
+        out.append(el("div", { className: "u-status", textContent: `エラー: ${(e as Error).message}` }));
+      }
+    };
+    const btn = el("button", { className: "u-btn u-btn-sm", textContent: "算出" });
+    btn.addEventListener("click", () => void load());
+    box.append(el("div", { className: "u-row" }, [el("label", { textContent: "対象日" }), dateIn, btn]), out);
+    void load();
+    return box;
+  };
+
+  // ソーラーアーク方向法。進行の太陽の移動量を全天体に一律で加える。
+  const arcNode = (): HTMLElement => {
+    const box = el("div", {});
+    const dateIn = el("input", { type: "date", value: new Date().toISOString().slice(0, 10) }) as HTMLInputElement;
+    const out = el("div", {});
+    const load = async () => {
+      out.innerHTML = "";
+      out.append(el("div", { className: "u-pat-empty", textContent: "算出中…" }));
+      try {
+        const d = await api<SolarArc>(`/api/v1/uranai/astrology/person/${personId}/solar_arc?date=${dateIn.value}`);
+        out.innerHTML = "";
+        out.append(el("div", { className: "u-pat-comp", textContent: `アーク ${d.arc.toFixed(4)}°（進行の太陽が出生の太陽から進んだ角度）を全天体に加える。` }));
+        out.append(el("div", { className: "u-tbl-title", textContent: "方向後の位置" }));
+        out.append(mkTable(["天体", "サイン", "度数"], d.positions.map((p) =>
+          [bodyLabel(p.planet), sgLbl(p.sign), fmtDeg(p.degree)])));
+        out.append(el("div", { className: "u-tbl-title", textContent: `出生図との接触（オーブ1度以内・${d.contacts.length}）` }));
+        out.append(d.contacts.length
+          ? mkTable(["方向", "出生", "種別", "オーブ"], d.contacts.map((c) =>
+              [bodyLabel(c.directed), bodyLabel(c.natal), ASPECT_INFO[c.type]?.label ?? c.type, `${c.orb.toFixed(2)}°`]))
+          : el("div", { className: "u-pat-empty", textContent: "該当する接触はありません" }));
+      } catch (e) {
+        out.innerHTML = "";
+        out.append(el("div", { className: "u-status", textContent: `エラー: ${(e as Error).message}` }));
+      }
+    };
+    const btn = el("button", { className: "u-btn u-btn-sm", textContent: "算出" });
+    btn.addEventListener("click", () => void load());
+    box.append(el("div", { className: "u-row" }, [el("label", { textContent: "対象日" }), dateIn, btn]), out);
+    void load();
+    return box;
+  };
 
   // 象限。地平線と子午線が作る4つのクォーター。ルディアはハウスをこの単位でも読む。
   const quadTbl = mkTable(["象限", "ハウス", "意味"], (chart.quadrants ?? []).map((q) => [
@@ -1038,6 +1124,12 @@ function chartView(chart: Chart, birth: Birth | null | undefined, personId: stri
     ...(usesPart("decan") || usesPart("face") ? [{ label: "デーカン/フェイス", node: decanTbl }] : []),
     ...(usesPart("antiscia") ? [{ label: "アンティシア", node: antiTbl }] : []),
     ...(usesPart("harmonic") || usesPart("draconic") ? [{ label: "ハーモニクス", node: harmTbl }] : []),
+    ...(usesPart("term") ? [{ label: "ターム", node: termTbl }] : []),
+    ...(usesPart("almuten") ? [{ label: "アルムーテン", node: almTbl }] : []),
+    ...(usesPart("arabic_part") ? [{ label: "アラビックパーツ", node: lotTbl }] : []),
+    ...(usesPart("sabian") ? [{ label: "サビアン", node: sabTbl }] : []),
+    ...(usesPart("profection") ? [{ label: "プロフェクション", node: profNode() }] : []),
+    ...(usesPart("solar_arc") ? [{ label: "ソーラーアーク", node: arcNode() }] : []),
     ...(usesPart("quadrant") ? [{ label: "象限", node: quadTbl }] : []),
     ...(usesPart("lunation") ? [{ label: "ルネーション", node: lunTbl }] : []),
     { label: `アスペクト(${chart.aspects.length})`, node: aspectNode },

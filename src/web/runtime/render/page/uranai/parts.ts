@@ -119,6 +119,11 @@ export type Chart = {
     contra_antiscion: { longitude: number; sign: string; degree: number };
     draconic: { sign: string; degree: number } | null;
     harmonic: { n: number; sign: string; degree: number } }>;
+  terms?: Array<{ planet: string; ruler: string; from: number; to: number }>;
+  almutens?: Array<{ planet: string; winner: string | null;
+                     scores: Array<{ planet: string; score: number; from: string[] }> }>;
+  arabic_parts?: Array<{ id: string; name: string; longitude: number; sign: string; degree: number }>;
+  sabian?: Array<{ planet: string; index: number; sign: string; degree: number }>;
   placements: Placement[]; aspects: Aspect[];
   patterns?: Pattern[];
   dignities: Array<{ planet: string; dignity: string }>;
@@ -256,3 +261,12 @@ export async function loadSettings(): Promise<Settings> {
     return { zodiac: s.zodiac ?? d.zodiac, house_system_id: s.house_system_id ?? d.house_system_id, ephemeris: s.ephemeris ?? d.ephemeris, ayanamsha: s.ayanamsha ?? d.ayanamsha };
   } catch { return d; }
 }
+
+/** 年運のプロフェクション。1年に1室ずつ進める。 */
+export type Profection = { target: string; age: number; house: number; sign: string; lord: string;
+  month_house: number; month_sign: string; month_lord: string };
+
+/** ソーラーアーク方向法。進行の太陽が進んだ角度を全天体に加える。 */
+export type SolarArc = { target: string; arc: number;
+  positions: Array<{ planet: string; longitude: number; sign: string; degree: number }>;
+  contacts: Array<{ directed: string; natal: string; type: string; orb: number }> };
