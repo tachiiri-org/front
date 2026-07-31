@@ -75,6 +75,84 @@ function birthForm(personId: string, onDone: (chart: Chart) => void, prefill?: P
 }
 
 // ───────────────────────── 設定画面（ユーザーごとの方式デフォルト） ─────────────────────────
+/**
+ * 流派そのものの設定（時期の読み方・使う部品）を編む。
+ * 設定画面（既定の流派）と、人物ごとの設定タブの両方から同じものを使う。
+ *
+ * ここで変えるのは流派の定義なので、同じ流派を使う他の人物にも反映される。
+ * 人物ごとに変えたい場合は流派を複製して使う、という切り分けにしてある。
+ */
+function rulesetControls(getRuleset: () => string | undefined, getStatus: () => HTMLElement): {
+  timingBox: HTMLElement; partsBox: HTMLElement; renderTiming: () => void; renderParts: () => void;
+} {
+  const timingBox = el("div", { className: "u-parts" });
+  const partsBox = el("div", { className: "u-parts" });
+  const renderTiming = () => {
+    timingBox.innerHTML = "";
+    if (!allTimingShapes().length) return;
+    timingBox.append(el("div", { className: "u-set-title", textContent: "時期の読み方" }));
+    timingBox.append(el("div", { className: "u-pat-comp", textContent: "流派によって時期の主軸が違う。ルディアはサイクルの現在地、伝統派は時期支配星、現代西洋は接触の暦。主軸にした形のタブが時期のタブ群の先頭に出る。" }));
+    const save = (shapes: string[], primary: string) =>
+      api<{ shapes: string[]; primary: string }>(`/api/v1/uranai/astrology/timing`,
+        { method: "PUT", body: JSON.stringify({ ruleset: getRuleset(), shapes, primary }) })
+        .then((r) => { setTiming(r.shapes ?? shapes, r.primary ?? primary); renderTiming(); })
+        .catch((e) => { getStatus().textContent = `エラー: ${(e as Error).message}`; renderTiming(); });
+    const grid = el("div", { className: "u-parts-grid" });
+    for (const id of allTimingShapes()) {
+      const cb = el("input", { type: "checkbox" }) as HTMLInputElement;
+      cb.checked = usesTiming(id);
+      cb.disabled = !rulesetIsEditable();
+      cb.addEventListener("change", () => {
+        const next = allTimingShapes().filter((x) => x === id ? cb.checked : usesTiming(x));
+        if (!next.length) { getStatus().textContent = "時期の読み方は1つ以上必要です"; renderTiming(); return; }
+        void save(next, next.includes(timingPrimaryOf()) ? timingPrimaryOf() : next[0]);
+      });
+      const lb = el("label", { className: "u-tg-chip" }, [cb, el("span", { textContent: nameOf("timing_shape", id) })]);
+      lb.title = meaningOf("timing_shape", id);
+      grid.append(lb);
+    }
+    timingBox.append(grid);
+    const psel = el("select", { className: "u-fi" }) as HTMLSelectElement;
+    for (const id of allTimingShapes()) {
+      if (!usesTiming(id)) continue;
+      psel.append(el("option", { value: id, textContent: nameOf("timing_shape", id) }));
+    }
+    psel.value = timingPrimaryOf();
+    psel.disabled = !rulesetIsEditable();
+    psel.addEventListener("change", () => void save(allTimingShapes().filter((x) => usesTiming(x)), psel.value));
+    timingBox.append(el("div", { className: "u-set-row" }, [el("label", { textContent: "主軸" }), psel]));
+  };
+  const renderParts = () => {
+    partsBox.innerHTML = "";
+    if (!allParts().length) return;
+    partsBox.append(el("div", { className: "u-set-title", textContent: "使う部品" }));
+    const on = new Set(partsOn());
+    const grid = el("div", { className: "u-parts-grid" });
+    for (const id of allParts()) {
+      const cb = el("input", { type: "checkbox" }) as HTMLInputElement;
+      cb.checked = on.has(id);
+      cb.disabled = !rulesetIsEditable();
+      cb.addEventListener("change", () => {
+        const next = allParts().filter((x) => x === id ? cb.checked : on.has(x));
+        void api<{ parts: string[] }>(`/api/v1/uranai/astrology/parts`,
+          { method: "PUT", body: JSON.stringify({ ruleset: getRuleset(), parts: next }) })
+          .then((r) => { setParts(r.parts ?? next); renderParts(); })
+          .catch((e) => { getStatus().textContent = `エラー: ${(e as Error).message}`; cb.checked = on.has(id); });
+      });
+      const impl = isImplemented(id);
+      // サビアンは文言が無いと度数しか出ず、部品として成立しない。文言はこちらでは
+      // 用意できない（著作物）ので、未登録であることを選択画面でも分かるようにする。
+      const noData = id === "sabian" && !sabianReady();
+      const lb = el("label", { className: "u-tg-chip" + (impl && !noData ? "" : " u-part-todo") },
+        [cb, el("span", { textContent: nameOf("part", id) + (!impl ? "（未実装）" : noData ? "（なし）" : "") })]);
+      lb.title = noData ? "サビアンの文言は著作物のため同梱していない。サビアンのタブから手元の版を取り込むまで、度数しか出ない" : meaningOf("part", id);
+      grid.append(lb);
+    }
+    partsBox.append(grid);
+  };
+  return { timingBox, partsBox, renderTiming, renderParts };
+}
+
 function settingsView(settings: Settings, onSaved: () => void | Promise<void>): HTMLElement {
   const wrap = el("div", { className: "u-form" });
   const sels: Partial<Record<keyof Settings, HTMLSelectElement>> = {};
@@ -228,75 +306,8 @@ function settingsView(settings: Settings, onSaved: () => void | Promise<void>): 
       ownGrid.append(el("div", { className: "u-set-row" }, [el("label", { textContent: f.label }), sel]));
     }
   }
-  // 時期の読み方の形。流派によって主軸が違うので、使う形と主軸をここで切り替える。
-  // どのタブを出すかは部品の選択が決め、こちらは並び順（どれを先に見るか）を決める。
-  const timingBox = el("div", { className: "u-parts" });
-  const renderTiming = () => {
-    timingBox.innerHTML = "";
-    if (!allTimingShapes().length) return;
-    timingBox.append(el("div", { className: "u-set-title", textContent: "時期の読み方" }));
-    timingBox.append(el("div", { className: "u-pat-comp", textContent: "流派によって時期の主軸が違う。ルディアはサイクルの現在地、伝統派は時期支配星、現代西洋は接触の暦。主軸にした形のタブが時期のタブ群の先頭に出る。" }));
-    const save = (shapes: string[], primary: string) =>
-      api<{ shapes: string[]; primary: string }>(`/api/v1/uranai/astrology/timing`,
-        { method: "PUT", body: JSON.stringify({ ruleset: rsSel.value || undefined, shapes, primary }) })
-        .then((r) => { setTiming(r.shapes ?? shapes, r.primary ?? primary); renderTiming(); })
-        .catch((e) => { status.textContent = `エラー: ${(e as Error).message}`; renderTiming(); });
-    const grid = el("div", { className: "u-parts-grid" });
-    for (const id of allTimingShapes()) {
-      const cb = el("input", { type: "checkbox" }) as HTMLInputElement;
-      cb.checked = usesTiming(id);
-      cb.disabled = !rulesetIsEditable();
-      cb.addEventListener("change", () => {
-        const next = allTimingShapes().filter((x) => x === id ? cb.checked : usesTiming(x));
-        if (!next.length) { status.textContent = "時期の読み方は1つ以上必要です"; renderTiming(); return; }
-        void save(next, next.includes(timingPrimaryOf()) ? timingPrimaryOf() : next[0]);
-      });
-      const lb = el("label", { className: "u-tg-chip" }, [cb, el("span", { textContent: nameOf("timing_shape", id) })]);
-      lb.title = meaningOf("timing_shape", id);
-      grid.append(lb);
-    }
-    timingBox.append(grid);
-    const psel = el("select", { className: "u-fi" }) as HTMLSelectElement;
-    for (const id of allTimingShapes()) {
-      if (!usesTiming(id)) continue;
-      psel.append(el("option", { value: id, textContent: nameOf("timing_shape", id) }));
-    }
-    psel.value = timingPrimaryOf();
-    psel.disabled = !rulesetIsEditable();
-    psel.addEventListener("change", () => void save(allTimingShapes().filter((x) => usesTiming(x)), psel.value));
-    timingBox.append(el("div", { className: "u-set-row" }, [el("label", { textContent: "主軸" }), psel]));
-  };
-
-  // 部品の採用。流派を切り替えると既定が読み込まれ、そこから自分用に変えられる。
-  const partsBox = el("div", { className: "u-parts" });
-  const renderParts = () => {
-    partsBox.innerHTML = "";
-    if (!allParts().length) return;
-    partsBox.append(el("div", { className: "u-set-title", textContent: "使う部品" }));
-    const on = new Set(partsOn());
-    const grid = el("div", { className: "u-parts-grid" });
-    for (const id of allParts()) {
-      const cb = el("input", { type: "checkbox" }) as HTMLInputElement;
-      cb.checked = on.has(id);
-      cb.disabled = !rulesetIsEditable();
-      cb.addEventListener("change", () => {
-        const next = allParts().filter((x) => x === id ? cb.checked : on.has(x));
-        void api<{ parts: string[] }>(`/api/v1/uranai/astrology/parts`,
-          { method: "PUT", body: JSON.stringify({ ruleset: rsSel.value || undefined, parts: next }) })
-          .then((r) => { setParts(r.parts ?? next); renderParts(); })
-          .catch((e) => { status.textContent = `エラー: ${(e as Error).message}`; cb.checked = on.has(id); });
-      });
-      const impl = isImplemented(id);
-      // サビアンは文言が無いと度数しか出ず、部品として成立しない。文言はこちらでは
-      // 用意できない（著作物）ので、未登録であることを選択画面でも分かるようにする。
-      const noData = id === "sabian" && !sabianReady();
-      const lb = el("label", { className: "u-tg-chip" + (impl && !noData ? "" : " u-part-todo") },
-        [cb, el("span", { textContent: nameOf("part", id) + (!impl ? "（未実装）" : noData ? "（なし）" : "") })]);
-      lb.title = noData ? "サビアンの文言は著作物のため同梱していない。サビアンのタブから手元の版を取り込むまで、度数しか出ない" : meaningOf("part", id);
-      grid.append(lb);
-    }
-    partsBox.append(grid);
-  };
+  const { timingBox, partsBox, renderTiming, renderParts } =
+    rulesetControls(() => rsSel.value || undefined, () => status);
 
   const status = el("div", { className: "u-status" });
   // 全人物の再計算。流派を変えると保存済みのファクトが別の流派のものになるので、
@@ -1878,22 +1889,39 @@ function chartView(chart: Chart, birth: Birth | null | undefined, personId: stri
   const houseName = HOUSE_SYSTEM_JA[chart.house_system ?? ""] ?? chart.house_system ?? "-";
   const ICON: Record<string, string> = { name: "✎", date: "📅", time: "🕐", place: "📍", tz: "🌐" };
   const basicNode = el("div", { className: "u-basic" });
-  // 人物ごとの流派の選択。過去に読んだ人を全体設定の変更で巻き込まないための単位。
-  const personRulesetBox = el("div", { className: "u-person-rs" });
-  const renderPersonRuleset = () => {
-    personRulesetBox.innerHTML = "";
-    const sel = el("select", { className: "u-fi" }) as HTMLSelectElement;
-    const status = el("div", { className: "u-status" });
-    personRulesetBox.append(el("div", { className: "u-set-row" },
-      [el("label", { textContent: "この人物の流派" }), sel]), status);
-    void (async () => {
+  // 人物ごとの設定（タブ）。全体設定と同じものを、この人物に対して出す。
+  // 流派の選択だけが人物ごと。時期の読み方と部品は流派そのものの設定なので、
+  // ここで変えると同じ流派を使う他の人物にも反映される。
+  const personSettingsNode = el("div", { className: "u-form" });
+  {
+    const rsStatus = el("div", { className: "u-status" });
+    const rsSel = el("select", { className: "u-set-sel" }) as HTMLSelectElement;
+    const lockedGrid = el("div", { className: "u-set-grid" });
+    const noteBox = el("div", { className: "u-part-disabled" });
+    noteBox.style.display = "none";
+    const lockNote = el("div", { className: "u-lock-note" });
+    const { timingBox, partsBox, renderTiming, renderParts } =
+      rulesetControls(() => undefined, () => rsStatus); // 流派は人物の実効値（既定は送らない＝人物優先で解決される）
+    const renderLocked = (eff: Settings) => {
+      lockedGrid.innerHTML = "";
+      for (const f of SETTING_FIELDS) {
+        if (!f.byRuleset) continue;
+        const sel = selectEl(f.options, (eff as unknown as Record<string, string>)[f.key as string]);
+        sel.disabled = true;
+        lockedGrid.append(el("div", { className: "u-set-row u-set-locked" }, [
+          el("label", {}, [el("span", { className: "u-lock-ic", textContent: "固定" }), el("span", { textContent: f.label })]), sel,
+        ]));
+      }
+    };
+    const load = async () => {
       try {
         const [ref, cur] = await Promise.all([
           api<{ rulesets?: Array<{ id: string; name: string | null; editable?: boolean; lineage?: string | null }> }>(`/api/v1/uranai/astrology/reference`),
           api<{ ruleset_id: string | null; effective: string; default: string }>(`/api/v1/uranai/astrology/person/${personId}/ruleset`),
         ]);
+        rsSel.innerHTML = "";
         const defName = (ref.rulesets ?? []).find((r) => r.id === cur.default)?.name ?? cur.default;
-        sel.append(el("option", { value: "", textContent: `全体の既定に従う（${defName}）` }));
+        rsSel.append(el("option", { value: "", textContent: `全体の既定に従う（${defName}）` }));
         const LINEAGE_ORDER = ["traditional", "modern_west", "midpoint", "indian"];
         const groups = new Map<string, HTMLElement>();
         for (const lg of LINEAGE_ORDER) {
@@ -1907,26 +1935,44 @@ function chartView(chart: Chart, birth: Birth | null | undefined, personId: stri
           const opt = el("option", { value: r.id, textContent: r.name ?? r.id });
           (r.editable !== false ? own : groups.get(r.lineage ?? "") ?? own).append(opt);
         }
-        for (const lg of LINEAGE_ORDER) { const og = groups.get(lg); if (og?.children.length) sel.append(og); }
-        if (own.children.length) sel.append(own);
-        sel.value = cur.ruleset_id ?? "";
-        sel.addEventListener("change", () => {
-          status.textContent = "切り替え中…";
-          void api(`/api/v1/uranai/astrology/person/${personId}/ruleset`,
-            { method: "PUT", body: JSON.stringify({ ruleset_id: sel.value || null }) })
-            .then(async () => {
-              // その流派での計算がまだなら作る。既存の流派の結果は消さない。
-              await api(`/api/v1/uranai/astrology/person/${personId}/compute`, { method: "POST", body: "{}" }).catch(() => {});
-              clearMeanings();
-              status.textContent = "";
-              await onSaved(label);
-            })
-            .catch((e) => { status.textContent = `エラー: ${(e as Error).message}`; });
-        });
-      } catch { personRulesetBox.innerHTML = ""; }
-    })();
-  };
-  renderPersonRuleset();
+        for (const lg of LINEAGE_ORDER) { const og = groups.get(lg); if (og?.children.length) rsSel.append(og); }
+        if (own.children.length) rsSel.append(own);
+        rsSel.value = cur.ruleset_id ?? "";
+        const editable = (ref.rulesets ?? []).find((r) => r.id === cur.effective)?.editable !== false;
+        const effName = (ref.rulesets ?? []).find((r) => r.id === cur.effective)?.name ?? cur.effective;
+        lockNote.textContent = editable
+          ? `いま適用されているのは「${effName}」。この流派は編集できます。`
+          : `いま適用されているのは「${effName}」。組込みの流派なので、時期の読み方と部品は変更できません。`;
+        noteBox.textContent = rulesetNoteOf();
+        noteBox.style.display = rulesetNoteOf() ? "" : "none";
+        renderLocked(await api<Settings>(`/api/v1/uranai/astrology/settings?ruleset=${encodeURIComponent(cur.effective)}`));
+        renderTiming();
+        renderParts();
+      } catch (e) { rsStatus.textContent = `エラー: ${(e as Error).message}`; }
+    };
+    rsSel.addEventListener("change", () => {
+      rsStatus.textContent = "切り替え中…";
+      void api(`/api/v1/uranai/astrology/person/${personId}/ruleset`,
+        { method: "PUT", body: JSON.stringify({ ruleset_id: rsSel.value || null }) })
+        .then(async () => {
+          // その流派での計算がまだなら作る。既存の流派の結果は消さない。
+          await api(`/api/v1/uranai/astrology/person/${personId}/compute`, { method: "POST", body: "{}" }).catch(() => {});
+          clearMeanings();
+          rsStatus.textContent = "";
+          await onSaved(label);
+        })
+        .catch((e) => { rsStatus.textContent = `エラー: ${(e as Error).message}`; });
+    });
+    personSettingsNode.append(
+      el("div", { className: "u-settings-note", textContent: "流派の選択だけがこの人物ごとの設定です。時期の読み方と使う部品は流派そのものの設定なので、同じ流派を使う他の人物にも反映されます。" }),
+      el("div", { className: "u-set-title", textContent: "この人物の流派" }),
+      el("div", { className: "u-set-grid" }, [el("div", { className: "u-set-row" }, [el("label", { textContent: "流派" }), rsSel])]),
+      lockNote, noteBox,
+      el("div", { className: "u-set-title", textContent: "流派が決める（変更できない）" }), lockedGrid,
+      timingBox, partsBox, rsStatus,
+    );
+    void load();
+  }
   let editing: string | null = null;
   const doSave = async (statusEl: HTMLElement) => {
     if (!st.date || !st.time) { statusEl.textContent = "生年月日と時刻を入力してください"; return; }
@@ -1999,9 +2045,6 @@ function chartView(chart: Chart, birth: Birth | null | undefined, personId: stri
     addRow("house", "ハウス", false);
     addRow("node", "ノード/リリス", false);
     basicNode.append(tbl);
-    // 人物ごとの流派。全体設定は「既定」で、ここで選ぶとこの人だけがその流派になる。
-    // 全体設定を変えても、ここを設定済みの人は巻き込まれない。
-    basicNode.append(personRulesetBox);
     if (editMode) {
       const status = el("div", { className: "u-status" });
       const rc = el("button", { className: "u-btn u-btn-sm", textContent: "再計算" });
@@ -2023,6 +2066,7 @@ function chartView(chart: Chart, birth: Birth | null | undefined, personId: stri
   // 「読み」の大分類では下段が手順になり、選んだ手順の材料だけを出す。
   const dataSections: Array<{ label: string; node: HTMLElement }> = [
     { label: "基本情報", node: basicNode },
+    { label: "設定", node: personSettingsNode },
     { label: "チャート", node: chartNode },
     { label: "概念", node: conceptNode },
     ...(usesPart("shape") || usesPart("singleton") || usesPart("center") ? [{ label: "全体の形", node: shapeNode }] : []),
