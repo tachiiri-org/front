@@ -113,24 +113,33 @@ function settingsView(settings: Settings, onSaved: () => void | Promise<void>): 
       } catch (e) { status.textContent = `エラー: ${(e as Error).message}`; }
     })();
   });
-  void (async () => {
+  // 参照データを読んでから流派の一覧・ロックの注記・部品・時期の欄を描く。
+  // 定義順の都合で、実際の呼び出しは renderParts / renderTiming を組んだ後で行う。
+  const initRuleset = async () => {
     try {
       const [ref, pref] = await Promise.all([
         api<{ rulesets?: Array<{ id: string; name: string | null; editable?: boolean }> }>(`/api/v1/uranai/astrology/reference`),
         api<{ ruleset_id?: string }>(`/api/v1/uranai/astrology/preference`),
       ]);
       for (const r of ref.rulesets ?? []) {
-        rsSel.append(el("option", { value: r.id, textContent: (r.name ?? r.id) + (r.editable === false ? "" : "（編集できる）") }));
+        rsSel.append(el("option", { value: r.id, textContent: (r.name ?? r.id) + (r.editable === false ? "（組込み・変更不可）" : "") }));
       }
       rsSel.append(el("option", { value: NEW_RULESET, textContent: "＋ いまの設定を引き継いで新しい流派を作る" }));
       rsInitial = pref.ruleset_id ?? "default";
       rsPrev = rsInitial;
       rsSel.value = rsInitial;
-      lockNote.textContent = rulesetIsEditable()
+      // 編集の可否はいま取った一覧から決める。意味のキャッシュは設定画面を直接開いた
+      // 場合まだ読まれておらず、既定値の「編集できる」が残ってしまう。
+      const editable = (ref.rulesets ?? []).find((r) => r.id === rsInitial)?.editable !== false;
+      lockNote.textContent = editable
         ? "この流派は編集できます。下の項目・部品・時期の読み方を変えられます。"
         : "この流派は組込みで、体系の定義そのものなので変更できません。変えたい場合は「＋ いまの設定を引き継いで新しい流派を作る」を選んでください。";
+      // 参照データ（部品・時期の読み方の一覧）を読んでから、その2つの欄を描く。
+      await loadMeanings();
+      renderTiming();
+      renderParts();
     } catch { /* 参照が取れない時は流派を触らせない */ }
-  })();
+  };
 
   // 流派が決める項目と、自分で決める項目を分ける。
   // 前者は教義そのものなので個人の好みで上書きさせない。実効値は見せる。
@@ -142,7 +151,7 @@ function settingsView(settings: Settings, onSaved: () => void | Promise<void>): 
     if (f.byRuleset) {
       sel.disabled = true;
       lockedGrid.append(el("div", { className: "u-set-row u-set-locked" }, [
-        el("label", {}, [el("span", { className: "u-lock-ic", textContent: "🔒" }), el("span", { textContent: f.label })]), sel,
+        el("label", {}, [el("span", { className: "u-lock-ic", textContent: "固定" }), el("span", { textContent: f.label })]), sel,
       ]));
     } else {
       ownGrid.append(el("div", { className: "u-set-row" }, [el("label", { textContent: f.label }), sel]));
@@ -260,8 +269,7 @@ function settingsView(settings: Settings, onSaved: () => void | Promise<void>): 
       await onSaved();
     } catch (e) { status.textContent = `エラー: ${(e as Error).message}`; }
   });
-  renderParts();
-  renderTiming();
+  void initRuleset();
   wrap.append(
     el("div", { className: "u-settings-note", textContent: "この設定はあなた（ユーザー）の既定として保存され、全チャートに適用されます。" }),
     el("div", { className: "u-set-title", textContent: "流派" }), grid, lockNote,
@@ -1815,7 +1823,7 @@ export async function renderUranai(container: HTMLElement): Promise<void> {
     /* 流派が決める項目。錠前と背景で、変更できないことを一目で分かるようにする。 */
     .u-set-locked select{opacity:.65;cursor:not-allowed}
     .u-set-locked label{color:#6b7280}
-    .u-lock-ic{margin-right:4px;font-size:11px}
+    .u-lock-ic{margin-right:5px;font-size:10px;border:1px solid currentColor;border-radius:3px;padding:0 3px;opacity:.7}
     .u-lock-note{font-size:11px;color:#888;margin:2px 0 10px;line-height:1.6}
     [data-theme=dark] .u-set-locked label{color:#9aa3af}
     /* 使えない部品の説明。薄い注記ではなく、目に留まる枠で出す。 */
