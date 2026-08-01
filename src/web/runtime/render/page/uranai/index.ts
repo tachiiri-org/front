@@ -1339,8 +1339,8 @@ function chartView(chart: Chart, birth: Birth | null | undefined, personId: stri
 
   // 人生の出来事。流派の時期の技法と突き合わせるための事実の記録。
   // 解釈ではないので流派を跨いで同じものを見る。
-  const KIND_JA: Record<string, string> = { external: "外的な出来事", internal: "内的な変化", quiet: "静かだった期間" };
-  const WEIGHT_JA: Record<string, string> = { turning: "人生の向きが変わった", large: "大きい", medium: "中くらい" };
+  const KIND_JA: Record<string, string> = { external: "外的な出来事", internal: "内的な変化",
+    quiet_external: "外的に静かだった期間", quiet_internal: "内的に静かだった期間" };
   const eventsNode = (): HTMLElement => {
     const box = el("div", {});
     const out = el("div", {});
@@ -1348,8 +1348,10 @@ function chartView(chart: Chart, birth: Birth | null | undefined, personId: stri
     const form = el("div", { className: "u-set-grid" });
     const atIn = el("input", { type: "date" }) as HTMLInputElement;
     const untilIn = el("input", { type: "date" }) as HTMLInputElement;
-    const kindSel = selectEl([["external", "外的な出来事"], ["internal", "内的な変化"], ["quiet", "静かだった期間"]], "external");
-    const weightSel = selectEl([["", "（未設定）"], ["turning", "人生の向きが変わった"], ["large", "大きい"], ["medium", "中くらい"]], "");
+    const kindSel = selectEl([["external", "外的な出来事"], ["internal", "内的な変化"],
+      ["quiet_external", "外的に静かだった期間"], ["quiet_internal", "内的に静かだった期間"]], "external");
+    // 大きさは1〜10。粗くすると、大きな節目に小さな出来事が当たっただけで当たりになる。
+    const weightSel = selectEl([["", "（未設定）"], ...Array.from({ length: 10 }, (_, i) => [String(i + 1), String(i + 1)] as [string, string])], "");
     const bodyIn = el("input", { type: "text", className: "u-fi", placeholder: "内容（一行）" }) as HTMLInputElement;
     const anchorIn = el("input", { type: "text", className: "u-fi", placeholder: "日付の根拠（内的な変化のとき）" }) as HTMLInputElement;
     const circCb = el("input", { type: "checkbox" }) as HTMLInputElement;
@@ -1371,7 +1373,7 @@ function chartView(chart: Chart, birth: Birth | null | undefined, personId: stri
         const rowsOf = d.events.map((e) => [
           e.until ? `${e.at} 〜 ${e.until}` : e.at,
           KIND_JA[e.kind] ?? e.kind,
-          e.weight ? WEIGHT_JA[e.weight] ?? e.weight : "（未設定）",
+          e.weight === null ? "—" : String(e.weight),
           (e.body ?? "") + (e.circular ? "（占いで決めた）" : ""),
           e.anchor ?? "",
         ]);

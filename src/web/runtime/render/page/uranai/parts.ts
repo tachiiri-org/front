@@ -455,5 +455,6 @@ export type Muntha = { at: string; lagna: number; age: number; sign: number; lor
 
 /** 人生の出来事。解釈ではなく事実なので、流派を跨いで共有する。 */
 export type LifeEvent = { id: string; at: string; until: string | null;
-  kind: "external" | "internal" | "quiet"; weight: string | null; circular: boolean;
+  kind: "external" | "internal" | "quiet_external" | "quiet_internal";
+  weight: number | null; circular: boolean;
   body: string | null; anchor: string | null };
