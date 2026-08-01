@@ -1,6 +1,6 @@
 // ウラナイ画面のルート描画とフォーム類。定数・型・ヘルパは ./parts、ホイール描画は ./wheel に分割。
 import {
-  SIGN_ORDER, SIGN_GLYPH, SIGN_NAME, SIGN_ELEMENT, SIGN_QUALITY, ELEMENT_CHAR, QUALITY_CHAR, PLANET_GLYPH, PLANET_ORDER, PLANET_NAME_LINES, ASPECT_INFO, ASPECT_ORDER, PATTERN_INFO, PATTERN_ORDER, SHAPE_INFO, SHAPE_ORDER, Person, Prefill, Settings, SETTING_FIELDS, Chart, Derived, Cycles, Profection, SolarArc, FixedStars, OutOfBounds, Firdaria, Synastry, Composite, Rectification, PlanetCycle, TransitSearch, PrimaryDirection, TimeLords, Dasha, VargaCharts, Yogas, Jaimini, KpSubs, Muntha, RulingPlanets, CharaDasha, Tajika, optionsOf, nameOf, ownOf, setOwn, usesPart, partsOn, allParts, setParts, isImplemented, loadMeanings, meaningOf, conventionOf, sabianReady, sabianCountOf, usesTiming, timingPrimaryOf, allTimingShapes, setTiming, rulesetIsEditable, rulesetNoteOf, roleOf, clearMeanings, UranaiView, api, lonOf, fmtDeg, Birth, HOUSE_SYSTEM_JA, IANA_ZONES, FALLBACK_ZONES, CC_ZONE, offsetFromZone, el, selectEl, loadSettings,
+  SIGN_ORDER, SIGN_GLYPH, SIGN_NAME, SIGN_ELEMENT, SIGN_QUALITY, ELEMENT_CHAR, QUALITY_CHAR, PLANET_GLYPH, PLANET_ORDER, PLANET_NAME_LINES, ASPECT_INFO, ASPECT_ORDER, PATTERN_INFO, PATTERN_ORDER, SHAPE_INFO, SHAPE_ORDER, Person, Prefill, Settings, SETTING_FIELDS, Chart, Derived, Cycles, Profection, SolarArc, FixedStars, OutOfBounds, Firdaria, Synastry, Composite, Rectification, PlanetCycle, TransitSearch, PrimaryDirection, TimeLords, Dasha, VargaCharts, Yogas, Jaimini, KpSubs, Muntha, RulingPlanets, CharaDasha, Tajika, LifeEvent, optionsOf, nameOf, ownOf, setOwn, usesPart, partsOn, allParts, setParts, isImplemented, loadMeanings, meaningOf, conventionOf, sabianReady, sabianCountOf, usesTiming, timingPrimaryOf, allTimingShapes, setTiming, rulesetIsEditable, rulesetNoteOf, roleOf, clearMeanings, UranaiView, api, lonOf, fmtDeg, Birth, HOUSE_SYSTEM_JA, IANA_ZONES, FALLBACK_ZONES, CC_ZONE, offsetFromZone, el, selectEl, loadSettings,
 } from "./parts";
 import { drawWheelPro } from "./wheel";
 
@@ -1337,6 +1337,81 @@ function chartView(chart: Chart, birth: Birth | null | undefined, personId: stri
     return box;
   };
 
+  // 人生の出来事。流派の時期の技法と突き合わせるための事実の記録。
+  // 解釈ではないので流派を跨いで同じものを見る。
+  const KIND_JA: Record<string, string> = { external: "外的な出来事", internal: "内的な変化", quiet: "静かだった期間" };
+  const WEIGHT_JA: Record<string, string> = { turning: "人生の向きが変わった", large: "大きい", medium: "中くらい" };
+  const eventsNode = (): HTMLElement => {
+    const box = el("div", {});
+    const out = el("div", {});
+    const status = el("div", { className: "u-status" });
+    const form = el("div", { className: "u-set-grid" });
+    const atIn = el("input", { type: "date" }) as HTMLInputElement;
+    const untilIn = el("input", { type: "date" }) as HTMLInputElement;
+    const kindSel = selectEl([["external", "外的な出来事"], ["internal", "内的な変化"], ["quiet", "静かだった期間"]], "external");
+    const weightSel = selectEl([["", "（未設定）"], ["turning", "人生の向きが変わった"], ["large", "大きい"], ["medium", "中くらい"]], "");
+    const bodyIn = el("input", { type: "text", className: "u-fi", placeholder: "内容（一行）" }) as HTMLInputElement;
+    const anchorIn = el("input", { type: "text", className: "u-fi", placeholder: "日付の根拠（内的な変化のとき）" }) as HTMLInputElement;
+    const circCb = el("input", { type: "checkbox" }) as HTMLInputElement;
+    const addBtn = el("button", { className: "u-btn u-btn-sm", type: "button", textContent: "追加" });
+    form.append(
+      el("div", { className: "u-set-row" }, [el("label", { textContent: "日付" }), atIn]),
+      el("div", { className: "u-set-row" }, [el("label", { textContent: "終わり（幅があるとき）" }), untilIn]),
+      el("div", { className: "u-set-row" }, [el("label", { textContent: "種別" }), kindSel]),
+      el("div", { className: "u-set-row" }, [el("label", { textContent: "大きさ" }), weightSel]),
+      el("div", { className: "u-set-row" }, [el("label", { textContent: "内容" }), bodyIn]),
+      el("div", { className: "u-set-row" }, [el("label", { textContent: "根拠" }), anchorIn]),
+      el("div", { className: "u-set-row" }, [el("label", { textContent: "占いで決めた" }), el("label", { className: "u-tg-chip" }, [circCb, el("span", { textContent: "集計から外す" })])]),
+      el("div", { className: "u-set-row" }, [el("label", { textContent: "" }), addBtn]),
+    );
+    const load = async () => {
+      out.innerHTML = "";
+      try {
+        const d = await api<{ events: LifeEvent[] }>(`/api/v1/uranai/person/${personId}/event`);
+        const rowsOf = d.events.map((e) => [
+          e.until ? `${e.at} 〜 ${e.until}` : e.at,
+          KIND_JA[e.kind] ?? e.kind,
+          e.weight ? WEIGHT_JA[e.weight] ?? e.weight : "（未設定）",
+          (e.body ?? "") + (e.circular ? "（占いで決めた）" : ""),
+          e.anchor ?? "",
+        ]);
+        out.append(el("div", { className: "u-tbl-title", textContent: `記録した出来事（${d.events.length}）` }));
+        out.append(d.events.length
+          ? mkTable(["日付", "種別", "大きさ", "内容", "根拠"], rowsOf, [3, 4])
+          : el("div", { className: "u-pat-empty", textContent: "まだ記録がありません" }));
+        // 消せるように、日付と内容のボタンを並べる。
+        if (d.events.length) {
+          const del = el("div", { className: "u-row" });
+          for (const e of d.events) {
+            const btn = el("button", { className: "u-btn-sm u-btn-ghost", type: "button", textContent: `🗑 ${e.at}` });
+            btn.addEventListener("click", () => {
+              if (!confirm(`${e.at}「${e.body ?? ""}」を削除しますか？`)) return;
+              void api(`/api/v1/uranai/person/${personId}/event/${e.id}`, { method: "DELETE" })
+                .then(() => load()).catch((x) => { status.textContent = `エラー: ${(x as Error).message}`; });
+            });
+            del.append(btn);
+          }
+          out.append(el("div", { className: "u-tbl-title", textContent: "削除" }), del);
+        }
+      } catch (e) { out.append(el("div", { className: "u-status", textContent: `エラー: ${(e as Error).message}` })); }
+    };
+    addBtn.addEventListener("click", () => {
+      if (!atIn.value) { status.textContent = "日付を入れてください"; return; }
+      status.textContent = "保存中…";
+      void api(`/api/v1/uranai/person/${personId}/event`, { method: "POST", body: JSON.stringify({
+        at: atIn.value, until: untilIn.value || null, kind: kindSel.value,
+        weight: weightSel.value || null, body: bodyIn.value || null,
+        anchor: anchorIn.value || null, circular: circCb.checked,
+      }) }).then(async () => {
+        status.textContent = ""; atIn.value = ""; untilIn.value = ""; bodyIn.value = ""; anchorIn.value = ""; circCb.checked = false;
+        await load();
+      }).catch((e) => { status.textContent = `エラー: ${(e as Error).message}`; });
+    });
+    box.append(form, status, out);
+    void load();
+    return box;
+  };
+
   // 象限。地平線と子午線が作る4つのクォーター。ルディアはハウスをこの単位でも読む。
   const quadTbl = mkTable(["象限", "ハウス", "意味"], (chart.quadrants ?? []).map((q) => [
     QUAD_JA[q.id] ?? q.id,
@@ -2060,6 +2135,7 @@ function chartView(chart: Chart, birth: Birth | null | undefined, personId: stri
   const dataSections: Array<{ label: string; node: HTMLElement }> = [
     { label: "基本情報", node: basicNode },
     { label: "設定", node: personSettingsNode },
+    { label: "出来事", node: eventsNode() },
     { label: "チャート", node: chartNode },
     { label: "概念", node: conceptNode },
     ...(usesPart("shape") || usesPart("singleton") || usesPart("center") ? [{ label: "全体の形", node: shapeNode }] : []),

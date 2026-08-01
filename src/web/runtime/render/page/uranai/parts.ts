@@ -452,3 +452,8 @@ export type Tajika = { at: string; solar_return: string | null;
 
 /** タージカ式のムンタ。 */
 export type Muntha = { at: string; lagna: number; age: number; sign: number; lord: string };
+
+/** 人生の出来事。解釈ではなく事実なので、流派を跨いで共有する。 */
+export type LifeEvent = { id: string; at: string; until: string | null;
+  kind: "external" | "internal" | "quiet"; weight: string | null; circular: boolean;
+  body: string | null; anchor: string | null };
