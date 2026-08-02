@@ -114,7 +114,7 @@ export type Chart = {
   wheel_layout?: "sign_fixed" | "mandala"; // 流派が指定する描画規約（バックエンドが返す）
   interceptions?: Array<{ house: string; sign: string }>; // どのカスプにも現れないサイン
   tally?: boolean; // エレメント/クオリティの数え上げを使う流派か
-  aspect_figure?: boolean; // アスペクト図形の固有名を表示項目に含める流派か
+  aspect_figure?: boolean; // アスペクトパターンの固有名を表示項目に含める流派か
   quadrants?: Array<{ id: string; houses: string[] }>;
   lunation?: Lunation | null;
   shape?: { shape: string; span: number; largestGap: number; handle?: string[]; leadingBody?: string;
@@ -222,13 +222,22 @@ let meaningCache: MeaningMap | null = null;
  * 意味だけ捨てて部品や時期の読み方を残すと、前の流派の選択が画面に残り続ける。
  */
 export function clearMeanings(): void {
-  meaningCache = null; roleCache = null; nameCache = null; ownCache = null;
+  meaningCache = null; roleCache = null; nameCache = null; ownCache = null; loadedRuleset = undefined;
   partCache = null; conventionCache = []; sabianCount = 0;
   timingShapes = []; timingPrimary = "contact"; allTimingIds = [];
   rulesetEditable = true; rulesetNote = "";
 }
-export async function loadMeanings(): Promise<void> {
-  if (meaningCache) return;
+/**
+ * 参照データ（意味・名称・部品・時期の読み方）を読む。
+ *
+ * これらは全て流派スコープなので、どの流派で読むかを渡す。渡さないと全体の既定で
+ * 引いてしまい、人物ごとに別の流派を選んでいる場合に部品の一覧が食い違う
+ * （タブが前の流派のまま出る）。
+ */
+let loadedRuleset: string | undefined;
+export async function loadMeanings(ruleset?: string): Promise<void> {
+  if (meaningCache && loadedRuleset === ruleset) return;
+  loadedRuleset = ruleset;
   try {
     const r = await api<{
       meanings?: Array<{ concept_kind: string; concept_id: string; value: string }>;
@@ -240,7 +249,7 @@ export async function loadMeanings(): Promise<void> {
       timing_shapes?: string[]; timing_primary?: string; all_timing_shapes?: string[];
       editable?: boolean; ruleset_note?: string | null;
       body_role?: Array<{ planet_id: string; body_role_id: string }>;
-    }>(`/api/v1/uranai/astrology/reference`);
+    }>(`/api/v1/uranai/astrology/reference${ruleset ? `?ruleset=${encodeURIComponent(ruleset)}` : ""}`);
     const m: MeaningMap = {};
     for (const x of r.meanings ?? []) (m[x.concept_kind] ??= {})[x.concept_id] = x.value;
     meaningCache = m;
@@ -443,3 +452,9 @@ export type Tajika = { at: string; solar_return: string | null;
 
 /** タージカ式のムンタ。 */
 export type Muntha = { at: string; lagna: number; age: number; sign: number; lord: string };
+
+/** 人生の出来事。解釈ではなく事実なので、流派を跨いで共有する。 */
+export type LifeEvent = { id: string; at: string; until: string | null;
+  kind: "external" | "internal" | "quiet_external" | "quiet_internal";
+  weight: number | null; circular: boolean;
+  body: string | null; anchor: string | null };
