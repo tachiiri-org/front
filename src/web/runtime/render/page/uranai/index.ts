@@ -2126,8 +2126,8 @@ function chartView(chart: Chart, birth: Birth | null | undefined, personId: stri
   };
   renderBasic();
   // 元素・クオリティ（それぞれ独立タブ）。
-  const ec = Object.fromEntries(chart.elements.map((e) => [e.element, e.count]));
-  const qc = Object.fromEntries(chart.qualities.map((q) => [q.quality, q.count]));
+  const ec = Object.fromEntries((chart.elements ?? []).map((e) => [e.element, e.count]));
+  const qc = Object.fromEntries((chart.qualities ?? []).map((q) => [q.quality, q.count]));
   const elemNode = mkTable(["火", "地", "風", "水"], [[String(ec.fire ?? 0), String(ec.earth ?? 0), String(ec.air ?? 0), String(ec.water ?? 0)]]);
   const qualNode = mkTable(["活動", "不動", "柔軟"], [[String(qc.cardinal ?? 0), String(qc.fixed ?? 0), String(qc.mutable ?? 0)]]);
 
@@ -2187,7 +2187,7 @@ function chartView(chart: Chart, birth: Birth | null | undefined, personId: stri
     ...(usesPart("quadrant") ? [{ label: "象限", node: quadTbl }] : []),
     ...(usesPart("lunation") ? [{ label: "ルネーション", node: lunTbl }] : []),
     { label: `アスペクト(${chart.aspects.length})`, node: aspectNode },
-    ...(chart.aspect_figure === false || !usesPart("aspect_figure") ? [] : [{ label: `配置(${majorCount})`, node: patternNode }]),
+    ...(chart.aspect_figure === false || !usesPart("aspect_figure") ? [] : [{ label: `アスペクトパターン(${majorCount})`, node: patternNode }]),
     ...(usesPart("progression") ? [{ label: "進行", node: derivedNode("progressed") }] : []),
     ...(usesPart("transit") ? [{ label: "経過", node: derivedNode("transit") }] : []),
     ...(usesPart("cycles") ? [{ label: "サイクル", node: cyclesNode() }] : []),

@@ -114,7 +114,7 @@ export type Chart = {
   wheel_layout?: "sign_fixed" | "mandala"; // 流派が指定する描画規約（バックエンドが返す）
   interceptions?: Array<{ house: string; sign: string }>; // どのカスプにも現れないサイン
   tally?: boolean; // エレメント/クオリティの数え上げを使う流派か
-  aspect_figure?: boolean; // アスペクト図形の固有名を表示項目に含める流派か
+  aspect_figure?: boolean; // アスペクトパターンの固有名を表示項目に含める流派か
   quadrants?: Array<{ id: string; houses: string[] }>;
   lunation?: Lunation | null;
   shape?: { shape: string; span: number; largestGap: number; handle?: string[]; leadingBody?: string;
