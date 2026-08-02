@@ -66,7 +66,7 @@ export const URANAI_TOOLS = [
   {
     name: "uranai_read_chart",
     description:
-      "Read a natal chart: placements, houses, cusps, aspects (with waxing/waning phase), aspect patterns, whole shape, dispositor chains, house rulers, chart ruler, lunation, elements/qualities, and whatever else the ruleset's part list enables. This is the main tool for interpreting someone's chart. `ruleset` picks the 流派 (e.g. 'psychological', 'hellenistic', 'vedic'); omit it to use the person's own setting. Note the response currently includes sections the ruleset does not enable — check uranai_read_reference's `parts` before treating a section as in-scope. Use `sections` to fetch only the keys you need (the full response is ~30KB).",
+      "Read a natal chart: placements, houses, cusps, aspects (with waxing/waning phase), aspect patterns, whole shape, dispositor chains, house rulers, chart ruler, lunation, elements/qualities, and whatever else the ruleset's part list enables. This is the main tool for interpreting someone's chart. `ruleset` picks the 流派 (e.g. 'psychological', 'hellenistic', 'vedic'); omit it to use the person's own setting. The response only carries sections the ruleset enables, so a missing key means that technique is out of scope for this 流派 — do not reach for it elsewhere. Use `sections` to fetch only the keys you need (the full response is ~30KB).",
     inputSchema: {
       type: "object",
       properties: {
