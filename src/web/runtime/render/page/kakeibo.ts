@@ -146,8 +146,8 @@ function renderCsvImport(status: HTMLElement, onDone: () => void): HTMLElement {
       try {
         parsed.push(await readGoldpointCsvFile(f));
       } catch (e) {
-        parsed.push({ fileName: f.name, billingMonth: '', rowCount: 0, rowsTotal: 0, rows: [],
-          errors: [String(e instanceof Error ? e.message : e)] });
+        parsed.push({ fileName: f.name, billingMonth: '', declaredTotal: null, rowCount: 0, rowsTotal: 0,
+          rows: [], errors: [String(e instanceof Error ? e.message : e)] });
       }
     }
 
@@ -199,7 +199,7 @@ function renderCsvImport(status: HTMLElement, onDone: () => void): HTMLElement {
             capturedAt: new Date().toISOString(),
             rowCount: p.rowCount,
             rowsTotal: p.rowsTotal,
-            shownTotal: null,
+            shownTotal: p.declaredTotal,
             rows: p.rows,
           }),
         });
