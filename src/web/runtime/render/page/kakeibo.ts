@@ -8,6 +8,7 @@
 // 紐づけて毎回復元する。だから画面の主役は明細そのものより、店への費目・略名の付与になる。
 
 import { buildBookmarkletUrl } from './kakeibo-bookmarklet';
+import { readGoldpointCsvFile, type ParsedCsv } from './kakeibo-csv';
 
 type StatementRow = {
   statement_id: string;
@@ -103,6 +104,121 @@ function listenForImport(status: HTMLElement, onDone: () => void): void {
   });
 }
 
+/**
+ * CSV ファイルからの一括取り込み。
+ *
+ * 確定済みの月は CSV 直リンクが空を返すため、ブックマークレットでは取れない。
+ * 画面から落としたファイルを複数まとめて読ませる経路を用意する。
+ * 請求年月はファイルの支払予定月から決まるので、月の指定は不要。
+ */
+function renderCsvImport(status: HTMLElement, onDone: () => void): HTMLElement {
+  const box = el('div', S.card);
+  box.appendChild(el('div', 'font-weight:600;margin-bottom:4px;', 'CSV ファイルから取り込む'));
+  box.appendChild(el('div', S.note,
+    '確定済みの月はブックマークレットでは取得できません（CSV 直リンクが空を返すため）。' +
+    '明細ページの「CSVファイルのダウンロード」で落としたファイルを、複数まとめて選べます。' +
+    '請求年月はファイルの支払予定月から判別します。'));
+
+  const controls = el('div', 'display:flex;gap:8px;align-items:center;margin-top:8px;flex-wrap:wrap;');
+  const input = el('input', '') as HTMLInputElement;
+  input.type = 'file';
+  input.accept = '.csv,text/csv';
+  input.multiple = true;
+  const runBtn = el('button', S.btn, '取り込む');
+  runBtn.disabled = true;
+  controls.append(input, runBtn);
+  box.appendChild(controls);
+
+  const preview = el('div', 'margin-top:8px;');
+  box.appendChild(preview);
+
+  let parsed: ParsedCsv[] = [];
+
+  input.addEventListener('change', () => void (async () => {
+    parsed = [];
+    preview.innerHTML = '';
+    const files = [...(input.files ?? [])];
+    if (!files.length) { runBtn.disabled = true; return; }
+
+    for (const f of files) {
+      try {
+        parsed.push(await readGoldpointCsvFile(f));
+      } catch (e) {
+        parsed.push({ fileName: f.name, billingMonth: '', rowCount: 0, rowsTotal: 0, rows: [],
+          errors: [String(e instanceof Error ? e.message : e)] });
+      }
+    }
+
+    const table = el('table', S.table);
+    const head = el('tr');
+    for (const h of ['ファイル', '請求年月', '件数', '合計', '状態']) head.appendChild(el('th', S.th, h));
+    table.appendChild(head);
+    for (const p of parsed) {
+      const tr = el('tr');
+      tr.appendChild(el('td', S.td, p.fileName));
+      tr.appendChild(el('td', S.td, p.billingMonth || '—'));
+      tr.appendChild(el('td', S.num, String(p.rowCount)));
+      tr.appendChild(el('td', S.num, yen(p.rowsTotal)));
+      const ok = p.errors.length === 0 && p.billingMonth !== '' && p.rowCount > 0;
+      tr.appendChild(el('td', S.td + (ok ? 'color:#1e7a3c;' : 'color:#c0392b;'),
+        ok ? '取り込み可' : (p.errors[0] ?? '請求年月を判別できません')));
+      table.appendChild(tr);
+    }
+    preview.appendChild(table);
+
+    // 同じ請求年月のファイルを複数選ぶと、後勝ちで片方が消える。事故になるので止める。
+    const months = parsed.filter((p) => p.billingMonth).map((p) => p.billingMonth);
+    const dup = months.filter((m, i) => months.indexOf(m) !== i);
+    if (dup.length) {
+      preview.appendChild(el('div', S.err,
+        `同じ請求年月のファイルが複数あります（${[...new Set(dup)].join(', ')}）。取り込みは月ごとの全置換なので、片方が失われます。`));
+    }
+
+    const usable = parsed.filter((p) => p.errors.length === 0 && p.billingMonth && p.rowCount > 0);
+    runBtn.disabled = usable.length === 0 || dup.length > 0;
+  })());
+
+  runBtn.addEventListener('click', () => void (async () => {
+    runBtn.disabled = true;
+    const usable = parsed.filter((p) => p.errors.length === 0 && p.billingMonth && p.rowCount > 0);
+    const done: string[] = [];
+    const failed: string[] = [];
+    for (const p of usable) {
+      status.textContent = `取り込み中… ${p.fileName}`;
+      status.setAttribute('style', S.note);
+      try {
+        // ファイル取り込みには画面の合計が無いので shownTotal は送らない。
+        // ダウンロードしたファイルは丸ごと1本なので、ページングによる取りこぼしは起きない。
+        await api('/import', {
+          method: 'POST',
+          body: JSON.stringify({
+            source: 'goldpoint-csv',
+            billingMonth: p.billingMonth,
+            capturedAt: new Date().toISOString(),
+            rowCount: p.rowCount,
+            rowsTotal: p.rowsTotal,
+            shownTotal: null,
+            rows: p.rows,
+          }),
+        });
+        done.push(`${p.billingMonth}(${p.rowCount}件)`);
+      } catch (e) {
+        failed.push(`${p.fileName}: ${String(e instanceof Error ? e.message : e)}`);
+      }
+    }
+    status.textContent =
+      (done.length ? `取り込み完了: ${done.join(' / ')}` : '') +
+      (failed.length ? `　失敗: ${failed.join(' / ')}` : '');
+    status.setAttribute('style', failed.length ? S.err : S.ok);
+    input.value = '';
+    parsed = [];
+    preview.innerHTML = '';
+    onDone();
+  })());
+
+  return box;
+}
+
 function renderShopEditor(row: StatementRow, reload: () => void): HTMLElement {
   const box = el('div', 'display:flex;gap:6px;align-items:center;flex-wrap:wrap;');
   const alias = el('input', S.input + 'width:110px;') as HTMLInputElement;
@@ -173,6 +289,8 @@ export async function renderKakeibo(root: HTMLElement): Promise<void> {
 
   const summary = el('div', S.card);
   const listBox = el('div');
+  const reloadAll = (): void => void (async () => { await loadMonths(); await loadRows(); })();
+  page.appendChild(renderCsvImport(status, reloadAll));
   page.append(summary, listBox);
 
   const loadMonths = async (): Promise<void> => {
