@@ -71,12 +71,14 @@ const CSS = `
 .kk-btn:disabled{opacity:.45;cursor:default}
 .kk-in{padding:4px 6px;border:1px solid var(--line2);border-radius:5px;
   background:var(--field);color:var(--fg);font:inherit;font-size:13px}
-.kk-tb{width:100%;border-collapse:collapse;font-size:13px;table-layout:fixed}
-.kk-tb col.c-date{width:58px}.kk-tb col.c-cat{width:250px}
-.kk-tb col.c-alias{width:118px}.kk-tb col.c-amt{width:96px}
-.kk-tb td:nth-child(2){overflow-wrap:anywhere}
-.kk-tb th{text-align:left;border-bottom:1px solid var(--line2);padding:5px 4px;
-  white-space:nowrap;font-weight:600;color:var(--muted);font-size:12px}
+.kk-scroll{overflow-x:auto;-webkit-overflow-scrolling:touch}
+.kk-tb{border-collapse:collapse;font-size:13px;min-width:100%}
+.kk-tb td,.kk-tb th{white-space:nowrap}
+.kk-tb td.kk-wrap{white-space:normal;min-width:180px}
+.kk-tb th{text-align:left;border-bottom:1px solid var(--line2);padding:5px 8px 5px 4px;
+  font-weight:600;color:var(--muted);font-size:12px}
+.kk-tb th.kk-clk{cursor:pointer}
+.kk-tb th.kk-on{color:var(--fg)}
 .kk-tb td{border-bottom:1px solid var(--line);padding:5px 4px;vertical-align:top}
 .kk-num{text-align:right;white-space:nowrap;font-variant-numeric:tabular-nums}
 .kk-sub{color:var(--muted);font-size:11px}
@@ -187,7 +189,7 @@ function combobox(opts: {
 type Summary = {
   months: string[];
   byCategory: { billing_month: string; category: string; total: number; cnt: number }[];
-  byShop: { billing_month: string; shop_id: string; label: string; name: string; total: number; cnt: number }[];
+  byShop: { billing_month: string; shop_id: string; label: string; name: string; category: string; total: number; cnt: number }[];
   multiCategoryShops: number;
 };
 
@@ -205,63 +207,101 @@ async function renderSummary(host: HTMLElement): Promise<void> {
       `費目を複数持つ店が ${s.multiCategoryShops} 件あります。合計が実額とずれないよう、集計では名前順の先頭1つに畳んでいます。`));
   }
 
+  type Row = { key: string; sub?: string; vals: number[]; total: number };
+
+  /**
+   * 月×行のマトリクス。月ヘッダのクリックでその月の降順に並べ替える。
+   * 列は固定幅にせず、はみ出したら横スクロールさせる（月は増え続けるため）。
+   */
   const matrix = (
     title: string,
-    keys: string[],
-    get: (key: string, month: string) => number,
+    rows: Row[],
+    subHead: string | undefined,
     onClick?: (key: string) => void,
+    controls?: HTMLElement,
   ): HTMLElement => {
     const box = el('div', 'kk-card');
-    box.appendChild(el('div', 'kk-note', title));
-    const t = el('table', 'kk-tb');
-    const head = el('tr');
-    head.appendChild(el('th', '', ''));
-    for (const m of months) head.appendChild(el('th', 'kk-num', m.slice(2)));
-    head.appendChild(el('th', 'kk-num', '合計'));
-    t.appendChild(head);
+    const head0 = el('div', 'kk-row');
+    head0.appendChild(el('span', 'kk-note', title));
+    if (controls) head0.appendChild(controls);
+    box.appendChild(head0);
 
-    const rows = keys.map((k) => ({ k, vals: months.map((m) => get(k, m)) }));
-    rows.sort((a, b) => b.vals.reduce((x, y) => x + y, 0) - a.vals.reduce((x, y) => x + y, 0));
+    // -1 は合計列での並び替え
+    let sortAt = -1;
+    const scroll = el('div', 'kk-scroll');
+    box.appendChild(scroll);
 
-    for (const r of rows) {
-      const tr = el('tr');
-      const c0 = el('td', onClick ? 'kk-clk' : '', r.k);
-      if (onClick) c0.addEventListener('click', () => onClick(r.k));
-      tr.appendChild(c0);
-      for (const v of r.vals) tr.appendChild(el('td', 'kk-num', v ? yen(v) : ''));
-      tr.appendChild(el('td', 'kk-num', yen(r.vals.reduce((x, y) => x + y, 0))));
-      t.appendChild(tr);
-    }
+    const draw = (): void => {
+      scroll.innerHTML = '';
+      const t = el('table', 'kk-tb');
+      const h = el('tr');
+      h.appendChild(el('th', '', ''));
+      if (subHead !== undefined) h.appendChild(el('th', '', subHead));
+      months.forEach((m, i) => {
+        const th = el('th', 'kk-num kk-clk' + (sortAt === i ? ' kk-on' : ''), m.slice(2));
+        th.title = `${m} の多い順に並べ替え`;
+        th.addEventListener('click', () => { sortAt = i; draw(); });
+        h.appendChild(th);
+      });
+      const thTotal = el('th', 'kk-num kk-clk' + (sortAt === -1 ? ' kk-on' : ''), '合計');
+      thTotal.addEventListener('click', () => { sortAt = -1; draw(); });
+      h.appendChild(thTotal);
+      t.appendChild(h);
 
-    const sum = el('tr', 'kk-sum');
-    sum.appendChild(el('td', '', '合計'));
-    let grand = 0;
-    for (let i = 0; i < months.length; i++) {
-      const v = rows.reduce((a, r) => a + r.vals[i], 0);
-      grand += v;
-      sum.appendChild(el('td', 'kk-num', yen(v)));
-    }
-    sum.appendChild(el('td', 'kk-num', yen(grand)));
-    t.appendChild(sum);
-    box.appendChild(t);
+      const sorted = [...rows].sort((a, b) =>
+        sortAt === -1 ? b.total - a.total : (b.vals[sortAt] ?? 0) - (a.vals[sortAt] ?? 0));
+
+      for (const r of sorted) {
+        const tr = el('tr');
+        const c0 = el('td', onClick ? 'kk-clk' : '', r.key);
+        if (onClick) c0.addEventListener('click', () => onClick(r.key));
+        tr.appendChild(c0);
+        if (subHead !== undefined) tr.appendChild(el('td', 'kk-sub', r.sub ?? ''));
+        for (const v of r.vals) tr.appendChild(el('td', 'kk-num', v ? yen(v) : ''));
+        tr.appendChild(el('td', 'kk-num', yen(r.total)));
+        t.appendChild(tr);
+      }
+
+      const sum = el('tr', 'kk-sum');
+      sum.appendChild(el('td', '', '合計'));
+      if (subHead !== undefined) sum.appendChild(el('td', '', ''));
+      let grand = 0;
+      months.forEach((_, i) => {
+        const v = sorted.reduce((a, r) => a + (r.vals[i] ?? 0), 0);
+        grand += v;
+        sum.appendChild(el('td', 'kk-num', yen(v)));
+      });
+      sum.appendChild(el('td', 'kk-num', yen(grand)));
+      t.appendChild(sum);
+      scroll.appendChild(t);
+    };
+    draw();
     return box;
   };
 
+  // 費目 × 月
   const catAt = new Map<string, number>();
   for (const r of s.byCategory) catAt.set(`${r.category}\u0001${r.billing_month}`, r.total);
-  const cats = [...new Set(s.byCategory.map((r) => r.category))];
-  host.appendChild(matrix('費目 × 請求年月', cats, (k, m) => catAt.get(`${k}\u0001${m}`) ?? 0));
+  const catRows: Row[] = [...new Set(s.byCategory.map((r) => r.category))].map((k) => {
+    const vals = months.map((m) => catAt.get(`${k}\u0001${m}`) ?? 0);
+    return { key: k, vals, total: vals.reduce((a, b) => a + b, 0) };
+  });
+  host.appendChild(matrix('費目 × 請求年月', catRows, undefined));
 
-  // 略名（未設定なら店名）ごと。件数が多いので上位のみ出す。
+  // 略名 × 月（費目つき・費目で絞り込める）
   const shopAt = new Map<string, number>();
   const shopId = new Map<string, string>();
+  const shopCat = new Map<string, string>();
   for (const r of s.byShop) {
-    shopAt.set(`${r.label}\u0001${r.billing_month}`, (shopAt.get(`${r.label}\u0001${r.billing_month}`) ?? 0) + r.total);
+    const k = `${r.label}\u0001${r.billing_month}`;
+    shopAt.set(k, (shopAt.get(k) ?? 0) + r.total);
     shopId.set(r.label, r.shop_id);
+    shopCat.set(r.label, r.category);
   }
-  const shopTotal = new Map<string, number>();
-  for (const r of s.byShop) shopTotal.set(r.label, (shopTotal.get(r.label) ?? 0) + r.total);
-  const topShops = [...shopTotal.entries()].sort((a, b) => b[1] - a[1]).slice(0, 30).map(([k]) => k);
+  const allShopRows: Row[] = [...shopId.keys()].map((k) => {
+    const vals = months.map((m) => shopAt.get(`${k}\u0001${m}`) ?? 0);
+    return { key: k, sub: shopCat.get(k) ?? '', vals, total: vals.reduce((a, b) => a + b, 0) };
+  });
 
   const detail = el('div', '');
   const showDetail = async (label: string): Promise<void> => {
@@ -272,7 +312,8 @@ async function renderSummary(host: HTMLElement): Promise<void> {
     );
     detail.innerHTML = '';
     const box = el('div', 'kk-card');
-    box.appendChild(el('div', 'kk-note', `${label}　${res.rows.length}件　${yen(res.rows.reduce((a, r) => a + r.amount_jpy, 0))}`));
+    box.appendChild(el('div', 'kk-note',
+      `${label}　${res.rows.length}件　${yen(res.rows.reduce((a, r) => a + r.amount_jpy, 0))}`));
     const t = el('table', 'kk-tb');
     const h = el('tr');
     for (const x of ['請求月', '利用日', '店', '金額']) h.appendChild(el('th', x === '金額' ? 'kk-num' : '', x));
@@ -281,20 +322,39 @@ async function renderSummary(host: HTMLElement): Promise<void> {
       const tr = el('tr');
       tr.appendChild(el('td', '', r.billing_month));
       tr.appendChild(el('td', '', r.used_on));
-      const c = el('td', '');
+      const c = el('td', 'kk-wrap');
       c.appendChild(el('div', '', r.shop));
       if (r.remark) c.appendChild(el('div', 'kk-sub', r.remark));
       tr.appendChild(c);
       tr.appendChild(el('td', 'kk-num', yen(r.amount_jpy)));
       t.appendChild(tr);
     }
-    box.appendChild(t);
+    const sc = el('div', 'kk-scroll');
+    sc.appendChild(t);
+    box.appendChild(sc);
     detail.appendChild(box);
     box.scrollIntoView({ behavior: 'smooth', block: 'nearest' });
   };
 
-  host.appendChild(matrix('略名 × 請求年月（上位30・クリックで明細）', topShops,
-    (k, m) => shopAt.get(`${k}\u0001${m}`) ?? 0, (k) => void showDetail(k)));
+  const shopHost = el('div', '');
+  const filter = el('select', 'kk-in') as HTMLSelectElement;
+  for (const c of ['（費目で絞り込み）', ...new Set(allShopRows.map((r) => r.sub ?? '').filter(Boolean))].sort()) {
+    const o = el('option', '', c) as HTMLOptionElement;
+    o.value = c === '（費目で絞り込み）' ? '' : c;
+    filter.appendChild(o);
+  }
+  filter.value = '';
+  const drawShops = (): void => {
+    shopHost.innerHTML = '';
+    const rows = filter.value ? allShopRows.filter((r) => r.sub === filter.value) : allShopRows;
+    const ctrl = el('div', 'kk-row');
+    ctrl.appendChild(filter);
+    shopHost.appendChild(matrix('略名 × 請求年月（クリックで明細）', rows, '費目', (k) => void showDetail(k), ctrl));
+  };
+  filter.addEventListener('change', drawShops);
+  drawShops();
+
+  host.appendChild(shopHost);
   host.appendChild(detail);
 }
 
@@ -523,14 +583,6 @@ export async function renderKakeibo(root: HTMLElement): Promise<void> {
     }
 
     const table = el('table', 'kk-tb');
-    // 店名に余りを吸わせる。自動配分だと費目列が間延びして右が空く。
-    const cg = document.createElement('colgroup');
-    for (const c of ['c-date', '', 'c-cat', 'c-alias', 'c-amt']) {
-      const col = document.createElement('col');
-      if (c) col.className = c;
-      cg.appendChild(col);
-    }
-    table.appendChild(cg);
     const head = el('tr');
     for (const h of ['日付', '店', '費目', '略名', '金額']) head.appendChild(el('th', '', h));
     table.appendChild(head);
@@ -544,7 +596,7 @@ export async function renderKakeibo(root: HTMLElement): Promise<void> {
       const tr = el('tr');
       tr.appendChild(el('td', '', r.used_on.slice(5)));
 
-      const shopCell = el('td', '');
+      const shopCell = el('td', 'kk-wrap');
       shopCell.appendChild(el('div', '', r.shop));
       if (r.remark) shopCell.appendChild(el('div', 'kk-sub', r.remark));
       if (r.is_foreign) shopCell.appendChild(el('div', 'kk-sub', `${r.foreign_amount} ${r.currency}`));
@@ -583,7 +635,9 @@ export async function renderKakeibo(root: HTMLElement): Promise<void> {
       table.appendChild(tr);
     }
     listBox.innerHTML = '';
-    listBox.appendChild(table);
+    const sc = el('div', 'kk-scroll');
+    sc.appendChild(table);
+    listBox.appendChild(sc);
   };
 
   const reloadAll = (): void => void (async () => {
