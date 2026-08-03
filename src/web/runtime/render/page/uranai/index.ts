@@ -13,6 +13,9 @@ function birthForm(personId: string, onDone: (chart: Chart) => void, prefill?: P
   const label = el("input", { type: "text", placeholder: "表示名（例: 自分）", value: prefill?.label ?? "" });
   const date = el("input", { type: "date", value: prefill?.date ?? "" });
   const time = el("input", { type: "time", value: prefill?.time ?? "" });
+  // 出生時刻が不確かなときの終端（任意）。入れると期間として扱い、幅で不正確になる要素は弾かれる。
+  const dateEnd = el("input", { type: "date", value: prefill?.dateEnd ?? "" });
+  const timeEnd = el("input", { type: "time", value: prefill?.timeEnd ?? "" });
   const placeInput = el("input", { type: "text", placeholder: "出生地を検索（例: 松本市）", value: prefill?.place ?? "" });
   const results = el("div", { className: "u-geo-results" });
   const geoWrap = el("div", { className: "u-geo-wrap" }, [placeInput, results]);
@@ -54,8 +57,12 @@ function birthForm(personId: string, onDone: (chart: Chart) => void, prefill?: P
     status.textContent = "計算中…";
     try {
       if (label.value.trim()) await api(`/api/v1/uranai/person/${personId}`, { method: "PATCH", body: JSON.stringify({ label: label.value.trim() }) }).catch(() => {});
-      const born_at = `${date.value}T${time.value}:00${tz.value.trim() || "+00:00"}`;
-      await api(`/api/v1/uranai/person/${personId}/birth`, { method: "PUT", body: JSON.stringify({ born_at, lat: String(lat), lng: String(lng), place: placeName, timezone: tz.value.trim() }) });
+      const offz = tz.value.trim() || "+00:00";
+      const born_at = `${date.value}T${time.value}:00${offz}`;
+      // 終端が入っていれば期間。日付未入力なら開始日を流用（時刻だけの幅＝当日内）。
+      const born_until = (timeEnd.value || dateEnd.value)
+        ? `${dateEnd.value || date.value}T${timeEnd.value || time.value}:00${offz}` : null;
+      await api(`/api/v1/uranai/person/${personId}/birth`, { method: "PUT", body: JSON.stringify({ born_at, born_until, lat: String(lat), lng: String(lng), place: placeName, timezone: tz.value.trim() }) });
       const chart = await api<Chart>(`/api/v1/uranai/astrology/person/${personId}/compute`, { method: "POST", body: "{}" });
       // 参照データはその人物の流派で読む（表示は onDone → showChart 側でも読み直す）。
       await loadMeanings(chart.ruleset);
@@ -67,6 +74,7 @@ function birthForm(personId: string, onDone: (chart: Chart) => void, prefill?: P
   wrap.append(
     el("div", { className: "u-row" }, [el("label", { textContent: "表示名" }), label]),
     el("div", { className: "u-row" }, [el("label", { textContent: "生年月日" }), date, time]),
+    el("div", { className: "u-row" }, [el("label", { textContent: "終わり（時刻が不確かな時・任意）" }), dateEnd, timeEnd]),
     el("div", { className: "u-row" }, [el("label", { textContent: "出生地" }), geoWrap]),
     picked,
     el("div", { className: "u-row" }, [el("label", { textContent: "UTC offset" }), tz]),
@@ -1933,17 +1941,19 @@ function chartView(chart: Chart, birth: Birth | null | undefined, personId: stri
   // 基本情報: 通常は表。各編集項目に編集アイコン、押すとその項目だけ編集モード（他はグレーアウト）、
   // 再計算(保存)またはキャンセル。
   const bm = (birth?.born_at ?? "").match(/^(\d{4}-\d{2}-\d{2})T(\d{2}:\d{2})/);
+  const bmEnd = (birth?.born_until ?? "").match(/^(\d{4}-\d{2}-\d{2})T(\d{2}:\d{2})/);
   const zones = IANA_ZONES.length ? IANA_ZONES : FALLBACK_ZONES;
   const initZone = (birth?.timezone && birth.timezone.includes("/")) ? birth.timezone : "Asia/Tokyo";
   const st = {
-    name: label ?? "", date: bm?.[1] ?? "", time: bm?.[2] ?? "", place: birth?.place ?? "",
+    name: label ?? "", date: bm?.[1] ?? "", time: bm?.[2] ?? "",
+    dateEnd: bmEnd?.[1] ?? "", timeEnd: bmEnd?.[2] ?? "", place: birth?.place ?? "",
     lat: (birth?.lat ? Number(birth.lat) : null) as number | null,
     lng: (birth?.lng ? Number(birth.lng) : null) as number | null,
     tz: zones.includes(initZone) ? initZone : "Asia/Tokyo",
   };
   const orig = { ...st };
   const houseName = HOUSE_SYSTEM_JA[chart.house_system ?? ""] ?? chart.house_system ?? "-";
-  const ICON: Record<string, string> = { name: "✎", date: "📅", time: "🕐", place: "📍", tz: "🌐" };
+  const ICON: Record<string, string> = { name: "✎", date: "📅", time: "🕐", dateEnd: "📅", timeEnd: "🕐", place: "📍", tz: "🌐" };
   const basicNode = el("div", { className: "u-basic" });
   // 人物ごとの設定（タブ）。全体設定と同じものを、この人物に対して出す。
   // 流派の選択だけが人物ごと。時期の読み方と部品は流派そのものの設定なので、
@@ -2053,7 +2063,10 @@ function chartView(chart: Chart, birth: Birth | null | undefined, personId: stri
       if (nm && nm !== (label ?? "")) await api(`/api/v1/uranai/person/${personId}`, { method: "PATCH", body: JSON.stringify({ label: nm }) }).catch(() => {});
       const off = offsetFromZone(st.tz, new Date(`${st.date}T${st.time}:00`));
       const born_at = `${st.date}T${st.time}:00${off}`;
-      await api(`/api/v1/uranai/person/${personId}/birth`, { method: "PUT", body: JSON.stringify({ born_at, lat: String(st.lat), lng: String(st.lng), place: st.place, timezone: st.tz }) });
+      // 終端が入っていれば期間として送る。日付未入力なら開始日を流用（時刻だけの幅）。
+      const born_until = (st.timeEnd || st.dateEnd)
+        ? `${st.dateEnd || st.date}T${st.timeEnd || st.time}:00${offsetFromZone(st.tz, new Date(`${st.dateEnd || st.date}T${st.timeEnd || st.time}:00`))}` : null;
+      await api(`/api/v1/uranai/person/${personId}/birth`, { method: "PUT", body: JSON.stringify({ born_at, born_until, lat: String(st.lat), lng: String(st.lng), place: st.place, timezone: st.tz }) });
       await api(`/api/v1/uranai/astrology/person/${personId}/compute`, { method: "POST", body: "{}" });
       await onSaved(nm || label);
     } catch (e) { statusEl.textContent = `エラー: ${(e as Error).message}`; }
@@ -2062,7 +2075,8 @@ function chartView(chart: Chart, birth: Birth | null | undefined, personId: stri
     basicNode.innerHTML = "";
     const editMode = editing !== null;
     const disp: Record<string, string> = {
-      name: st.name || "-", date: st.date || "-", time: st.time || "-", place: st.place || "-",
+      name: st.name || "-", date: st.date || "-", time: st.time || "-",
+      dateEnd: st.dateEnd || "-", timeEnd: st.timeEnd || "-", place: st.place || "-",
       lat: st.lat !== null ? st.lat.toFixed(4) : "-", lng: st.lng !== null ? st.lng.toFixed(4) : "-",
       tz: st.tz, house: houseName, node: "平均",
     };
@@ -2071,6 +2085,8 @@ function chartView(chart: Chart, birth: Birth | null | undefined, personId: stri
     if (editing === "name") { const i = el("input", { type: "text", className: "u-fi", value: st.name }); i.addEventListener("input", () => { st.name = i.value; }); ctrl = i; }
     else if (editing === "date") { const i = el("input", { type: "date", className: "u-fi", value: st.date }); i.addEventListener("input", () => { st.date = i.value; }); ctrl = i; }
     else if (editing === "time") { const i = el("input", { type: "time", className: "u-fi", value: st.time }); i.addEventListener("input", () => { st.time = i.value; }); ctrl = i; }
+    else if (editing === "dateEnd") { const i = el("input", { type: "date", className: "u-fi", value: st.dateEnd }); i.addEventListener("input", () => { st.dateEnd = i.value; }); ctrl = i; }
+    else if (editing === "timeEnd") { const i = el("input", { type: "time", className: "u-fi", value: st.timeEnd }); i.addEventListener("input", () => { st.timeEnd = i.value; }); ctrl = i; }
     else if (editing === "tz") { const sel = el("select", { className: "u-fi" }); for (const z of zones) sel.append(el("option", { value: z, textContent: z })); sel.value = st.tz; sel.addEventListener("change", () => { st.tz = sel.value; }); ctrl = sel; }
     else if (editing === "place") {
       const i = el("input", { type: "text", className: "u-fi", value: st.place, placeholder: "出生地を検索" });
@@ -2108,6 +2124,8 @@ function chartView(chart: Chart, birth: Birth | null | undefined, personId: stri
     addRow("name", "表示名", true);
     addRow("date", "生年月日", true);
     addRow("time", "時刻", true);
+    addRow("dateEnd", "終了日(幅・任意)", true);
+    addRow("timeEnd", "終了時刻(幅・任意)", true);
     addRow("place", "出生地", true);
     addRow("lat", "緯度", false);
     addRow("lng", "経度", false);
