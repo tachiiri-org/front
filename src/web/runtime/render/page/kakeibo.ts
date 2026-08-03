@@ -52,7 +52,7 @@ const LIGHT = `--bg:#fff;--fg:#1a1a1a;--muted:#666;--line:#e2e2e2;--line2:#c8c8c
   --menu:#fff;--hover:#f0f0f0`;
 
 const CSS = `
-.kk{${LIGHT};max-width:1000px;margin:0 auto;padding:16px;
+.kk{${LIGHT};width:100%;padding:12px 16px;
   font:14px/1.7 system-ui,-apple-system,"Segoe UI",sans-serif;
   background:var(--bg);color:var(--fg);min-height:100vh;box-sizing:border-box}
 @media (prefers-color-scheme:dark){.kk{${DARK}}}
@@ -71,7 +71,10 @@ const CSS = `
 .kk-btn:disabled{opacity:.45;cursor:default}
 .kk-in{padding:4px 6px;border:1px solid var(--line2);border-radius:5px;
   background:var(--field);color:var(--fg);font:inherit;font-size:13px}
-.kk-tb{width:100%;border-collapse:collapse;font-size:13px}
+.kk-tb{width:100%;border-collapse:collapse;font-size:13px;table-layout:fixed}
+.kk-tb col.c-date{width:58px}.kk-tb col.c-cat{width:250px}
+.kk-tb col.c-alias{width:118px}.kk-tb col.c-amt{width:96px}
+.kk-tb td:nth-child(2){overflow-wrap:anywhere}
 .kk-tb th{text-align:left;border-bottom:1px solid var(--line2);padding:5px 4px;
   white-space:nowrap;font-weight:600;color:var(--muted);font-size:12px}
 .kk-tb td{border-bottom:1px solid var(--line);padding:5px 4px;vertical-align:top}
@@ -386,6 +389,14 @@ export async function renderKakeibo(root: HTMLElement): Promise<void> {
     }
 
     const table = el('table', 'kk-tb');
+    // 店名に余りを吸わせる。自動配分だと費目列が間延びして右が空く。
+    const cg = document.createElement('colgroup');
+    for (const c of ['c-date', '', 'c-cat', 'c-alias', 'c-amt']) {
+      const col = document.createElement('col');
+      if (c) col.className = c;
+      cg.appendChild(col);
+    }
+    table.appendChild(cg);
     const head = el('tr');
     for (const h of ['日付', '店', '費目', '略名', '金額']) head.appendChild(el('th', '', h));
     table.appendChild(head);
