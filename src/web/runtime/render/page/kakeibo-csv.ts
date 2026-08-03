@@ -26,6 +26,7 @@ export type ParsedRow = {
   currency: string;
   fxRate: string;
   fxDate: string;
+  remark: string;
   dupIndex: number;
 };
 
@@ -71,17 +72,52 @@ export function parseGoldpointCsv(text: string, fileName: string): ParsedCsv {
     return { fileName, billingMonth: '', rowCount: 0, rowsTotal: 0, rows: [], errors: ['CSV ではなく HTML です'] };
   }
 
+  // CSV は2種類ある。
+  //  A) 確定前（支払予定分）: 13列・ヘッダ無し・支払予定月の列あり
+  //  B) 確定済み: 7列・先頭に3列のヘッダ行（氏名/カード番号/カード名称）・支払予定月の列なし
+  // B は請求年月を中身から決められないので、ファイル名 yyyyMM.csv（支払月）を使う。
+  const widths = lines.map((l) => l.split(',').length);
+  const isConfirmed = widths.filter((w) => w === 7).length > widths.filter((w) => w === 13).length;
+  const expected = isConfirmed ? 7 : 13;
+
   lines.forEach((line, i) => {
     const c = line.split(',');
+    // 確定済み版の先頭行は氏名・カード番号・カード名称のヘッダ。データではないので飛ばす。
+    if (isConfirmed && i === 0 && c.length === 3) return;
     // 実データは店名の読点が全角なので split(',') が通るが、ASCII カンマが来ると
     // 静かに列がずれる。列数を検証して、ずれたら取り込ませない。
-    if (c.length !== 13) {
-      errors.push(`${i + 1}行目: 列数 ${c.length}（13のはず）: ${line.slice(0, 80)}`);
+    if (c.length !== expected) {
+      errors.push(`${i + 1}行目: 列数 ${c.length}（${expected}のはず）: ${line.slice(0, 80)}`);
       return;
     }
     const usedOn = toDate(c[0]);
-    const amount = toInt(c[6]);
     if (!usedOn) { errors.push(`${i + 1}行目: 利用日が不正 ${c[0]}`); return; }
+
+    if (isConfirmed) {
+      // 7列: 利用日 / 店名 / ご利用金額 / 支払区分 / 回数 / お支払い金額 / 備考
+      const amount = toInt(c[2]);
+      if (amount === null) { errors.push(`${i + 1}行目: 金額が不正 ${c[2]}`); return; }
+      const kubun = norm(c[3]);
+      rows.push({
+        usedOn,
+        shop: c[1].trim(), shopKey: norm(c[1]),
+        // 確定済み版に名義の列は無い。家族カードは無い前提で「ご本人」に寄せ、
+        // 確定前版と同じ店・同じカードとして突き合わせられるようにする。
+        card: 'ご本人', cardKey: 'ご本人',
+        payType: kubun === '1' ? '1回払い' : kubun,
+        installments: norm(c[4]),
+        payMonth: '', // 呼び出し側がファイル名から決めた請求年月で埋める
+        amountJpy: amount,
+        paymentTotal: toInt(c[5]), feeJpy: null,
+        isForeign: false, foreignAmount: '', currency: '', fxRate: '', fxDate: '',
+        remark: (c[6] ?? '').trim(),
+        dupIndex: 0,
+      });
+      return;
+    }
+
+    // 13列
+    const amount = toInt(c[6]);
     if (amount === null) { errors.push(`${i + 1}行目: 金額が不正 ${c[6]}`); return; }
     const fa = (c[9] ?? '').trim();
     const isForeign = fa !== '' || (c[10] ?? '').trim() !== '';
@@ -96,6 +132,7 @@ export function parseGoldpointCsv(text: string, fileName: string): ParsedCsv {
       currency: isForeign ? (c[10] ?? '').trim() : '',
       fxRate: isForeign ? (c[11] ?? '').trim() : '',
       fxDate: isForeign ? (c[12] ?? '').trim() : '',
+      remark: '',
       dupIndex: 0,
     });
   });
@@ -110,19 +147,31 @@ export function parseGoldpointCsv(text: string, fileName: string): ParsedCsv {
     counter.set(k, n + 1);
   }
 
-  // 請求年月は支払予定月の列から決める。ファイル名や画面の表示に依存しない。
-  // 全行が同じ月であることが前提なので、混在していたら取り込ませない。
-  const months = [...new Set(rows.map((r) => r.payMonth).filter(Boolean))];
+  // 請求年月の決め方。
+  //  A) 13列版: 支払予定月の列がある。全行が同じ月である前提なので、混在は弾く
+  //  B) 7列版: 列が無いのでファイル名 yyyyMM.csv（支払月）から取る。
+  //     利用日から「翌月が請求月」と推測する手もあるが、推測でずれても気づけないので採らない
+  const fileMonth = /(\d{4})(\d{2})/.exec(fileName);
   let billingMonth = '';
-  if (months.length === 1) {
-    billingMonth = months[0];
-  } else if (months.length > 1) {
-    errors.push(`支払予定月が混在しています: ${months.join(' / ')}`);
+  if (isConfirmed) {
+    if (fileMonth) {
+      billingMonth = `${fileMonth[1]}-${fileMonth[2]}`;
+      // 支払予定月の列が無い形式なので、請求年月をそのまま支払予定月として埋める
+      for (const r of rows) r.payMonth = billingMonth;
+    } else {
+      errors.push(`請求年月を判別できません。ファイル名を yyyyMM.csv 形式にしてください（現在: ${fileName}）`);
+    }
   } else {
-    // 支払予定月が空なら、ファイル名の先頭6桁（yyyyMM）を保険に使う
-    const m = /(\d{4})(\d{2})/.exec(fileName);
-    if (m) billingMonth = `${m[1]}-${m[2]}`;
-    else errors.push('請求年月を判別できません（支払予定月もファイル名も手がかりなし）');
+    const months = [...new Set(rows.map((r) => r.payMonth).filter(Boolean))];
+    if (months.length === 1) {
+      billingMonth = months[0];
+    } else if (months.length > 1) {
+      errors.push(`支払予定月が混在しています: ${months.join(' / ')}`);
+    } else if (fileMonth) {
+      billingMonth = `${fileMonth[1]}-${fileMonth[2]}`;
+    } else {
+      errors.push('請求年月を判別できません');
+    }
   }
 
   return {

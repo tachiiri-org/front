@@ -24,6 +24,7 @@ type StatementRow = {
   currency: string | null;
   foreign_amount: string | null;
   note: string | null;
+  remark: string | null;
   categories: string[];
 };
 
@@ -117,7 +118,8 @@ function renderCsvImport(status: HTMLElement, onDone: () => void): HTMLElement {
   box.appendChild(el('div', S.note,
     '確定済みの月はブックマークレットでは取得できません（CSV 直リンクが空を返すため）。' +
     '明細ページの「CSVファイルのダウンロード」で落としたファイルを、複数まとめて選べます。' +
-    '請求年月はファイルの支払予定月から判別します。'));
+    '確定前の13列形式と確定済みの7列形式の両方に対応します。請求年月は、13列形式は支払予定月の列から、' +
+    '7列形式はファイル名（yyyyMM.csv）から決まります。'));
 
   const controls = el('div', 'display:flex;gap:8px;align-items:center;margin-top:8px;flex-wrap:wrap;');
   const input = el('input', '') as HTMLInputElement;
@@ -340,6 +342,7 @@ export async function renderKakeibo(root: HTMLElement): Promise<void> {
       const shopCell = el('td', S.td);
       shopCell.appendChild(el('div', '', r.shop_alias || r.shop));
       if (r.shop_alias) shopCell.appendChild(el('div', S.note, r.shop));
+      if (r.remark) shopCell.appendChild(el('div', S.note, r.remark));
       if (r.is_foreign) shopCell.appendChild(el('div', S.note, `${r.foreign_amount} ${r.currency}`));
       tr.appendChild(shopCell);
       const catCell = el('td', S.td);
