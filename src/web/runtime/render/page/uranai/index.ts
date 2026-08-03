@@ -1755,7 +1755,7 @@ function chartView(chart: Chart, birth: Birth | null | undefined, personId: stri
   };
   // メモはグラフのリレーションと同じ形。本文＋n項の参加者。
   type Ray = { concept_kind: string; concept_id: string };
-  type Note = { note_id: string; idx: number; at: string | null; until: string | null; title: string; value: string; rays: Ray[]; links: string[] };
+  type Note = { note_id: string; idx: number; at: string | null; until: string | null; title: string; value: string; rays: Ray[]; links: string[]; cells: Record<string, string> };
   const hasRay = (n: Note, kind: string, id: string) => n.rays.some((r) => r.concept_kind === kind && r.concept_id === id);
   let notes: Note[] = [];
   const matHost = el("div", {});
@@ -1874,6 +1874,9 @@ function chartView(chart: Chart, birth: Birth | null | undefined, personId: stri
   const tabOf = (n: Note): string => n.rays.find((r) => r.concept_kind === "note_type")?.concept_id ?? "event";
   const dateVal = (v: string | null): string => (v ?? "").slice(0, 10);
   const isoOf = (d: string): string | null => (d ? `${d}T12:00:00Z` : null);
+  // タブごとの汎用カラム（列）。未取得のタブは非同期で読む。
+  type Col = { col_id: string; name: string; kind: string; idx: number };
+  const colsByTab: Record<string, Col[]> = {};
 
   // 右ペイン: 種別タブ＋一覧（列＝タイトル・期間、インライン編集）／または詳細ページ。
   const renderNotes = () => {
@@ -1890,9 +1893,40 @@ function chartView(chart: Chart, birth: Birth | null | undefined, personId: stri
       tabbar.append(b);
     }
     reportHost.append(tabbar);
+    // このタブの汎用カラム。未取得なら空で描いてから非同期取得→再描画。
+    if (colsByTab[noteTab] === undefined) {
+      colsByTab[noteTab] = [];
+      void api<{ columns: Col[] }>(`/api/v1/uranai/astrology/person/${personId}/note-columns?note_type=${noteTab}`)
+        .then((r) => { colsByTab[noteTab] = r.columns ?? []; renderNotes(); }).catch(() => { /* 未取得 */ });
+    }
+    const cols = colsByTab[noteTab] ?? [];
     const shown = notes.filter((n) => tabOf(n) === noteTab);
     const head = el("tr", {});
     for (const h of ["タイトル", "期間"]) head.append(el("th", { textContent: h }));
+    for (const col of cols) {
+      const th = el("th", { className: "u-col-th" });
+      th.append(el("span", { textContent: col.name || "（無名）" }));
+      const del = el("button", { className: "u-col-del", type: "button", textContent: "×", title: "列を削除" });
+      del.addEventListener("click", () => {
+        if (!confirm(`列「${col.name || "無名"}」を削除しますか？`)) return;
+        void api(`/api/v1/uranai/astrology/note-column/${col.col_id}`, { method: "DELETE" })
+          .then(() => { delete colsByTab[noteTab]; renderNotes(); });
+      });
+      th.append(del);
+      head.append(th);
+    }
+    // 列の追加（Notionの「＋」）
+    const addTh = el("th", { className: "u-col-add" });
+    const addColBtn = el("button", { className: "u-col-add-btn", type: "button", textContent: "＋", title: "列を追加" });
+    addColBtn.addEventListener("click", () => {
+      const name = prompt("列名を入力");
+      if (!name) return;
+      const kind = confirm("日付の列にしますか？（キャンセル＝テキスト）") ? "date" : "text";
+      void api(`/api/v1/uranai/astrology/person/${personId}/note-columns`, { method: "POST", body: JSON.stringify({ note_type: noteTab, name, kind }) })
+        .then(() => { delete colsByTab[noteTab]; renderNotes(); });
+    });
+    addTh.append(addColBtn);
+    head.append(addTh);
     const tbl = el("table", { className: "u-tbl u-tbl-auto u-db-tbl" }, [head]);
     for (const n of shown) {
       const tr = el("tr", {});
@@ -1914,6 +1948,15 @@ function chartView(chart: Chart, birth: Birth | null | undefined, personId: stri
         el("td", { className: "u-td-title" }, [ti, openBtn]),
         el("td", {}, [at, el("span", { className: "u-row-tilde", textContent: "〜" }), until]),
       );
+      // 汎用カラムのセル（種別ごとの入力）
+      for (const col of cols) {
+        const cur = n.cells?.[col.col_id] ?? "";
+        const inp = el("input", { className: "u-cell", type: col.kind === "date" ? "date" : "text", value: col.kind === "date" ? cur.slice(0, 10) : cur }) as HTMLInputElement;
+        const saveCell = () => { if (!n.cells) n.cells = {}; n.cells[col.col_id] = inp.value; patch(n, { cells: { [col.col_id]: inp.value } }, () => { /* 局所更新のみ */ }); };
+        inp.addEventListener("change", saveCell);
+        if (col.kind !== "date") inp.addEventListener("blur", saveCell);
+        tr.append(el("td", {}, [inp]));
+      }
       tbl.append(tr);
     }
     reportHost.append(tbl);
@@ -1925,7 +1968,7 @@ function chartView(chart: Chart, birth: Birth | null | undefined, personId: stri
         { method: "POST", body: JSON.stringify({ value: "", title: "", rays, at: nowIso }) })
         .then((r) => {
           // 一覧のまま空行を足す（詳細へは行かない）。編集は行内、詳細は「開く」で。
-          notes.push({ note_id: r.note_id, idx: r.idx, at: nowIso, until: null, title: "", value: "", rays: r.rays ?? rays, links: r.links ?? [] });
+          notes.push({ note_id: r.note_id, idx: r.idx, at: nowIso, until: null, title: "", value: "", rays: r.rays ?? rays, links: r.links ?? [], cells: {} });
           renderNotes();
         });
     });
@@ -2319,6 +2362,17 @@ export async function renderUranai(container: HTMLElement): Promise<void> {
     [data-theme=dark] .u-db-tab:hover{color:#fff;background:#ffffff0f}
     [data-theme=dark] .u-db-tab.on{color:#fff;border-bottom-color:#fff}
     [data-theme=dark] .u-open-btn{background:#2a2b2e;color:#ddd;border-color:#ffffff2b}
+    .u-col-th{position:relative;white-space:nowrap}
+    .u-col-del{margin-left:5px;border:0;background:transparent;color:#bbb;cursor:pointer;font-size:12px;opacity:0}
+    .u-col-th:hover .u-col-del{opacity:1}
+    .u-col-del:hover{color:#c0392b}
+    .u-col-add{width:34px}
+    .u-col-add-btn{border:1px dashed #0003;background:transparent;color:#888;cursor:pointer;border-radius:4px;padding:2px 7px;font-size:12px}
+    .u-col-add-btn:hover{color:#333;border-color:#4A90C2}
+    .u-cell{width:100%;box-sizing:border-box;padding:4px 6px;border:1px solid transparent;border-radius:4px;background:transparent;color:inherit;font-size:12px;color-scheme:dark}
+    .u-cell:hover,.u-cell:focus{border-color:#4A90C2;background:#00000008;outline:none}
+    [data-theme=light] .u-cell{color-scheme:light}
+    [data-theme=dark] .u-col-add-btn{border-color:#ffffff2b;color:#ffffff8a}
     .u-person{position:relative;display:flex;align-items:center;gap:4px;padding:6px 8px;border-radius:6px}.u-person:hover{background:#0000000a}.u-person.sel{background:#4A90C222;font-weight:600}
     .u-person-name{flex:1;min-width:0;cursor:pointer;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
     .u-person-menu{flex:none;border:0;background:transparent;color:#888;cursor:pointer;font-size:16px;line-height:1;padding:2px 6px;border-radius:4px}
