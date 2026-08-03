@@ -7,3 +7,6 @@ e2e/.auth/
 .playwright-mcp/
 .wrangler/
 .dev.vars
+
+# e2e のスクリーンショット（実データが写るため）
+e2e/*.png
