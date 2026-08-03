@@ -10,6 +10,7 @@ import { renderSettingsPage } from './runtime/render/page/settings';
 import { renderAdminPage } from './runtime/render/page/admin';
 import { renderGraphEditor } from './runtime/render/page/graph-editor';
 import { renderUranai } from './runtime/render/page/uranai';
+import { renderKakeibo } from './runtime/render/page/kakeibo';
 import { renderStorageExplorer } from './runtime/render/page/storage-explorer';
 import type { GraphEditorComponent } from './schema/component/kind/graph-editor';
 import type { StorageExplorerComponent } from './schema/component/kind/storage-explorer';
@@ -24,6 +25,7 @@ const PRODUCT = (window as unknown as { __PRODUCT__?: string }).__PRODUCT__;
 const PRODUCT_CONFIG: Record<string, { screens: string[] }> = {
   graph: { screens: ['graph-editor'] },
   uranai: { screens: ['uranai'] },
+  kakeibo: { screens: ['kakeibo'] },
   admin: { screens: ['org-members', 'admin-members', 'storage-explorer'] },
 };
 const PRODUCT_SCREENS = PRODUCT ? PRODUCT_CONFIG[PRODUCT]?.screens : undefined;
@@ -357,6 +359,15 @@ const renderScreen = async (screenId: string): Promise<void> => {
     root.innerHTML = '';
     root.style.position = 'relative';
     await renderUranai(root);
+    return;
+  }
+  // 家計簿もカスタム画面（layouts スペック不要）。明細一覧は縦に伸びるのでスクロール型。
+  if (screenId === 'kakeibo') {
+    applyScrollableLayout();
+    void renderNav(screenId);
+    root.innerHTML = '';
+    root.style.position = 'relative';
+    await renderKakeibo(root);
     return;
   }
   const inlineData = readInlineScreenData();
