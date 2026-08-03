@@ -52,6 +52,12 @@ export const KAKEIBO_TOOLS = [
     inputSchema: { type: "object", properties: {}, required: [] },
   },
   {
+    name: "kakeibo_read_summary",
+    description:
+      "Cross-month totals: 費目 (category) x 請求年月, and 店 (shop) x 請求年月. Use this to answer questions like 'how much did I spend on 食費 last month' or 'which shop grew the most' without reading every statement row. Categories are folded to one per shop (name order) so the totals sum to the real spend — a shop with several 費目 would otherwise be counted twice.",
+    inputSchema: { type: "object", properties: {}, required: [] },
+  },
+  {
     name: "kakeibo_read_statements",
     description:
       "Read the statement rows of one billing month (請求年月). Returns each row with its shop, alias, 費目, amount and remark, plus the latest import's totals. Read-only: rows are replaced wholesale on every import, so they must not be edited individually.",
@@ -90,6 +96,10 @@ export async function callKakeiboTool(
 ): Promise<ToolResult> {
   if (name === "kakeibo_list_shops") {
     return asResult(await kakeiboFetch(env, "/shops"));
+  }
+
+  if (name === "kakeibo_read_summary") {
+    return asResult(await kakeiboFetch(env, "/summary"));
   }
 
   if (name === "kakeibo_list_months") {

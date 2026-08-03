@@ -1,0 +1,196 @@
+/**
+ * 店に費目・略名を一括で付ける。マッピングは MAP に持つ（店名の完全一致 or 正規表現）。
+ * 明細そのものは触らない。費目・略名は店に紐づくので、取り込みを跨いで残る。
+ *
+ * 使い方: npx tsx e2e/kakeibo-apply.ts [dev|stage|production] [--dry-run]
+ */
+import './load-dev-vars.ts';
+import { chromium } from '@playwright/test';
+import path from 'node:path';
+import { fileURLToPath } from 'node:url';
+import { existsSync, readFileSync } from 'node:fs';
+
+const ENV = process.argv[2] ?? 'production';
+const DRY = process.argv.includes('--dry-run');
+const PREFIX = ENV === 'production' ? '' : `${ENV}.`;
+const BASE = `https://${PREFIX}kakeibo.tachiiri.com`;
+const STATE = path.join(path.dirname(fileURLToPath(import.meta.url)), `.auth/${PREFIX}kakeibo-tachiiri-com.json`);
+
+/** [店名の判定, 費目, 略名] 。判定は文字列(完全一致) か RegExp。 */
+type Rule = [string | RegExp, string[], string?];
+
+const MAP: Rule[] = [
+  // 公共料金・通信（月ごとに別店舗になるものは正規表現でまとめる）
+  ['東京ガス', ['公共料金'], '東京ガス'],
+  ['東京都水道局', ['公共料金'], '水道局'],
+  ['ＮＨＫ　放送受信料', ['公共料金'], 'NHK'],
+  [/^ＮＵＲＯ光/, ['通信費'], 'NURO光'],
+  ['ラクテンモバイルツウシンリヨウ', ['通信費'], '楽天モバイル'],
+  ['ドコモご利用料金', ['通信費'], 'ドコモ'],
+  [/^ソフトバンクＭ/, ['通信費'], 'ソフトバンク'],
+
+  // 通販
+  ['ヨドバシドットコム', ['通販'], 'ヨドバシ'],
+  ['ＡＭＡＺＯＮ．ＣＯ．ＪＰ', ['通販'], 'Amazon'],
+
+  // 食費（スーパー・食料品）
+  [/^ヨークフーズ/, ['食費'], 'ヨークフーズ'],
+  ['ライフ恵比寿ガ－デンプレイス店', ['食費'], 'ライフ'],
+  [/^イトーヨーカドー/, ['食費'], 'ヨーカドー'],
+  ['セブン－イレブン', ['食費'], 'セブン'],
+  ['ファミリーマート', ['食費'], 'ファミマ'],
+  ['ローソン', ['食費'], 'ローソン'],
+  ['坂ノ途中ＯｎｌｉｎｅＳｈｏｐ', ['食費'], '坂ノ途中'],
+  ['株式会社大石', ['食費'], '大石'],
+  ['オーケー三鷹北口店', ['食費'], 'オーケー'],
+  ['いなげや　小金井東町店', ['食費'], 'いなげや'],
+  ['京王ストア', ['食費'], '京王ストア'],
+  ['まいばすけっと', ['食費'], 'まいばす'],
+  [/^サミット/, ['食費'], 'サミット'],
+  ['イオンマーケット', ['食費'], 'イオン'],
+  ['よつ葉ミルクプレイス', ['食費'], 'よつ葉'],
+  [/^コ―ク  オン  ペイ|^コカ・コーラ/, ['食費'], 'コカコーラ'],
+
+  // 外食
+  [/マクドナルド|マックデリバリ/, ['外食'], 'マック'],
+  ['ガスト', ['外食'], 'ガスト'],
+  ['ケンタッキーフライドチキン', ['外食'], 'ケンタッキー'],
+  [/^吉野家/, ['外食'], '吉野家'],
+  [/^サイゼリヤ/, ['外食'], 'サイゼリヤ'],
+  ['すかいら－く店頭飲食アプリ決済', ['外食'], 'すかいらーく'],
+  ['カブシキガイシャドミノピザジャパン', ['外食'], 'ドミノピザ'],
+  ['ピザーラ', ['外食'], 'ピザーラ'],
+  [/^モスの|^モスバーガー/, ['外食'], 'モス'],
+  [/^かつや/, ['外食'], 'かつや'],
+  ['デニーズ', ['外食'], 'デニーズ'],
+  ['餃子の王将　武蔵境駅前店', ['外食'], '王将'],
+  ['魚べい東小金井店', ['外食'], '魚べい'],
+  ['銀座麻辣湯', ['外食'], '麻辣湯'],
+  ['八郎そば', ['外食'], '八郎そば'],
+  ['スターバックス　コーヒー　ジャパン', ['外食'], 'スタバ'],
+  [/^タリーズ/, ['外食'], 'タリーズ'],
+  ['サーティワンアイスクリーム', ['外食'], 'サーティワン'],
+
+  // サブスク・クラウド
+  [/OPENAI|CHATGPT/, ['サブスク'], 'OpenAI'],
+  [/CLAUDE\.AI|ANTHROPIC/, ['サブスク'], 'Claude'],
+  [/NOTION|ＮＯＴＩＯＮ/, ['サブスク'], 'Notion'],
+  [/ＮＥＴＦＬＩＸ|ネットフリックス/, ['サブスク'], 'Netflix'],
+  [/^ＡＰＰＬＥ  ＣＯＭ  ＢＩＬＬ/, ['サブスク'], 'Apple'],
+  ['Ａｍａｚｏｎプライム会費', ['サブスク'], 'Amazonプライム'],
+  [/GITHUB|ＧＩＴＨＵＢ/, ['サブスク'], 'GitHub'],
+  [/CLOUDFLARE|ＣＬＯＵＤＦＬＡＲＥ/, ['サブスク'], 'Cloudflare'],
+  [/ＧＯＯＧＬＥ＊ＣＬＯＵＤ/, ['サブスク'], 'GCP'],
+  [/BUYMEACOFFEE|COFF\.EE/, ['サブスク'], 'buymeacoffee'],
+  ['ＤＭＭ', ['サブスク'], 'DMM'],
+
+  // 日用品
+  ['バックマーケットジャパンカブシキガイシャ', ['日用品'], 'Back Market'],
+  ['株式会社タカギ', ['日用品'], 'タカギ'],
+  [/^ダイソー/, ['日用品'], 'ダイソー'],
+  [/^セリア/, ['日用品'], 'セリア'],
+  ['カインズ', ['日用品'], 'カインズ'],
+  [/^ウェルパーク/, ['日用品'], 'ウェルパーク'],
+  ['無印良品', ['日用品'], '無印'],
+
+  // 美容
+  ['Ｓｑｕａｒｅ', ['美容'], '美容院'],
+
+  // レジャー
+  [/^東京ディズニーリゾート/, ['レジャー'], 'ディズニー'],
+  [/^ＴＯＨＯシネマズ|^吉祥寺オデヲン|^丸の内ピカデリー/, ['レジャー'], '映画'],
+  ['京王れーるランド', ['レジャー'], '京王れーるランド'],
+  ['野川公園', ['レジャー'], '野川公園'],
+  ['多摩動物公園', ['レジャー'], '多摩動物公園'],
+  [/^ＮＩＮＴＥＮＤＯ/, ['レジャー'], '任天堂'],
+
+  // 医療
+  [/クリニック|薬局|医療センター|脳神経外科/, ['医療'], undefined],
+
+  // ── 2回目の分類（未分類だった61店舗のうち、方針が決まったもの）
+  // 商業施設・駅ビルは中で何を買ったか分からないので「お出かけ」でまとめる
+  [/^アトレ|^吉祥寺パルコ|^ルミネ|^東京ソラマチ|^東京ミッドタウン|^新丸の内ビルディング/, ['お出かけ'], undefined],
+  [/^東京駅グランスタ|^グランスタ東京|^キラリナ京王吉祥寺|^ｎｏｎｏｗａ|^渋谷サクラステージ/, ['お出かけ'], undefined],
+  [/^ＪＲ東日本クロスステーション|^ＪＲ－ＣｒｏｓｓＲＣＰ/, ['お出かけ'], undefined],
+
+  // カフェ・スイーツ・食堂は外食
+  [/^ゴディバ|^パティスリー|^ラブティック|^楠木茶房|^キィニョン|^ウッドベリ|^ＨＵＧＨＵＧ/, ['外食'], undefined],
+  [/^カフェテラスロイヤル|^和菓子処ならは|^ハイチ|^いい菜|^アンドザフリット|^国際基督教大学食堂/, ['外食'], undefined],
+  [/券売機|^発券機|^食券/, ['外食'], undefined],
+
+  // 書店・衣類は日用品
+  [/^ジュンク堂|^丸善|^紀伊國屋|^ＢＯＯＫＯＦＦ/, ['日用品'], undefined],
+  [/^ＺＡＲＡ|^ユニクロ/, ['日用品'], undefined],
+
+  // 交通
+  [/^Ｓｕｉｃａ|^ＧＯ（タクシーアプリ）|^個人タクシー|^羽田空港ターミナル/, ['交通費'], undefined],
+  [/^ＮｅｗＤａｙｓ|^ヤマト運輸|^チヤ―ジスポツト/, ['交通費'], undefined],
+  ['サイクルンペデイア', ['交通費'], 'サイクルンペディア'],
+
+  // 習い事・その他
+  ['桜田倶楽部・東京テニスカレッジ', ['テニス'], '東京テニスカレッジ'],
+  [/^テニスサポ|^ダヴィンチマスターズ|^パークス野川店/, ['日用品'], undefined],
+  ['秋田県男鹿市（さとふる）', ['ふるさと納税'], 'さとふる'],
+];
+
+const norm = (s: string): string => s.normalize('NFKC').replace(/\s+/g, ' ').trim();
+
+function ruleFor(shop: string): Rule | undefined {
+  const n = norm(shop);
+  return MAP.find(([m]) => (typeof m === 'string' ? norm(m) === n : m.test(shop) || m.test(n)));
+}
+
+if (!existsSync(STATE)) {
+  console.error(`認証状態がありません。先に screenshot-kakeibo.ts を実行してください`);
+  process.exit(1);
+}
+
+const browser = await chromium.launch({ headless: true, args: ['--no-sandbox'] });
+const ctx = await browser.newContext({ storageState: JSON.parse(readFileSync(STATE, 'utf-8')) });
+const page = await ctx.newPage();
+await page.goto(`${BASE}/import`, { waitUntil: 'domcontentloaded' });
+await page.waitForSelector('.kk', { timeout: 30000 });
+
+const shops = (await page.evaluate(`(async () => {
+  const r = await fetch('/api/v1/kakeibo/shops');
+  return (await r.json()).shops;
+})()`)) as { shop_id: string; name: string; alias: string | null }[];
+
+const plan: { id: string; shop: string; cats: string[]; alias?: string }[] = [];
+const unmatched: string[] = [];
+for (const s of shops) {
+  const rule = ruleFor(s.name);
+  if (!rule) { unmatched.push(s.name); continue; }
+  plan.push({ id: s.shop_id, shop: s.name, cats: rule[1], alias: rule[2] });
+}
+
+console.log(`店舗数=${shops.length} 一致=${plan.length} 未分類=${unmatched.length}`);
+for (const p of plan) console.log(`  ${p.shop} → ${p.cats.join('|')}${p.alias ? ' / ' + p.alias : ''}`);
+console.log('--- 未分類 ---');
+for (const u of unmatched) console.log(`  ${u}`);
+
+if (DRY) { console.log('\n(dry-run: 変更していません)'); await browser.close(); process.exit(0); }
+
+let ok = 0;
+let skipped = 0;
+for (const p of plan) {
+  // backend にレート制限があるので間隔を空ける（429 で半分近く弾かれた）
+  await page.waitForTimeout(900);
+  const body = JSON.stringify(p.alias === undefined ? { categories: p.cats } : { categories: p.cats, alias: p.alias });
+  const res = (await page.evaluate(
+    `fetch('/api/v1/kakeibo/shops/${p.id}', {method:'PUT',headers:{'Content-Type':'application/json'},body:${JSON.stringify(body)}}).then(r=>r.status)`,
+  )) as number;
+  if (res === 200) { ok++; continue; }
+  if (res === 429) {
+    // 一度だけ長めに待って再試行する
+    await page.waitForTimeout(6000);
+    const retry = (await page.evaluate(
+      `fetch('/api/v1/kakeibo/shops/${p.id}', {method:'PUT',headers:{'Content-Type':'application/json'},body:${JSON.stringify(body)}}).then(r=>r.status)`,
+    )) as number;
+    if (retry === 200) { ok++; continue; }
+  }
+  skipped++;
+  console.log(`  失敗 ${res}: ${p.shop}`);
+}
+console.log(`\n登録 ${ok}/${plan.length}（失敗 ${skipped}）`);
+await browser.close();
