@@ -2393,7 +2393,7 @@ export async function renderUranai(container: HTMLElement): Promise<void> {
     .u-report-body{color:#888;font-size:13px}
     /* ノートDB（Notion風） */
     .u-db-tabs{display:flex;gap:2px;align-items:center;border-bottom:1px solid #0001;margin-bottom:8px;overflow:visible;flex-wrap:nowrap}
-    .u-db-tab{display:inline-flex;align-items:center;gap:5px;border:0;background:transparent;color:#888;cursor:pointer;font-size:13px;padding:6px 10px;border-bottom:2px solid transparent;white-space:nowrap;margin-bottom:-1px}
+    .u-db-tab{position:relative;display:inline-flex;align-items:center;gap:5px;border:0;background:transparent;color:#888;cursor:pointer;font-size:13px;padding:6px 10px;border-bottom:2px solid transparent;white-space:nowrap;margin-bottom:-1px}
     .u-db-tab:hover{color:#333;background:#00000006}
     .u-db-tab.on{color:#333;font-weight:600;border-bottom-color:#333}
     .u-db-tab-ic{opacity:.55;font-size:12px}
