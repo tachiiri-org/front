@@ -119,7 +119,7 @@ export function handleOAuthMetadata(request: Request, env: AuthorizeEnv): Respon
     grant_types_supported: ["authorization_code", "refresh_token"],
     code_challenge_methods_supported: ["S256"],
     token_endpoint_auth_methods_supported: ["none"],
-    scopes_supported: ["graph:read", "graph:write"],
+    scopes_supported: ["graph:read", "graph:write", "uranai:read", "uranai:write"],
   });
 }
 
@@ -139,7 +139,7 @@ export function handleOpenIDConfiguration(request: Request, env: AuthorizeEnv): 
     token_endpoint_auth_methods_supported: ["none"],
     subject_types_supported: ["public"],
     id_token_signing_alg_values_supported: ["ES256"],
-    scopes_supported: ["openid", "graph:read", "graph:write"],
+    scopes_supported: ["openid", "graph:read", "graph:write", "uranai:read", "uranai:write"],
     claims_supported: ["iss", "sub", "aud", "exp", "iat", "auth_time", "group_id"],
   });
 }
@@ -188,7 +188,7 @@ export async function handleMcpAuthorize(request: Request, env: AuthorizeEnv): P
   const codeChallenge = url.searchParams.get("code_challenge") ?? "";
   const codeChallengeMethod = url.searchParams.get("code_challenge_method") ?? "S256";
   const state = url.searchParams.get("state") ?? "";
-  const scope = url.searchParams.get("scope") ?? "graph:read graph:write";
+  const scope = url.searchParams.get("scope") ?? "graph:read graph:write uranai:read uranai:write";
   // RFC 8707: the resource the client wants a token for. We only serve one resource
   // (this MCP server), so reject a mismatched request and default to it when omitted.
   const serverResource = mcpResource(request, env);
