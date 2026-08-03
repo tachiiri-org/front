@@ -47,7 +47,7 @@ export const ASPECT_ORDER = ["conjunction", "sextile", "square", "trine", "oppos
 export const NS = "http://www.w3.org/2000/svg";
 
 export type Person = { id: string; label: string | null };
-export type Prefill = { label?: string | null; date?: string; time?: string; place?: string; lat?: number; lng?: number; tz?: string };
+export type Prefill = { label?: string | null; date?: string; time?: string; dateEnd?: string; timeEnd?: string; place?: string; lat?: number; lng?: number; tz?: string };
 export type Settings = { zodiac: string; house_system_id: string; ephemeris: string; ayanamsha: string };
 // ユーザーごとの方式デフォルト（設定画面）の選択肢。[key, ラベル, 選択肢[[値,表示]]]。
 /**
@@ -170,7 +170,7 @@ export const fmtDeg = (d: number): string => {
   if (min >= 60) { min -= 60; deg += 1; }
   return `${deg}°${String(min).padStart(2, "0")}′`;
 };
-export type Birth = { born_at: string | null; lat: string | null; lng: string | null; place: string | null; timezone: string | null };
+export type Birth = { born_at: string | null; born_until: string | null; lat: string | null; lng: string | null; place: string | null; timezone: string | null };
 // チャート全体の形（ジョーンズの惑星配置型）。名称と成立条件の事実のみ。閾値は標準的な定義。
 // 7パターンの表示順（ジョーンズの定義。集中→分散の順）。
 export const SHAPE_ORDER = ["bundle", "bowl", "bucket", "locomotive", "seesaw", "splash", "splay"];
