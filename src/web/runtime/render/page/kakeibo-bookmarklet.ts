@@ -1,0 +1,168 @@
+// カード明細ページで動かすブックマークレットの本体。
+//
+// この関数はページ内では実行されない。toString() で直列化して javascript: URL にし、
+// 利用者がブックマークとして登録する。よって外部の import やモジュールスコープの値を
+// 参照してはならない（自己完結していること）。送信先は登録時のオリジンを埋め込むので、
+// dev / stage / 本番で同じコードが使える。
+//
+// 明細ページ側から外部オリジンへ直接 fetch はしない。CSV は同一オリジンで取得し、
+// 家計簿アプリのタブへ postMessage で渡す。相手サイトの CSP に左右されない。
+export function goldpointBookmarklet(TARGET: string): void {
+  const toast = (msg: string, isError?: boolean): HTMLElement => {
+    const d = (document.getElementById('__gp_toast') as HTMLElement) || document.createElement('div');
+    d.id = '__gp_toast';
+    d.style.cssText =
+      'position:fixed;z-index:2147483647;left:50%;top:20px;transform:translateX(-50%);' +
+      'padding:12px 18px;border-radius:6px;font:14px/1.6 sans-serif;color:#fff;max-width:80vw;' +
+      'box-shadow:0 2px 12px rgba(0,0,0,.3);background:' + (isError ? '#c0392b' : '#2c3e50');
+    d.textContent = msg;
+    document.body.appendChild(d);
+    return d;
+  };
+
+  const p01m = /[?&]p01=(\d{6})/.exec(location.href);
+  if (!p01m) {
+    toast('明細ページ（p01=YYYYMM 付きのURL）で実行してください', true);
+    return;
+  }
+  const p01 = p01m[1];
+
+  const body = document.body.innerText.replace(/\s+/g, ' ');
+  const pick = (re: RegExp): string => {
+    const m = re.exec(body);
+    return m ? m[1] : '';
+  };
+  const shownTotalRaw = pick(/ご利用明細合計\s*([\d,]+)\s*円/).replace(/,/g, '');
+  const shownTotal = shownTotalRaw ? Number(shownTotalRaw) : null;
+  const asOf = pick(/(\d{4}年\d{1,2}月\d{1,2}日)\s*現在判明分/);
+
+  toast('CSV を取得しています…');
+
+  const url =
+    location.origin + '/memapi/jaxrs/dl/meisai/meisai_csv_dl/v1?downloadKey=2&seikyuym=' + p01;
+
+  fetch(url, { credentials: 'include' })
+    .then((r) => {
+      if (!r.ok) throw new Error('CSV 取得に失敗しました (HTTP ' + r.status + ')');
+      return r.arrayBuffer();
+    })
+    .then((buf) => {
+      const text = new TextDecoder('shift_jis').decode(buf);
+      const lines = text.split(/\r?\n/).filter((l) => l.trim() !== '');
+      const rows: Record<string, unknown>[] = [];
+      const errors: string[] = [];
+
+      const zero = (s: string | number): string => String(s).padStart(2, '0');
+      const toDate = (s: string): string => {
+        const m = /^(\d{4})\/(\d{1,2})\/(\d{1,2})$/.exec(s.trim());
+        return m ? m[1] + '-' + zero(m[2]) + '-' + zero(m[3]) : '';
+      };
+      const toMonth = (s: string): string => {
+        // "'26/08" — Excel の日付自動変換除けで先頭にアポストロフィが付く
+        const m = /^'?(\d{2})\/(\d{1,2})$/.exec(s.trim());
+        return m ? '20' + m[1] + '-' + zero(m[2]) : '';
+      };
+      const toInt = (s: string): number | null => {
+        const t = String(s == null ? '' : s).replace(/[',]/g, '').trim();
+        if (t === '') return null;
+        const n = Number(t);
+        return isFinite(n) ? Math.round(n) : null;
+      };
+      const norm = (s: string): string => String(s).normalize('NFKC').replace(/\s+/g, ' ').trim();
+
+      lines.forEach((line, i) => {
+        const c = line.split(',');
+        // 実データは店名の読点が全角なので split(',') が通るが、ASCII カンマが来ると
+        // 静かに列がずれる。列数を検証して、ずれたら取り込ませない。
+        if (c.length !== 13) {
+          errors.push(i + 1 + '行目: 列数 ' + c.length + '（13のはず）');
+          return;
+        }
+        const usedOn = toDate(c[0]);
+        const amount = toInt(c[6]);
+        if (!usedOn) { errors.push(i + 1 + '行目: 利用日が不正 ' + c[0]); return; }
+        if (amount === null) { errors.push(i + 1 + '行目: 金額が不正 ' + c[6]); return; }
+        const fa = (c[9] || '').trim();
+        const isForeign = fa !== '' || (c[10] || '').trim() !== '';
+        rows.push({
+          usedOn: usedOn, shop: c[1].trim(), shopKey: norm(c[1]),
+          card: c[2].trim(), cardKey: norm(c[2]),
+          payType: c[3].trim(), installments: c[4].trim(), payMonth: toMonth(c[5]),
+          amountJpy: amount,
+          // 外貨行は「お支払い総額」が空になる
+          paymentTotal: toInt(c[7]), feeJpy: toInt(c[8]),
+          isForeign: isForeign, foreignAmount: isForeign ? fa : '',
+          currency: isForeign ? (c[10] || '').trim() : '',
+          fxRate: isForeign ? (c[11] || '').trim() : '',
+          fxDate: isForeign ? (c[12] || '').trim() : '',
+        });
+      });
+
+      if (errors.length) { toast('CSV の解析に失敗: ' + errors[0], true); return; }
+
+      // 同一(利用日+店+カード)内の連番。表は利用日の降順で新しい利用が先頭に挿入されるため、
+      // 全体の通し番号だと毎回ずれる。グループ内なら他の日に何件増えても影響しない。
+      const counter: Record<string, number> = {};
+      rows.forEach((r) => {
+        const k = [r.usedOn, r.shopKey, r.cardKey].join('');
+        r.dupIndex = counter[k] || 0;
+        counter[k] = (r.dupIndex as number) + 1;
+      });
+
+      const rowsTotal = rows.reduce((a, r) => a + (r.amountJpy as number), 0);
+      // 画面の合計との一致は必須。ページングに気づかず3割の行を落としかけた実績があるので、
+      // 一致しない限り送信しない。
+      if (shownTotal !== null && shownTotal !== rowsTotal) {
+        toast('合計が一致しません（画面 ' + shownTotal + ' 円 / 明細 ' + rowsTotal +
+              ' 円）。取り込みを中止しました', true);
+        return;
+      }
+
+      const payload = {
+        source: 'goldpoint',
+        billingMonth: p01.slice(0, 4) + '-' + p01.slice(4),
+        asOf: asOf,
+        capturedAt: new Date().toISOString(),
+        rowCount: rows.length,
+        rowsTotal: rowsTotal,
+        shownTotal: shownTotal,
+        rows: rows,
+      };
+
+      const t = toast('取り込み先を開いています…');
+      const w = window.open(TARGET + '/import', 'gp_import');
+      if (!w) { toast('ポップアップがブロックされました。許可してから再実行してください', true); return; }
+
+      // 受け手が未ログインだと認証を挟むため、準備完了は cross-origin では検知できない。
+      // ack が返るまで送り続ける。ログイン操作を挟んでも間に合うよう 3 分待つ。
+      let done = false;
+      const onMsg = (ev: MessageEvent): void => {
+        if (ev.origin !== TARGET) return;
+        const d = ev.data as { type?: string } | null;
+        if (d && d.type === 'gp-import-ack') {
+          done = true;
+          window.removeEventListener('message', onMsg);
+          t.textContent = '送信しました（' + rows.length + '件 / ' + rowsTotal + '円）';
+          setTimeout(() => { t.remove(); }, 4000);
+        }
+      };
+      window.addEventListener('message', onMsg);
+
+      let tries = 0;
+      const timer = setInterval(() => {
+        if (done || tries++ > 360) {
+          clearInterval(timer);
+          if (!done) toast('取り込み先から応答がありません', true);
+          return;
+        }
+        try { w.postMessage({ type: 'gp-import', payload: payload }, TARGET); } catch (e) { /* 未遷移中は無視 */ }
+      }, 500);
+    })
+    .catch((e: unknown) => { toast(String(e instanceof Error ? e.message : e), true); });
+}
+
+/** 現在のオリジンを送信先として埋め込んだ javascript: URL を組み立てる */
+export function buildBookmarkletUrl(origin: string): string {
+  const src = `(${goldpointBookmarklet.toString()})(${JSON.stringify(origin)})`;
+  return 'javascript:' + encodeURIComponent(src);
+}

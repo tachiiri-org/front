@@ -7,6 +7,8 @@
 // 明細は請求年月ごとの全削除・全追加なので、行に付けた分類は残らない。分類は「店」に
 // 紐づけて毎回復元する。だから画面の主役は明細そのものより、店への費目・略名の付与になる。
 
+import { buildBookmarkletUrl } from './kakeibo-bookmarklet';
+
 type StatementRow = {
   statement_id: string;
   used_on: string;
@@ -144,6 +146,37 @@ export async function renderKakeibo(root: HTMLElement): Promise<void> {
   const reloadBtn = el('button', S.btn, '再読込');
   bar.append(el('span', '', '請求年月'), monthSel, reloadBtn);
   page.append(bar, status);
+
+  // ブックマークレットの受け渡し。ドラッグ登録は本番の運用として想定していないので、
+  // クリップボードへコピーしてブックマークのURL欄に貼ってもらう。登録は一度きりで済む。
+  // 送信先は今見ているオリジンを埋め込むため、dev/stage/本番でそれぞれ正しいものが作られる。
+  const setup = el('div', S.card);
+  setup.appendChild(el('div', 'font-weight:600;margin-bottom:6px;', '取り込み用ブックマークレット'));
+  setup.appendChild(el('div', S.note,
+    'コピーしてブックマークを新規作成し、URL 欄に貼り付けてください。登録は一度だけで済みます。' +
+    'カードのご利用明細ページを開いた状態でそのブックマークを開くと、この画面へ取り込まれます。'));
+  const copyRow = el('div', 'display:flex;gap:8px;align-items:center;margin-top:8px;flex-wrap:wrap;');
+  const copyBtn = el('button', S.btn, 'ブックマークレットをコピー');
+  const copyMsg = el('span', S.note, '');
+  copyBtn.addEventListener('click', () => void (async () => {
+    const url = buildBookmarkletUrl(location.origin);
+    try {
+      await navigator.clipboard.writeText(url);
+      copyMsg.textContent = `コピーしました（${url.length.toLocaleString('ja-JP')} 文字 / 送信先 ${location.origin}）`;
+      copyMsg.setAttribute('style', S.ok);
+    } catch {
+      // クリップボード API が使えない場合は選択してコピーできるように出す
+      const ta = el('textarea', 'width:100%;height:80px;margin-top:8px;font:11px monospace;') as HTMLTextAreaElement;
+      ta.value = url;
+      copyRow.parentElement?.appendChild(ta);
+      ta.select();
+      copyMsg.textContent = '自動コピーできませんでした。下の内容を手動でコピーしてください。';
+      copyMsg.setAttribute('style', S.err);
+    }
+  })());
+  copyRow.append(copyBtn, copyMsg);
+  setup.appendChild(copyRow);
+  page.appendChild(setup);
 
   const summary = el('div', S.card);
   const listBox = el('div');
