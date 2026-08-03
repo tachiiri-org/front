@@ -107,10 +107,15 @@ export const PATTERN_INFO: Record<string, { name: string; aka?: string; comp: st
   stellium:          { name: "ステリウム", comp: "同一サイン/ハウスに3天体以上" },
 };
 export const PATTERN_ORDER = ["grand_sextile", "grand_cross", "kite", "mystic_rectangle", "grand_trine", "t_square", "yod", "stellium", "cradle", "wedge", "mini_trine"];
+// 出生時刻の幅で不正確になる要素。バックエンドが中央時刻で計算しつつ、幅で不確実なものを立てる。
+export type Uncertain = { width_minutes: number; angles: Record<string, boolean>; houses: boolean; bodies: Record<string, boolean>; points: string[] };
+
 export type Chart = {
   ascendant: number; midheaven: number;
   house_system?: string; cusps?: Cusp[];
   ruleset?: string;
+  // GET chart は birth_uncertain、compute は uncertain で返す（どちらか一方が入る）。
+  birth_uncertain?: Uncertain; uncertain?: Uncertain;
   wheel_layout?: "sign_fixed" | "mandala"; // 流派が指定する描画規約（バックエンドが返す）
   interceptions?: Array<{ house: string; sign: string }>; // どのカスプにも現れないサイン
   tally?: boolean; // エレメント/クオリティの数え上げを使う流派か
