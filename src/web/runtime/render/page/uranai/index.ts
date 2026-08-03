@@ -1924,8 +1924,9 @@ function chartView(chart: Chart, birth: Birth | null | undefined, personId: stri
       void api<{ note_id: string; idx: number; rays?: Ray[]; links?: string[] }>(`/api/v1/uranai/astrology/person/${personId}/notes`,
         { method: "POST", body: JSON.stringify({ value: "", title: "", rays, at: nowIso }) })
         .then((r) => {
+          // 一覧のまま空行を足す（詳細へは行かない）。編集は行内、詳細は「開く」で。
           notes.push({ note_id: r.note_id, idx: r.idx, at: nowIso, until: null, title: "", value: "", rays: r.rays ?? rays, links: r.links ?? [] });
-          openNote = r.note_id; renderNotes();
+          renderNotes();
         });
     });
     reportHost.append(add);
