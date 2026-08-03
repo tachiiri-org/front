@@ -1865,10 +1865,10 @@ function chartView(chart: Chart, birth: Birth | null | undefined, personId: stri
     return box;
   };
 
-  // 右ペインはノートDB。タブ＝種別(note_type)のビュー。プロパティはタイトル・期間・テキストのみ。
-  const NOTE_TABS: Array<{ id: string; label: string }> = [
-    { id: "event", label: "出来事" }, { id: "concept", label: "概念" },
-  ];
+  // 右ペインはノートDB。タブ＝ビュー(note_type)。タブ・列はユーザーが追加/改名/削除できる。
+  type Tab = { note_type: string; label: string; idx: number };
+  let tabs: Tab[] = [];
+  let tabsLoaded = false;
   let noteTab = "event";
   // 種別の無い既存ノートは「出来事」に置く（プロポーズ等を失わない）。
   const tabOf = (n: Note): string => n.rays.find((r) => r.concept_kind === "note_type")?.concept_id ?? "event";
@@ -1884,14 +1884,41 @@ function chartView(chart: Chart, birth: Birth | null | undefined, personId: stri
     reportHost.innerHTML = "";
     const open = openNote ? notes.find((x) => x.note_id === openNote) : null;
     if (open) { reportHost.append(pageView(open, renderNotes)); return; }
-    // タブ（種別ごとのビュー）。Notion風＝アイコン＋ラベル、選択中は下線。
+    // タブ（ビュー）を読む（未取得なら取得→再描画）。
+    if (!tabsLoaded) {
+      tabsLoaded = true;
+      void api<{ tabs: Tab[] }>(`/api/v1/uranai/astrology/person/${personId}/note-tabs`)
+        .then((r) => { tabs = r.tabs ?? []; if (tabs.length && !tabs.some((t) => t.note_type === noteTab)) noteTab = tabs[0].note_type; renderNotes(); }).catch(() => { /* 未取得 */ });
+    }
+    // Notion風タブ＝アイコン＋ラベル、選択中は下線。⋯で改名/削除、末尾＋で追加。
     const tabbar = el("div", { className: "u-db-tabs" });
-    for (const t of NOTE_TABS) {
-      const b = el("button", { className: "u-db-tab" + (t.id === noteTab ? " on" : ""), type: "button" });
+    for (const t of tabs) {
+      const b = el("button", { className: "u-db-tab" + (t.note_type === noteTab ? " on" : ""), type: "button" });
       b.append(el("span", { className: "u-db-tab-ic", textContent: "▤" }), el("span", { textContent: t.label }));
-      b.addEventListener("click", () => { noteTab = t.id; renderNotes(); });
+      b.addEventListener("click", () => { noteTab = t.note_type; renderNotes(); });
+      const menu = el("button", { className: "u-db-tab-menu", type: "button", textContent: "⋯", title: "タブの操作" });
+      menu.addEventListener("click", (e) => {
+        e.stopPropagation();
+        const act = prompt(`「${t.label}」タブ：  r=改名  /  d=削除  を入力`, "");
+        if (act === "r") {
+          const nm = prompt("新しいタブ名", t.label);
+          if (nm) void api(`/api/v1/uranai/astrology/person/${personId}/note-tabs/${encodeURIComponent(t.note_type)}`, { method: "PUT", body: JSON.stringify({ label: nm }) }).then(() => { tabsLoaded = false; renderNotes(); });
+        } else if (act === "d") {
+          if (confirm(`タブ「${t.label}」を削除しますか？（この列は消え、行は「出来事」へ移ります）`))
+            void api(`/api/v1/uranai/astrology/person/${personId}/note-tabs/${encodeURIComponent(t.note_type)}`, { method: "DELETE" }).then(() => { if (noteTab === t.note_type) noteTab = "event"; delete colsByTab[t.note_type]; tabsLoaded = false; renderNotes(); });
+        }
+      });
+      b.append(menu);
       tabbar.append(b);
     }
+    const addTab = el("button", { className: "u-db-tab u-db-tab-add", type: "button", textContent: "＋", title: "タブを追加" });
+    addTab.addEventListener("click", () => {
+      const label = prompt("新しいタブ名");
+      if (!label) return;
+      void api<{ note_type: string }>(`/api/v1/uranai/astrology/person/${personId}/note-tabs`, { method: "POST", body: JSON.stringify({ label }) })
+        .then((r) => { noteTab = r.note_type; tabsLoaded = false; renderNotes(); });
+    });
+    tabbar.append(addTab);
     reportHost.append(tabbar);
     // このタブの汎用カラム。未取得なら空で描いてから非同期取得→再描画。
     if (colsByTab[noteTab] === undefined) {
@@ -1905,14 +1932,17 @@ function chartView(chart: Chart, birth: Birth | null | undefined, personId: stri
     for (const h of ["タイトル", "期間"]) head.append(el("th", { textContent: h }));
     for (const col of cols) {
       const th = el("th", { className: "u-col-th" });
-      th.append(el("span", { textContent: col.name || "（無名）" }));
-      const del = el("button", { className: "u-col-del", type: "button", textContent: "×", title: "列を削除" });
-      del.addEventListener("click", () => {
-        if (!confirm(`列「${col.name || "無名"}」を削除しますか？`)) return;
-        void api(`/api/v1/uranai/astrology/note-column/${col.col_id}`, { method: "DELETE" })
-          .then(() => { delete colsByTab[noteTab]; renderNotes(); });
+      // 見出しクリックでメニュー：改名 / 種別切替(text⇄date) / 削除。
+      const nameBtn = el("button", { className: "u-col-name", type: "button" });
+      nameBtn.append(el("span", { textContent: col.name || "（無名）" }), el("span", { className: "u-col-kind", textContent: col.kind === "date" ? "📅" : "" }));
+      nameBtn.addEventListener("click", () => {
+        const act = prompt(`列「${col.name}」：  r=改名  /  k=種別切替(text⇄date)  /  d=削除`, "");
+        const after = () => { delete colsByTab[noteTab]; renderNotes(); };
+        if (act === "r") { const nm = prompt("新しい列名", col.name); if (nm != null) void api(`/api/v1/uranai/astrology/note-column/${col.col_id}`, { method: "PUT", body: JSON.stringify({ name: nm }) }).then(after); }
+        else if (act === "k") { const nk = col.kind === "date" ? "text" : "date"; void api(`/api/v1/uranai/astrology/note-column/${col.col_id}`, { method: "PUT", body: JSON.stringify({ kind: nk }) }).then(after); }
+        else if (act === "d") { if (confirm(`列「${col.name || "無名"}」を削除しますか？`)) void api(`/api/v1/uranai/astrology/note-column/${col.col_id}`, { method: "DELETE" }).then(after); }
       });
-      th.append(del);
+      th.append(nameBtn);
       head.append(th);
     }
     // 列の追加（Notionの「＋」）
@@ -2373,6 +2403,12 @@ export async function renderUranai(container: HTMLElement): Promise<void> {
     .u-cell:hover,.u-cell:focus{border-color:#4A90C2;background:#00000008;outline:none}
     [data-theme=light] .u-cell{color-scheme:light}
     [data-theme=dark] .u-col-add-btn{border-color:#ffffff2b;color:#ffffff8a}
+    .u-db-tab-menu{margin-left:4px;border:0;background:transparent;color:#aaa;cursor:pointer;font-size:12px;opacity:0;padding:0 2px}
+    .u-db-tab:hover .u-db-tab-menu{opacity:.85}
+    .u-db-tab-add{color:#999;font-weight:400}
+    .u-col-name{border:0;background:transparent;color:inherit;cursor:pointer;font-weight:700;font-size:11px;padding:2px 4px;display:inline-flex;gap:4px;align-items:center}
+    .u-col-name:hover{background:#00000010;border-radius:4px}
+    .u-col-kind{font-size:10px;opacity:.7}
     .u-person{position:relative;display:flex;align-items:center;gap:4px;padding:6px 8px;border-radius:6px}.u-person:hover{background:#0000000a}.u-person.sel{background:#4A90C222;font-weight:600}
     .u-person-name{flex:1;min-width:0;cursor:pointer;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
     .u-person-menu{flex:none;border:0;background:transparent;color:#888;cursor:pointer;font-size:16px;line-height:1;padding:2px 6px;border-radius:4px}
