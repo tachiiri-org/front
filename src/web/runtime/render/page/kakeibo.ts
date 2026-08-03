@@ -8,6 +8,7 @@
 // 紐づけて毎回復元する。だから画面の主役は明細そのものより、店への費目・略名の付与になる。
 
 import { buildBookmarkletUrl } from './kakeibo-bookmarklet';
+import { readGoldpointCsvFile, type ParsedCsv } from './kakeibo-csv';
 
 type StatementRow = {
   statement_id: string;
@@ -23,6 +24,7 @@ type StatementRow = {
   currency: string | null;
   foreign_amount: string | null;
   note: string | null;
+  remark: string | null;
   categories: string[];
 };
 
@@ -103,6 +105,122 @@ function listenForImport(status: HTMLElement, onDone: () => void): void {
   });
 }
 
+/**
+ * CSV ファイルからの一括取り込み。
+ *
+ * 確定済みの月は CSV 直リンクが空を返すため、ブックマークレットでは取れない。
+ * 画面から落としたファイルを複数まとめて読ませる経路を用意する。
+ * 請求年月はファイルの支払予定月から決まるので、月の指定は不要。
+ */
+function renderCsvImport(status: HTMLElement, onDone: () => void): HTMLElement {
+  const box = el('div', S.card);
+  box.appendChild(el('div', 'font-weight:600;margin-bottom:4px;', 'CSV ファイルから取り込む'));
+  box.appendChild(el('div', S.note,
+    '確定済みの月はブックマークレットでは取得できません（CSV 直リンクが空を返すため）。' +
+    '明細ページの「CSVファイルのダウンロード」で落としたファイルを、複数まとめて選べます。' +
+    '確定前の13列形式と確定済みの7列形式の両方に対応します。請求年月は、13列形式は支払予定月の列から、' +
+    '7列形式はファイル名（yyyyMM.csv）から決まります。'));
+
+  const controls = el('div', 'display:flex;gap:8px;align-items:center;margin-top:8px;flex-wrap:wrap;');
+  const input = el('input', '') as HTMLInputElement;
+  input.type = 'file';
+  input.accept = '.csv,text/csv';
+  input.multiple = true;
+  const runBtn = el('button', S.btn, '取り込む');
+  runBtn.disabled = true;
+  controls.append(input, runBtn);
+  box.appendChild(controls);
+
+  const preview = el('div', 'margin-top:8px;');
+  box.appendChild(preview);
+
+  let parsed: ParsedCsv[] = [];
+
+  input.addEventListener('change', () => void (async () => {
+    parsed = [];
+    preview.innerHTML = '';
+    const files = [...(input.files ?? [])];
+    if (!files.length) { runBtn.disabled = true; return; }
+
+    for (const f of files) {
+      try {
+        parsed.push(await readGoldpointCsvFile(f));
+      } catch (e) {
+        parsed.push({ fileName: f.name, billingMonth: '', rowCount: 0, rowsTotal: 0, rows: [],
+          errors: [String(e instanceof Error ? e.message : e)] });
+      }
+    }
+
+    const table = el('table', S.table);
+    const head = el('tr');
+    for (const h of ['ファイル', '請求年月', '件数', '合計', '状態']) head.appendChild(el('th', S.th, h));
+    table.appendChild(head);
+    for (const p of parsed) {
+      const tr = el('tr');
+      tr.appendChild(el('td', S.td, p.fileName));
+      tr.appendChild(el('td', S.td, p.billingMonth || '—'));
+      tr.appendChild(el('td', S.num, String(p.rowCount)));
+      tr.appendChild(el('td', S.num, yen(p.rowsTotal)));
+      const ok = p.errors.length === 0 && p.billingMonth !== '' && p.rowCount > 0;
+      tr.appendChild(el('td', S.td + (ok ? 'color:#1e7a3c;' : 'color:#c0392b;'),
+        ok ? '取り込み可' : (p.errors[0] ?? '請求年月を判別できません')));
+      table.appendChild(tr);
+    }
+    preview.appendChild(table);
+
+    // 同じ請求年月のファイルを複数選ぶと、後勝ちで片方が消える。事故になるので止める。
+    const months = parsed.filter((p) => p.billingMonth).map((p) => p.billingMonth);
+    const dup = months.filter((m, i) => months.indexOf(m) !== i);
+    if (dup.length) {
+      preview.appendChild(el('div', S.err,
+        `同じ請求年月のファイルが複数あります（${[...new Set(dup)].join(', ')}）。取り込みは月ごとの全置換なので、片方が失われます。`));
+    }
+
+    const usable = parsed.filter((p) => p.errors.length === 0 && p.billingMonth && p.rowCount > 0);
+    runBtn.disabled = usable.length === 0 || dup.length > 0;
+  })());
+
+  runBtn.addEventListener('click', () => void (async () => {
+    runBtn.disabled = true;
+    const usable = parsed.filter((p) => p.errors.length === 0 && p.billingMonth && p.rowCount > 0);
+    const done: string[] = [];
+    const failed: string[] = [];
+    for (const p of usable) {
+      status.textContent = `取り込み中… ${p.fileName}`;
+      status.setAttribute('style', S.note);
+      try {
+        // ファイル取り込みには画面の合計が無いので shownTotal は送らない。
+        // ダウンロードしたファイルは丸ごと1本なので、ページングによる取りこぼしは起きない。
+        await api('/import', {
+          method: 'POST',
+          body: JSON.stringify({
+            source: 'goldpoint-csv',
+            billingMonth: p.billingMonth,
+            capturedAt: new Date().toISOString(),
+            rowCount: p.rowCount,
+            rowsTotal: p.rowsTotal,
+            shownTotal: null,
+            rows: p.rows,
+          }),
+        });
+        done.push(`${p.billingMonth}(${p.rowCount}件)`);
+      } catch (e) {
+        failed.push(`${p.fileName}: ${String(e instanceof Error ? e.message : e)}`);
+      }
+    }
+    status.textContent =
+      (done.length ? `取り込み完了: ${done.join(' / ')}` : '') +
+      (failed.length ? `　失敗: ${failed.join(' / ')}` : '');
+    status.setAttribute('style', failed.length ? S.err : S.ok);
+    input.value = '';
+    parsed = [];
+    preview.innerHTML = '';
+    onDone();
+  })());
+
+  return box;
+}
+
 function renderShopEditor(row: StatementRow, reload: () => void): HTMLElement {
   const box = el('div', 'display:flex;gap:6px;align-items:center;flex-wrap:wrap;');
   const alias = el('input', S.input + 'width:110px;') as HTMLInputElement;
@@ -138,7 +256,31 @@ export async function renderKakeibo(root: HTMLElement): Promise<void> {
   const page = el('div', S.page);
   root.appendChild(page);
 
-  page.appendChild(el('h1', S.h1, '家計簿 — カード明細'));
+  // 見出し行。ブックマークレットのコピーは常設だが主役ではないので右端に寄せる。
+  const header = el('div', 'display:flex;align-items:center;justify-content:space-between;gap:12px;margin-bottom:12px;');
+  header.appendChild(el('h1', S.h1 + 'margin:0;', '家計簿 — カード明細'));
+  const copyBox = el('div', 'display:flex;align-items:center;gap:8px;flex-wrap:wrap;justify-content:flex-end;');
+  const copyMsg = el('span', S.note, '');
+  const copyBtn = el('button', S.btn, 'ブックマークレットをコピー');
+  copyBtn.addEventListener('click', () => void (async () => {
+    // 送信先は今見ているオリジンを埋め込むので、dev/stage/本番でそれぞれ正しいものが作られる
+    const url = buildBookmarkletUrl(location.origin);
+    try {
+      await navigator.clipboard.writeText(url);
+      copyMsg.textContent = 'コピーしました。ブックマークを新規作成して URL 欄に貼ってください';
+      copyMsg.setAttribute('style', S.ok);
+    } catch {
+      const ta = el('textarea', 'width:100%;height:80px;margin-top:8px;font:11px monospace;') as HTMLTextAreaElement;
+      ta.value = url;
+      page.insertBefore(ta, page.children[1] ?? null);
+      ta.select();
+      copyMsg.textContent = '自動コピーできませんでした。下の内容を手動でコピーしてください';
+      copyMsg.setAttribute('style', S.err);
+    }
+  })());
+  copyBox.append(copyMsg, copyBtn);
+  header.appendChild(copyBox);
+  page.appendChild(header);
 
   const status = el('div', S.note, 'カード明細ページのブックマークレットから取り込めます。');
   const bar = el('div', S.bar);
@@ -147,39 +289,10 @@ export async function renderKakeibo(root: HTMLElement): Promise<void> {
   bar.append(el('span', '', '請求年月'), monthSel, reloadBtn);
   page.append(bar, status);
 
-  // ブックマークレットの受け渡し。ドラッグ登録は本番の運用として想定していないので、
-  // クリップボードへコピーしてブックマークのURL欄に貼ってもらう。登録は一度きりで済む。
-  // 送信先は今見ているオリジンを埋め込むため、dev/stage/本番でそれぞれ正しいものが作られる。
-  const setup = el('div', S.card);
-  setup.appendChild(el('div', 'font-weight:600;margin-bottom:6px;', '取り込み用ブックマークレット'));
-  setup.appendChild(el('div', S.note,
-    'コピーしてブックマークを新規作成し、URL 欄に貼り付けてください。登録は一度だけで済みます。' +
-    'カードのご利用明細ページを開いた状態でそのブックマークを開くと、この画面へ取り込まれます。'));
-  const copyRow = el('div', 'display:flex;gap:8px;align-items:center;margin-top:8px;flex-wrap:wrap;');
-  const copyBtn = el('button', S.btn, 'ブックマークレットをコピー');
-  const copyMsg = el('span', S.note, '');
-  copyBtn.addEventListener('click', () => void (async () => {
-    const url = buildBookmarkletUrl(location.origin);
-    try {
-      await navigator.clipboard.writeText(url);
-      copyMsg.textContent = `コピーしました（${url.length.toLocaleString('ja-JP')} 文字 / 送信先 ${location.origin}）`;
-      copyMsg.setAttribute('style', S.ok);
-    } catch {
-      // クリップボード API が使えない場合は選択してコピーできるように出す
-      const ta = el('textarea', 'width:100%;height:80px;margin-top:8px;font:11px monospace;') as HTMLTextAreaElement;
-      ta.value = url;
-      copyRow.parentElement?.appendChild(ta);
-      ta.select();
-      copyMsg.textContent = '自動コピーできませんでした。下の内容を手動でコピーしてください。';
-      copyMsg.setAttribute('style', S.err);
-    }
-  })());
-  copyRow.append(copyBtn, copyMsg);
-  setup.appendChild(copyRow);
-  page.appendChild(setup);
-
   const summary = el('div', S.card);
   const listBox = el('div');
+  const reloadAll = (): void => void (async () => { await loadMonths(); await loadRows(); })();
+  page.appendChild(renderCsvImport(status, reloadAll));
   page.append(summary, listBox);
 
   const loadMonths = async (): Promise<void> => {
@@ -229,6 +342,7 @@ export async function renderKakeibo(root: HTMLElement): Promise<void> {
       const shopCell = el('td', S.td);
       shopCell.appendChild(el('div', '', r.shop_alias || r.shop));
       if (r.shop_alias) shopCell.appendChild(el('div', S.note, r.shop));
+      if (r.remark) shopCell.appendChild(el('div', S.note, r.remark));
       if (r.is_foreign) shopCell.appendChild(el('div', S.note, `${r.foreign_amount} ${r.currency}`));
       tr.appendChild(shopCell);
       const catCell = el('td', S.td);
