@@ -4,6 +4,7 @@ import { mcpResource } from "./oauth";
 import { TOOLS, callTool } from "./tools/authorize";
 import { GRAPH_TOOLS, callGraphTool } from "./tools/graph";
 import { URANAI_TOOLS, callUranaiTool } from "./tools/uranai";
+import { KAKEIBO_TOOLS, callKakeiboTool } from "./tools/kakeibo";
 
 type JsonRpcRequest = {
   jsonrpc: "2.0";
@@ -60,7 +61,7 @@ export async function handleMcp(request: Request, env: AuthorizeEnv): Promise<Re
       serverInfo: { name: "front", version: "1.0.0" },
     };
   } else if (body.method === "tools/list") {
-    result = { tools: [...TOOLS, ...GRAPH_TOOLS, ...URANAI_TOOLS] };
+    result = { tools: [...TOOLS, ...GRAPH_TOOLS, ...URANAI_TOOLS, ...KAKEIBO_TOOLS] };
   } else if (body.method === "tools/call") {
     const { name, arguments: args } = body.params as {
       name: string;
@@ -70,6 +71,8 @@ export async function handleMcp(request: Request, env: AuthorizeEnv): Promise<Re
       ? await callGraphTool(name, args, mcpEnv)
       : name.startsWith("uranai_")
       ? await callUranaiTool(name, args, mcpEnv)
+      : name.startsWith("kakeibo_")
+      ? await callKakeiboTool(name, args, mcpEnv)
       : await callTool(name, args, mcpEnv, request);
   } else {
     return Response.json({

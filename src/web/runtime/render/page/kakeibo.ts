@@ -1,11 +1,14 @@
 // 家計簿（kakeibo.tachiiri.com）の画面。
 //
-// 取り込みは、カード明細ページで動かすブックマークレットが window.open + postMessage で
-// データを渡してくる。明細ページ側から外部オリジンへ直接 fetch させない設計なので、
-// 相手サイトの CSP に左右されない（実測では CSP も COOP も無かったが、依存しない方が堅い）。
+// 取り込みは2経路ある。
+//  - 確定前の月: カード明細ページのブックマークレットが window.open + postMessage で渡す
+//  - 確定済みの月: CSV 直リンクが空を返すので、画面から落としたファイルを読む
 //
 // 明細は請求年月ごとの全削除・全追加なので、行に付けた分類は残らない。分類は「店」に
 // 紐づけて毎回復元する。だから画面の主役は明細そのものより、店への費目・略名の付与になる。
+//
+// 配色は CSS 変数で持ち、prefers-color-scheme と [data-theme] の両方に追随する。
+// インラインスタイルではメディアクエリを書けないため、スタイルは class に寄せている。
 
 import { buildBookmarkletUrl } from './kakeibo-bookmarklet';
 import { readGoldpointCsvFile, type ParsedCsv } from './kakeibo-csv';
@@ -32,30 +35,64 @@ const yen = (n: number): string => `${Number(n || 0).toLocaleString('ja-JP')}円
 
 const el = <K extends keyof HTMLElementTagNameMap>(
   tag: K,
-  style?: string,
+  cls?: string,
   text?: string,
 ): HTMLElementTagNameMap[K] => {
   const e = document.createElement(tag);
-  if (style) e.setAttribute('style', style);
+  if (cls) e.className = cls;
   if (text !== undefined) e.textContent = text;
   return e;
 };
 
-const S = {
-  page: 'max-width:960px;margin:0 auto;padding:16px;font:14px/1.7 system-ui,sans-serif;',
-  h1: 'font-size:20px;font-weight:600;margin:0 0 12px;',
-  bar: 'display:flex;gap:8px;align-items:center;flex-wrap:wrap;margin-bottom:12px;',
-  card: 'border:1px solid #ddd;border-radius:8px;padding:12px;margin-bottom:12px;',
-  table: 'width:100%;border-collapse:collapse;font-size:13px;',
-  th: 'text-align:left;border-bottom:2px solid #ccc;padding:6px 4px;white-space:nowrap;',
-  td: 'border-bottom:1px solid #eee;padding:6px 4px;vertical-align:top;',
-  num: 'border-bottom:1px solid #eee;padding:6px 4px;text-align:right;white-space:nowrap;',
-  btn: 'padding:6px 12px;border:1px solid #888;border-radius:4px;background:#fff;cursor:pointer;',
-  input: 'padding:4px 6px;border:1px solid #bbb;border-radius:4px;font:inherit;',
-  note: 'color:#666;font-size:12px;',
-  err: 'color:#c0392b;',
-  ok: 'color:#1e7a3c;',
-};
+const DARK = `--bg:#1e1e1e;--fg:rgba(255,255,255,.82);--muted:rgba(255,255,255,.5);
+  --line:rgba(255,255,255,.12);--line2:rgba(255,255,255,.22);--card:#252526;--field:#2a2b2e;
+  --ok:#4ade80;--err:#f87171;--accent:#60a5fa;--menu:#2a2b2e;--hover:rgba(255,255,255,.08)`;
+const LIGHT = `--bg:#fff;--fg:#1a1a1a;--muted:#666;--line:#e2e2e2;--line2:#c8c8c8;
+  --card:#fafafa;--field:#fff;--ok:#1e7a3c;--err:#c0392b;--accent:#2563eb;
+  --menu:#fff;--hover:#f0f0f0`;
+
+const CSS = `
+.kk{${LIGHT};width:100%;padding:12px 16px;
+  font:14px/1.7 system-ui,-apple-system,"Segoe UI",sans-serif;
+  background:var(--bg);color:var(--fg);min-height:100vh;box-sizing:border-box}
+@media (prefers-color-scheme:dark){.kk{${DARK}}}
+:root[data-theme=dark] .kk{${DARK}}
+:root[data-theme=light] .kk{${LIGHT}}
+.kk-hd{display:flex;align-items:center;justify-content:space-between;gap:12px;margin-bottom:10px}
+.kk-hd h1{font-size:17px;font-weight:600;margin:0}
+.kk-row{display:flex;align-items:center;gap:8px;flex-wrap:wrap}
+.kk-card{border:1px solid var(--line);border-radius:8px;padding:10px;margin:10px 0;background:var(--card)}
+.kk-note{color:var(--muted);font-size:12px}
+.kk-ok{color:var(--ok);font-size:12px}
+.kk-err{color:var(--err);font-size:12px}
+.kk-btn{padding:5px 10px;border:1px solid var(--line2);border-radius:5px;
+  background:var(--field);color:var(--fg);cursor:pointer;font:inherit;font-size:13px}
+.kk-btn:hover:not(:disabled){background:var(--hover)}
+.kk-btn:disabled{opacity:.45;cursor:default}
+.kk-in{padding:4px 6px;border:1px solid var(--line2);border-radius:5px;
+  background:var(--field);color:var(--fg);font:inherit;font-size:13px}
+.kk-tb{width:100%;border-collapse:collapse;font-size:13px;table-layout:fixed}
+.kk-tb col.c-date{width:58px}.kk-tb col.c-cat{width:250px}
+.kk-tb col.c-alias{width:118px}.kk-tb col.c-amt{width:96px}
+.kk-tb td:nth-child(2){overflow-wrap:anywhere}
+.kk-tb th{text-align:left;border-bottom:1px solid var(--line2);padding:5px 4px;
+  white-space:nowrap;font-weight:600;color:var(--muted);font-size:12px}
+.kk-tb td{border-bottom:1px solid var(--line);padding:5px 4px;vertical-align:top}
+.kk-num{text-align:right;white-space:nowrap;font-variant-numeric:tabular-nums}
+.kk-sub{color:var(--muted);font-size:11px}
+.kk-cb{position:relative;display:inline-block}
+.kk-cb-menu{position:absolute;z-index:50;left:0;top:100%;min-width:100%;max-height:220px;
+  overflow:auto;background:var(--menu);border:1px solid var(--line2);border-radius:6px;
+  box-shadow:0 6px 20px rgba(0,0,0,.25);display:none}
+.kk-cb-menu.on{display:block}
+.kk-cb-item{padding:5px 10px;cursor:pointer;white-space:nowrap;font-size:13px}
+.kk-cb-item:hover,.kk-cb-item.sel{background:var(--hover)}
+.kk-cb-new{color:var(--accent)}
+.kk-tag{display:inline-block;padding:1px 7px;margin:1px 3px 1px 0;border-radius:10px;
+  border:1px solid var(--line2);font-size:12px;background:var(--field)}
+.kk-tag button{border:0;background:none;color:var(--muted);cursor:pointer;padding:0 0 0 4px;font:inherit}
+.kk-tag button:hover{color:var(--err)}
+`;
 
 async function api<T>(path: string, init?: RequestInit): Promise<T> {
   const r = await fetch(`/api/v1/kakeibo${path}`, {
@@ -68,70 +105,119 @@ async function api<T>(path: string, init?: RequestInit): Promise<T> {
 }
 
 /**
- * ブックマークレットからの取り込みを待ち受ける。
- *
- * 未ログインだと認証リダイレクトを挟むぶん受信側の準備が遅れるため、送り手は ack が返るまで
- * 送り続ける実装になっている。こちらは読み込み直後からリスナを張り、受け取ったら ack を返す。
+ * 検索可能なプルダウン。入力で候補を絞り込み、未登録の語はその場で新規として使える。
+ * 費目も略名も語彙が育っていくものなので、固定の select では足りない。
+ * 候補を出すこと自体が目的で、「食費」と「食料品」のような表記ゆれを防ぐ。
  */
+function combobox(opts: {
+  placeholder: string;
+  value?: string;
+  width: string;
+  choices: () => string[];
+  onPick: (v: string) => void;
+  clearOnPick?: boolean;
+}): HTMLElement {
+  const wrap = el('span', 'kk-cb');
+  const input = el('input', 'kk-in') as HTMLInputElement;
+  input.placeholder = opts.placeholder;
+  input.value = opts.value ?? '';
+  input.style.width = opts.width;
+  const menu = el('div', 'kk-cb-menu');
+  wrap.append(input, menu);
+
+  let idx = -1;
+  const close = (): void => { menu.classList.remove('on'); idx = -1; };
+  const pick = (v: string): void => {
+    opts.onPick(v);
+    input.value = opts.clearOnPick ? '' : v;
+    close();
+  };
+
+  const build = (): void => {
+    const q = input.value.trim().toLowerCase();
+    const all = opts.choices();
+    const hits = q ? all.filter((c) => c.toLowerCase().includes(q)) : all;
+    menu.innerHTML = '';
+    for (const c of hits.slice(0, 40)) {
+      const it = el('div', 'kk-cb-item', c);
+      it.addEventListener('mousedown', (e) => { e.preventDefault(); pick(c); });
+      menu.appendChild(it);
+    }
+    const q0 = input.value.trim();
+    if (q0 && !all.includes(q0)) {
+      const it = el('div', 'kk-cb-item kk-cb-new', `+ ${q0}`);
+      it.addEventListener('mousedown', (e) => { e.preventDefault(); pick(q0); });
+      menu.appendChild(it);
+    }
+    menu.classList.toggle('on', menu.childElementCount > 0);
+  };
+
+  input.addEventListener('focus', build);
+  input.addEventListener('input', build);
+  input.addEventListener('blur', () => setTimeout(close, 120));
+  input.addEventListener('keydown', (e) => {
+    const items = [...menu.querySelectorAll<HTMLElement>('.kk-cb-item')];
+    if (e.key === 'ArrowDown' || e.key === 'ArrowUp') {
+      e.preventDefault();
+      if (!items.length) return;
+      idx = e.key === 'ArrowDown' ? Math.min(idx + 1, items.length - 1) : Math.max(idx - 1, 0);
+      items.forEach((n, i) => n.classList.toggle('sel', i === idx));
+      items[idx]?.scrollIntoView({ block: 'nearest' });
+    } else if (e.key === 'Enter') {
+      e.preventDefault();
+      const t = idx >= 0 ? (items[idx]?.textContent ?? '') : input.value.trim();
+      if (t) pick(t.replace(/^\+ /, ''));
+    } else if (e.key === 'Escape') {
+      close();
+    }
+  });
+
+  return wrap;
+}
+
+/** ブックマークレットからの取り込みを待ち受ける（未ログイン時は送り手が ack まで再送する） */
 function listenForImport(status: HTMLElement, onDone: () => void): void {
   window.addEventListener('message', async (ev: MessageEvent) => {
     const data = ev.data as { type?: string; payload?: unknown } | null;
     if (!data || data.type !== 'gp-import') return;
     // 送り主のオリジンを確認する。カード明細ページ以外からは受け取らない。
     if (!/^https:\/\/secure\.goldpoint\.co\.jp$/.test(ev.origin)) {
-      status.textContent = `受信を拒否しました（想定外の送信元: ${ev.origin}）`;
-      status.setAttribute('style', S.err);
+      status.className = 'kk-err';
+      status.textContent = `拒否: ${ev.origin}`;
       return;
     }
     (ev.source as Window | null)?.postMessage({ type: 'gp-import-ack' }, ev.origin);
-
-    status.textContent = '取り込み中…';
-    status.setAttribute('style', S.note);
+    status.className = 'kk-note';
+    status.textContent = '取り込み中';
     try {
-      const res = await api<{ rowCount: number; rowsTotal: number; billingMonth: string; replaced: number }>(
-        '/import',
-        { method: 'POST', body: JSON.stringify(data.payload) },
+      const res = await api<{ rowCount: number; rowsTotal: number; billingMonth: string }>(
+        '/import', { method: 'POST', body: JSON.stringify(data.payload) },
       );
-      status.textContent =
-        `取り込み完了: ${res.billingMonth} / ${res.rowCount}件 / ${yen(res.rowsTotal)}` +
-        (res.replaced ? `（既存 ${res.replaced} 件を差し替え）` : '');
-      status.setAttribute('style', S.ok);
+      status.className = 'kk-ok';
+      status.textContent = `${res.billingMonth} ${res.rowCount}件 ${yen(res.rowsTotal)}`;
       onDone();
     } catch (e) {
-      // 合計不一致は 409。取りこぼしを黙って登録するより落とす方が安全なので、原因をそのまま出す。
-      status.textContent = `取り込み失敗: ${String(e instanceof Error ? e.message : e)}`;
-      status.setAttribute('style', S.err);
+      status.className = 'kk-err';
+      status.textContent = String(e instanceof Error ? e.message : e);
     }
   });
 }
 
-/**
- * CSV ファイルからの一括取り込み。
- *
- * 確定済みの月は CSV 直リンクが空を返すため、ブックマークレットでは取れない。
- * 画面から落としたファイルを複数まとめて読ませる経路を用意する。
- * 請求年月はファイルの支払予定月から決まるので、月の指定は不要。
- */
+/** CSV ファイルからの一括取り込み。確定済みの月はこちらでしか入らない。 */
 function renderCsvImport(status: HTMLElement, onDone: () => void): HTMLElement {
-  const box = el('div', S.card);
-  box.appendChild(el('div', 'font-weight:600;margin-bottom:4px;', 'CSV ファイルから取り込む'));
-  box.appendChild(el('div', S.note,
-    '確定済みの月はブックマークレットでは取得できません（CSV 直リンクが空を返すため）。' +
-    '明細ページの「CSVファイルのダウンロード」で落としたファイルを、複数まとめて選べます。' +
-    '確定前の13列形式と確定済みの7列形式の両方に対応します。請求年月は、13列形式は支払予定月の列から、' +
-    '7列形式はファイル名（yyyyMM.csv）から決まります。'));
-
-  const controls = el('div', 'display:flex;gap:8px;align-items:center;margin-top:8px;flex-wrap:wrap;');
-  const input = el('input', '') as HTMLInputElement;
+  const box = el('div', 'kk-card');
+  const row = el('div', 'kk-row');
+  const input = el('input', 'kk-in') as HTMLInputElement;
   input.type = 'file';
   input.accept = '.csv,text/csv';
   input.multiple = true;
-  const runBtn = el('button', S.btn, '取り込む');
+  const runBtn = el('button', 'kk-btn', '取り込む');
   runBtn.disabled = true;
-  controls.append(input, runBtn);
-  box.appendChild(controls);
+  row.append(el('span', 'kk-note', 'CSV'), input, runBtn);
+  box.appendChild(row);
 
-  const preview = el('div', 'margin-top:8px;');
+  const preview = el('div', '');
+  preview.style.marginTop = '8px';
   box.appendChild(preview);
 
   let parsed: ParsedCsv[] = [];
@@ -141,43 +227,37 @@ function renderCsvImport(status: HTMLElement, onDone: () => void): HTMLElement {
     preview.innerHTML = '';
     const files = [...(input.files ?? [])];
     if (!files.length) { runBtn.disabled = true; return; }
-
     for (const f of files) {
-      try {
-        parsed.push(await readGoldpointCsvFile(f));
-      } catch (e) {
-        parsed.push({ fileName: f.name, billingMonth: '', declaredTotal: null, rowCount: 0, rowsTotal: 0,
-          rows: [], errors: [String(e instanceof Error ? e.message : e)] });
+      try { parsed.push(await readGoldpointCsvFile(f)); }
+      catch (e) {
+        parsed.push({ fileName: f.name, billingMonth: '', declaredTotal: null, rowCount: 0,
+          rowsTotal: 0, rows: [], errors: [String(e instanceof Error ? e.message : e)] });
       }
     }
 
-    const table = el('table', S.table);
+    const table = el('table', 'kk-tb');
     const head = el('tr');
-    for (const h of ['ファイル', '請求年月', '件数', '合計', '状態']) head.appendChild(el('th', S.th, h));
+    for (const h of ['ファイル', '請求月', '件数', '合計', '']) head.appendChild(el('th', '', h));
     table.appendChild(head);
     for (const p of parsed) {
       const tr = el('tr');
-      tr.appendChild(el('td', S.td, p.fileName));
-      tr.appendChild(el('td', S.td, p.billingMonth || '—'));
-      tr.appendChild(el('td', S.num, String(p.rowCount)));
-      tr.appendChild(el('td', S.num, yen(p.rowsTotal)));
+      tr.appendChild(el('td', '', p.fileName));
+      tr.appendChild(el('td', '', p.billingMonth || '—'));
+      tr.appendChild(el('td', 'kk-num', String(p.rowCount)));
+      tr.appendChild(el('td', 'kk-num', yen(p.rowsTotal)));
       const ok = p.errors.length === 0 && p.billingMonth !== '' && p.rowCount > 0;
-      tr.appendChild(el('td', S.td + (ok ? 'color:#1e7a3c;' : 'color:#c0392b;'),
-        ok ? '取り込み可' : (p.errors[0] ?? '請求年月を判別できません')));
+      tr.appendChild(el('td', ok ? 'kk-ok' : 'kk-err', ok ? '可' : (p.errors[0] ?? '請求月不明')));
       table.appendChild(tr);
     }
     preview.appendChild(table);
 
     // 同じ請求年月のファイルを複数選ぶと、後勝ちで片方が消える。事故になるので止める。
     const months = parsed.filter((p) => p.billingMonth).map((p) => p.billingMonth);
-    const dup = months.filter((m, i) => months.indexOf(m) !== i);
+    const dup = [...new Set(months.filter((m, i) => months.indexOf(m) !== i))];
     if (dup.length) {
-      preview.appendChild(el('div', S.err,
-        `同じ請求年月のファイルが複数あります（${[...new Set(dup)].join(', ')}）。取り込みは月ごとの全置換なので、片方が失われます。`));
+      preview.appendChild(el('div', 'kk-err', `請求月が重複: ${dup.join(', ')}（月ごとの全置換なので片方が消えます）`));
     }
-
-    const usable = parsed.filter((p) => p.errors.length === 0 && p.billingMonth && p.rowCount > 0);
-    runBtn.disabled = usable.length === 0 || dup.length > 0;
+    runBtn.disabled = parsed.every((p) => p.errors.length || !p.billingMonth || !p.rowCount) || dup.length > 0;
   })());
 
   runBtn.addEventListener('click', () => void (async () => {
@@ -186,32 +266,24 @@ function renderCsvImport(status: HTMLElement, onDone: () => void): HTMLElement {
     const done: string[] = [];
     const failed: string[] = [];
     for (const p of usable) {
-      status.textContent = `取り込み中… ${p.fileName}`;
-      status.setAttribute('style', S.note);
+      status.className = 'kk-note';
+      status.textContent = `取り込み中 ${p.fileName}`;
       try {
-        // ファイル取り込みには画面の合計が無いので shownTotal は送らない。
-        // ダウンロードしたファイルは丸ごと1本なので、ページングによる取りこぼしは起きない。
         await api('/import', {
           method: 'POST',
           body: JSON.stringify({
-            source: 'goldpoint-csv',
-            billingMonth: p.billingMonth,
-            capturedAt: new Date().toISOString(),
-            rowCount: p.rowCount,
-            rowsTotal: p.rowsTotal,
-            shownTotal: p.declaredTotal,
-            rows: p.rows,
+            source: 'goldpoint-csv', billingMonth: p.billingMonth,
+            capturedAt: new Date().toISOString(), rowCount: p.rowCount,
+            rowsTotal: p.rowsTotal, shownTotal: p.declaredTotal, rows: p.rows,
           }),
         });
-        done.push(`${p.billingMonth}(${p.rowCount}件)`);
+        done.push(`${p.billingMonth} ${p.rowCount}件`);
       } catch (e) {
         failed.push(`${p.fileName}: ${String(e instanceof Error ? e.message : e)}`);
       }
     }
-    status.textContent =
-      (done.length ? `取り込み完了: ${done.join(' / ')}` : '') +
-      (failed.length ? `　失敗: ${failed.join(' / ')}` : '');
-    status.setAttribute('style', failed.length ? S.err : S.ok);
+    status.className = failed.length ? 'kk-err' : 'kk-ok';
+    status.textContent = [done.join(' / '), failed.join(' / ')].filter(Boolean).join('　');
     input.value = '';
     parsed = [];
     preview.innerHTML = '';
@@ -221,79 +293,52 @@ function renderCsvImport(status: HTMLElement, onDone: () => void): HTMLElement {
   return box;
 }
 
-function renderShopEditor(row: StatementRow, reload: () => void): HTMLElement {
-  const box = el('div', 'display:flex;gap:6px;align-items:center;flex-wrap:wrap;');
-  const alias = el('input', S.input + 'width:110px;') as HTMLInputElement;
-  alias.value = row.shop_alias ?? '';
-  alias.placeholder = '略名';
-  const cats = el('input', S.input + 'width:160px;') as HTMLInputElement;
-  cats.value = row.categories.join(', ');
-  cats.placeholder = '費目（カンマ区切り）';
-  const save = el('button', S.btn + 'padding:3px 8px;font-size:12px;', '保存');
-  save.addEventListener('click', async () => {
-    save.textContent = '保存中';
-    try {
-      await api(`/shops/${encodeURIComponent(row.shop_id)}`, {
-        method: 'PUT',
-        body: JSON.stringify({
-          alias: alias.value,
-          categories: cats.value.split(',').map((s) => s.trim()).filter(Boolean),
-        }),
-      });
-      save.textContent = '保存済';
-      // 店に付けた費目・略名は同じ店の全明細に効くので、一覧を引き直す
-      reload();
-    } catch (e) {
-      save.textContent = '失敗';
-      console.error(e);
-    }
-  });
-  box.append(alias, cats, save);
-  return box;
-}
-
 export async function renderKakeibo(root: HTMLElement): Promise<void> {
-  const page = el('div', S.page);
+  const style = document.createElement('style');
+  style.textContent = CSS;
+  document.head.appendChild(style);
+
+  const page = el('div', 'kk');
   root.appendChild(page);
 
-  // 見出し行。ブックマークレットのコピーは常設だが主役ではないので右端に寄せる。
-  const header = el('div', 'display:flex;align-items:center;justify-content:space-between;gap:12px;margin-bottom:12px;');
-  header.appendChild(el('h1', S.h1 + 'margin:0;', '家計簿 — カード明細'));
-  const copyBox = el('div', 'display:flex;align-items:center;gap:8px;flex-wrap:wrap;justify-content:flex-end;');
-  const copyMsg = el('span', S.note, '');
-  const copyBtn = el('button', S.btn, 'ブックマークレットをコピー');
+  const status = el('span', 'kk-note', '');
+  const monthSel = el('select', 'kk-in') as HTMLSelectElement;
+  const summary = el('div', 'kk-card');
+  const listBox = el('div', '');
+  // 既知の費目・略名は表示中の全行から集め、プルダウンの候補にする
+  let knownCategories: string[] = [];
+  let knownAliases: string[] = [];
+
+  const hd = el('div', 'kk-hd');
+  hd.appendChild(el('h1', '', '家計簿'));
+  const copyBtn = el('button', 'kk-btn', 'ブックマークレット');
+  const copyMsg = el('span', 'kk-note', '');
   copyBtn.addEventListener('click', () => void (async () => {
     // 送信先は今見ているオリジンを埋め込むので、dev/stage/本番でそれぞれ正しいものが作られる
     const url = buildBookmarkletUrl(location.origin);
     try {
       await navigator.clipboard.writeText(url);
-      copyMsg.textContent = 'コピーしました。ブックマークを新規作成して URL 欄に貼ってください';
-      copyMsg.setAttribute('style', S.ok);
+      copyMsg.className = 'kk-ok';
+      copyMsg.textContent = 'コピー済';
     } catch {
-      const ta = el('textarea', 'width:100%;height:80px;margin-top:8px;font:11px monospace;') as HTMLTextAreaElement;
+      const ta = el('textarea', 'kk-in') as HTMLTextAreaElement;
       ta.value = url;
+      ta.style.cssText = 'width:100%;height:70px;margin-top:6px;font:11px monospace';
       page.insertBefore(ta, page.children[1] ?? null);
       ta.select();
-      copyMsg.textContent = '自動コピーできませんでした。下の内容を手動でコピーしてください';
-      copyMsg.setAttribute('style', S.err);
+      copyMsg.className = 'kk-err';
+      copyMsg.textContent = '手動でコピー';
     }
   })());
-  copyBox.append(copyMsg, copyBtn);
-  header.appendChild(copyBox);
-  page.appendChild(header);
+  const hdRight = el('div', 'kk-row');
+  hdRight.append(copyMsg, copyBtn);
+  hd.appendChild(hdRight);
+  page.appendChild(hd);
 
-  const status = el('div', S.note, 'カード明細ページのブックマークレットから取り込めます。');
-  const bar = el('div', S.bar);
-  const monthSel = el('select', S.input) as HTMLSelectElement;
-  const reloadBtn = el('button', S.btn, '再読込');
-  bar.append(el('span', '', '請求年月'), monthSel, reloadBtn);
-  page.append(bar, status);
-
-  const summary = el('div', S.card);
-  const listBox = el('div');
-  const reloadAll = (): void => void (async () => { await loadMonths(); await loadRows(); })();
-  page.appendChild(renderCsvImport(status, reloadAll));
-  page.append(summary, listBox);
+  const bar = el('div', 'kk-row');
+  const reloadBtn = el('button', 'kk-btn', '再読込');
+  bar.append(monthSel, reloadBtn, status);
+  page.appendChild(bar);
 
   const loadMonths = async (): Promise<void> => {
     const { months } = await api<{ months: string[] }>('/months');
@@ -305,68 +350,122 @@ export async function renderKakeibo(root: HTMLElement): Promise<void> {
       monthSel.appendChild(o);
     }
     if (keep && months.includes(keep)) monthSel.value = keep;
-    if (!months.length) {
-      summary.textContent = 'まだ取り込みがありません。';
-      listBox.innerHTML = '';
-    }
+    if (!months.length) { summary.textContent = '取り込みなし'; listBox.innerHTML = ''; }
   };
 
   const loadRows = async (): Promise<void> => {
     const bm = monthSel.value;
     if (!bm) return;
     const res = await api<{
-      latestImport: { as_of?: string; captured_at?: string; shown_total?: number; rows_total?: number; row_count?: number } | null;
+      latestImport: { as_of?: string; captured_at?: string; rows_total?: number; row_count?: number } | null;
       rows: StatementRow[];
     }>(`/statements?billingMonth=${encodeURIComponent(bm)}`);
+
+    knownCategories = [...new Set(res.rows.flatMap((r) => r.categories))].sort();
+    knownAliases = [...new Set(res.rows.map((r) => r.shop_alias ?? '').filter(Boolean))].sort();
 
     const m = res.latestImport;
     summary.innerHTML = '';
     if (m) {
-      summary.append(
-        el('div', 'font-weight:600;', `${bm} / ${m.row_count ?? res.rows.length}件 / ${yen(m.rows_total ?? 0)}`),
-        // 「現在判明分」は確定前スナップショットの基準日。日次で取り直す前提なので必ず見せる。
-        el('div', S.note, `取得時点: ${m.as_of ?? '不明'} ／ 取り込み: ${m.captured_at ?? ''}`),
-      );
+      const s = el('div', 'kk-row');
+      s.appendChild(el('strong', '', `${m.row_count ?? res.rows.length}件 ${yen(m.rows_total ?? 0)}`));
+      // 「現在判明分」は確定前スナップショットの基準日。取り直す前提なので必ず見せる。
+      s.appendChild(el('span', 'kk-sub',
+        [m.as_of, m.captured_at?.slice(0, 16).replace('T', ' ')].filter(Boolean).join(' / ')));
+      summary.appendChild(s);
+      // 費目ごとの小計。分類の目的はこれなので、明細より先に出す。
+      const byCat = new Map<string, number>();
+      for (const r of res.rows) {
+        for (const k of r.categories.length ? r.categories : ['未分類']) {
+          byCat.set(k, (byCat.get(k) ?? 0) + r.amount_jpy);
+        }
+      }
+      const cats = el('div', 'kk-row');
+      cats.style.marginTop = '4px';
+      for (const [k, v] of [...byCat].sort((a, b) => b[1] - a[1])) {
+        cats.appendChild(el('span', 'kk-tag', `${k} ${yen(v)}`));
+      }
+      summary.appendChild(cats);
     }
 
-    const table = el('table', S.table);
-    const head = el('tr');
-    for (const h of ['利用日', '店', '費目・略名', 'カード', '支払', '金額']) {
-      head.appendChild(el('th', S.th, h));
+    const table = el('table', 'kk-tb');
+    // 店名に余りを吸わせる。自動配分だと費目列が間延びして右が空く。
+    const cg = document.createElement('colgroup');
+    for (const c of ['c-date', '', 'c-cat', 'c-alias', 'c-amt']) {
+      const col = document.createElement('col');
+      if (c) col.className = c;
+      cg.appendChild(col);
     }
+    table.appendChild(cg);
+    const head = el('tr');
+    for (const h of ['日付', '店', '費目', '略名', '金額']) head.appendChild(el('th', '', h));
     table.appendChild(head);
+
+    const saveShop = async (shopId: string, body: Record<string, unknown>): Promise<void> => {
+      await api(`/shops/${encodeURIComponent(shopId)}`, { method: 'PUT', body: JSON.stringify(body) });
+      await loadRows();
+    };
 
     for (const r of res.rows) {
       const tr = el('tr');
-      tr.appendChild(el('td', S.td, r.used_on));
-      const shopCell = el('td', S.td);
-      shopCell.appendChild(el('div', '', r.shop_alias || r.shop));
-      if (r.shop_alias) shopCell.appendChild(el('div', S.note, r.shop));
-      if (r.remark) shopCell.appendChild(el('div', S.note, r.remark));
-      if (r.is_foreign) shopCell.appendChild(el('div', S.note, `${r.foreign_amount} ${r.currency}`));
+      tr.appendChild(el('td', '', r.used_on.slice(5)));
+
+      const shopCell = el('td', '');
+      shopCell.appendChild(el('div', '', r.shop));
+      if (r.remark) shopCell.appendChild(el('div', 'kk-sub', r.remark));
+      if (r.is_foreign) shopCell.appendChild(el('div', 'kk-sub', `${r.foreign_amount} ${r.currency}`));
       tr.appendChild(shopCell);
-      const catCell = el('td', S.td);
-      catCell.appendChild(renderShopEditor(r, () => void loadRows()));
+
+      // 費目はタグ表示 + 検索可能プルダウンで追加。店に紐づくので同じ店の全明細に効く。
+      const catCell = el('td', '');
+      for (const c of r.categories) {
+        const t = el('span', 'kk-tag', c);
+        const x = el('button', '', '×');
+        x.title = '外す';
+        x.addEventListener('click', () => void saveShop(r.shop_id,
+          { categories: r.categories.filter((v) => v !== c) }));
+        t.appendChild(x);
+        catCell.appendChild(t);
+      }
+      catCell.appendChild(combobox({
+        placeholder: '費目', width: '90px', clearOnPick: true,
+        choices: () => knownCategories,
+        onPick: (v) => {
+          if (!v || r.categories.includes(v)) return;
+          void saveShop(r.shop_id, { categories: [...r.categories, v] });
+        },
+      }));
       tr.appendChild(catCell);
-      tr.appendChild(el('td', S.td, r.card));
-      tr.appendChild(el('td', S.td, r.pay_type));
-      tr.appendChild(el('td', S.num, yen(r.amount_jpy)));
+
+      const aliasCell = el('td', '');
+      aliasCell.appendChild(combobox({
+        placeholder: '略名', width: '90px', value: r.shop_alias ?? '',
+        choices: () => knownAliases,
+        onPick: (v) => void saveShop(r.shop_id, { alias: v }),
+      }));
+      tr.appendChild(aliasCell);
+
+      tr.appendChild(el('td', 'kk-num', yen(r.amount_jpy)));
       table.appendChild(tr);
     }
     listBox.innerHTML = '';
     listBox.appendChild(table);
   };
 
-  monthSel.addEventListener('change', () => void loadRows());
-  reloadBtn.addEventListener('click', () => void (async () => { await loadMonths(); await loadRows(); })());
+  const reloadAll = (): void => void (async () => { await loadMonths(); await loadRows(); })();
 
-  listenForImport(status, () => void (async () => { await loadMonths(); await loadRows(); })());
+  page.appendChild(renderCsvImport(status, reloadAll));
+  page.append(summary, listBox);
+
+  monthSel.addEventListener('change', () => void loadRows());
+  reloadBtn.addEventListener('click', reloadAll);
+  listenForImport(status, reloadAll);
 
   try {
     await loadMonths();
     await loadRows();
   } catch (e) {
-    status.textContent = `読み込み失敗: ${String(e instanceof Error ? e.message : e)}`;
-    status.setAttribute('style', S.err);
+    status.className = 'kk-err';
+    status.textContent = String(e instanceof Error ? e.message : e);
   }
 }
