@@ -33,6 +33,8 @@ export type ParsedRow = {
 export type ParsedCsv = {
   fileName: string;
   billingMonth: string;
+  /** CSV 末尾の合計行に書かれた金額。無ければ null */
+  declaredTotal: number | null;
   rowCount: number;
   rowsTotal: number;
   rows: ParsedRow[];
@@ -90,10 +92,10 @@ export function parseGoldpointCsv(text: string, fileName: string): ParsedCsv {
   const errors: string[] = [];
 
   if (!lines.length) {
-    return { fileName, billingMonth: '', rowCount: 0, rowsTotal: 0, rows: [], errors: ['中身が空です'] };
+    return { fileName, billingMonth: '', declaredTotal: null, rowCount: 0, rowsTotal: 0, rows: [], errors: ['中身が空です'] };
   }
   if (/^\s*(<!DOCTYPE|<html)/i.test(text)) {
-    return { fileName, billingMonth: '', rowCount: 0, rowsTotal: 0, rows: [], errors: ['CSV ではなく HTML です'] };
+    return { fileName, billingMonth: '', declaredTotal: null, rowCount: 0, rowsTotal: 0, rows: [], errors: ['CSV ではなく HTML です'] };
   }
 
   // CSV は2種類ある。
@@ -106,6 +108,9 @@ export function parseGoldpointCsv(text: string, fileName: string): ParsedCsv {
 
   // 店名より後ろの列数。ここを固定値として末尾から数え、間を店名に畳んで復元する。
   const tailCount = isConfirmed ? 5 : 11;
+  // CSV 末尾に「,,,,,278249,」のような合計行が入る。取りこぼしを検出できる唯一の手がかりなので
+  // 読み捨てずに拾い、明細合計との一致を必須条件にする。
+  let declaredTotal: number | null = null;
 
   lines.forEach((line, i) => {
     const raw = line.split(',');
@@ -116,6 +121,11 @@ export function parseGoldpointCsv(text: string, fileName: string): ParsedCsv {
     if (!c) {
       errors.push(`${i + 1}行目: 列数 ${raw.length}（${expected}のはず）: ${line.slice(0, 80)}`);
       return;
+    }
+    // 合計行は利用日も店名も空で、金額欄だけ埋まっている
+    if (c[0].trim() === '' && c[1].trim() === '') {
+      const t = toInt(c[isConfirmed ? 5 : 6]);
+      if (t !== null) { declaredTotal = t; return; }
     }
     const usedOn = toDate(c[0]);
     if (!usedOn) { errors.push(`${i + 1}行目: 利用日が不正 ${c[0]}`); return; }
@@ -209,11 +219,19 @@ export function parseGoldpointCsv(text: string, fileName: string): ParsedCsv {
     }
   }
 
+  const rowsTotal = rows.reduce((a, r) => a + r.amountJpy, 0);
+  // 合計行があるなら一致を必須にする。ページングで3割の行を落としかけた実績があるので、
+  // 検証できる手段がある場合はそれを使い切る。
+  if (declaredTotal !== null && declaredTotal !== rowsTotal) {
+    errors.push(`合計が一致しません（ファイルの合計行 ${declaredTotal} / 明細合計 ${rowsTotal}）`);
+  }
+
   return {
     fileName,
     billingMonth,
+    declaredTotal,
     rowCount: rows.length,
-    rowsTotal: rows.reduce((a, r) => a + r.amountJpy, 0),
+    rowsTotal,
     rows,
     errors,
   };
