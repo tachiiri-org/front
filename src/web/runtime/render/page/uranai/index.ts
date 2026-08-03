@@ -1755,7 +1755,7 @@ function chartView(chart: Chart, birth: Birth | null | undefined, personId: stri
   };
   // メモはグラフのリレーションと同じ形。本文＋n項の参加者。
   type Ray = { concept_kind: string; concept_id: string };
-  type Note = { note_id: string; idx: number; at: string | null; title: string; value: string; rays: Ray[]; links: string[] };
+  type Note = { note_id: string; idx: number; at: string | null; until: string | null; title: string; value: string; rays: Ray[]; links: string[] };
   const hasRay = (n: Note, kind: string, id: string) => n.rays.some((r) => r.concept_kind === kind && r.concept_id === id);
   let notes: Note[] = [];
   const matHost = el("div", {});
@@ -1828,39 +1828,26 @@ function chartView(chart: Chart, birth: Birth | null | undefined, personId: stri
     return el("div", { className: "u-prop" }, [el("div", { className: "u-prop-k", textContent: "プロパティ" }), vals]);
   };
 
-  // ページ: タイトル・プロパティ・本文。
+  // 詳細（開く）: タイトル・期間・テキストだけ。プロパティ（概念リンク）は持たない。
   const pageView = (n: Note, after: () => void): HTMLElement => {
     const box = el("div", { className: "u-page" });
     const back = el("button", { className: "u-btn-sm u-btn-ghost", textContent: "← 一覧" });
     back.addEventListener("click", () => { openNote = null; after(); });
     box.append(back);
-    const ti = el("input", { className: "u-page-title", value: titleOf(n) === "無題" ? "" : n.title }) as HTMLInputElement;
+    const ti = el("input", { className: "u-page-title", value: n.title }) as HTMLInputElement;
     ti.placeholder = "無題";
-    ti.addEventListener("blur", () => { n.title = ti.value; patch(n, { title: ti.value }, after); });
+    ti.addEventListener("blur", () => { if (ti.value !== n.title) { n.title = ti.value; patch(n, { title: ti.value }, after); } });
     box.append(ti);
-    box.append(propRow(n, after));
     const at = el("input", { type: "date", className: "u-prop-sel", value: (n.at ?? "").slice(0, 10) }) as HTMLInputElement;
-    at.addEventListener("change", () => {
+    const until = el("input", { type: "date", className: "u-prop-sel", value: (n.until ?? "").slice(0, 10) }) as HTMLInputElement;
+    const saveSpan = () => {
       n.at = at.value ? `${at.value}T12:00:00Z` : null;
-      patch(n, { at: at.value ? `${at.value}T12:00:00Z` : "" }, () => { /* 一覧の再描画は不要 */ });
-    });
-    box.append(el("div", { className: "u-prop" }, [el("div", { className: "u-prop-k", textContent: "日時" }), at]));
-    // ページ間のリンク。
-    const links = el("div", { className: "u-ray-chips" });
-    for (const t of n.links) {
-      const target = notes.find((x) => x.note_id === t);
-      const c = el("button", { className: "u-ray on", textContent: target ? titleOf(target) : t.slice(0, 8) });
-      c.addEventListener("click", () => patch(n, { links: n.links.filter((x) => x !== t) }, after));
-      links.append(c);
-    }
-    const lsel = el("select", { className: "u-prop-sel" }) as HTMLSelectElement;
-    lsel.append(el("option", { value: "", textContent: "＋" }));
-    for (const o of notes.filter((x) => x.note_id !== n.note_id && !n.links.includes(x.note_id))) {
-      lsel.append(el("option", { value: o.note_id, textContent: titleOf(o) }));
-    }
-    lsel.addEventListener("change", () => { if (lsel.value) patch(n, { links: [...n.links, lsel.value] }, after); });
-    links.append(lsel);
-    box.append(el("div", { className: "u-prop" }, [el("div", { className: "u-prop-k", textContent: "リンク" }), links]));
+      n.until = until.value ? `${until.value}T12:00:00Z` : null;
+      patch(n, { at: n.at ?? "", until: n.until ?? "" }, () => { /* 一覧の再描画は不要 */ });
+    };
+    at.addEventListener("change", saveSpan);
+    until.addEventListener("change", saveSpan);
+    box.append(el("div", { className: "u-prop" }, [el("div", { className: "u-prop-k", textContent: "期間" }), at, el("span", { className: "u-row-tilde", textContent: "〜" }), until]));
     const ta = el("textarea", { className: "u-note" }) as HTMLTextAreaElement;
     ta.value = n.value;
     ta.addEventListener("blur", () => {
@@ -1878,40 +1865,61 @@ function chartView(chart: Chart, birth: Birth | null | undefined, personId: stri
     return box;
   };
 
-  // 右ペイン: 一覧（1行=1ページ）またはページ。手順を選んでいる間はその手順で絞る。
+  // 右ペインはノートDB。タブ＝種別(note_type)のビュー。プロパティはタイトル・期間・テキストのみ。
+  const NOTE_TABS: Array<{ id: string; label: string }> = [
+    { id: "event", label: "出来事" }, { id: "concept", label: "概念" },
+  ];
+  let noteTab = "event";
+  // 種別の無い既存ノートは「出来事」に置く（プロポーズ等を失わない）。
+  const tabOf = (n: Note): string => n.rays.find((r) => r.concept_kind === "note_type")?.concept_id ?? "event";
+  const dateVal = (v: string | null): string => (v ?? "").slice(0, 10);
+  const isoOf = (d: string): string | null => (d ? `${d}T12:00:00Z` : null);
+
+  // 右ペイン: 種別タブ＋一覧（列＝タイトル・期間、インライン編集）／または詳細ページ。
   const renderNotes = () => {
     if (!reportHost) return;
     reportHost.innerHTML = "";
     const open = openNote ? notes.find((x) => x.note_id === openNote) : null;
     if (open) { reportHost.append(pageView(open, renderNotes)); return; }
-    const shown = houseFilter ? notes.filter((n) => hasRay(n, "house", houseFilter as string)) : notes;
-    // 何で絞っているかと、新規作成時に入るプロパティを先に見せる。
-    const ctx = contextRays();
-    if (ctx.length) {
-      const scope = el("div", { className: "u-scope" });
-      for (const r of ctx) scope.append(el("span", { className: "u-ray on", textContent: rayLabel(r) }));
-      reportHost.append(scope);
+    // タブ（種別ごとのビュー）
+    const tabbar = el("div", { className: "u-tabs" });
+    for (const t of NOTE_TABS) {
+      const b = el("button", { className: "u-tab-btn" + (t.id === noteTab ? " on" : ""), type: "button", textContent: t.label });
+      b.addEventListener("click", () => { noteTab = t.id; renderNotes(); });
+      tabbar.append(b);
     }
+    reportHost.append(tabbar);
+    const shown = notes.filter((n) => tabOf(n) === noteTab);
     const head = el("tr", {});
-    for (const h of ["タイトル", "プロパティ", "日時"]) head.append(el("th", { textContent: h }));
+    for (const h of ["タイトル", "期間", ""]) head.append(el("th", { textContent: h }));
     const tbl = el("table", { className: "u-tbl u-tbl-auto" }, [head]);
     for (const n of shown) {
-      const tr = el("tr", { className: "u-hit" });
-      tr.append(el("td", { className: "u-mean", textContent: `▤ ${titleOf(n)}` }));
-      tr.append(el("td", { className: "u-mean", textContent: n.rays.map(rayLabel).join("　") }));
-      tr.append(el("td", { textContent: (n.at ?? "").slice(0, 10) }));
-      tr.addEventListener("click", () => { openNote = n.note_id; renderNotes(); });
+      const tr = el("tr", {});
+      const ti = el("input", { className: "u-fi u-row-ti", value: n.title }) as HTMLInputElement;
+      ti.placeholder = "無題";
+      ti.addEventListener("blur", () => { if (ti.value !== n.title) { n.title = ti.value; patch(n, { title: ti.value }, () => { /* 局所更新のみ */ }); } });
+      const at = el("input", { type: "date", className: "u-fi u-row-dt", value: dateVal(n.at) }) as HTMLInputElement;
+      const until = el("input", { type: "date", className: "u-fi u-row-dt", value: dateVal(n.until) }) as HTMLInputElement;
+      const saveSpan = () => {
+        n.at = isoOf(at.value); n.until = isoOf(until.value);
+        patch(n, { at: n.at ?? "", until: n.until ?? "" }, () => { /* 局所更新のみ */ });
+      };
+      at.addEventListener("change", saveSpan);
+      until.addEventListener("change", saveSpan);
+      const openBtn = el("button", { className: "u-btn-sm u-btn-ghost", type: "button", textContent: "開く" });
+      openBtn.addEventListener("click", () => { openNote = n.note_id; renderNotes(); });
+      tr.append(el("td", {}, [ti]), el("td", {}, [at, el("span", { className: "u-row-tilde", textContent: "〜" }), until]), el("td", {}, [openBtn]));
       tbl.append(tr);
     }
     reportHost.append(tbl);
     const add = el("button", { className: "u-btn u-btn-sm", textContent: "＋" });
     add.addEventListener("click", () => {
-      const rays = contextRays();
-      const nowIso = new Date().toISOString(); // 日時は既定で現在時刻
-      void api<{ note_id: string; idx: number; rays: Ray[]; links: string[] }>(`/api/v1/uranai/astrology/person/${personId}/notes`,
+      const nowIso = new Date().toISOString();
+      const rays: Ray[] = [{ concept_kind: "note_type", concept_id: noteTab }];
+      void api<{ note_id: string; idx: number; rays?: Ray[]; links?: string[] }>(`/api/v1/uranai/astrology/person/${personId}/notes`,
         { method: "POST", body: JSON.stringify({ value: "", title: "", rays, at: nowIso }) })
         .then((r) => {
-          notes.push({ note_id: r.note_id, idx: r.idx, at: nowIso, title: "", value: "", rays: r.rays ?? rays, links: r.links ?? [] });
+          notes.push({ note_id: r.note_id, idx: r.idx, at: nowIso, until: null, title: "", value: "", rays: r.rays ?? rays, links: r.links ?? [] });
           openNote = r.note_id; renderNotes();
         });
     });
@@ -2176,17 +2184,9 @@ function chartView(chart: Chart, birth: Birth | null | undefined, personId: stri
   // 「読み」の大分類では下段が手順になり、選んだ手順の材料だけを出す。
   const dataSections: Array<{ label: string; node: HTMLElement }> = [
     { label: "基本情報", node: basicNode },
-    { label: "設定", node: personSettingsNode },
-    { label: "出来事", node: eventsNode() },
-    { label: "チャート", node: chartNode },
-    { label: "概念", node: conceptNode },
-    ...(usesPart("shape") || usesPart("singleton") || usesPart("center") ? [{ label: "全体の形", node: shapeNode }] : []),
+    { label: "設定", node: personSettingsNode },    { label: "チャート", node: chartNode },    ...(usesPart("shape") || usesPart("singleton") || usesPart("center") ? [{ label: "全体の形", node: shapeNode }] : []),
     ...(chart.tally === false || !usesPart("tally") ? [] : [{ label: "元素", node: elemNode }, { label: "クオリティ", node: qualNode }]),
-    { label: "天体", node: planetTbl },
-    { label: "カスプ", node: cuspTbl },
-    { label: "ハウス詳細", node: matHost },
-    { label: "サイン", node: signTbl },
-    ...(usesPart("interception") ? [{ label: "インターセプト", node: icptTbl }] : []),
+    { label: "天体", node: planetTbl },    { label: "ハウス詳細", node: matHost },    ...(usesPart("interception") ? [{ label: "インターセプト", node: icptTbl }] : []),
     ...(usesPart("dignity") ? [{ label: "ディグニティ", node: digTbl }] : []),
     ...(usesPart("rulership") ? [{ label: "支配関係", node: rulerTbl }] : []),
     ...(usesPart("dispositor") ? [{ label: "ディスポジター", node: dispTbl }] : []),
@@ -2294,6 +2294,11 @@ export async function renderUranai(container: HTMLElement): Promise<void> {
     .u-report{flex:1;min-width:0;overflow-y:auto;border-left:1px solid #0001;padding-left:14px}
     .u-report-head{font-weight:700;font-size:15px;margin-bottom:8px;color:#333;border-bottom:2px solid #4A90C2;padding-bottom:4px}
     .u-report-body{color:#888;font-size:13px}
+    /* ノートDB 行の インライン編集 */
+    .u-row-ti{width:100%;box-sizing:border-box;padding:3px 6px;border:1px solid transparent;border-radius:5px;background:transparent;color:inherit;font-size:13px}
+    .u-row-ti:hover,.u-row-ti:focus{border-color:#4A90C2;background:#00000008;outline:none}
+    .u-row-dt{padding:2px 4px;border:1px solid #0002;border-radius:4px;background:transparent;color:inherit;font-size:11px}
+    .u-row-tilde{margin:0 3px;color:#999}
     .u-person{position:relative;display:flex;align-items:center;gap:4px;padding:6px 8px;border-radius:6px}.u-person:hover{background:#0000000a}.u-person.sel{background:#4A90C222;font-weight:600}
     .u-person-name{flex:1;min-width:0;cursor:pointer;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
     .u-person-menu{flex:none;border:0;background:transparent;color:#888;cursor:pointer;font-size:16px;line-height:1;padding:2px 6px;border-radius:4px}
