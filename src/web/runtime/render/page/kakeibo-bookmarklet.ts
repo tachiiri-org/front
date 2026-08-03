@@ -20,26 +20,37 @@ export function goldpointBookmarklet(TARGET: string): void {
     return d;
   };
 
-  const p01m = /[?&]p01=(\d{6})/.exec(location.href);
-  if (!p01m) {
-    toast('明細ページ（p01=YYYYMM 付きのURL）で実行してください', true);
-    return;
-  }
-  const p01 = p01m[1];
-
   const body = document.body.innerText.replace(/\s+/g, ' ');
   const pick = (re: RegExp): string => {
     const m = re.exec(body);
     return m ? m[1] : '';
   };
+
+  // 請求年月は「◯年◯月◯日お支払い分」の見出しから取る。
+  // 月の切り替えはプルダウン＋照会ボタンで行われ URL の p01 は変わらないため、
+  // p01 を信じると画面の月を変えても常に同じ月を取り込んでしまう。p01 は保険。
+  const pay = /(\d{4})年(\d{1,2})月\d{1,2}日お支払い分/.exec(body);
+  const p01m = /[?&]p01=(\d{6})/.exec(location.href);
+  const seikyuym = pay ? pay[1] + String(pay[2]).padStart(2, '0') : p01m ? p01m[1] : '';
+  if (!seikyuym) {
+    toast('請求年月を判別できませんでした。ご利用明細照会のページで実行してください', true);
+    return;
+  }
+  const billingMonth = seikyuym.slice(0, 4) + '-' + seikyuym.slice(4);
+
   const shownTotalRaw = pick(/ご利用明細合計\s*([\d,]+)\s*円/).replace(/,/g, '');
   const shownTotal = shownTotalRaw ? Number(shownTotalRaw) : null;
+  // 合計が読めないと取りこぼしを検出できない。検証できない取り込みは通さない。
+  if (shownTotal === null) {
+    toast('画面の合計金額を読み取れませんでした。取りこぼしを検出できないため中止します', true);
+    return;
+  }
   const asOf = pick(/(\d{4}年\d{1,2}月\d{1,2}日)\s*現在判明分/);
 
-  toast('CSV を取得しています…');
+  toast(seikyuym.slice(0, 4) + '年' + Number(seikyuym.slice(4)) + '月請求分の CSV を取得しています…');
 
   const url =
-    location.origin + '/memapi/jaxrs/dl/meisai/meisai_csv_dl/v1?downloadKey=2&seikyuym=' + p01;
+    location.origin + '/memapi/jaxrs/dl/meisai/meisai_csv_dl/v1?downloadKey=2&seikyuym=' + seikyuym;
 
   fetch(url, { credentials: 'include' })
     .then((r) => {
@@ -121,6 +132,15 @@ export function goldpointBookmarklet(TARGET: string): void {
         counter[k] = (r.dupIndex as number) + 1;
       });
 
+      // 取得した CSV が本当に表示中の月かを、支払予定月で独立に検算する。
+      // 画面の月とリクエストした月がずれていたら、ここで気づける。
+      const wrongMonth = rows.filter((r) => r.payMonth && r.payMonth !== billingMonth);
+      if (wrongMonth.length) {
+        toast('取得した明細の支払予定月が画面と一致しません（画面 ' + billingMonth +
+              ' / CSV ' + String(wrongMonth[0].payMonth) + '）。取り込みを中止しました', true);
+        return;
+      }
+
       const rowsTotal = rows.reduce((a, r) => a + (r.amountJpy as number), 0);
       // 画面の合計との一致は必須。ページングに気づかず3割の行を落としかけた実績があるので、
       // 一致しない限り送信しない。
@@ -132,7 +152,7 @@ export function goldpointBookmarklet(TARGET: string): void {
 
       const payload = {
         source: 'goldpoint',
-        billingMonth: p01.slice(0, 4) + '-' + p01.slice(4),
+        billingMonth: billingMonth,
         asOf: asOf,
         capturedAt: new Date().toISOString(),
         rowCount: rows.length,

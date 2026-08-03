@@ -138,7 +138,31 @@ export async function renderKakeibo(root: HTMLElement): Promise<void> {
   const page = el('div', S.page);
   root.appendChild(page);
 
-  page.appendChild(el('h1', S.h1, '家計簿 — カード明細'));
+  // 見出し行。ブックマークレットのコピーは常設だが主役ではないので右端に寄せる。
+  const header = el('div', 'display:flex;align-items:center;justify-content:space-between;gap:12px;margin-bottom:12px;');
+  header.appendChild(el('h1', S.h1 + 'margin:0;', '家計簿 — カード明細'));
+  const copyBox = el('div', 'display:flex;align-items:center;gap:8px;flex-wrap:wrap;justify-content:flex-end;');
+  const copyMsg = el('span', S.note, '');
+  const copyBtn = el('button', S.btn, 'ブックマークレットをコピー');
+  copyBtn.addEventListener('click', () => void (async () => {
+    // 送信先は今見ているオリジンを埋め込むので、dev/stage/本番でそれぞれ正しいものが作られる
+    const url = buildBookmarkletUrl(location.origin);
+    try {
+      await navigator.clipboard.writeText(url);
+      copyMsg.textContent = 'コピーしました。ブックマークを新規作成して URL 欄に貼ってください';
+      copyMsg.setAttribute('style', S.ok);
+    } catch {
+      const ta = el('textarea', 'width:100%;height:80px;margin-top:8px;font:11px monospace;') as HTMLTextAreaElement;
+      ta.value = url;
+      page.insertBefore(ta, page.children[1] ?? null);
+      ta.select();
+      copyMsg.textContent = '自動コピーできませんでした。下の内容を手動でコピーしてください';
+      copyMsg.setAttribute('style', S.err);
+    }
+  })());
+  copyBox.append(copyMsg, copyBtn);
+  header.appendChild(copyBox);
+  page.appendChild(header);
 
   const status = el('div', S.note, 'カード明細ページのブックマークレットから取り込めます。');
   const bar = el('div', S.bar);
@@ -146,37 +170,6 @@ export async function renderKakeibo(root: HTMLElement): Promise<void> {
   const reloadBtn = el('button', S.btn, '再読込');
   bar.append(el('span', '', '請求年月'), monthSel, reloadBtn);
   page.append(bar, status);
-
-  // ブックマークレットの受け渡し。ドラッグ登録は本番の運用として想定していないので、
-  // クリップボードへコピーしてブックマークのURL欄に貼ってもらう。登録は一度きりで済む。
-  // 送信先は今見ているオリジンを埋め込むため、dev/stage/本番でそれぞれ正しいものが作られる。
-  const setup = el('div', S.card);
-  setup.appendChild(el('div', 'font-weight:600;margin-bottom:6px;', '取り込み用ブックマークレット'));
-  setup.appendChild(el('div', S.note,
-    'コピーしてブックマークを新規作成し、URL 欄に貼り付けてください。登録は一度だけで済みます。' +
-    'カードのご利用明細ページを開いた状態でそのブックマークを開くと、この画面へ取り込まれます。'));
-  const copyRow = el('div', 'display:flex;gap:8px;align-items:center;margin-top:8px;flex-wrap:wrap;');
-  const copyBtn = el('button', S.btn, 'ブックマークレットをコピー');
-  const copyMsg = el('span', S.note, '');
-  copyBtn.addEventListener('click', () => void (async () => {
-    const url = buildBookmarkletUrl(location.origin);
-    try {
-      await navigator.clipboard.writeText(url);
-      copyMsg.textContent = `コピーしました（${url.length.toLocaleString('ja-JP')} 文字 / 送信先 ${location.origin}）`;
-      copyMsg.setAttribute('style', S.ok);
-    } catch {
-      // クリップボード API が使えない場合は選択してコピーできるように出す
-      const ta = el('textarea', 'width:100%;height:80px;margin-top:8px;font:11px monospace;') as HTMLTextAreaElement;
-      ta.value = url;
-      copyRow.parentElement?.appendChild(ta);
-      ta.select();
-      copyMsg.textContent = '自動コピーできませんでした。下の内容を手動でコピーしてください。';
-      copyMsg.setAttribute('style', S.err);
-    }
-  })());
-  copyRow.append(copyBtn, copyMsg);
-  setup.appendChild(copyRow);
-  page.appendChild(setup);
 
   const summary = el('div', S.card);
   const listBox = el('div');
