@@ -48,7 +48,18 @@ export function goldpointBookmarklet(TARGET: string): void {
     })
     .then((buf) => {
       const text = new TextDecoder('shift_jis').decode(buf);
+
+      // セッションが切れていると、CSV ではなくログイン画面の HTML が 200 で返る。
+      // そのまま列数エラーにすると原因が分からないので、ここで明示的に切り分ける。
+      const headText = text.slice(0, 400).replace(/\s+/g, ' ');
+      if (/^\s*(<!DOCTYPE|<html|<\?xml)/i.test(text) || /ログイン|会員ID/.test(headText)) {
+        toast('CSV ではなく HTML が返りました。カード側のログインが切れている可能性があります。' +
+              '明細ページを再読み込みしてログインし直してから、もう一度実行してください。', true);
+        return;
+      }
+
       const lines = text.split(/\r?\n/).filter((l) => l.trim() !== '');
+      if (!lines.length) { toast('CSV が空でした。ログイン状態を確認してください。', true); return; }
       const rows: Record<string, unknown>[] = [];
       const errors: string[] = [];
 
@@ -75,7 +86,8 @@ export function goldpointBookmarklet(TARGET: string): void {
         // 実データは店名の読点が全角なので split(',') が通るが、ASCII カンマが来ると
         // 静かに列がずれる。列数を検証して、ずれたら取り込ませない。
         if (c.length !== 13) {
-          errors.push(i + 1 + '行目: 列数 ' + c.length + '（13のはず）');
+          // 原因を追えるように、実際に返ってきた行の中身も添える
+          errors.push(i + 1 + '行目: 列数 ' + c.length + '（13のはず）: ' + line.slice(0, 120));
           return;
         }
         const usedOn = toDate(c[0]);
