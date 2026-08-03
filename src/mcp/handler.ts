@@ -3,6 +3,7 @@ import { verifyInternalToken } from "../session/token";
 import { mcpResource } from "./oauth";
 import { TOOLS, callTool } from "./tools/authorize";
 import { GRAPH_TOOLS, callGraphTool } from "./tools/graph";
+import { URANAI_TOOLS, callUranaiTool } from "./tools/uranai";
 
 type JsonRpcRequest = {
   jsonrpc: "2.0";
@@ -59,7 +60,7 @@ export async function handleMcp(request: Request, env: AuthorizeEnv): Promise<Re
       serverInfo: { name: "front", version: "1.0.0" },
     };
   } else if (body.method === "tools/list") {
-    result = { tools: [...TOOLS, ...GRAPH_TOOLS] };
+    result = { tools: [...TOOLS, ...GRAPH_TOOLS, ...URANAI_TOOLS] };
   } else if (body.method === "tools/call") {
     const { name, arguments: args } = body.params as {
       name: string;
@@ -67,6 +68,8 @@ export async function handleMcp(request: Request, env: AuthorizeEnv): Promise<Re
     };
     result = name.startsWith("graph_")
       ? await callGraphTool(name, args, mcpEnv)
+      : name.startsWith("uranai_")
+      ? await callUranaiTool(name, args, mcpEnv)
       : await callTool(name, args, mcpEnv, request);
   } else {
     return Response.json({
