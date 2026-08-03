@@ -121,6 +121,8 @@ for (const scheme of ['light', 'dark'] as const) {
     storageState: state, viewport: { width: 1400, height: 900 }, locale: 'ja-JP', colorScheme: scheme,
   });
   const page = await ctx.newPage();
+  // デプロイ直後は古いバンドルを掴むことがあるのでキャッシュを使わせない
+  await page.route('**/*', (route) => route.continue({ headers: { ...route.request().headers(), 'Cache-Control': 'no-cache' } }));
   const errs: string[] = [];
   page.on('console', (m) => { if (m.type() === 'error') errs.push(m.text().slice(0, 160)); });
   page.on('pageerror', (e) => errs.push('pageerror: ' + String(e).slice(0, 160)));
