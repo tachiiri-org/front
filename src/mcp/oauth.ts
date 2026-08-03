@@ -230,12 +230,22 @@ export async function handleMcpAuthorize(request: Request, env: AuthorizeEnv): P
     sameSite: "Lax",
   });
 
+  // 認可画面の文言は client_id から引く。製品ホスト（graph/uranai/kakeibo…）のログインは
+  // client_id が製品スラッグそのものなので、それを表示名に使う。MCP クライアントなど
+  // 製品スラッグでない場合は登録名にフォールバックする。
+  // ここを "Claude Code" / "graph data" 固定にしていたため、製品が増えたときに
+  // 家計簿のログイン画面で「grant access to your graph data」と出ていた。
+  const productLabels: Record<string, string> = { graph: "Graph", uranai: "Uranai", kakeibo: "Kakeibo" };
+  const productLabel = productLabels[clientId];
+  const appName = productLabel ?? client.name ?? "this application";
+  const dataDescription = productLabel ? `your ${productLabel} data` : "your data";
+
   const html = `<!DOCTYPE html>
 <html lang="en">
 <head>
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width,initial-scale=1">
-  <title>Authorize Claude Code</title>
+  <title>Authorize ${appName}</title>
   <style>
     body { font-family: system-ui, sans-serif; max-width: 480px; margin: 80px auto; padding: 0 16px; }
     h1 { font-size: 1.5rem; margin-bottom: 8px; }
@@ -247,8 +257,8 @@ export async function handleMcpAuthorize(request: Request, env: AuthorizeEnv): P
   </style>
 </head>
 <body>
-  <h1>Authorize ${client.name ?? ""}</h1>
-  <p>Sign in to grant access to your graph data.</p>
+  <h1>Authorize ${appName}</h1>
+  <p>Sign in to grant access to ${dataDescription}.</p>
   <div class="scope">Scopes: ${scope}</div>
   <a class="btn github" href="/oauth/github/start">Sign in with GitHub</a>
   <a class="btn google" href="/oauth/google/start">Sign in with Google</a>

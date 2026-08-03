@@ -529,6 +529,25 @@ export const handleApiRequest = async (request: Request, env: Env): Promise<Resp
     });
   }
 
+  // 家計簿 API — backend の /api/v1/kakeibo/* (KakeiboDO) へ中継する。
+  // graph と同じくテナント／実行者ごとのデータなので、識別子が欠けたまま転送しない。
+  const kakeiboApiMatch = url.pathname.match(/^\/api\/v1\/kakeibo(\/.*)?$/);
+  if (kakeiboApiMatch) {
+    const suffix = kakeiboApiMatch[1] ?? '/';
+    const backendPath = `/api/v1/kakeibo${suffix}${url.search}`;
+    const body = request.method !== 'GET' && request.method !== 'HEAD' ? await request.text() : undefined;
+    const identity = await readIdentity(env, request);
+    const tenantContext = { tenantId: identity?.groupId, subjectId: identity?.userId };
+    // タブを開いたままセッションが切れた場合、テナント無しで転送すると空テナントに対する
+    // 操作になって取り込みが黙って消える。401 を返してログインし直しを促す。
+    if (!tenantContext.tenantId || !tenantContext.subjectId) {
+      return Response.json({ error: 'unauthenticated' }, { status: 401 });
+    }
+    const res = await authorizeFetch(env, { path: backendPath, method: request.method, body, tenantContext });
+    if (env.LOG_LEVEL === 'debug') console.log(`[kakeibo-proxy] ${request.method} ${backendPath} → ${res.status}`);
+    return res;
+  }
+
   // D1-backed graph API — proxy to backend /api/v1/graph/*
   const graphApiMatch = url.pathname.match(/^\/api\/v1\/graph(\/.*)?$/);
   if (graphApiMatch) {
