@@ -505,7 +505,15 @@ const getCookie = (name: string): string | null => {
 
 const loadEditorBootstrap = async (): Promise<void> => {
   const pathnameScreenId = getScreenIdFromPathname();
-  const screenId = pathnameScreenId ?? PRODUCT_SCREENS?.[0] ?? await findEditorScreenId();
+  // 製品モードでは、その製品が持たない画面IDをパスから拾っても layouts には存在しない。
+  // 製品固有のパス（家計簿の /import など）を開いたときに
+  // Failed to load screen "import" (404) になっていたので、製品の画面へ倒す。
+  // ログイン系など下の分岐で扱うパスは、この後の判定でそちらが優先される。
+  const productScreenId =
+    PRODUCT_SCREENS && pathnameScreenId && !PRODUCT_SCREENS.includes(pathnameScreenId)
+      ? PRODUCT_SCREENS[0]
+      : pathnameScreenId;
+  const screenId = productScreenId ?? PRODUCT_SCREENS?.[0] ?? await findEditorScreenId();
 
   // Group-specific login page: /login/<uuid>
   if (/^\/login\/[0-9a-f-]{36}$/i.test(window.location.pathname)) {
