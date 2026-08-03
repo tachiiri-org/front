@@ -60,6 +60,30 @@ const toInt = (s: string | undefined): number | null => {
 
 const norm = (s: string): string => String(s).normalize('NFKC').replace(/\s+/g, ' ').trim();
 
+/**
+ * 店名に ASCII カンマが含まれる行を復元する。
+ *
+ * 例: 2026/02/10,GITHUB, INC. (GITHUB.COM ),707,１,１,707,4.40　USD　160.708　02 11
+ * 値は引用符で囲われていないので一般的な CSV パーサでは解決しない。ただし列数は固定で、
+ * カンマが混ざるのは店名だけなので、先頭1列と末尾 tailCount 列を固定して間を店名に畳めば戻せる。
+ */
+function fitColumns(cols: string[], expected: number, tailCount: number): string[] | null {
+  if (cols.length === expected) return cols;
+  if (cols.length < expected) return null;
+  const shopEnd = cols.length - tailCount;
+  if (shopEnd < 1) return null;
+  return [cols[0], cols.slice(1, shopEnd).join(','), ...cols.slice(shopEnd)];
+}
+
+/**
+ * 7列形式では、外貨取引の換算情報が備考欄に全角スペース区切りで入る。
+ * 例: "4.40　USD　160.708　02 11" → 4.40 USD / レート 160.708 / 換算日 02 11
+ */
+function parseForeignRemark(remark: string): { amount: string; currency: string; rate: string; date: string } | null {
+  const m = /^\s*([\d.,]+)[\s　]+([A-Z]{3})[\s　]+([\d.,]+)[\s　]+(.+?)\s*$/.exec(remark);
+  return m ? { amount: m[1], currency: m[2], rate: m[3], date: m[4] } : null;
+}
+
 export function parseGoldpointCsv(text: string, fileName: string): ParsedCsv {
   const lines = text.split(/\r?\n/).filter((l) => l.trim() !== '');
   const rows: ParsedRow[] = [];
@@ -80,14 +104,17 @@ export function parseGoldpointCsv(text: string, fileName: string): ParsedCsv {
   const isConfirmed = widths.filter((w) => w === 7).length > widths.filter((w) => w === 13).length;
   const expected = isConfirmed ? 7 : 13;
 
+  // 店名より後ろの列数。ここを固定値として末尾から数え、間を店名に畳んで復元する。
+  const tailCount = isConfirmed ? 5 : 11;
+
   lines.forEach((line, i) => {
-    const c = line.split(',');
+    const raw = line.split(',');
     // 確定済み版の先頭行は氏名・カード番号・カード名称のヘッダ。データではないので飛ばす。
-    if (isConfirmed && i === 0 && c.length === 3) return;
-    // 実データは店名の読点が全角なので split(',') が通るが、ASCII カンマが来ると
-    // 静かに列がずれる。列数を検証して、ずれたら取り込ませない。
-    if (c.length !== expected) {
-      errors.push(`${i + 1}行目: 列数 ${c.length}（${expected}のはず）: ${line.slice(0, 80)}`);
+    if (isConfirmed && i === 0 && raw.length === 3) return;
+    // 店名に ASCII カンマが入ると列がずれる。末尾から数えて復元を試み、駄目なら取り込ませない。
+    const c = fitColumns(raw, expected, tailCount);
+    if (!c) {
+      errors.push(`${i + 1}行目: 列数 ${raw.length}（${expected}のはず）: ${line.slice(0, 80)}`);
       return;
     }
     const usedOn = toDate(c[0]);
@@ -98,6 +125,10 @@ export function parseGoldpointCsv(text: string, fileName: string): ParsedCsv {
       const amount = toInt(c[2]);
       if (amount === null) { errors.push(`${i + 1}行目: 金額が不正 ${c[2]}`); return; }
       const kubun = norm(c[3]);
+      const remarkRaw = (c[6] ?? '').trim();
+      // 7列形式には外貨用の列が無く、換算情報が備考欄に入る。
+      // 備考として素通りさせると外貨取引だと分からなくなるので、ここで取り出す。
+      const fx = parseForeignRemark(remarkRaw);
       rows.push({
         usedOn,
         shop: c[1].trim(), shopKey: norm(c[1]),
@@ -109,8 +140,12 @@ export function parseGoldpointCsv(text: string, fileName: string): ParsedCsv {
         payMonth: '', // 呼び出し側がファイル名から決めた請求年月で埋める
         amountJpy: amount,
         paymentTotal: toInt(c[5]), feeJpy: null,
-        isForeign: false, foreignAmount: '', currency: '', fxRate: '', fxDate: '',
-        remark: (c[6] ?? '').trim(),
+        isForeign: fx !== null,
+        foreignAmount: fx ? fx.amount : '',
+        currency: fx ? fx.currency : '',
+        fxRate: fx ? fx.rate : '',
+        fxDate: fx ? fx.date : '',
+        remark: fx ? '' : remarkRaw,
         dupIndex: 0,
       });
       return;
