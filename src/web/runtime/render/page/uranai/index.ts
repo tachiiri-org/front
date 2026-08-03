@@ -511,6 +511,28 @@ function chartView(chart: Chart, birth: Birth | null | undefined, personId: stri
     [...planetRows.map((r, i) => { const k = PLANET_ORDER.filter((x) => place.has(x))[i]; return [...r, ROLE_JA[roleOf(k)] ?? "", meaningOf("planet", k)]; }),
      ...angleRows.map((r) => [...r, "", ""])], [6]);
   const cuspTbl = mkTable(["室", "サイン", "度数", "意味"], cuspLons.map((lon, i) => { const sign = SIGN_ORDER[Math.floor((((lon % 360) + 360) % 360) / 30) % 12]; return [String(i + 1), SIGN_NAME[sign], fmtDeg(((lon % 30) + 30) % 30), meaningOf("house", `house_${i + 1}`)]; }), [3]);
+  // 出生時刻の幅で不正確になる要素をグレーアウト（バックエンドの uncertain フラグを消費）。
+  // 中央時刻で計算した値は残しつつ、幅でブレる要素（アングル・室・高速天体）を灰色にして弾く。
+  {
+    const bu = chart.birth_uncertain ?? chart.uncertain;
+    if (bu && bu.width_minutes > 0) {
+      const orderedKeys = [...PLANET_ORDER.filter((k) => place.has(k)), ...["asc", "mc", "dsc", "ic"].filter((k) => place.has(k))];
+      const uset = new Set(bu.points);
+      const trs = planetTbl.querySelectorAll("tr");
+      orderedKeys.forEach((k, i) => {
+        const tr = trs[i + 1] as HTMLElement | undefined;   // +1: ヘッダ行を飛ばす
+        if (!tr) return;
+        if (uset.has(k)) tr.classList.add("u-uncertain");
+        // 室(house)列=index 4。ハウスが不確実なら各天体の室セルを灰色に（アングルは室空欄）。
+        if (bu.houses) { const td = tr.children[4] as HTMLElement | undefined; if (td && td.textContent) td.classList.add("u-uncertain"); }
+      });
+      const cap = el("caption", { className: "u-uncertain-note",
+        textContent: `⚠ 出生時刻に約${Math.round(bu.width_minutes)}分の幅があるため、灰色の項目は不確実です（中央時刻で計算）` });
+      planetTbl.insertBefore(cap, planetTbl.firstChild);
+      // カスプ（室の枠）も時刻依存。ハウスが不確実ならカスプ表全体を灰色に。
+      if (bu.houses) cuspTbl.classList.add("u-uncertain");
+    }
+  }
   // サインの意味（流派スコープ）。ルディアはサインを「生命プロセスの12の位相」として定義する。
   const signTbl = mkTable(["サイン", "意味"], SIGN_ORDER.map((k) => [
     { t: `${SIGN_GLYPH[k]}︎ ${SIGN_NAME[k] ?? k}`, tip: `sign:${k}` }, ownOf("sign", k) || meaningOf("sign", k)]), [1]);
@@ -2338,6 +2360,11 @@ export async function renderUranai(container: HTMLElement): Promise<void> {
     .u-basic-v .u-fi{width:100%;box-sizing:border-box;padding:5px 6px;border:1px solid #4A90C2;border-radius:5px}
     .u-basic-ic{width:40px;text-align:right}
     .u-basic-tbl tr.u-dim{opacity:.32;pointer-events:none}
+    /* 出生時刻の幅で不確実な要素のグレーアウト */
+    tr.u-uncertain td{opacity:.4}
+    td.u-uncertain{opacity:.4;text-decoration:line-through}
+    .u-tbl.u-uncertain td{opacity:.45}
+    caption.u-uncertain-note{caption-side:top;text-align:left;font-size:11px;color:#c26a00;padding:4px 2px}
     .u-edit-ic{border:0;background:transparent;cursor:pointer;font-size:14px;padding:3px 7px;border-radius:5px;color:#888;line-height:1}
     .u-edit-ic:hover{background:#0000000f;color:#333}
     .u-basic-actions{display:flex;gap:8px;align-items:center;margin-top:12px}
