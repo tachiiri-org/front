@@ -108,7 +108,7 @@ export const URANAI_TOOLS = [
   {
     name: "uranai_read_technique",
     description:
-      "Read one derived or time-based technique for a person: progressions, transits, profection, solar arc, planetary cycles, transit search, primary directions, time lords, Vimshottari dasha, vargas, yogas, Jaimini, KP, muntha, chara dasha, ruling planets, Tajika, synastry, composite, or the user's own interpretation notes. Most take `date`; some take extra params (e.g. planet_cycle: until_age; dasha: levels; synastry/composite: the partner's person id). Pass them through `params`. Check the technique is in the ruleset's part list first (uranai_read_reference) — the API will compute it regardless.",
+      "Read one derived or time-based technique for a person: progressions, transits, profection, solar arc, planetary cycles, transit search, primary directions, time lords, Vimshottari dasha, vargas, yogas, Jaimini, KP, muntha, chara dasha, ruling planets, Tajika, synastry, composite, or the user's own interpretation notes. Most take `date`; some take extra params (e.g. planet_cycle: until_age; dasha: levels; synastry/composite: the partner's person id). Pass them through `params`. Check the technique is in the ruleset's part list first (uranai_read_reference) — the API will compute it regardless. For technique 'notes', pass params {note_type:'event'|'concept'} to fetch a single tab/view; each note also carries its own note_type and period (at/until).",
     inputSchema: {
       type: "object",
       properties: {

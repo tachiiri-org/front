@@ -12,6 +12,26 @@ run_worker_first = true
 name = "front-stage"
 workers_dev = true
 
+# カスタムドメインは rp.ts の規約に従う:
+#   {product}.tachiiri.com が製品ホスト、authn.tachiiri.com が認証オリジン。
+#   productClientId は "tachiiri" の直前のラベル（dev.graph... も graph 扱い）。
+#   dev/stage は先頭に環境ラベルを付ける（dev.authn.tachiiri.com など）。
+[[env.stage.routes]]
+pattern = "stage.authn.tachiiri.com"
+custom_domain = true
+
+[[env.stage.routes]]
+pattern = "stage.graph.tachiiri.com"
+custom_domain = true
+
+[[env.stage.routes]]
+pattern = "stage.uranai.tachiiri.com"
+custom_domain = true
+
+[[env.stage.routes]]
+pattern = "stage.kakeibo.tachiiri.com"
+custom_domain = true
+
 [env.stage.observability]
 enabled = true
 
@@ -35,6 +55,22 @@ service = "backend-stage"
 name = "front-production"
 workers_dev = true
 
+[[env.production.routes]]
+pattern = "authn.tachiiri.com"
+custom_domain = true
+
+[[env.production.routes]]
+pattern = "graph.tachiiri.com"
+custom_domain = true
+
+[[env.production.routes]]
+pattern = "uranai.tachiiri.com"
+custom_domain = true
+
+[[env.production.routes]]
+pattern = "kakeibo.tachiiri.com"
+custom_domain = true
+
 [env.production.observability]
 enabled = true
 
@@ -55,6 +91,22 @@ service = "backend-production"
 [env.dev]
 name = "front-dev"
 workers_dev = true
+
+[[env.dev.routes]]
+pattern = "dev.authn.tachiiri.com"
+custom_domain = true
+
+[[env.dev.routes]]
+pattern = "dev.graph.tachiiri.com"
+custom_domain = true
+
+[[env.dev.routes]]
+pattern = "dev.uranai.tachiiri.com"
+custom_domain = true
+
+[[env.dev.routes]]
+pattern = "dev.kakeibo.tachiiri.com"
+custom_domain = true
 
 [env.dev.observability]
 enabled = true

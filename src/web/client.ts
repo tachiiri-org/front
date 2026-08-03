@@ -10,6 +10,7 @@ import { renderSettingsPage } from './runtime/render/page/settings';
 import { renderAdminPage } from './runtime/render/page/admin';
 import { renderGraphEditor } from './runtime/render/page/graph-editor';
 import { renderUranai } from './runtime/render/page/uranai';
+import { renderKakeibo } from './runtime/render/page/kakeibo';
 import { renderStorageExplorer } from './runtime/render/page/storage-explorer';
 import type { GraphEditorComponent } from './schema/component/kind/graph-editor';
 import type { StorageExplorerComponent } from './schema/component/kind/storage-explorer';
@@ -24,6 +25,7 @@ const PRODUCT = (window as unknown as { __PRODUCT__?: string }).__PRODUCT__;
 const PRODUCT_CONFIG: Record<string, { screens: string[] }> = {
   graph: { screens: ['graph-editor'] },
   uranai: { screens: ['uranai'] },
+  kakeibo: { screens: ['kakeibo'] },
   admin: { screens: ['org-members', 'admin-members', 'storage-explorer'] },
 };
 const PRODUCT_SCREENS = PRODUCT ? PRODUCT_CONFIG[PRODUCT]?.screens : undefined;
@@ -359,6 +361,15 @@ const renderScreen = async (screenId: string): Promise<void> => {
     await renderUranai(root);
     return;
   }
+  // 家計簿もカスタム画面（layouts スペック不要）。明細一覧は縦に伸びるのでスクロール型。
+  if (screenId === 'kakeibo') {
+    applyScrollableLayout();
+    void renderNav(screenId);
+    root.innerHTML = '';
+    root.style.position = 'relative';
+    await renderKakeibo(root);
+    return;
+  }
   const inlineData = readInlineScreenData();
   let value: unknown;
   if (inlineData !== null) {
@@ -494,7 +505,15 @@ const getCookie = (name: string): string | null => {
 
 const loadEditorBootstrap = async (): Promise<void> => {
   const pathnameScreenId = getScreenIdFromPathname();
-  const screenId = pathnameScreenId ?? PRODUCT_SCREENS?.[0] ?? await findEditorScreenId();
+  // 製品モードでは、その製品が持たない画面IDをパスから拾っても layouts には存在しない。
+  // 製品固有のパス（家計簿の /import など）を開いたときに
+  // Failed to load screen "import" (404) になっていたので、製品の画面へ倒す。
+  // ログイン系など下の分岐で扱うパスは、この後の判定でそちらが優先される。
+  const productScreenId =
+    PRODUCT_SCREENS && pathnameScreenId && !PRODUCT_SCREENS.includes(pathnameScreenId)
+      ? PRODUCT_SCREENS[0]
+      : pathnameScreenId;
+  const screenId = productScreenId ?? PRODUCT_SCREENS?.[0] ?? await findEditorScreenId();
 
   // Group-specific login page: /login/<uuid>
   if (/^\/login\/[0-9a-f-]{36}$/i.test(window.location.pathname)) {
