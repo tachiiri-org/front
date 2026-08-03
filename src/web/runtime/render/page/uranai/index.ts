@@ -1881,34 +1881,39 @@ function chartView(chart: Chart, birth: Birth | null | undefined, personId: stri
     reportHost.innerHTML = "";
     const open = openNote ? notes.find((x) => x.note_id === openNote) : null;
     if (open) { reportHost.append(pageView(open, renderNotes)); return; }
-    // タブ（種別ごとのビュー）
-    const tabbar = el("div", { className: "u-tabs" });
+    // タブ（種別ごとのビュー）。Notion風＝アイコン＋ラベル、選択中は下線。
+    const tabbar = el("div", { className: "u-db-tabs" });
     for (const t of NOTE_TABS) {
-      const b = el("button", { className: "u-tab-btn" + (t.id === noteTab ? " on" : ""), type: "button", textContent: t.label });
+      const b = el("button", { className: "u-db-tab" + (t.id === noteTab ? " on" : ""), type: "button" });
+      b.append(el("span", { className: "u-db-tab-ic", textContent: "▤" }), el("span", { textContent: t.label }));
       b.addEventListener("click", () => { noteTab = t.id; renderNotes(); });
       tabbar.append(b);
     }
     reportHost.append(tabbar);
     const shown = notes.filter((n) => tabOf(n) === noteTab);
     const head = el("tr", {});
-    for (const h of ["タイトル", "期間", ""]) head.append(el("th", { textContent: h }));
-    const tbl = el("table", { className: "u-tbl u-tbl-auto" }, [head]);
+    for (const h of ["タイトル", "期間"]) head.append(el("th", { textContent: h }));
+    const tbl = el("table", { className: "u-tbl u-tbl-auto u-db-tbl" }, [head]);
     for (const n of shown) {
       const tr = el("tr", {});
-      const ti = el("input", { className: "u-fi u-row-ti", value: n.title }) as HTMLInputElement;
+      const ti = el("input", { className: "u-row-ti", value: n.title }) as HTMLInputElement;
       ti.placeholder = "無題";
       ti.addEventListener("blur", () => { if (ti.value !== n.title) { n.title = ti.value; patch(n, { title: ti.value }, () => { /* 局所更新のみ */ }); } });
-      const at = el("input", { type: "date", className: "u-fi u-row-dt", value: dateVal(n.at) }) as HTMLInputElement;
-      const until = el("input", { type: "date", className: "u-fi u-row-dt", value: dateVal(n.until) }) as HTMLInputElement;
+      // 開くボタンはタイトルセル内。行の高さに収め、ホバー時に出す（Notionの OPEN 風）。
+      const openBtn = el("button", { className: "u-open-btn", type: "button", textContent: "開く" });
+      openBtn.addEventListener("click", () => { openNote = n.note_id; renderNotes(); });
+      const at = el("input", { type: "date", className: "u-row-dt", value: dateVal(n.at) }) as HTMLInputElement;
+      const until = el("input", { type: "date", className: "u-row-dt", value: dateVal(n.until) }) as HTMLInputElement;
       const saveSpan = () => {
         n.at = isoOf(at.value); n.until = isoOf(until.value);
         patch(n, { at: n.at ?? "", until: n.until ?? "" }, () => { /* 局所更新のみ */ });
       };
       at.addEventListener("change", saveSpan);
       until.addEventListener("change", saveSpan);
-      const openBtn = el("button", { className: "u-btn-sm u-btn-ghost", type: "button", textContent: "開く" });
-      openBtn.addEventListener("click", () => { openNote = n.note_id; renderNotes(); });
-      tr.append(el("td", {}, [ti]), el("td", {}, [at, el("span", { className: "u-row-tilde", textContent: "〜" }), until]), el("td", {}, [openBtn]));
+      tr.append(
+        el("td", { className: "u-td-title" }, [ti, openBtn]),
+        el("td", {}, [at, el("span", { className: "u-row-tilde", textContent: "〜" }), until]),
+      );
       tbl.append(tr);
     }
     reportHost.append(tbl);
@@ -2294,11 +2299,25 @@ export async function renderUranai(container: HTMLElement): Promise<void> {
     .u-report{flex:1;min-width:0;overflow-y:auto;border-left:1px solid #0001;padding-left:14px}
     .u-report-head{font-weight:700;font-size:15px;margin-bottom:8px;color:#333;border-bottom:2px solid #4A90C2;padding-bottom:4px}
     .u-report-body{color:#888;font-size:13px}
-    /* ノートDB 行の インライン編集 */
-    .u-row-ti{width:100%;box-sizing:border-box;padding:3px 6px;border:1px solid transparent;border-radius:5px;background:transparent;color:inherit;font-size:13px}
+    /* ノートDB（Notion風） */
+    .u-db-tabs{display:flex;gap:2px;align-items:center;border-bottom:1px solid #0001;margin-bottom:8px;overflow-x:auto}
+    .u-db-tab{display:inline-flex;align-items:center;gap:5px;border:0;background:transparent;color:#888;cursor:pointer;font-size:13px;padding:6px 10px;border-bottom:2px solid transparent;white-space:nowrap;margin-bottom:-1px}
+    .u-db-tab:hover{color:#333;background:#00000006}
+    .u-db-tab.on{color:#333;font-weight:600;border-bottom-color:#333}
+    .u-db-tab-ic{opacity:.55;font-size:12px}
+    .u-db-tbl td{padding:0;vertical-align:middle}
+    .u-td-title{position:relative}
+    .u-row-ti{width:100%;box-sizing:border-box;padding:6px 62px 6px 8px;border:1px solid transparent;border-radius:5px;background:transparent;color:inherit;font-size:13px}
     .u-row-ti:hover,.u-row-ti:focus{border-color:#4A90C2;background:#00000008;outline:none}
-    .u-row-dt{padding:2px 4px;border:1px solid #0002;border-radius:4px;background:transparent;color:inherit;font-size:11px}
-    .u-row-tilde{margin:0 3px;color:#999}
+    .u-open-btn{position:absolute;right:6px;top:50%;transform:translateY(-50%);opacity:0;font-size:11px;padding:1px 9px;border:1px solid #0002;border-radius:4px;background:#fff;color:#555;cursor:pointer;line-height:1.5}
+    .u-td-title:hover .u-open-btn,.u-open-btn:focus{opacity:1}
+    .u-row-dt{color-scheme:dark;padding:4px;border:1px solid #0002;border-radius:4px;background:transparent;color:inherit;font-size:12px}
+    .u-row-tilde{margin:0 4px;color:#999}
+    [data-theme=light] .u-row-dt{color-scheme:light}
+    [data-theme=dark] .u-db-tab{color:#ffffff8a}
+    [data-theme=dark] .u-db-tab:hover{color:#fff;background:#ffffff0f}
+    [data-theme=dark] .u-db-tab.on{color:#fff;border-bottom-color:#fff}
+    [data-theme=dark] .u-open-btn{background:#2a2b2e;color:#ddd;border-color:#ffffff2b}
     .u-person{position:relative;display:flex;align-items:center;gap:4px;padding:6px 8px;border-radius:6px}.u-person:hover{background:#0000000a}.u-person.sel{background:#4A90C222;font-weight:600}
     .u-person-name{flex:1;min-width:0;cursor:pointer;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
     .u-person-menu{flex:none;border:0;background:transparent;color:#888;cursor:pointer;font-size:16px;line-height:1;padding:2px 6px;border-radius:4px}
