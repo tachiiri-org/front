@@ -855,11 +855,14 @@ export async function renderKakeibo(root: HTMLElement): Promise<void> {
 
   const bar = el('div', 'kk-row');
   const reloadBtn = el('button', 'kk-btn', '再読込');
-  bar.append(monthSel, reloadBtn, status);
+  bar.append(el('span', 'kk-note', '利用月'), monthSel, reloadBtn, status);
   listView.appendChild(bar);
 
   const loadMonths = async (): Promise<void> => {
-    const { months } = await api<{ months: string[] }>('/months');
+    // 集計と同じ「利用月」で揃える。請求月のままだと 2026-07 を選んだのに6月の利用が出て、
+    // 集計の列とも食い違っていた。
+    const { usedMonths } = await api<{ months: string[]; usedMonths: string[] }>('/months');
+    const months = usedMonths;
     const keep = monthSel.value;
     monthSel.innerHTML = '';
     for (const m of months) {
@@ -877,20 +880,17 @@ export async function renderKakeibo(root: HTMLElement): Promise<void> {
     const res = await api<{
       latestImport: { as_of?: string; captured_at?: string; rows_total?: number; row_count?: number } | null;
       rows: StatementRow[];
-    }>(`/statements?billingMonth=${encodeURIComponent(bm)}`);
+    }>(`/statements?usedMonth=${encodeURIComponent(bm)}`);
 
     knownCategories = [...new Set(res.rows.flatMap((r) => r.categories))].sort();
     knownAliases = [...new Set(res.rows.map((r) => r.shop_alias ?? '').filter(Boolean))].sort();
 
-    const m = res.latestImport;
     summary.innerHTML = '';
-    if (m) {
+    {
       const s = el('div', 'kk-row');
-      s.appendChild(el('strong', '', `${m.row_count ?? res.rows.length}件 ${yen(m.rows_total ?? 0)}`));
+      s.appendChild(el('strong', '',
+        `${res.rows.length}件 ${yen(res.rows.reduce((a, r) => a + r.amount_jpy, 0))}`));
       if (catFilter) s.appendChild(el('span', 'kk-note', `絞り込み: ${catFilter}（もう一度クリックで解除）`));
-      // 「現在判明分」は確定前スナップショットの基準日。取り直す前提なので必ず見せる。
-      s.appendChild(el('span', 'kk-sub',
-        [m.as_of, m.captured_at?.slice(0, 16).replace('T', ' ')].filter(Boolean).join(' / ')));
       summary.appendChild(s);
       // 費目ごとの小計。分類の目的はこれなので、明細より先に出す。
       const byCat = new Map<string, number>();
