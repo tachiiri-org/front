@@ -124,8 +124,11 @@ const MAP: Rule[] = [
   [/^ＺＡＲＡ|^ユニクロ/, ['日用品'], undefined],
 
   // 交通
-  [/^Ｓｕｉｃａ|^ＧＯ（タクシーアプリ）|^個人タクシー/, ['交通費'], undefined],
-  [/^ＮｅｗＤａｙｓ|^ヤマト運輸|^チヤ―ジスポツト/, ['交通費'], undefined],
+  ['Ｓｕｉｃａ（ＧｏｏｇｌｅＰａｙ）', ['交通費'], 'Suica'],
+  [/^ＧＯ（タクシーアプリ）|^個人タクシー/, ['交通費'], undefined],
+  // 支店管轄ごとに別店舗になっているのでまとめる
+  [/^ＮｅｗＤａｙｓ/, ['交通費'], 'NewDays'],
+  [/^ヤマト運輸|^チヤ―ジスポツト/, ['交通費'], undefined],
   ['サイクルンペデイア', ['交通費'], 'サイクルンペディア'],
 
   // 習い事・その他
@@ -143,6 +146,37 @@ const MAP: Rule[] = [
   // 羽田空港内の店舗はまとめて外食（ターミナル内の飲食が実態）
   [/^羽田空港ターミナル|^ｃｕｕｄ第２タ－ミナルビル店/, ['外食'], '羽田空港'],
 ];
+
+
+/**
+ * 略名が指定されていない店の表示名を作る。
+ * 全角は半角へ、決済端末由来の「／ＮＦＣ」など無意味な接尾辞は落とし、10文字以内に詰める。
+ * 一覧で横に並ぶので、長い正式名称のままだと読み比べられない。
+ */
+function defaultAlias(name: string): string {
+  let t = name.normalize('NFKC').replace(/\s+/g, ' ').trim();
+  t = t.replace(/[\/／]?\s*NFC\s*$/i, '');                 // 決済端末の識別子
+  t = t.replace(/[\/／]\s*LINE\s*EC\s*$/i, '');
+  t = t.replace(/^(株式会社|カブシキガイシャ)/, '');
+  t = t.replace(/(株式会社|カブシキガイシャ)$/, '');
+  t = t.replace(/[（(][^）)]*[）)]\s*$/, '');                 // 末尾の括弧書き
+  t = t.replace(/\s*(支店管轄|本部|本店|オンライン|ご利用料金|ご利用金額)$/, '');
+  t = t.trim();
+  if (t.length <= 10) return t;
+
+  // ここから短縮。まず末尾の「◯◯店」を落とす。ただし本体まで削らないよう、
+  // 落とした結果が4文字未満になるならやめる（「キィニョン…ののみち店」→「キィ」になった）。
+  const dropped = t.replace(/\s*[^\s]{0,8}店$/, '').trim();
+  if (dropped.length >= 4) t = dropped;
+  if (t.length <= 10) return t;
+
+  // それでも長ければ区切りで切る。機械的に切ると読めない語ができるため。
+  const cut = t.slice(0, 10);
+  const sep = Math.max(cut.lastIndexOf(' '), cut.lastIndexOf('/'), cut.lastIndexOf('・'));
+  return (sep >= 4 ? cut.slice(0, sep) : cut).trim();
+}
+
+
 
 const norm = (s: string): string => s.normalize('NFKC').replace(/\s+/g, ' ').trim();
 
@@ -171,8 +205,13 @@ const plan: { id: string; shop: string; cats: string[]; alias?: string }[] = [];
 const unmatched: string[] = [];
 for (const s of shops) {
   const rule = ruleFor(s.name);
-  if (!rule) { unmatched.push(s.name); continue; }
-  plan.push({ id: s.shop_id, shop: s.name, cats: rule[1], alias: rule[2] });
+  if (!rule) {
+    unmatched.push(s.name);
+    // 費目が決まらなくても表示名は短くしておく
+    plan.push({ id: s.shop_id, shop: s.name, cats: [], alias: defaultAlias(s.name) });
+    continue;
+  }
+  plan.push({ id: s.shop_id, shop: s.name, cats: rule[1], alias: rule[2] ?? defaultAlias(s.name) });
 }
 
 console.log(`店舗数=${shops.length} 一致=${plan.length} 未分類=${unmatched.length}`);
@@ -187,7 +226,9 @@ let skipped = 0;
 for (const p of plan) {
   // backend にレート制限があるので間隔を空ける（429 で半分近く弾かれた）
   await page.waitForTimeout(900);
-  const body = JSON.stringify(p.alias === undefined ? { categories: p.cats } : { categories: p.cats, alias: p.alias });
+  const body = JSON.stringify(
+    p.cats.length === 0 ? { alias: p.alias } : { categories: p.cats, alias: p.alias },
+  );
   const res = (await page.evaluate(
     `fetch('/api/v1/kakeibo/shops/${p.id}', {method:'PUT',headers:{'Content-Type':'application/json'},body:${JSON.stringify(body)}}).then(r=>r.status)`,
   )) as number;

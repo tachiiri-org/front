@@ -101,6 +101,16 @@ const CSS = `
 .kk-ms-in{border:0;background:none;color:var(--fg);font:inherit;font-size:13px;
   outline:none;min-width:56px;flex:1;padding:2px 0}
 .kk-tag.on{border-color:var(--accent);color:var(--accent)}
+.kk-ov{position:fixed;inset:0;z-index:100;background:rgba(0,0,0,.45);
+  display:flex;align-items:center;justify-content:center;padding:16px}
+.kk-pop{background:var(--card);color:var(--fg);border:1px solid var(--line2);border-radius:10px;
+  max-width:min(760px,96vw);max-height:82vh;display:flex;flex-direction:column;
+  box-shadow:0 12px 40px rgba(0,0,0,.5)}
+.kk-pop-hd{display:flex;align-items:center;justify-content:space-between;gap:12px;
+  padding:10px 12px;border-bottom:1px solid var(--line)}
+.kk-pop-bd{overflow:auto;padding:0 12px 12px}
+.kk-x{border:0;background:none;color:var(--muted);font-size:18px;cursor:pointer;line-height:1}
+.kk-x:hover{color:var(--fg)}
 .kk-tabs{display:flex;gap:4px;margin-bottom:10px}
 .kk-tab{padding:4px 12px;border:1px solid transparent;border-radius:5px;cursor:pointer;
   color:var(--muted);font-size:13px;background:none}
@@ -312,24 +322,31 @@ async function renderSummary(host: HTMLElement): Promise<void> {
     return { key: k, sub: shopCat.get(k) ?? '', vals, total: vals.reduce((a, b) => a + b, 0) };
   });
 
-  const detail = el('div', '');
   const showDetail = async (label: string): Promise<void> => {
     const id = shopId.get(label);
     if (!id) return;
     const res = await api<{ rows: { billing_month: string; used_on: string; amount_jpy: number; shop: string; remark: string | null }[] }>(
       `/shops/${encodeURIComponent(id)}/statements`,
     );
-    detail.innerHTML = '';
-    const box = el('div', 'kk-card');
-    box.appendChild(el('div', 'kk-note',
+
+    // 表の下に足すと画面が飛ぶので、その場に重ねる。閉じれば元の位置に戻る。
+    const overlay = el('div', 'kk-ov');
+    const pop = el('div', 'kk-pop');
+    const hd = el('div', 'kk-pop-hd');
+    hd.appendChild(el('strong', '',
       `${label}　${res.rows.length}件　${yen(res.rows.reduce((a, r) => a + r.amount_jpy, 0))}`));
+    const close = el('button', 'kk-x', '×');
+    close.title = '閉じる';
+    hd.appendChild(close);
+    pop.appendChild(hd);
+
+    const bd = el('div', 'kk-pop-bd');
     const t = el('table', 'kk-tb');
     const h = el('tr');
-    for (const x of ['請求月', '利用日', '店', '金額']) h.appendChild(el('th', x === '金額' ? 'kk-num' : '', x));
+    for (const x of ['利用日', '店', '金額']) h.appendChild(el('th', x === '金額' ? 'kk-num' : '', x));
     t.appendChild(h);
     for (const r of res.rows) {
       const tr = el('tr');
-      tr.appendChild(el('td', '', r.billing_month));
       tr.appendChild(el('td', '', r.used_on));
       const c = el('td', 'kk-wrap');
       c.appendChild(el('div', '', r.shop));
@@ -340,9 +357,16 @@ async function renderSummary(host: HTMLElement): Promise<void> {
     }
     const sc = el('div', 'kk-scroll');
     sc.appendChild(t);
-    box.appendChild(sc);
-    detail.appendChild(box);
-    box.scrollIntoView({ behavior: 'smooth', block: 'nearest' });
+    bd.appendChild(sc);
+    pop.appendChild(bd);
+    overlay.appendChild(pop);
+
+    const dismiss = (): void => { overlay.remove(); document.removeEventListener('keydown', onKey); };
+    const onKey = (e: KeyboardEvent): void => { if (e.key === 'Escape') dismiss(); };
+    close.addEventListener('click', dismiss);
+    overlay.addEventListener('click', (e) => { if (e.target === overlay) dismiss(); });
+    document.addEventListener('keydown', onKey);
+    document.body.appendChild(overlay);
   };
 
   const shopHost = el('div', '');
@@ -364,7 +388,6 @@ async function renderSummary(host: HTMLElement): Promise<void> {
   drawShops();
 
   host.appendChild(shopHost);
-  host.appendChild(detail);
 }
 
 
@@ -590,6 +613,10 @@ export async function renderKakeibo(root: HTMLElement): Promise<void> {
   let knownAliases: string[] = [];
   // 費目タグのクリックで明細を絞り込む（もう一度押すと解除）
   let catFilter: string | null = null;
+  // 明細の並び替え。既定は金額の降順（何に使ったかより、何が高かったかを先に見たい）。
+  // ヘッダ1回目で降順、2回目で昇順。
+  let sortKey: 'used_on' | 'shop' | 'amount' = 'amount';
+  let sortAsc = false;
 
   const hd = el('div', 'kk-hd');
   hd.appendChild(el('h1', '', '家計簿'));
@@ -687,7 +714,21 @@ export async function renderKakeibo(root: HTMLElement): Promise<void> {
 
     const table = el('table', 'kk-tb');
     const head = el('tr');
-    for (const h of ['日付', '店', '費目', '略名', '金額']) head.appendChild(el('th', '', h));
+    const cols: [string, 'used_on' | 'shop' | 'amount' | null][] = [
+      ['日付', 'used_on'], ['店', 'shop'], ['費目', null], ['略名', null], ['金額', 'amount'],
+    ];
+    for (const [label, key] of cols) {
+      if (!key) { head.appendChild(el('th', '', label)); continue; }
+      const on = sortKey === key;
+      const th = el('th', (key === 'amount' ? 'kk-num ' : '') + 'kk-clk' + (on ? ' kk-on' : ''),
+        label + (on ? (sortAsc ? ' ▲' : ' ▼') : ''));
+      th.addEventListener('click', () => {
+        if (sortKey === key) sortAsc = !sortAsc;
+        else { sortKey = key; sortAsc = false; }
+        void loadRows();
+      });
+      head.appendChild(th);
+    }
     table.appendChild(head);
 
     const saveShop = async (shopId: string, body: Record<string, unknown>): Promise<void> => {
@@ -696,9 +737,17 @@ export async function renderKakeibo(root: HTMLElement): Promise<void> {
     };
 
     const cf = catFilter;
-    const shown = cf
+    const shown = (cf
       ? res.rows.filter((r) => (r.categories.length ? r.categories : ['未分類']).includes(cf))
-      : res.rows;
+      : [...res.rows]);
+    shown.sort((a, b) => {
+      const d = sortKey === 'amount'
+        ? a.amount_jpy - b.amount_jpy
+        : sortKey === 'shop'
+          ? (a.shop_alias ?? a.shop).localeCompare(b.shop_alias ?? b.shop, 'ja')
+          : a.used_on.localeCompare(b.used_on);
+      return sortAsc ? d : -d;
+    });
     for (const r of shown) {
       const tr = el('tr');
       tr.appendChild(el('td', '', r.used_on.slice(5)));
