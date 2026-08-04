@@ -94,6 +94,13 @@ const CSS = `
   border:1px solid var(--line2);font-size:12px;background:var(--field)}
 .kk-tag button{border:0;background:none;color:var(--muted);cursor:pointer;padding:0 0 0 4px;font:inherit}
 .kk-tag button:hover{color:var(--err)}
+.kk-ms{position:relative;display:inline-flex;align-items:center;flex-wrap:wrap;gap:2px;
+  min-width:150px;padding:2px 4px;border:1px solid var(--line2);border-radius:5px;
+  background:var(--field);cursor:text}
+.kk-ms:focus-within{border-color:var(--accent)}
+.kk-ms-in{border:0;background:none;color:var(--fg);font:inherit;font-size:13px;
+  outline:none;min-width:56px;flex:1;padding:2px 0}
+.kk-tag.on{border-color:var(--accent);color:var(--accent)}
 .kk-tabs{display:flex;gap:4px;margin-bottom:10px}
 .kk-tab{padding:4px 12px;border:1px solid transparent;border-radius:5px;cursor:pointer;
   color:var(--muted);font-size:13px;background:none}
@@ -238,12 +245,14 @@ async function renderSummary(host: HTMLElement): Promise<void> {
       h.appendChild(el('th', '', ''));
       if (subHead !== undefined) h.appendChild(el('th', '', subHead));
       months.forEach((m, i) => {
-        const th = el('th', 'kk-num kk-clk' + (sortAt === i ? ' kk-on' : ''), m.slice(2));
+        const th = el('th', 'kk-num kk-clk' + (sortAt === i ? ' kk-on' : ''),
+          m.slice(2) + (sortAt === i ? ' ▼' : ''));
         th.title = `${m} の多い順に並べ替え`;
         th.addEventListener('click', () => { sortAt = i; draw(); });
         h.appendChild(th);
       });
-      const thTotal = el('th', 'kk-num kk-clk' + (sortAt === -1 ? ' kk-on' : ''), '合計');
+      const thTotal = el('th', 'kk-num kk-clk' + (sortAt === -1 ? ' kk-on' : ''),
+        '合計' + (sortAt === -1 ? ' ▼' : ''));
       thTotal.addEventListener('click', () => { sortAt = -1; draw(); });
       h.appendChild(thTotal);
       t.appendChild(h);
@@ -356,6 +365,94 @@ async function renderSummary(host: HTMLElement): Promise<void> {
 
   host.appendChild(shopHost);
   host.appendChild(detail);
+}
+
+
+/**
+ * Notion の select 列に近い複数選択。タグと入力欄を1つの枠に収める。
+ * ボタンとテキストボックスが別要素だと編集対象が分かりにくいため。
+ */
+function multiSelect(opts: {
+  values: string[];
+  choices: () => string[];
+  onChange: (next: string[]) => void;
+  placeholder?: string;
+}): HTMLElement {
+  const wrap = el('span', 'kk-ms');
+  const input = el('input', 'kk-ms-in') as HTMLInputElement;
+  input.placeholder = opts.values.length ? '' : (opts.placeholder ?? '');
+  const menu = el('div', 'kk-cb-menu');
+  let idx = -1;
+
+  const paint = (): void => {
+    for (const n of [...wrap.querySelectorAll('.kk-tag')]) n.remove();
+    opts.values.forEach((v) => {
+      const t = el('span', 'kk-tag', v);
+      const x = el('button', '', '×');
+      x.title = '外す';
+      x.addEventListener('mousedown', (e) => {
+        e.preventDefault();
+        opts.onChange(opts.values.filter((c) => c !== v));
+      });
+      t.appendChild(x);
+      wrap.insertBefore(t, input);
+    });
+    input.placeholder = opts.values.length ? '' : (opts.placeholder ?? '');
+  };
+
+  const close = (): void => { menu.classList.remove('on'); idx = -1; };
+  const pick = (v: string): void => {
+    close();
+    input.value = '';
+    if (v && !opts.values.includes(v)) opts.onChange([...opts.values, v]);
+  };
+
+  const build = (): void => {
+    const q = input.value.trim().toLowerCase();
+    const all = opts.choices().filter((c) => !opts.values.includes(c));
+    const hits = q ? all.filter((c) => c.toLowerCase().includes(q)) : all;
+    menu.innerHTML = '';
+    for (const c of hits.slice(0, 40)) {
+      const it = el('div', 'kk-cb-item', c);
+      it.addEventListener('mousedown', (e) => { e.preventDefault(); pick(c); });
+      menu.appendChild(it);
+    }
+    const q0 = input.value.trim();
+    if (q0 && !all.includes(q0) && !opts.values.includes(q0)) {
+      const it = el('div', 'kk-cb-item kk-cb-new', `+ ${q0}`);
+      it.addEventListener('mousedown', (e) => { e.preventDefault(); pick(q0); });
+      menu.appendChild(it);
+    }
+    menu.classList.toggle('on', menu.childElementCount > 0);
+  };
+
+  input.addEventListener('focus', build);
+  input.addEventListener('input', build);
+  input.addEventListener('blur', () => setTimeout(close, 120));
+  input.addEventListener('keydown', (e) => {
+    const items = [...menu.querySelectorAll<HTMLElement>('.kk-cb-item')];
+    if (e.key === 'ArrowDown' || e.key === 'ArrowUp') {
+      e.preventDefault();
+      if (!items.length) return;
+      idx = e.key === 'ArrowDown' ? Math.min(idx + 1, items.length - 1) : Math.max(idx - 1, 0);
+      items.forEach((n, i) => n.classList.toggle('sel', i === idx));
+      items[idx]?.scrollIntoView({ block: 'nearest' });
+    } else if (e.key === 'Enter') {
+      e.preventDefault();
+      const t = idx >= 0 ? (items[idx]?.textContent ?? '') : input.value.trim();
+      if (t) pick(t.replace(/^\+ /, ''));
+    } else if (e.key === 'Backspace' && input.value === '' && opts.values.length) {
+      opts.onChange(opts.values.slice(0, -1));
+    } else if (e.key === 'Escape') { close(); }
+  });
+  // 枠のどこを押しても入力に入る
+  wrap.addEventListener('mousedown', (e) => {
+    if (e.target === wrap) { e.preventDefault(); input.focus(); }
+  });
+
+  wrap.append(input, menu);
+  paint();
+  return wrap;
 }
 
 /** ブックマークレットからの取り込みを待ち受ける（未ログイン時は送り手が ack まで再送する） */
@@ -491,6 +588,8 @@ export async function renderKakeibo(root: HTMLElement): Promise<void> {
   // 既知の費目・略名は表示中の全行から集め、プルダウンの候補にする
   let knownCategories: string[] = [];
   let knownAliases: string[] = [];
+  // 費目タグのクリックで明細を絞り込む（もう一度押すと解除）
+  let catFilter: string | null = null;
 
   const hd = el('div', 'kk-hd');
   hd.appendChild(el('h1', '', '家計簿'));
@@ -563,6 +662,7 @@ export async function renderKakeibo(root: HTMLElement): Promise<void> {
     if (m) {
       const s = el('div', 'kk-row');
       s.appendChild(el('strong', '', `${m.row_count ?? res.rows.length}件 ${yen(m.rows_total ?? 0)}`));
+      if (catFilter) s.appendChild(el('span', 'kk-note', `絞り込み: ${catFilter}（もう一度クリックで解除）`));
       // 「現在判明分」は確定前スナップショットの基準日。取り直す前提なので必ず見せる。
       s.appendChild(el('span', 'kk-sub',
         [m.as_of, m.captured_at?.slice(0, 16).replace('T', ' ')].filter(Boolean).join(' / ')));
@@ -577,7 +677,10 @@ export async function renderKakeibo(root: HTMLElement): Promise<void> {
       const cats = el('div', 'kk-row');
       cats.style.marginTop = '4px';
       for (const [k, v] of [...byCat].sort((a, b) => b[1] - a[1])) {
-        cats.appendChild(el('span', 'kk-tag', `${k} ${yen(v)}`));
+        // クリックでその費目だけに絞る。もう一度押すと解除。
+        const t = el('span', 'kk-tag kk-clk' + (catFilter === k ? ' on' : ''), `${k} ${yen(v)}`);
+        t.addEventListener('click', () => { catFilter = catFilter === k ? null : k; void loadRows(); });
+        cats.appendChild(t);
       }
       summary.appendChild(cats);
     }
@@ -592,7 +695,11 @@ export async function renderKakeibo(root: HTMLElement): Promise<void> {
       await loadRows();
     };
 
-    for (const r of res.rows) {
+    const cf = catFilter;
+    const shown = cf
+      ? res.rows.filter((r) => (r.categories.length ? r.categories : ['未分類']).includes(cf))
+      : res.rows;
+    for (const r of shown) {
       const tr = el('tr');
       tr.appendChild(el('td', '', r.used_on.slice(5)));
 
@@ -602,24 +709,13 @@ export async function renderKakeibo(root: HTMLElement): Promise<void> {
       if (r.is_foreign) shopCell.appendChild(el('div', 'kk-sub', `${r.foreign_amount} ${r.currency}`));
       tr.appendChild(shopCell);
 
-      // 費目はタグ表示 + 検索可能プルダウンで追加。店に紐づくので同じ店の全明細に効く。
+      // 費目は Notion の select 列に近い1つのコントロール。店に紐づくので同じ店の全明細に効く。
       const catCell = el('td', '');
-      for (const c of r.categories) {
-        const t = el('span', 'kk-tag', c);
-        const x = el('button', '', '×');
-        x.title = '外す';
-        x.addEventListener('click', () => void saveShop(r.shop_id,
-          { categories: r.categories.filter((v) => v !== c) }));
-        t.appendChild(x);
-        catCell.appendChild(t);
-      }
-      catCell.appendChild(combobox({
-        placeholder: '費目', width: '90px', clearOnPick: true,
+      catCell.appendChild(multiSelect({
+        values: r.categories,
+        placeholder: '費目',
         choices: () => knownCategories,
-        onPick: (v) => {
-          if (!v || r.categories.includes(v)) return;
-          void saveShop(r.shop_id, { categories: [...r.categories, v] });
-        },
+        onChange: (next) => void saveShop(r.shop_id, { categories: next }),
       }));
       tr.appendChild(catCell);
 
