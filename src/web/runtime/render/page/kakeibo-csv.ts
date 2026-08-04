@@ -102,7 +102,10 @@ export function parseGoldpointCsv(text: string, fileName: string): ParsedCsv {
   //  A) 確定前（支払予定分）: 13列・ヘッダ無し・支払予定月の列あり
   //  B) 確定済み: 7列・先頭に3列のヘッダ行（氏名/カード番号/カード名称）・支払予定月の列なし
   // B は請求年月を中身から決められないので、ファイル名 yyyyMM.csv（支払月）を使う。
-  const widths = lines.map((l) => l.split(',').length);
+  const widths = lines
+    .map((l) => l.split(','))
+    .filter((c) => !(c.length === 3 && /\*{2,}/.test(c[1] ?? '')))
+    .map((c) => c.length);
   const isConfirmed = widths.filter((w) => w === 7).length > widths.filter((w) => w === 13).length;
   const expected = isConfirmed ? 7 : 13;
 
@@ -114,8 +117,9 @@ export function parseGoldpointCsv(text: string, fileName: string): ParsedCsv {
 
   lines.forEach((line, i) => {
     const raw = line.split(',');
-    // 確定済み版の先頭行は氏名・カード番号・カード名称のヘッダ。データではないので飛ばす。
-    if (isConfirmed && i === 0 && raw.length === 3) return;
+    // 氏名・カード番号・カード名称のヘッダ行。1ファイルに複数枚のカードが入ることがあり、
+    // 枚数ぶん途中にも現れる（先頭だけ飛ばす実装では2枚目で列数エラーになっていた）。
+    if (isConfirmed && raw.length === 3 && /\*{2,}/.test(raw[1] ?? '')) return;
     // 店名に ASCII カンマが入ると列がずれる。末尾から数えて復元を試み、駄目なら取り込ませない。
     const c = fitColumns(raw, expected, tailCount);
     if (!c) {
