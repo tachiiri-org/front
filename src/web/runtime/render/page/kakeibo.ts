@@ -210,6 +210,7 @@ type Summary = {
   byCategory: { billing_month: string; category: string; total: number; cnt: number }[];
   byShop: { billing_month: string; shop_id: string; label: string; name: string; category: string; total: number; cnt: number }[];
   income: { billing_month: string; label: string; total: number }[];
+  bySource: { source: string; billing_month: string; total: number }[];
   multiCategoryShops: number;
 };
 
@@ -309,6 +310,20 @@ async function renderSummary(host: HTMLElement): Promise<void> {
     const vals = months.map((m) => catAt.get(`${k}\u0001${m}`) ?? 0);
     return { key: k, vals, total: vals.reduce((a, b) => a + b, 0) };
   });
+  // 経路別（収入 / 引落 / ヨドバシカード）。支払い元が違うので分けて見る。
+  if (s.bySource?.length) {
+    const srcAt = new Map<string, number>();
+    for (const r of s.bySource) srcAt.set(`${r.source}\u0001${r.billing_month}`, r.total);
+    const order = ['振込', '引落', 'ヨドバシカード'];
+    const srcRows: Row[] = order
+      .filter((k) => s.bySource.some((r) => r.source === k))
+      .map((k) => {
+        const vals = months.map((m) => srcAt.get(`${k}\u0001${m}`) ?? 0);
+        return { key: k === '振込' ? '収入（振込）' : k, vals, total: vals.reduce((a, b) => a + b, 0) };
+      });
+    host.appendChild(matrix('経路 × 利用月', srcRows, undefined));
+  }
+
   host.appendChild(matrix('費目 × 利用月', catRows, undefined));
 
   // 収入と収支。支出は費目に合算済みなので、ここでは収入と差額だけ見せる。
@@ -545,7 +560,7 @@ type FixedData = {
   recurring: { recurring_id: string; kind: string; label: string; amount_jpy: number;
     start_month: string; end_month: string | null; category: string | null }[];
   entries: { entry_id: string; kind: string; label: string; occurred_month: string;
-    amount_jpy: number; note: string | null; category: string | null }[];
+    amount_jpy: number; note: string | null; category: string | null; override_of: string | null }[];
 };
 
 /**
@@ -553,10 +568,13 @@ type FixedData = {
  *  - 毎月定額（家賃）は定義を1つ置き、期間内の各月へ自動で計上する
  *  - 金額が毎回違うもの（学費・固定資産税）と収入は、都度1件ずつ記録する
  */
-async function renderFixed(host: HTMLElement, cats: () => string[]): Promise<void> {
+async function renderFixed(host: HTMLElement, kind: 'expense' | 'income'): Promise<void> {
   host.innerHTML = '';
   const d = await api<FixedData>('/fixed');
-  const reload = (): void => void renderFixed(host, cats);
+  const reload = (): void => void renderFixed(host, kind);
+  const rec = d.recurring.filter((r) => r.kind === kind);
+  const ent = d.entries.filter((e) => e.kind === kind);
+  const word = kind === 'income' ? '振込' : '引落';
 
   const field = (ph: string, w = '110px', type = 'text'): HTMLInputElement => {
     const i = el('input', 'kk-in') as HTMLInputElement;
@@ -565,39 +583,48 @@ async function renderFixed(host: HTMLElement, cats: () => string[]): Promise<voi
     i.type = type;
     return i;
   };
-  const kindSel = (): HTMLSelectElement => {
-    const k = el('select', 'kk-in') as HTMLSelectElement;
-    for (const [v, t] of [['expense', '支出'], ['income', '収入']]) {
-      const o = el('option', '', t) as HTMLOptionElement;
-      o.value = v;
-      k.appendChild(o);
-    }
-    return k;
-  };
 
   // ── 毎月定額
   const recBox = el('div', 'kk-card');
-  recBox.appendChild(el('div', 'kk-note', '毎月定額（家賃など）— 期間内の各月に自動で計上されます'));
+  recBox.appendChild(el('div', 'kk-note',
+    `毎月定額 — 期間内の各月に自動で計上されます。特定の月だけ違う額なら「この月だけ変更」で上書きできます。`));
   const rt = el('table', 'kk-tb');
   const rh = el('tr');
-  for (const x of ['種別', '名称', '費目', '金額', '開始', '終了', '']) rh.appendChild(el('th', '', x));
+  for (const x of ['名称', '費目', '金額', '開始', '終了', '']) rh.appendChild(el('th', '', x));
   rt.appendChild(rh);
-  for (const r of d.recurring) {
+  for (const r of rec) {
     const tr = el('tr');
-    tr.appendChild(el('td', '', r.kind === 'income' ? '収入' : '支出'));
     tr.appendChild(el('td', '', r.label));
     tr.appendChild(el('td', 'kk-sub', r.category ?? ''));
     tr.appendChild(el('td', 'kk-num', yen(r.amount_jpy)));
     tr.appendChild(el('td', '', r.start_month));
     tr.appendChild(el('td', '', r.end_month ?? '継続中'));
+    const act = el('td', '');
+    const ov = el('button', 'kk-btn', 'この月だけ変更');
+    ov.addEventListener('click', () => {
+      // 定義はそのままに、指定月だけ別額を記録する。集計ではその月の定義展開を止める。
+      const m = field('YYYY-MM', '96px');
+      const a = field('金額', '90px', 'number');
+      const go = el('button', 'kk-btn', '保存');
+      go.addEventListener('click', () => void (async () => {
+        if (!/^\d{4}-\d{2}$/.test(m.value) || !a.value) { go.textContent = '入力不足'; return; }
+        await api('/fixed/entry', { method: 'POST', body: JSON.stringify({
+          kind, label: r.label, amount: Number(a.value), occurredMonth: m.value,
+          overrideOf: r.recurring_id,
+          categories: r.category ? [r.category] : [],
+        }) });
+        reload();
+      })());
+      act.innerHTML = '';
+      act.append(m, a, go);
+    });
     const del = el('button', 'kk-btn', '削除');
     del.addEventListener('click', () => void (async () => {
       await api(`/fixed/recurring/${encodeURIComponent(r.recurring_id)}`, { method: 'DELETE' });
       reload();
     })());
-    const td = el('td', '');
-    td.appendChild(del);
-    tr.appendChild(td);
+    act.append(ov, del);
+    tr.appendChild(act);
     rt.appendChild(tr);
   }
   const rsc = el('div', 'kk-scroll');
@@ -606,34 +633,35 @@ async function renderFixed(host: HTMLElement, cats: () => string[]): Promise<voi
 
   const rf = el('div', 'kk-row');
   rf.style.marginTop = '8px';
-  const rk = kindSel(); const rl = field('名称'); const rc = field('費目', '90px');
+  const rl = field('名称'); const rc = field('費目', '90px');
   const ra = field('金額', '90px', 'number'); const rs = field('開始 YYYY-MM', '110px');
   const re = field('終了（空で継続）', '130px');
   const radd = el('button', 'kk-btn', '追加');
   radd.addEventListener('click', () => void (async () => {
     if (!rl.value.trim() || !ra.value || !/^\d{4}-\d{2}$/.test(rs.value)) { radd.textContent = '入力不足'; return; }
     await api('/fixed/recurring', { method: 'POST', body: JSON.stringify({
-      kind: rk.value, label: rl.value.trim(), amount: Number(ra.value),
+      kind, label: rl.value.trim(), amount: Number(ra.value),
       startMonth: rs.value, endMonth: re.value || null,
       categories: rc.value.split(',').map((x) => x.trim()).filter(Boolean),
     }) });
     reload();
   })());
-  rf.append(rk, rl, rc, ra, rs, re, radd);
+  rf.append(rl, rc, ra, rs, re, radd);
   recBox.appendChild(rf);
   host.appendChild(recBox);
 
   // ── 都度
   const entBox = el('div', 'kk-card');
-  entBox.appendChild(el('div', 'kk-note', '都度（学費・固定資産税・給与など）— 金額が毎回違うもの'));
+  entBox.appendChild(el('div', 'kk-note', `都度 — 金額が毎回違う${word}`));
   const et = el('table', 'kk-tb');
   const eh = el('tr');
-  for (const x of ['種別', '名称', '費目', '月', '金額', 'メモ', '']) eh.appendChild(el('th', '', x));
+  for (const x of ['名称', '費目', '月', '金額', 'メモ', '']) eh.appendChild(el('th', '', x));
   et.appendChild(eh);
-  for (const e of d.entries) {
+  for (const e of ent) {
     const tr = el('tr');
-    tr.appendChild(el('td', '', e.kind === 'income' ? '収入' : '支出'));
-    tr.appendChild(el('td', '', e.label));
+    const nm = el('td', '', e.label);
+    if (e.override_of) nm.appendChild(el('div', 'kk-sub', '毎月定額の上書き'));
+    tr.appendChild(nm);
     tr.appendChild(el('td', 'kk-sub', e.category ?? ''));
     tr.appendChild(el('td', '', e.occurred_month));
     tr.appendChild(el('td', 'kk-num', yen(e.amount_jpy)));
@@ -654,23 +682,22 @@ async function renderFixed(host: HTMLElement, cats: () => string[]): Promise<voi
 
   const ef = el('div', 'kk-row');
   ef.style.marginTop = '8px';
-  const ek = kindSel(); const el2 = field('名称'); const ec = field('費目', '90px');
+  const el2 = field('名称'); const ec = field('費目', '90px');
   const em = field('月 YYYY-MM', '110px'); const ea = field('金額', '90px', 'number');
   const en = field('メモ', '120px');
   const eadd = el('button', 'kk-btn', '追加');
   eadd.addEventListener('click', () => void (async () => {
     if (!el2.value.trim() || !ea.value || !/^\d{4}-\d{2}$/.test(em.value)) { eadd.textContent = '入力不足'; return; }
     await api('/fixed/entry', { method: 'POST', body: JSON.stringify({
-      kind: ek.value, label: el2.value.trim(), amount: Number(ea.value),
+      kind, label: el2.value.trim(), amount: Number(ea.value),
       occurredMonth: em.value, note: en.value || null,
       categories: ec.value.split(',').map((x) => x.trim()).filter(Boolean),
     }) });
     reload();
   })());
-  ef.append(ek, el2, ec, em, ea, en, eadd);
+  ef.append(el2, ec, em, ea, en, eadd);
   entBox.appendChild(ef);
   host.appendChild(entBox);
-  void cats;
 }
 
 /** ブックマークレットからの取り込みを待ち受ける（未ログイン時は送り手が ack まで再送する） */
@@ -843,15 +870,18 @@ export async function renderKakeibo(root: HTMLElement): Promise<void> {
   const tabs = el('div', 'kk-tabs');
   const tabAgg = el('button', 'kk-tab on', '集計');
   const tabList = el('button', 'kk-tab', '明細');
-  const tabFixed = el('button', 'kk-tab', '固定費・収入');
-  tabs.append(tabAgg, tabList, tabFixed);
+  const tabDebit = el('button', 'kk-tab', '引落');
+  const tabIncome = el('button', 'kk-tab', '振込');
+  tabs.append(tabAgg, tabList, tabDebit, tabIncome);
   page.appendChild(tabs);
 
   const aggBox = el('div', '');
   const listView = el('div', '');
   listView.style.display = 'none';
-  const fixedView = el('div', '');
-  fixedView.style.display = 'none';
+  const debitView = el('div', '');
+  debitView.style.display = 'none';
+  const incomeView = el('div', '');
+  incomeView.style.display = 'none';
 
   const bar = el('div', 'kk-row');
   const reloadBtn = el('button', 'kk-btn', '再読込');
@@ -991,21 +1021,25 @@ export async function renderKakeibo(root: HTMLElement): Promise<void> {
 
   listView.appendChild(renderCsvImport(status, reloadAll));
   listView.append(summary, listBox);
-  page.append(aggBox, listView, fixedView);
+  page.append(aggBox, listView, debitView, incomeView);
 
-  const showTab = (which: 'agg' | 'list' | 'fixed'): void => {
+  const showTab = (which: 'agg' | 'list' | 'debit' | 'income'): void => {
     tabAgg.className = 'kk-tab' + (which === 'agg' ? ' on' : '');
     tabList.className = 'kk-tab' + (which === 'list' ? ' on' : '');
-    tabFixed.className = 'kk-tab' + (which === 'fixed' ? ' on' : '');
+    tabDebit.className = 'kk-tab' + (which === 'debit' ? ' on' : '');
+    tabIncome.className = 'kk-tab' + (which === 'income' ? ' on' : '');
     aggBox.style.display = which === 'agg' ? '' : 'none';
     listView.style.display = which === 'list' ? '' : 'none';
-    fixedView.style.display = which === 'fixed' ? '' : 'none';
+    debitView.style.display = which === 'debit' ? '' : 'none';
+    incomeView.style.display = which === 'income' ? '' : 'none';
     if (which === 'agg') void renderSummary(aggBox).catch((e) => { aggBox.textContent = String(e); });
-    if (which === 'fixed') void renderFixed(fixedView, () => knownCategories).catch((e) => { fixedView.textContent = String(e); });
+    if (which === 'debit') void renderFixed(debitView, 'expense').catch((e) => { debitView.textContent = String(e); });
+    if (which === 'income') void renderFixed(incomeView, 'income').catch((e) => { incomeView.textContent = String(e); });
   };
   tabAgg.addEventListener('click', () => showTab('agg'));
   tabList.addEventListener('click', () => showTab('list'));
-  tabFixed.addEventListener('click', () => showTab('fixed'));
+  tabDebit.addEventListener('click', () => showTab('debit'));
+  tabIncome.addEventListener('click', () => showTab('income'));
 
   monthSel.addEventListener('change', () => void loadRows());
   reloadBtn.addEventListener('click', reloadAll);
