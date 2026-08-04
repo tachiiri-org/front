@@ -217,6 +217,7 @@ type Summary = {
  * 略名をクリックするとその店の明細を月を跨いで表示する。
  */
 async function renderSummary(host: HTMLElement): Promise<void> {
+  const redraw = (): void => void renderSummary(host);
   host.innerHTML = '';
   const s = await api<Summary>('/summary');
   const months = s.months;
@@ -313,6 +314,7 @@ async function renderSummary(host: HTMLElement): Promise<void> {
   const shopAt = new Map<string, number>();
   const shopId = new Map<string, string>();
   const shopCat = new Map<string, string>();
+  const knownCats = [...new Set(s.byCategory.map((r) => r.category))].filter((c) => c !== '未分類').sort();
   for (const r of s.byShop) {
     const k = `${r.label}\u0001${r.billing_month}`;
     shopAt.set(k, (shopAt.get(k) ?? 0) + r.total);
@@ -336,8 +338,24 @@ async function renderSummary(host: HTMLElement): Promise<void> {
     const overlay = el('div', 'kk kk-ov');
     const pop = el('div', 'kk-pop');
     const hd = el('div', 'kk-pop-hd');
-    hd.appendChild(el('strong', '',
+    const onKey = (e: KeyboardEvent): void => { if (e.key === 'Escape') dismiss(); };
+    const dismiss = (): void => { overlay.remove(); document.removeEventListener('keydown', onKey); };
+    const left = el('div', 'kk-row');
+    left.appendChild(el('strong', '',
       `${label}　${res.rows.length}件　${yen(res.rows.reduce((a, r) => a + r.amount_jpy, 0))}`));
+    // ここで費目を直せる。集計を見て気づいた分類ミスを、明細を確かめながら直せるようにする。
+    const cur = shopCat.get(label);
+    left.appendChild(multiSelect({
+      values: cur && cur !== '未分類' ? [cur] : [],
+      placeholder: '費目',
+      choices: () => knownCats,
+      onChange: (next) => void (async () => {
+        await api(`/shops/${encodeURIComponent(id)}`, { method: 'PUT', body: JSON.stringify({ categories: next }) });
+        dismiss();
+        redraw();
+      })(),
+    }));
+    hd.appendChild(left);
     const close = el('button', 'kk-x', '×');
     close.title = '閉じる';
     hd.appendChild(close);
@@ -364,8 +382,6 @@ async function renderSummary(host: HTMLElement): Promise<void> {
     pop.appendChild(bd);
     overlay.appendChild(pop);
 
-    const dismiss = (): void => { overlay.remove(); document.removeEventListener('keydown', onKey); };
-    const onKey = (e: KeyboardEvent): void => { if (e.key === 'Escape') dismiss(); };
     close.addEventListener('click', dismiss);
     overlay.addEventListener('click', (e) => { if (e.target === overlay) dismiss(); });
     document.addEventListener('keydown', onKey);
