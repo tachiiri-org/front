@@ -314,26 +314,15 @@ async function renderSummary(host: HTMLElement): Promise<void> {
     const vals = months.map((m) => catAt.get(`${k}\u0001${m}`) ?? 0);
     return { key: k, vals, total: vals.reduce((a, b) => a + b, 0) };
   });
-  // 経路別（収入 / 引落 / ヨドバシカード）。支払い元が違うので分けて見る。
-  if (s.bySource?.length) {
-    const srcAt = new Map<string, number>();
-    for (const r of s.bySource) srcAt.set(`${r.source}\u0001${r.billing_month}`, r.total);
-    const order = ['振込', '引落', 'ヨドバシカード'];
-    const srcRows: Row[] = order
-      .filter((k) => s.bySource.some((r) => r.source === k))
-      .map((k) => {
-        const vals = months.map((m) => srcAt.get(`${k}\u0001${m}`) ?? 0);
-        return { key: k === '振込' ? '収入（振込）' : k, vals, total: vals.reduce((a, b) => a + b, 0) };
-      });
-    host.appendChild(matrix('経路 × 利用月', srcRows, undefined));
-  }
-
-  host.appendChild(matrix('費目 × 利用月', catRows, undefined));
-
-  // 手入力（引落・振込）はここで直接いじれるようにする。金額のセルを押すとその場で編集でき、
-  // 毎月定額はその月だけの上書きとして保存する（定義自体は変わらない）。
+  // 経路 × 利用月。カードは1行、引落・振込は明細ごとに1行ずつ出す。
+  // 合計は単純な足し算ではなく収支（収入 − 支出）。足し算だと収入と支出が混ざって意味を成さない。
+  // 金額のセルはその場で直せる（毎月定額はその月だけの上書きとして保存し、定義は変えない）。
   const fx = await api<FixedData>('/fixed');
-  if (fx.recurring.length || fx.entries.length) {
+  {
+    const cardAt = new Map<string, number>();
+    for (const r of s.bySource ?? []) {
+      if (r.source === 'ヨドバシカード') cardAt.set(r.billing_month, r.total);
+    }
     const ovr = new Map<string, { id: string; amount: number }>();
     for (const e of fx.entries) {
       if (e.override_of) ovr.set(`${e.override_of}\u0001${e.occurred_month}`, { id: e.entry_id, amount: e.amount_jpy });
@@ -342,119 +331,124 @@ async function renderSummary(host: HTMLElement): Promise<void> {
       m >= r.start_month && (!r.end_month || m <= r.end_month);
 
     const box = el('div', 'kk-card');
-    box.appendChild(el('div', 'kk-note', '引落・振込 × 利用月（金額をクリックしてその場で修正）'));
-    const t = el('table', 'kk-tb');
-    const h = el('tr');
-    h.appendChild(el('th', '', ''));
-    h.appendChild(el('th', '', '費目'));
-    for (const m of months) h.appendChild(el('th', 'kk-num', m.slice(2)));
-    h.appendChild(el('th', 'kk-num', '合計'));
-    t.appendChild(h);
+    box.appendChild(el('div', 'kk-note', '経路 × 利用月（引落・振込の金額はクリックで修正）'));
+    const scroll = el('div', 'kk-scroll');
+    box.appendChild(scroll);
 
-    for (const r of fx.recurring) {
-      const tr = el('tr');
-      tr.appendChild(el('td', '', `${r.label}${r.kind === 'income' ? '（振込）' : ''}`));
-      tr.appendChild(el('td', 'kk-sub', r.category ?? ''));
-      let sum = 0;
-      for (const m of months) {
-        const o = ovr.get(`${r.recurring_id}\u0001${m}`);
-        const eff = o ? o.amount : (inRange(r, m) ? r.amount_jpy : 0);
-        sum += eff;
-        const td = el('td', 'kk-num kk-edit', eff ? yen(eff) : '');
-        if (o) td.style.color = 'var(--accent)';
-        td.title = o ? 'この月は上書き済み。空にすると既定額に戻ります' : 'クリックで この月だけ変更';
-        td.addEventListener('click', () => {
-          const inp = el('input', 'kk-cell-in') as HTMLInputElement;
-          inp.type = 'number';
-          inp.value = String(eff || '');
-          td.textContent = '';
-          td.appendChild(inp);
-          inp.focus();
-          inp.select();
-          const commit = (): void => void (async () => {
-            const v = inp.value.trim();
-            if (v === '' && o) {
-              await api(`/fixed/entry/${encodeURIComponent(o.id)}`, { method: 'DELETE' });
-            } else if (v !== '' && Number(v) !== eff) {
-              await api('/fixed/entry', { method: 'POST', body: JSON.stringify({
-                kind: r.kind, label: r.label, amount: Number(v), occurredMonth: m,
-                overrideOf: r.recurring_id, categories: r.category ? [r.category] : [],
-              }) });
-            }
-            redraw();
-          })();
-          inp.addEventListener('blur', commit);
-          inp.addEventListener('keydown', (e) => {
-            if (e.key === 'Enter') { e.preventDefault(); inp.blur(); }
-            if (e.key === 'Escape') { e.preventDefault(); redraw(); }
-          });
+    const draw = (): void => {
+      scroll.innerHTML = '';
+      const t = el('table', 'kk-tb');
+      const h = el('tr');
+      h.appendChild(el('th', '', ''));
+      h.appendChild(el('th', '', '経路'));
+      for (const m of months) h.appendChild(el('th', 'kk-num', m.slice(2)));
+      h.appendChild(el('th', 'kk-num', '合計'));
+      t.appendChild(h);
+
+      const inc: number[] = months.map(() => 0);
+      const exp: number[] = months.map(() => 0);
+
+      // カード
+      {
+        const tr = el('tr');
+        tr.appendChild(el('td', '', 'ヨドバシカード'));
+        tr.appendChild(el('td', 'kk-sub', 'カード'));
+        let sum = 0;
+        months.forEach((m, i) => {
+          const v = cardAt.get(m) ?? 0;
+          exp[i] += v;
+          sum += v;
+          tr.appendChild(el('td', 'kk-num', v ? yen(v) : ''));
         });
-        tr.appendChild(td);
+        tr.appendChild(el('td', 'kk-num', yen(sum)));
+        t.appendChild(tr);
       }
-      tr.appendChild(el('td', 'kk-num', yen(sum)));
-      t.appendChild(tr);
-    }
 
-    // 上書きでない都度の記録も同じ表に出す
-    for (const e of fx.entries.filter((x) => !x.override_of)) {
-      const tr = el('tr');
-      tr.appendChild(el('td', '', `${e.label}${e.kind === 'income' ? '（振込）' : ''}`));
-      tr.appendChild(el('td', 'kk-sub', e.category ?? ''));
-      for (const m of months) {
-        const v = e.occurred_month === m ? e.amount_jpy : 0;
-        tr.appendChild(el('td', 'kk-num', v ? yen(v) : ''));
+      // 毎月定額（明細ごと・編集可）
+      for (const r of fx.recurring) {
+        const tr = el('tr');
+        tr.appendChild(el('td', '', r.label));
+        tr.appendChild(el('td', 'kk-sub', r.kind === 'income' ? '振込' : '引落'));
+        let sum = 0;
+        months.forEach((m, i) => {
+          const o = ovr.get(`${r.recurring_id}\u0001${m}`);
+          const eff = o ? o.amount : (inRange(r, m) ? r.amount_jpy : 0);
+          if (r.kind === 'income') inc[i] += eff; else exp[i] += eff;
+          sum += eff;
+          const td = el('td', 'kk-num kk-edit', eff ? yen(eff) : '');
+          if (o) td.style.color = 'var(--accent)';
+          td.title = o ? 'この月は上書き済み。空にすると既定額に戻ります' : 'クリックでこの月だけ変更';
+          td.addEventListener('click', () => {
+            const inp = el('input', 'kk-cell-in') as HTMLInputElement;
+            inp.type = 'number';
+            inp.value = String(eff || '');
+            td.textContent = '';
+            td.appendChild(inp);
+            inp.focus();
+            inp.select();
+            let done = false;
+            const commit = (): void => void (async () => {
+              if (done) return;
+              done = true;
+              const v = inp.value.trim();
+              if (v === '' && o) {
+                await api(`/fixed/entry/${encodeURIComponent(o.id)}`, { method: 'DELETE' });
+              } else if (v !== '' && Number(v) !== eff) {
+                await api('/fixed/entry', { method: 'POST', body: JSON.stringify({
+                  kind: r.kind, label: r.label, amount: Number(v), occurredMonth: m,
+                  overrideOf: r.recurring_id, categories: r.category ? [r.category] : [],
+                }) });
+              }
+              redraw();
+            })();
+            inp.addEventListener('blur', commit);
+            inp.addEventListener('keydown', (e) => {
+              if (e.key === 'Enter') { e.preventDefault(); inp.blur(); }
+              if (e.key === 'Escape') { e.preventDefault(); done = true; redraw(); }
+            });
+          });
+          tr.appendChild(td);
+        });
+        tr.appendChild(el('td', 'kk-num', yen(sum)));
+        t.appendChild(tr);
       }
-      tr.appendChild(el('td', 'kk-num', yen(e.amount_jpy)));
-      t.appendChild(tr);
-    }
-    const sc = el('div', 'kk-scroll');
-    sc.appendChild(t);
-    box.appendChild(sc);
+
+      // 都度（上書き以外）も明細ごとに
+      for (const e of fx.entries.filter((x) => !x.override_of)) {
+        const tr = el('tr');
+        tr.appendChild(el('td', '', e.label));
+        tr.appendChild(el('td', 'kk-sub', e.kind === 'income' ? '振込' : '引落'));
+        months.forEach((m, i) => {
+          const v = e.occurred_month === m ? e.amount_jpy : 0;
+          if (v) { if (e.kind === 'income') inc[i] += v; else exp[i] += v; }
+          tr.appendChild(el('td', 'kk-num', v ? yen(v) : ''));
+        });
+        tr.appendChild(el('td', 'kk-num', yen(e.amount_jpy)));
+        t.appendChild(tr);
+      }
+
+      const sum = el('tr', 'kk-sum');
+      sum.appendChild(el('td', '', '収支'));
+      sum.appendChild(el('td', 'kk-sub', '収入 − 支出'));
+      let net = 0;
+      months.forEach((_, i) => {
+        const v = inc[i] - exp[i];
+        net += v;
+        const td = el('td', 'kk-num', yen(v));
+        if (v < 0) td.style.color = 'var(--err)';
+        sum.appendChild(td);
+      });
+      const tdAll = el('td', 'kk-num', yen(net));
+      if (net < 0) tdAll.style.color = 'var(--err)';
+      sum.appendChild(tdAll);
+      t.appendChild(sum);
+      scroll.appendChild(t);
+    };
+    draw();
     host.appendChild(box);
   }
 
-
-  // 収入と収支。支出は費目に合算済みなので、ここでは収入と差額だけ見せる。
-  if (s.income.length) {
-    const incAt = new Map<string, number>();
-    for (const r of s.income) {
-      const k = `${r.label}\u0001${r.billing_month}`;
-      incAt.set(k, (incAt.get(k) ?? 0) + r.total);
-    }
-    const incRows: Row[] = [...new Set(s.income.map((r) => r.label))].map((k) => {
-      const vals = months.map((m) => incAt.get(`${k}\u0001${m}`) ?? 0);
-      return { key: k, vals, total: vals.reduce((a, b) => a + b, 0) };
-    });
-    host.appendChild(matrix('収入 × 利用月', incRows, undefined));
-
-    const box = el('div', 'kk-card');
-    box.appendChild(el('div', 'kk-note', '収支（収入 − 支出）'));
-    const t = el('table', 'kk-tb');
-    const h = el('tr');
-    h.appendChild(el('th', '', ''));
-    for (const m of months) h.appendChild(el('th', 'kk-num', m.slice(2)));
-    h.appendChild(el('th', 'kk-num', '合計'));
-    t.appendChild(h);
-    const tr = el('tr', 'kk-sum');
-    tr.appendChild(el('td', '', '収支'));
-    let net = 0;
-    months.forEach((_, i) => {
-      const inc = incRows.reduce((a, r) => a + r.vals[i], 0);
-      const exp = catRows.reduce((a, r) => a + r.vals[i], 0);
-      net += inc - exp;
-      const td = el('td', 'kk-num', yen(inc - exp));
-      if (inc - exp < 0) td.style.color = 'var(--err)';
-      tr.appendChild(td);
-    });
-    const tdAll = el('td', 'kk-num', yen(net));
-    if (net < 0) tdAll.style.color = 'var(--err)';
-    tr.appendChild(tdAll);
-    t.appendChild(tr);
-    const sc = el('div', 'kk-scroll');
-    sc.appendChild(t);
-    box.appendChild(sc);
-    host.appendChild(box);
-  }
+  host.appendChild(matrix('費目 × 利用月', catRows, undefined));
 
   // 略名 × 月（費目つき・費目で絞り込める）
   const shopAt = new Map<string, number>();
