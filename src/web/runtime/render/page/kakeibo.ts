@@ -101,9 +101,10 @@ const CSS = `
 .kk-ms-in{border:0;background:none;color:var(--fg);font:inherit;font-size:13px;
   outline:none;min-width:56px;flex:1;padding:2px 0}
 .kk-tag.on{border-color:var(--accent);color:var(--accent)}
-.kk-ov{position:fixed;inset:0;z-index:100;background:rgba(0,0,0,.45);
+.kk-ov{position:fixed;inset:0;z-index:1000;background:rgba(0,0,0,.6);
   display:flex;align-items:center;justify-content:center;padding:16px}
-.kk-pop{background:var(--card);color:var(--fg);border:1px solid var(--line2);border-radius:10px;
+.kk-pop{background:var(--menu);color:var(--fg);border:1px solid var(--line2);border-radius:10px;
+  isolation:isolate;
   max-width:min(760px,96vw);max-height:82vh;display:flex;flex-direction:column;
   box-shadow:0 12px 40px rgba(0,0,0,.5)}
 .kk-pop-hd{display:flex;align-items:center;justify-content:space-between;gap:12px;
@@ -305,7 +306,7 @@ async function renderSummary(host: HTMLElement): Promise<void> {
     const vals = months.map((m) => catAt.get(`${k}\u0001${m}`) ?? 0);
     return { key: k, vals, total: vals.reduce((a, b) => a + b, 0) };
   });
-  host.appendChild(matrix('費目 × 請求年月', catRows, undefined));
+  host.appendChild(matrix('費目 × 利用月', catRows, undefined));
 
   // 略名 × 月（費目つき・費目で絞り込める）
   const shopAt = new Map<string, number>();
@@ -382,7 +383,7 @@ async function renderSummary(host: HTMLElement): Promise<void> {
     const rows = filter.value ? allShopRows.filter((r) => r.sub === filter.value) : allShopRows;
     const ctrl = el('div', 'kk-row');
     ctrl.appendChild(filter);
-    shopHost.appendChild(matrix('略名 × 請求年月（クリックで明細）', rows, '費目', (k) => void showDetail(k), ctrl));
+    shopHost.appendChild(matrix('略名 × 利用月（クリックで明細）', rows, '費目', (k) => void showDetail(k), ctrl));
   };
   filter.addEventListener('change', drawShops);
   drawShops();
