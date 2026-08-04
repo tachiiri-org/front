@@ -336,6 +336,10 @@ async function renderSummary(host: HTMLElement): Promise<void> {
     // 並び替えの既定は「最新の確定月」。途中の月は金額が小さく出るので基準にしない。
     const fixedIdx = inProgress ? 1 : 0;
 
+    const cardAt = new Map<string, number>();
+    for (const r of s.bySource ?? []) {
+      if (r.source === 'ヨドバシカード') cardAt.set(r.billing_month, r.total);
+    }
     const ovr = new Map<string, { id: string; amount: number }>();
     for (const e of fx.entries) {
       if (e.override_of) ovr.set(`${e.override_of}\u0001${e.occurred_month}`, { id: e.entry_id, amount: e.amount_jpy });
@@ -377,108 +381,98 @@ async function renderSummary(host: HTMLElement): Promise<void> {
       scroll.innerHTML = '';
       const t = el('table', 'kk-tb');
 
-      const headRow = (): HTMLTableRowElement => {
-        const h = el('tr');
-        h.appendChild(el('th', '', ''));
-        h.appendChild(el('th', '', ''));
-        if (inProgress) h.appendChild(el('th', 'kk-num', '予測'));
-        months.forEach((m, i) => {
-          const th = el('th', 'kk-num kk-clk' + (sortAt === i ? ' kk-on' : ''),
-            m.slice(2) + (sortAt === i ? ' ▼' : ''));
-          th.addEventListener('click', () => { sortAt = i; draw(); });
-          h.appendChild(th);
-        });
-        const ht = el('th', 'kk-num kk-clk' + (sortAt === -1 ? ' kk-on' : ''),
-          '合計' + (sortAt === -1 ? ' ▼' : ''));
-        ht.addEventListener('click', () => { sortAt = -1; draw(); });
-        h.appendChild(ht);
-        return h;
+      // ヘッダは表全体で1つ。節ごとに繰り返すと縦に間延びして読みにくい。
+      const h = el('tr');
+      h.appendChild(el('th', '', ''));
+      h.appendChild(el('th', '', ''));
+      if (inProgress) h.appendChild(el('th', 'kk-num', '予測'));
+      months.forEach((m, i) => {
+        const th = el('th', 'kk-num kk-clk' + (sortAt === i ? ' kk-on' : ''),
+          m.slice(2) + (sortAt === i ? ' ▼' : ''));
+        th.addEventListener('click', () => { sortAt = i; draw(); });
+        h.appendChild(th);
+      });
+      const ht = el('th', 'kk-num kk-clk' + (sortAt === -1 ? ' kk-on' : ''),
+        '合計' + (sortAt === -1 ? ' ▼' : ''));
+      ht.addEventListener('click', () => { sortAt = -1; draw(); });
+      h.appendChild(ht);
+      t.appendChild(h);
+
+      const proj = (base: number, fixedPart: number, scale: boolean): number =>
+        scale ? Math.round((base - fixedPart) * factor) + fixedPart : base;
+
+      const totalRow = (label: string, sub: string, vals: number[], projVal: number | null,
+        emphasise: boolean): HTMLTableRowElement => {
+        const tr = el('tr', emphasise ? 'kk-sum' : 'kk-sum');
+        const c0 = el('td', '', label);
+        c0.style.paddingTop = '10px';
+        tr.appendChild(c0);
+        tr.appendChild(el('td', 'kk-sub', sub));
+        if (inProgress) tr.appendChild(el('td', 'kk-num kk-sub', projVal === null ? '' : yen(projVal)));
+        for (const v of vals) {
+          const td = el('td', 'kk-num', yen(v));
+          if (emphasise && v < 0) td.style.color = 'var(--err)';
+          tr.appendChild(td);
+        }
+        const tot = vals.reduce((a, b) => a + b, 0);
+        const tdT = el('td', 'kk-num', yen(tot));
+        if (emphasise && tot < 0) tdT.style.color = 'var(--err)';
+        tr.appendChild(tdT);
+        return tr;
       };
 
-      const section = (title: string, rows: SRow[], sumLabel: string, project: boolean): number[] => {
-        const cap = el('tr');
-        const td = el('td', 'kk-sub');
-        td.colSpan = months.length + (inProgress ? 4 : 3);
-        td.textContent = title;
-        td.style.paddingTop = '10px';
-        cap.appendChild(td);
-        t.appendChild(cap);
-        t.appendChild(headRow());
-
+      const itemRows = (rows: SRow[], scale: boolean): void => {
         const sorted = [...rows].sort((a, b) =>
           sortAt === -1 ? b.total - a.total : (b.vals[sortAt] ?? 0) - (a.vals[sortAt] ?? 0));
-        const totals = months.map(() => 0);
         for (const r of sorted) {
           const tr = el('tr');
           tr.appendChild(el('td', '', r.key));
           tr.appendChild(el('td', 'kk-sub', r.sub));
           if (inProgress) {
             const base = r.vals[0] ?? 0;
-            const fixedPart = project ? (fixedByCat.get(`${r.key}\u0001${months[0]}`) ?? 0) : base;
-            const proj = project ? Math.round((base - fixedPart) * factor) + fixedPart : base;
-            const td2 = el('td', 'kk-num kk-sub', proj ? yen(proj) : '');
-            tr.appendChild(td2);
+            tr.appendChild(el('td', 'kk-num kk-sub', yen(proj(base, scale ? 0 : base, scale))));
           }
           months.forEach((m, i) => {
             const v = r.vals[i] ?? 0;
-            totals[i] += v;
-            if (r.edit) {
-              const o = ovr.get(`${r.edit.rec.recurring_id}\u0001${m}`);
-              const td3 = el('td', 'kk-num kk-edit', v ? yen(v) : '');
-              if (o) td3.style.color = 'var(--accent)';
-              td3.title = o ? 'この月は上書き済み。空にすると既定額に戻ります' : 'クリックでこの月だけ変更';
-              td3.addEventListener('click', () => {
-                const rec = r.edit!.rec;
-                const inp = el('input', 'kk-cell-in') as HTMLInputElement;
-                inp.type = 'number';
-                inp.value = String(v || '');
-                td3.textContent = '';
-                td3.appendChild(inp);
-                inp.focus(); inp.select();
-                let done = false;
-                const commit = (): void => void (async () => {
-                  if (done) return;
-                  done = true;
-                  const nv = inp.value.trim();
-                  if (nv === '' && o) {
-                    await api(`/fixed/entry/${encodeURIComponent(o.id)}`, { method: 'DELETE' });
-                  } else if (nv !== '' && Number(nv) !== v) {
-                    await api('/fixed/entry', { method: 'POST', body: JSON.stringify({
-                      kind: rec.kind, label: rec.label, amount: Number(nv), occurredMonth: m,
-                      overrideOf: rec.recurring_id, categories: rec.category ? [rec.category] : [],
-                    }) });
-                  }
-                  redraw();
-                })();
-                inp.addEventListener('blur', commit);
-                inp.addEventListener('keydown', (e) => {
-                  if (e.key === 'Enter') { e.preventDefault(); inp.blur(); }
-                  if (e.key === 'Escape') { e.preventDefault(); done = true; redraw(); }
-                });
+            if (!r.edit) { tr.appendChild(el('td', 'kk-num', v ? yen(v) : '')); return; }
+            const rec = r.edit.rec;
+            const o = ovr.get(`${rec.recurring_id}\u0001${m}`);
+            const td = el('td', 'kk-num kk-edit', v ? yen(v) : '');
+            if (o) td.style.color = 'var(--accent)';
+            td.title = o ? 'この月は上書き済み。空にすると既定額に戻ります' : 'クリックでこの月だけ変更';
+            td.addEventListener('click', () => {
+              const inp = el('input', 'kk-cell-in') as HTMLInputElement;
+              inp.type = 'number';
+              inp.value = String(v || '');
+              td.textContent = '';
+              td.appendChild(inp);
+              inp.focus(); inp.select();
+              let done = false;
+              const commit = (): void => void (async () => {
+                if (done) return;
+                done = true;
+                const nv = inp.value.trim();
+                if (nv === '' && o) {
+                  await api(`/fixed/entry/${encodeURIComponent(o.id)}`, { method: 'DELETE' });
+                } else if (nv !== '' && Number(nv) !== v) {
+                  await api('/fixed/entry', { method: 'POST', body: JSON.stringify({
+                    kind: rec.kind, label: rec.label, amount: Number(nv), occurredMonth: m,
+                    overrideOf: rec.recurring_id, categories: rec.category ? [rec.category] : [],
+                  }) });
+                }
+                redraw();
+              })();
+              inp.addEventListener('blur', commit);
+              inp.addEventListener('keydown', (e) => {
+                if (e.key === 'Enter') { e.preventDefault(); inp.blur(); }
+                if (e.key === 'Escape') { e.preventDefault(); done = true; redraw(); }
               });
-              tr.appendChild(td3);
-            } else {
-              tr.appendChild(el('td', 'kk-num', v ? yen(v) : ''));
-            }
+            });
+            tr.appendChild(td);
           });
           tr.appendChild(el('td', 'kk-num', yen(r.total)));
           t.appendChild(tr);
         }
-        const sum = el('tr', 'kk-sum');
-        sum.appendChild(el('td', '', sumLabel));
-        sum.appendChild(el('td', '', ''));
-        if (inProgress) {
-          const base = totals[0];
-          const fixedPart = project
-            ? sorted.reduce((a, r) => a + (fixedByCat.get(`${r.key}\u0001${months[0]}`) ?? 0), 0)
-            : base;
-          sum.appendChild(el('td', 'kk-num kk-sub',
-            yen(project ? Math.round((base - fixedPart) * factor) + fixedPart : base)));
-        }
-        for (const v of totals) sum.appendChild(el('td', 'kk-num', yen(v)));
-        sum.appendChild(el('td', 'kk-num', yen(totals.reduce((a, b) => a + b, 0))));
-        t.appendChild(sum);
-        return totals;
       };
 
       const recRows = (kind: 'income' | 'expense'): SRow[] => [
@@ -493,30 +487,27 @@ async function renderSummary(host: HTMLElement): Promise<void> {
         }),
       ];
 
-      const incTotals = section('振込', recRows('income'), '振込 計', false);
-      section('引落', recRows('expense'), '引落 計', false);
-      const expTotals = section('費目（カード＋引落）', catRows.map((r) => ({
-        key: r.key, sub: '', vals: r.vals, total: r.total,
-      })), '支出 計', true);
+      const incs = recRows('income');
+      const debits = recRows('expense');
+      const sumOf = (rows: SRow[]): number[] => months.map((_, i) => rows.reduce((a, r) => a + (r.vals[i] ?? 0), 0));
+      const incTotals = sumOf(incs);
+      const debTotals = sumOf(debits);
+      const cardTotals = months.map((m) => cardAt.get(m) ?? 0);
 
-      const net = el('tr', 'kk-sum');
-      const nl = el('td', '', '収支');
-      nl.style.paddingTop = '10px';
-      net.appendChild(nl);
-      net.appendChild(el('td', 'kk-sub', '収入 − 支出'));
-      if (inProgress) net.appendChild(el('td', 'kk-num kk-sub', ''));
-      let sumNet = 0;
-      months.forEach((_, i) => {
-        const v = incTotals[i] - expTotals[i];
-        sumNet += v;
-        const td4 = el('td', 'kk-num', yen(v));
-        if (v < 0) td4.style.color = 'var(--err)';
-        net.appendChild(td4);
-      });
-      const tdN = el('td', 'kk-num', yen(sumNet));
-      if (sumNet < 0) tdN.style.color = 'var(--err)';
-      net.appendChild(tdN);
-      t.appendChild(net);
+      // 合計は各節の先頭に置く。まず結果、次に内訳という順で読める。
+      t.appendChild(totalRow('収支', '収入 − 支出',
+        months.map((_, i) => incTotals[i] - debTotals[i] - cardTotals[i]),
+        inProgress ? incTotals[0] - debTotals[0] - proj(cardTotals[0], 0, true) : null, true));
+
+      t.appendChild(totalRow('振込', '', incTotals, inProgress ? incTotals[0] : null, false));
+      itemRows(incs, false);
+
+      t.appendChild(totalRow('引落', '', debTotals, inProgress ? debTotals[0] : null, false));
+      itemRows(debits, false);
+
+      t.appendChild(totalRow('ヨドバシ', '', cardTotals,
+        inProgress ? proj(cardTotals[0], 0, true) : null, false));
+      itemRows(catRows.map((r) => ({ key: r.key, sub: '', vals: r.vals, total: r.total })), true);
 
       scroll.appendChild(t);
     };
