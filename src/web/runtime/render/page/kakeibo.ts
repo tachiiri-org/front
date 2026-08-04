@@ -102,7 +102,8 @@ const CSS = `
   outline:none;min-width:56px;flex:1;padding:2px 0}
 .kk-tag.on{border-color:var(--accent);color:var(--accent)}
 .kk-ov{position:fixed;inset:0;z-index:1000;background:rgba(0,0,0,.6);
-  display:flex;align-items:center;justify-content:center;padding:16px}
+  display:flex;align-items:center;justify-content:center;padding:16px;
+  width:auto;min-height:0}
 .kk-pop{background:var(--menu);color:var(--fg);border:1px solid var(--line2);border-radius:10px;
   isolation:isolate;
   max-width:min(760px,96vw);max-height:82vh;display:flex;flex-direction:column;
@@ -331,7 +332,8 @@ async function renderSummary(host: HTMLElement): Promise<void> {
     );
 
     // 表の下に足すと画面が飛ぶので、その場に重ねる。閉じれば元の位置に戻る。
-    const overlay = el('div', 'kk-ov');
+    // body 直下に出すため、CSS 変数を定義している .kk を併記して継承させる
+    const overlay = el('div', 'kk kk-ov');
     const pop = el('div', 'kk-pop');
     const hd = el('div', 'kk-pop-hd');
     hd.appendChild(el('strong', '',
