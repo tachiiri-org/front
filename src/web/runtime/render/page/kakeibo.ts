@@ -46,10 +46,10 @@ const el = <K extends keyof HTMLElementTagNameMap>(
 
 const DARK = `--bg:#1e1e1e;--fg:rgba(255,255,255,.82);--muted:rgba(255,255,255,.5);
   --line:rgba(255,255,255,.12);--line2:rgba(255,255,255,.22);--card:#252526;--field:#2a2b2e;
-  --ok:#4ade80;--err:#f87171;--accent:#60a5fa;--menu:#2a2b2e;--hover:rgba(255,255,255,.08)`;
+  --ok:#4ade80;--err:#f87171;--accent:#60a5fa;--menu:#2a2b2e;--hover:rgba(255,255,255,.08);--sumbg:rgba(255,255,255,.06)`;
 const LIGHT = `--bg:#fff;--fg:#1a1a1a;--muted:#666;--line:#e2e2e2;--line2:#c8c8c8;
   --card:#fafafa;--field:#fff;--ok:#1e7a3c;--err:#c0392b;--accent:#2563eb;
-  --menu:#fff;--hover:#f0f0f0`;
+  --menu:#fff;--hover:#f0f0f0;--sumbg:rgba(0,0,0,.045)`;
 
 const CSS = `
 .kk{${LIGHT};width:100%;padding:12px 16px;
@@ -124,7 +124,7 @@ const CSS = `
 .kk-tab:hover{background:var(--hover)}
 .kk-clk{cursor:pointer;text-decoration:underline;text-decoration-style:dotted;text-underline-offset:3px}
 .kk-clk:hover{color:var(--accent)}
-.kk-tb tr.kk-sum td{border-top:1px solid var(--line2);font-weight:600}
+.kk-tb tr.kk-sum td{border-top:1px solid var(--line2);font-weight:600;background:var(--sumbg)}
 `;
 
 async function api<T>(path: string, init?: RequestInit): Promise<T> {
@@ -384,7 +384,6 @@ async function renderSummary(host: HTMLElement): Promise<void> {
       // ヘッダは表全体で1つ。節ごとに繰り返すと縦に間延びして読みにくい。
       const h = el('tr');
       h.appendChild(el('th', '', ''));
-      h.appendChild(el('th', '', ''));
       if (inProgress) h.appendChild(el('th', 'kk-num', '予測'));
       months.forEach((m, i) => {
         const th = el('th', 'kk-num kk-clk' + (sortAt === i ? ' kk-on' : ''),
@@ -401,13 +400,10 @@ async function renderSummary(host: HTMLElement): Promise<void> {
       const proj = (base: number, fixedPart: number, scale: boolean): number =>
         scale ? Math.round((base - fixedPart) * factor) + fixedPart : base;
 
-      const totalRow = (label: string, sub: string, vals: number[], projVal: number | null,
+      const totalRow = (label: string, vals: number[], projVal: number | null,
         emphasise: boolean): HTMLTableRowElement => {
-        const tr = el('tr', emphasise ? 'kk-sum' : 'kk-sum');
-        const c0 = el('td', '', label);
-        c0.style.paddingTop = '10px';
-        tr.appendChild(c0);
-        tr.appendChild(el('td', 'kk-sub', sub));
+        const tr = el('tr', 'kk-sum');
+        tr.appendChild(el('td', '', label));
         if (inProgress) tr.appendChild(el('td', 'kk-num kk-sub', projVal === null ? '' : yen(projVal)));
         for (const v of vals) {
           const td = el('td', 'kk-num', yen(v));
@@ -427,7 +423,6 @@ async function renderSummary(host: HTMLElement): Promise<void> {
         for (const r of sorted) {
           const tr = el('tr');
           tr.appendChild(el('td', '', r.key));
-          tr.appendChild(el('td', 'kk-sub', r.sub));
           if (inProgress) {
             const base = r.vals[0] ?? 0;
             tr.appendChild(el('td', 'kk-num kk-sub', yen(proj(base, scale ? 0 : base, scale))));
@@ -495,17 +490,17 @@ async function renderSummary(host: HTMLElement): Promise<void> {
       const cardTotals = months.map((m) => cardAt.get(m) ?? 0);
 
       // 合計は各節の先頭に置く。まず結果、次に内訳という順で読める。
-      t.appendChild(totalRow('収支', '収入 − 支出',
+      t.appendChild(totalRow('収支',
         months.map((_, i) => incTotals[i] - debTotals[i] - cardTotals[i]),
         inProgress ? incTotals[0] - debTotals[0] - proj(cardTotals[0], 0, true) : null, true));
 
-      t.appendChild(totalRow('振込', '', incTotals, inProgress ? incTotals[0] : null, false));
+      t.appendChild(totalRow('振込', incTotals, inProgress ? incTotals[0] : null, false));
       itemRows(incs, false);
 
-      t.appendChild(totalRow('引落', '', debTotals, inProgress ? debTotals[0] : null, false));
+      t.appendChild(totalRow('引落', debTotals, inProgress ? debTotals[0] : null, false));
       itemRows(debits, false);
 
-      t.appendChild(totalRow('ヨドバシ', '', cardTotals,
+      t.appendChild(totalRow('ヨドバシ', cardTotals,
         inProgress ? proj(cardTotals[0], 0, true) : null, false));
       itemRows(catRows.map((r) => ({ key: r.key, sub: '', vals: r.vals, total: r.total })), true);
 
