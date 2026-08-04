@@ -58,6 +58,60 @@ export const KAKEIBO_TOOLS = [
     inputSchema: { type: "object", properties: {}, required: [] },
   },
   {
+    name: "kakeibo_list_fixed",
+    description:
+      "List the manually entered money movements: recurring ones (家賃 and other monthly fixed amounts) and one-off ones (学費, 固定資産税, salary…). These are bank-debit / income items kept apart from the credit-card statements, so a card re-import never touches them.",
+    inputSchema: { type: "object", properties: {}, required: [] },
+  },
+  {
+    name: "kakeibo_set_recurring",
+    description:
+      "Define a monthly fixed amount (家賃 etc.) or a recurring income. It is entered once and counted into every month from start_month until end_month (or until the latest month with data). Use this instead of adding one entry per month. Pass id to update an existing definition — omit it to create.",
+    inputSchema: {
+      type: "object",
+      properties: {
+        id: { type: "string", description: "Existing recurring id to update; omit to create" },
+        kind: { type: "string", enum: ["expense", "income"], description: "既定は expense" },
+        label: { type: "string", description: "名称。例: '家賃'" },
+        amount: { type: "number", description: "毎月の金額（円）" },
+        start_month: { type: "string", description: "開始月 YYYY-MM" },
+        end_month: { type: "string", description: "終了月 YYYY-MM。継続中なら省略" },
+        categories: { type: "array", items: { type: "string" }, description: "費目。カード明細と共通" },
+      },
+      required: ["label", "amount", "start_month"],
+    },
+  },
+  {
+    name: "kakeibo_set_entry",
+    description:
+      "Record a one-off amount for a single month — 学費, 固定資産税, a salary payment, anything whose amount differs each time. Pass id to update an existing record; omit it to create.",
+    inputSchema: {
+      type: "object",
+      properties: {
+        id: { type: "string", description: "Existing entry id to update; omit to create" },
+        kind: { type: "string", enum: ["expense", "income"], description: "既定は expense" },
+        label: { type: "string", description: "名称。例: '固定資産税'" },
+        amount: { type: "number", description: "金額（円）" },
+        occurred_month: { type: "string", description: "発生月 YYYY-MM" },
+        note: { type: "string" },
+        categories: { type: "array", items: { type: "string" }, description: "費目。カード明細と共通" },
+      },
+      required: ["label", "amount", "occurred_month"],
+    },
+  },
+  {
+    name: "kakeibo_delete_fixed",
+    description: "Delete a recurring definition or a one-off record by id.",
+    inputSchema: {
+      type: "object",
+      properties: {
+        kind: { type: "string", enum: ["recurring", "entry"] },
+        id: { type: "string" },
+      },
+      required: ["kind", "id"],
+    },
+  },
+  {
     name: "kakeibo_read_statements",
     description:
       "Read the statement rows of one billing month (請求年月). Returns each row with its shop, alias, 費目, amount and remark, plus the latest import's totals. Read-only: rows are replaced wholesale on every import, so they must not be edited individually.",
@@ -96,6 +150,41 @@ export async function callKakeiboTool(
 ): Promise<ToolResult> {
   if (name === "kakeibo_list_shops") {
     return asResult(await kakeiboFetch(env, "/shops"));
+  }
+
+  if (name === "kakeibo_list_fixed") {
+    return asResult(await kakeiboFetch(env, "/fixed"));
+  }
+
+  if (name === "kakeibo_set_recurring") {
+    const body = {
+      kind: args.kind, label: args.label, amount: args.amount,
+      startMonth: args.start_month, endMonth: args.end_month ?? null,
+      categories: Array.isArray(args.categories) ? args.categories.map((c) => String(c)) : undefined,
+    };
+    const id = args.id ? String(args.id) : "";
+    return asResult(await kakeiboFetch(env, id ? `/fixed/recurring/${encodeURIComponent(id)}` : "/fixed/recurring",
+      id ? "PUT" : "POST", body));
+  }
+
+  if (name === "kakeibo_set_entry") {
+    const body = {
+      kind: args.kind, label: args.label, amount: args.amount,
+      occurredMonth: args.occurred_month, note: args.note,
+      categories: Array.isArray(args.categories) ? args.categories.map((c) => String(c)) : undefined,
+    };
+    const id = args.id ? String(args.id) : "";
+    return asResult(await kakeiboFetch(env, id ? `/fixed/entry/${encodeURIComponent(id)}` : "/fixed/entry",
+      id ? "PUT" : "POST", body));
+  }
+
+  if (name === "kakeibo_delete_fixed") {
+    const kind = String(args.kind ?? "");
+    const id = String(args.id ?? "");
+    if (!id || (kind !== "recurring" && kind !== "entry")) {
+      return { content: [{ type: "text", text: "kind must be recurring|entry and id is required" }], isError: true };
+    }
+    return asResult(await kakeiboFetch(env, `/fixed/${kind}/${encodeURIComponent(id)}`, "DELETE"));
   }
 
   if (name === "kakeibo_read_summary") {
