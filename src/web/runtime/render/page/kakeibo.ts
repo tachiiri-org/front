@@ -209,6 +209,7 @@ type Summary = {
   months: string[];
   byCategory: { billing_month: string; category: string; total: number; cnt: number }[];
   byShop: { billing_month: string; shop_id: string; label: string; name: string; category: string; total: number; cnt: number }[];
+  income: { billing_month: string; label: string; total: number }[];
   multiCategoryShops: number;
 };
 
@@ -309,6 +310,48 @@ async function renderSummary(host: HTMLElement): Promise<void> {
     return { key: k, vals, total: vals.reduce((a, b) => a + b, 0) };
   });
   host.appendChild(matrix('費目 × 利用月', catRows, undefined));
+
+  // 収入と収支。支出は費目に合算済みなので、ここでは収入と差額だけ見せる。
+  if (s.income.length) {
+    const incAt = new Map<string, number>();
+    for (const r of s.income) {
+      const k = `${r.label}\u0001${r.billing_month}`;
+      incAt.set(k, (incAt.get(k) ?? 0) + r.total);
+    }
+    const incRows: Row[] = [...new Set(s.income.map((r) => r.label))].map((k) => {
+      const vals = months.map((m) => incAt.get(`${k}\u0001${m}`) ?? 0);
+      return { key: k, vals, total: vals.reduce((a, b) => a + b, 0) };
+    });
+    host.appendChild(matrix('収入 × 利用月', incRows, undefined));
+
+    const box = el('div', 'kk-card');
+    box.appendChild(el('div', 'kk-note', '収支（収入 − 支出）'));
+    const t = el('table', 'kk-tb');
+    const h = el('tr');
+    h.appendChild(el('th', '', ''));
+    for (const m of months) h.appendChild(el('th', 'kk-num', m.slice(2)));
+    h.appendChild(el('th', 'kk-num', '合計'));
+    t.appendChild(h);
+    const tr = el('tr', 'kk-sum');
+    tr.appendChild(el('td', '', '収支'));
+    let net = 0;
+    months.forEach((_, i) => {
+      const inc = incRows.reduce((a, r) => a + r.vals[i], 0);
+      const exp = catRows.reduce((a, r) => a + r.vals[i], 0);
+      net += inc - exp;
+      const td = el('td', 'kk-num', yen(inc - exp));
+      if (inc - exp < 0) td.style.color = 'var(--err)';
+      tr.appendChild(td);
+    });
+    const tdAll = el('td', 'kk-num', yen(net));
+    if (net < 0) tdAll.style.color = 'var(--err)';
+    tr.appendChild(tdAll);
+    t.appendChild(tr);
+    const sc = el('div', 'kk-scroll');
+    sc.appendChild(t);
+    box.appendChild(sc);
+    host.appendChild(box);
+  }
 
   // 略名 × 月（費目つき・費目で絞り込める）
   const shopAt = new Map<string, number>();
@@ -497,6 +540,139 @@ function multiSelect(opts: {
   return wrap;
 }
 
+
+type FixedData = {
+  recurring: { recurring_id: string; kind: string; label: string; amount_jpy: number;
+    start_month: string; end_month: string | null; category: string | null }[];
+  entries: { entry_id: string; kind: string; label: string; occurred_month: string;
+    amount_jpy: number; note: string | null; category: string | null }[];
+};
+
+/**
+ * 口座引落の固定費と収入の入力。カード明細とは別勘定なので、取り込みでは触らない。
+ *  - 毎月定額（家賃）は定義を1つ置き、期間内の各月へ自動で計上する
+ *  - 金額が毎回違うもの（学費・固定資産税）と収入は、都度1件ずつ記録する
+ */
+async function renderFixed(host: HTMLElement, cats: () => string[]): Promise<void> {
+  host.innerHTML = '';
+  const d = await api<FixedData>('/fixed');
+  const reload = (): void => void renderFixed(host, cats);
+
+  const field = (ph: string, w = '110px', type = 'text'): HTMLInputElement => {
+    const i = el('input', 'kk-in') as HTMLInputElement;
+    i.placeholder = ph;
+    i.style.width = w;
+    i.type = type;
+    return i;
+  };
+  const kindSel = (): HTMLSelectElement => {
+    const k = el('select', 'kk-in') as HTMLSelectElement;
+    for (const [v, t] of [['expense', '支出'], ['income', '収入']]) {
+      const o = el('option', '', t) as HTMLOptionElement;
+      o.value = v;
+      k.appendChild(o);
+    }
+    return k;
+  };
+
+  // ── 毎月定額
+  const recBox = el('div', 'kk-card');
+  recBox.appendChild(el('div', 'kk-note', '毎月定額（家賃など）— 期間内の各月に自動で計上されます'));
+  const rt = el('table', 'kk-tb');
+  const rh = el('tr');
+  for (const x of ['種別', '名称', '費目', '金額', '開始', '終了', '']) rh.appendChild(el('th', '', x));
+  rt.appendChild(rh);
+  for (const r of d.recurring) {
+    const tr = el('tr');
+    tr.appendChild(el('td', '', r.kind === 'income' ? '収入' : '支出'));
+    tr.appendChild(el('td', '', r.label));
+    tr.appendChild(el('td', 'kk-sub', r.category ?? ''));
+    tr.appendChild(el('td', 'kk-num', yen(r.amount_jpy)));
+    tr.appendChild(el('td', '', r.start_month));
+    tr.appendChild(el('td', '', r.end_month ?? '継続中'));
+    const del = el('button', 'kk-btn', '削除');
+    del.addEventListener('click', () => void (async () => {
+      await api(`/fixed/recurring/${encodeURIComponent(r.recurring_id)}`, { method: 'DELETE' });
+      reload();
+    })());
+    const td = el('td', '');
+    td.appendChild(del);
+    tr.appendChild(td);
+    rt.appendChild(tr);
+  }
+  const rsc = el('div', 'kk-scroll');
+  rsc.appendChild(rt);
+  recBox.appendChild(rsc);
+
+  const rf = el('div', 'kk-row');
+  rf.style.marginTop = '8px';
+  const rk = kindSel(); const rl = field('名称'); const rc = field('費目', '90px');
+  const ra = field('金額', '90px', 'number'); const rs = field('開始 YYYY-MM', '110px');
+  const re = field('終了（空で継続）', '130px');
+  const radd = el('button', 'kk-btn', '追加');
+  radd.addEventListener('click', () => void (async () => {
+    if (!rl.value.trim() || !ra.value || !/^\d{4}-\d{2}$/.test(rs.value)) { radd.textContent = '入力不足'; return; }
+    await api('/fixed/recurring', { method: 'POST', body: JSON.stringify({
+      kind: rk.value, label: rl.value.trim(), amount: Number(ra.value),
+      startMonth: rs.value, endMonth: re.value || null,
+      categories: rc.value.split(',').map((x) => x.trim()).filter(Boolean),
+    }) });
+    reload();
+  })());
+  rf.append(rk, rl, rc, ra, rs, re, radd);
+  recBox.appendChild(rf);
+  host.appendChild(recBox);
+
+  // ── 都度
+  const entBox = el('div', 'kk-card');
+  entBox.appendChild(el('div', 'kk-note', '都度（学費・固定資産税・給与など）— 金額が毎回違うもの'));
+  const et = el('table', 'kk-tb');
+  const eh = el('tr');
+  for (const x of ['種別', '名称', '費目', '月', '金額', 'メモ', '']) eh.appendChild(el('th', '', x));
+  et.appendChild(eh);
+  for (const e of d.entries) {
+    const tr = el('tr');
+    tr.appendChild(el('td', '', e.kind === 'income' ? '収入' : '支出'));
+    tr.appendChild(el('td', '', e.label));
+    tr.appendChild(el('td', 'kk-sub', e.category ?? ''));
+    tr.appendChild(el('td', '', e.occurred_month));
+    tr.appendChild(el('td', 'kk-num', yen(e.amount_jpy)));
+    tr.appendChild(el('td', 'kk-sub', e.note ?? ''));
+    const del = el('button', 'kk-btn', '削除');
+    del.addEventListener('click', () => void (async () => {
+      await api(`/fixed/entry/${encodeURIComponent(e.entry_id)}`, { method: 'DELETE' });
+      reload();
+    })());
+    const td = el('td', '');
+    td.appendChild(del);
+    tr.appendChild(td);
+    et.appendChild(tr);
+  }
+  const esc = el('div', 'kk-scroll');
+  esc.appendChild(et);
+  entBox.appendChild(esc);
+
+  const ef = el('div', 'kk-row');
+  ef.style.marginTop = '8px';
+  const ek = kindSel(); const el2 = field('名称'); const ec = field('費目', '90px');
+  const em = field('月 YYYY-MM', '110px'); const ea = field('金額', '90px', 'number');
+  const en = field('メモ', '120px');
+  const eadd = el('button', 'kk-btn', '追加');
+  eadd.addEventListener('click', () => void (async () => {
+    if (!el2.value.trim() || !ea.value || !/^\d{4}-\d{2}$/.test(em.value)) { eadd.textContent = '入力不足'; return; }
+    await api('/fixed/entry', { method: 'POST', body: JSON.stringify({
+      kind: ek.value, label: el2.value.trim(), amount: Number(ea.value),
+      occurredMonth: em.value, note: en.value || null,
+      categories: ec.value.split(',').map((x) => x.trim()).filter(Boolean),
+    }) });
+    reload();
+  })());
+  ef.append(ek, el2, ec, em, ea, en, eadd);
+  entBox.appendChild(ef);
+  host.appendChild(entBox);
+  void cats;
+}
+
 /** ブックマークレットからの取り込みを待ち受ける（未ログイン時は送り手が ack まで再送する） */
 function listenForImport(status: HTMLElement, onDone: () => void): void {
   window.addEventListener('message', async (ev: MessageEvent) => {
@@ -667,12 +843,15 @@ export async function renderKakeibo(root: HTMLElement): Promise<void> {
   const tabs = el('div', 'kk-tabs');
   const tabAgg = el('button', 'kk-tab on', '集計');
   const tabList = el('button', 'kk-tab', '明細');
-  tabs.append(tabAgg, tabList);
+  const tabFixed = el('button', 'kk-tab', '固定費・収入');
+  tabs.append(tabAgg, tabList, tabFixed);
   page.appendChild(tabs);
 
   const aggBox = el('div', '');
   const listView = el('div', '');
   listView.style.display = 'none';
+  const fixedView = el('div', '');
+  fixedView.style.display = 'none';
 
   const bar = el('div', 'kk-row');
   const reloadBtn = el('button', 'kk-btn', '再読込');
@@ -812,17 +991,21 @@ export async function renderKakeibo(root: HTMLElement): Promise<void> {
 
   listView.appendChild(renderCsvImport(status, reloadAll));
   listView.append(summary, listBox);
-  page.append(aggBox, listView);
+  page.append(aggBox, listView, fixedView);
 
-  const showTab = (agg: boolean): void => {
-    tabAgg.className = 'kk-tab' + (agg ? ' on' : '');
-    tabList.className = 'kk-tab' + (agg ? '' : ' on');
-    aggBox.style.display = agg ? '' : 'none';
-    listView.style.display = agg ? 'none' : '';
-    if (agg) void renderSummary(aggBox).catch((e) => { aggBox.textContent = String(e); });
+  const showTab = (which: 'agg' | 'list' | 'fixed'): void => {
+    tabAgg.className = 'kk-tab' + (which === 'agg' ? ' on' : '');
+    tabList.className = 'kk-tab' + (which === 'list' ? ' on' : '');
+    tabFixed.className = 'kk-tab' + (which === 'fixed' ? ' on' : '');
+    aggBox.style.display = which === 'agg' ? '' : 'none';
+    listView.style.display = which === 'list' ? '' : 'none';
+    fixedView.style.display = which === 'fixed' ? '' : 'none';
+    if (which === 'agg') void renderSummary(aggBox).catch((e) => { aggBox.textContent = String(e); });
+    if (which === 'fixed') void renderFixed(fixedView, () => knownCategories).catch((e) => { fixedView.textContent = String(e); });
   };
-  tabAgg.addEventListener('click', () => showTab(true));
-  tabList.addEventListener('click', () => showTab(false));
+  tabAgg.addEventListener('click', () => showTab('agg'));
+  tabList.addEventListener('click', () => showTab('list'));
+  tabFixed.addEventListener('click', () => showTab('fixed'));
 
   monthSel.addEventListener('change', () => void loadRows());
   reloadBtn.addEventListener('click', reloadAll);
