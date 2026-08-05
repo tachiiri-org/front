@@ -89,6 +89,8 @@ export const SHOSAI_CSS = `
   .s-notion-prog-err{color:#c0392b;font-weight:600}
   .s-notion-drop{margin-top:4px;color:#888;font-size:11.5px;line-height:1.5}
   .s-notion-warn{margin-top:4px;color:#c26a00;font-size:11.5px;line-height:1.5}
+  .s-notion-fail{margin-top:2px;padding-left:8px;color:#c0392b;font-size:11px;line-height:1.45;
+                 word-break:break-all;font-family:ui-monospace,SFMono-Regular,Menlo,monospace}
   [data-theme=dark] .s-notion-head{border-color:#ffffff22}
   [data-theme=dark] .s-notion-src:hover{background:#ffffff0f}
   [data-theme=dark] .s-notion-progress{background:#4A90C222}

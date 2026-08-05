@@ -18,6 +18,8 @@ export interface OptionDef { id: string; name: string }
 export interface ViewDef { id: string; type: string; name: string }
 export interface DatabaseSummary {
   databaseId: string; blockId: string | null; title: string; rowCount: number; propertyCount: number;
+  /** Notion 由来なら data_source_id が入る。取り込み中は syncStatus が 'running'。 */
+  syncStatus?: string | null; syncPhase?: string | null; notionSourceId?: string | null;
 }
 export interface DatabaseDetail {
   databaseId: string;
@@ -132,3 +134,17 @@ export const startImport = (body: {
 
 export const importStatus = (importId: string): Promise<ImportStatus> =>
   call(`/notion/import/${encodeURIComponent(importId)}`);
+
+export interface ImportProgress {
+  state: {
+    databaseId: string; cursor: string | null; synced_at: number | null;
+    status: string | null; phase: string | null;
+    rows: number | null; blocks: number | null; importId: string | null; updated_at: number | null;
+  } | null;
+  rowsInDb: number;
+  failures: Array<{ seq: number; at: number; notionId: string | null; message: string }>;
+}
+
+/** 取り込みの進み具合と失敗。ワークフローの状態と違い、走行中でも中身が読める。 */
+export const importProgress = (databaseId: string): Promise<ImportProgress> =>
+  call(`/notion/progress?databaseId=${encodeURIComponent(databaseId)}`);

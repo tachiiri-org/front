@@ -127,6 +127,32 @@ export function createNotionView(opts: {
   progress.style.display = 'none';
   root.append(progress);
 
+  /** 進捗の枠を描き直す。走行中でも失敗が見えることが要点。 */
+  const paintProgress = async (databaseId: string, title: string, workflowStatus: string): Promise<void> => {
+    let p: api.ImportProgress | null = null;
+    try { p = await api.importProgress(databaseId); } catch { /* 取れなくても表示は続ける */ }
+    progress.innerHTML = '';
+    const st = p?.state;
+    const rows = st?.rows ?? p?.rowsInDb ?? 0;
+    const blocks = st?.blocks ?? 0;
+    progress.append(el('div', {
+      class: 's-notion-prog-line',
+      text: `${title}: ${st?.phase ?? workflowStatus}`,
+    }));
+    progress.append(el('div', { class: 's-note', text: `${rows} 行 / ${blocks} ブロック` }));
+    const fails = p?.failures ?? [];
+    if (fails.length) {
+      const head = el('div', { class: 's-notion-warn', text: `失敗 ${fails.length} 件（新しい順）` });
+      progress.append(head);
+      for (const f of fails.slice(0, 5)) {
+        progress.append(el('div', {
+          class: 's-notion-fail',
+          text: `${f.notionId ? f.notionId.slice(0, 8) + '… ' : ''}${f.message}`,
+        }));
+      }
+    }
+  };
+
   const watchImport = (importId: string, title: string, databaseId: string): void => {
     progress.style.display = '';
     progress.innerHTML = '';
@@ -163,9 +189,11 @@ export function createNotionView(opts: {
           }
           if (out.failed?.length) {
             progress.append(el('div', {
-              class: 's-notion-warn',
-              text: `取り込めなかったページ ${out.failed.length} 件: ${out.failed[0]}`,
+              class: 's-notion-warn', text: `取り込めなかったページ ${out.failed.length} 件`,
             }));
+            for (const f of out.failed.slice(0, 5)) {
+              progress.append(el('div', { class: 's-notion-fail', text: f }));
+            }
           }
           opts.onImported();
           return;
@@ -175,18 +203,19 @@ export function createNotionView(opts: {
           progress.innerHTML = '';
           progress.append(el('div', { class: 's-notion-prog-err', text: `${title}: 失敗しました` }));
           progress.append(el('div', { class: 's-note', text: String(res.status.error ?? '').slice(0, 200) }));
+          // どこまで進んで何で落ちたかは DO 側の記録にしかない。
+          try {
+            const p = await api.importProgress(databaseId);
+            progress.append(el('div', { class: 's-note', text: `${p.rowsInDb} 行まで取り込み済み` }));
+            for (const f of p.failures.slice(0, 5)) {
+              progress.append(el('div', { class: 's-notion-fail', text: `${f.notionId ? f.notionId.slice(0,8) + '… ' : ''}${f.message}` }));
+            }
+          } catch { /* 取れなければ諦める */ }
           return;
         }
-        // 何件入ったかを実測して出す。ワークフローの状態だけでは進捗が分からない。
-        // 左ペイン全体は描き直さない（点滅する）。数字の行だけを書き換える。
-        let done = 0;
-        try {
-          const dbs = await api.listDatabases();
-          done = dbs.databases.find((d) => d.databaseId === databaseId)?.rowCount ?? 0;
-        } catch { /* 取れなくても進捗表示を止めない */ }
-        line.textContent = done
-          ? `${title}: ${done} 行を取り込みました…`
-          : `${title} を取り込んでいます…（${st}）`;
+        // ワークフローの状態は running としか言わないので、DO に書かれた進捗を読む。
+        // 左ペイン全体は描き直さない（点滅する）。この枠の中だけを書き換える。
+        await paintProgress(databaseId, title, st);
         opts.onProgress(databaseId);
       } catch {
         // 進捗の取得に失敗しても取り込み自体は続いている。監視だけ諦める。
@@ -198,6 +227,33 @@ export function createNotionView(opts: {
   };
 
   // ── 一覧の描画 ───────────────────────────────────────────────
+  /**
+   * 走行中の取り込みを拾い直す。画面を再読み込みしても進捗に戻れるようにする。
+   * ワークフローの importId は覚えていないので、DO 側の状態だけを見て表示する。
+   */
+  const resumeRunning = async (): Promise<void> => {
+    try {
+      const dbs = await api.listDatabases();
+      const running = dbs.databases.find((d) => d.syncStatus === 'running');
+      if (!running) return;
+      progress.style.display = '';
+      await paintProgress(running.databaseId, running.title || 'Notion', 'running');
+      // importId が無いので、DO の進捗だけを見張る。完了すると status が complete になる。
+      const poll = async (): Promise<void> => {
+        const p = await api.importProgress(running.databaseId).catch(() => null);
+        if (p?.state?.status === 'complete') {
+          await paintProgress(running.databaseId, running.title || 'Notion', 'complete');
+          opts.onImported();
+          return;
+        }
+        await paintProgress(running.databaseId, running.title || 'Notion', 'running');
+        opts.onProgress(running.databaseId);
+        setTimeout(() => { void poll(); }, 3000);
+      };
+      setTimeout(() => { void poll(); }, 3000);
+    } catch { /* 拾えなくても画面は動く */ }
+  };
+
   const refresh = async (): Promise<void> => {
     // 進捗表示は消さずに残す（取り込み中の再描画で消えると不安になる）。
     [...root.children].forEach((c) => { if (c !== progress) c.remove(); });
@@ -241,6 +297,7 @@ export function createNotionView(opts: {
         text: '接続すると、Notion 側で選んだページ／データベースだけが見えます。',
       }), progress);
     }
+    void resumeRunning();
   };
 
   return { el: root, refresh };
