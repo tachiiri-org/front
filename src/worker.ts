@@ -28,6 +28,7 @@ import { handleOidcLoginStart, handleOidcLoginCallback } from './session/oidc';
 import { handleSamlMetadata, handleSamlSsoStart, handleSamlAcs } from './session/saml';
 import { authorizeFetch } from './session/fetch';
 import { handleAuthCallback, handleProductLoginRedirect, isProductHost, productClientId } from './session/rp';
+import { startNotionConnect, handleNotionCallback } from './session/notion';
 
 type AssetsEnv = {
   readonly ASSETS: {
@@ -213,6 +214,13 @@ async function fetchInner(request: Request, env: Env): Promise<Response> {
     if (isProductHost(new URL(request.url).hostname)) {
       if (pathname === '/auth/callback') {
         return handleAuthCallback(request, env);
+      }
+      // Notion 連携。ログイン済みが前提なので、下のログイン誘導より前には置かない。
+      if (pathname === '/auth/notion') {
+        return startNotionConnect(request, env);
+      }
+      if (pathname === '/auth/notion/callback') {
+        return handleNotionCallback(request, env);
       }
       if (isNavigationRequest(request) && !isPublicPath(pathname) && !(await readIdentity(env, request))) {
         return handleProductLoginRedirect(request, env);
