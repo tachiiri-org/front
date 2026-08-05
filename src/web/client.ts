@@ -587,9 +587,11 @@ const loadEditorBootstrap = async (): Promise<void> => {
 };
 
 window.addEventListener('popstate', (e) => {
-  // uranai の内部ナビゲーション（history.state.uranai を持つ）は uranai 側の
-  // popstate ハンドラが復元するため、ここでの全体再ブートストラップはスキップ。
-  if ((e.state as { uranai?: unknown } | null)?.uranai) return;
+  // uranai / shosai の内部ナビゲーション（history.state に自分の印を持つ）は
+  // それぞれの popstate ハンドラが復元するため、ここでの全体再ブートストラップは
+  // スキップする。再ブートストラップすると画面状態（開いているペインなど）が消える。
+  const st = e.state as { uranai?: unknown; shosai?: unknown } | null;
+  if (st?.uranai || st?.shosai) return;
   void loadEditorBootstrap();
 });
 

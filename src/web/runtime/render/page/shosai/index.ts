@@ -256,7 +256,7 @@ export async function renderShosai(container: HTMLElement): Promise<void> {
   const goPane = (key: string, push = true): void => {
     if (wrap.dataset.pane === key) return;
     setPane(key);
-    if (push && !poppingPane) history.pushState({ shosaiPane: key }, '', location.pathname);
+    if (push && !poppingPane) history.pushState({ shosai: true, shosaiPane: key }, '', location.pathname);
   };
   window.addEventListener('popstate', (e) => {
     // ポップオーバー（選択肢・参照先・取り込み）が開いていれば、まずそれを閉じる。
@@ -264,7 +264,7 @@ export async function renderShosai(container: HTMLElement): Promise<void> {
     const overlays = document.querySelectorAll('.s-overlay, .s-pop');
     if (overlays.length) {
       overlays.forEach((n) => n.remove());
-      history.pushState({ shosaiPane: wrap.dataset.pane ?? 'side' }, '', location.pathname);
+      history.pushState({ shosai: true, shosaiPane: wrap.dataset.pane ?? 'side' }, '', location.pathname);
       return;
     }
     const st = (e.state ?? null) as { shosaiPane?: string } | null;
@@ -273,9 +273,14 @@ export async function renderShosai(container: HTMLElement): Promise<void> {
     setPane(st?.shosaiPane ?? 'side');
     poppingPane = false;
   });
-  setPane('side');
+  // 履歴に残っているペインがあればそれを復元する。無条件に一覧へ戻すと、
+  // 戻る操作のたびに最初の画面に飛ばされる。
+  const restored = (history.state as { shosaiPane?: string } | null)?.shosaiPane;
+  setPane(restored && PANES.some((p) => p.key === restored) ? restored : 'side');
   // 最初の状態も履歴に持たせておく。これが無いと1回目の戻るで離脱する。
-  history.replaceState({ shosaiPane: 'side' }, '', location.pathname);
+  history.replaceState(
+    { shosai: true, shosaiPane: wrap.dataset.pane ?? 'side' }, '', location.pathname,
+  );
   goEditor = () => {
     if (isNarrowNow()) goPane('editor');
     else editor.el.scrollIntoView({ block: 'nearest', inline: 'nearest' });
