@@ -166,3 +166,6 @@ export const relationCandidates = (propertyId: string): Promise<{ pages: Array<{
 export const relatedSources = (connectionId: string, dataSourceId: string):
   Promise<{ related: Array<{ id: string; title: string }> }> =>
   call(`/notion/related?connectionId=${encodeURIComponent(connectionId)}&dataSourceId=${encodeURIComponent(dataSourceId)}`);
+
+export const deleteDatabase = (databaseId: string): Promise<{ databaseId: string }> =>
+  call(`/database/${encodeURIComponent(databaseId)}`, { method: 'DELETE' });

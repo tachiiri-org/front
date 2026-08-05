@@ -25,6 +25,8 @@ export interface EditorView {
   open: (pageId: string) => Promise<void>;
   reload: () => Promise<void>;
   currentPageId: () => string | null;
+  /** いま開いているページのタイトル。タブの見出しに使う。 */
+  currentTitle: () => string;
 }
 
 export function createEditorView(opts: {
@@ -317,5 +319,6 @@ export function createEditorView(opts: {
     },
     reload: () => guard(reload),
     currentPageId: () => pageId,
+    currentTitle: () => detail?.page.title ?? title.value ?? '',
   };
 }

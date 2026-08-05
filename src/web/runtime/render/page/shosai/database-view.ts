@@ -96,24 +96,24 @@ export function createDatabaseView(opts: {
 
     const chosen = new Set(selectedIds);
     const close = (): void => { overlay.remove(); pop.remove(); };
-    const commit = (): void => {
-      onDone(options.filter((o) => chosen.has(o.id)));
-      close();
-    };
+    // 選んだ時点で保存する。「決定」を押さずに閉じると消える作りだと、
+    // 選んだのに保存されていないことに気づけない。
+    const apply = (): void => onDone(options.filter((o) => chosen.has(o.id)));
     for (const o of options) {
       const item = el('button', { class: 's-pop-item s-opt' });
       const mark = el('span', { class: 's-opt-mark', text: chosen.has(o.id) ? '✓' : '' });
       item.append(mark, el('span', { class: 's-chip', text: o.name }));
       item.addEventListener('click', () => {
-        if (prop.type === 'select') { chosen.clear(); chosen.add(o.id); commit(); return; }
+        if (prop.type === 'select') { chosen.clear(); chosen.add(o.id); apply(); close(); return; }
         if (chosen.has(o.id)) chosen.delete(o.id); else chosen.add(o.id);
         mark.textContent = chosen.has(o.id) ? '✓' : '';
+        apply();
       });
       pop.append(item);
     }
     if (prop.type === 'multi_select') {
-      const done = el('button', { class: 's-pop-item s-opt-done', text: '決定' });
-      done.addEventListener('click', commit);
+      const done = el('button', { class: 's-pop-item s-opt-done', text: '閉じる' });
+      done.addEventListener('click', close);
       pop.append(done);
     }
     overlay.addEventListener('click', close);
@@ -166,17 +166,15 @@ export function createDatabaseView(opts: {
         item.addEventListener('click', () => {
           if (chosen.has(c.id)) chosen.delete(c.id); else chosen.add(c.id);
           mark.textContent = chosen.has(c.id) ? '✓' : '';
+          onDone(candidates.filter((x) => chosen.has(x.id)));   // 選んだ時点で保存する
         });
         list.append(item);
       }
     };
     paint('');
     filter.addEventListener('input', () => paint(filter.value.trim()));
-    const done = el('button', { class: 's-pop-item s-opt-done', text: '決定' });
-    done.addEventListener('click', () => {
-      onDone(candidates.filter((c) => chosen.has(c.id)));
-      close();
-    });
+    const done = el('button', { class: 's-pop-item s-opt-done', text: '閉じる' });
+    done.addEventListener('click', close);
     pop.append(done);
     overlay.addEventListener('click', close);
     document.body.append(overlay, pop);
@@ -220,7 +218,7 @@ export function createDatabaseView(opts: {
     if (prop.type === 'relation') {
       // リンクを押せば相手のページを開く。余白を押せば参照先を選び直す。
       // 両方を1つのセルに載せるので、押した場所で分ける。
-      const box = el('div', { class: 's-cell s-chips' });
+      const box = el('div', { class: 's-cell s-chips s-chips-scroll' });
       const paintRefs = (refs: Array<{ id: string; title: string }>): void => {
         box.innerHTML = '';
         if (!refs.length) {
@@ -304,17 +302,11 @@ export function createDatabaseView(opts: {
     for (const row of detail.rows) {
       const tr = el('tr');
       const td = el('td', { class: 's-td-title' });
-      const ti = el('input', { class: 's-row-ti', placeholder: '無題' }) as HTMLInputElement;
-      ti.value = row.title;
-      ti.addEventListener('change', () => {
-        void guard(async () => {
-          await api.patchBlock(row.id, { text: ti.value });
-          opts.onChanged();
-        });
-      });
-      const open = el('button', { class: 's-open-btn', text: '開く' });
-      open.addEventListener('click', () => opts.onOpenPage(row.id));
-      td.append(ti, open);
+      // タイトル自体を開く導線にする。ボタンを別に置くと、狭い列で文字の場所を奪う。
+      // 名前の変更はエディタ側か、一覧の長押しメニューから行う。
+      const link = el('a', { class: 's-row-link', text: row.title || '（無題）', href: '#' });
+      link.addEventListener('click', (e) => { e.preventDefault(); opts.onOpenPage(row.id); });
+      td.append(link);
       tr.append(td);
 
       for (const p of detail.properties) {

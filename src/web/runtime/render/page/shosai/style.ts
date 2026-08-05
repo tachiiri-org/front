@@ -33,18 +33,21 @@ export const SHOSAI_CSS = `
   .s-db-tab.on{color:#333;font-weight:600;border-bottom-color:#333}
 
   .s-tbl{width:100%;border-collapse:collapse;font-size:12.5px}
-  .s-tbl th{text-align:left;padding:4px 6px;border-bottom:1px solid #0002;white-space:nowrap;font-weight:700;font-size:11px;color:#888}
-  .s-tbl td{padding:0;border-bottom:1px solid #0001;vertical-align:middle}
+  .s-tbl th{text-align:left;padding:4px 6px;border-bottom:1px solid #0002;border-right:1px solid #0001;white-space:nowrap;font-weight:700;font-size:11px;color:#888}
+  .s-tbl th:last-child,.s-tbl td:last-child{border-right:0}
+  .s-tbl td{padding:0;border-bottom:1px solid #0001;border-right:1px solid #0001;vertical-align:middle}
   .s-tbl tr:hover td{background:#00000005}
   .s-col-kind{font-size:10px;opacity:.6;font-weight:400;margin-left:4px}
   .s-col-add{width:36px}
   .s-col-add-btn{border:1px dashed #0003;background:transparent;color:#888;cursor:pointer;border-radius:4px;padding:2px 7px;font-size:12px}
   .s-col-add-btn:hover{color:#333;border-color:#4A90C2}
   .s-td-title{position:relative;min-width:150px}
-  .s-row-ti{width:100%;padding:6px 62px 6px 8px;border:1px solid transparent;border-radius:5px;background:transparent;color:inherit;font-size:13px;font-family:inherit}
-  .s-row-ti:hover,.s-row-ti:focus{border-color:#4A90C2;background:#00000008;outline:none}
-  .s-open-btn{position:absolute;right:6px;top:50%;transform:translateY(-50%);opacity:0;font-size:11px;padding:1px 9px;border:1px solid #0002;border-radius:4px;background:#fff;color:#555;cursor:pointer;line-height:1.6}
-  .s-td-title:hover .s-open-btn,.s-open-btn:focus{opacity:1}
+  /* タイトル自体が開く導線。ボタンを別に置くと狭い列で文字の場所を奪う。 */
+  .s-row-link{display:block;padding:7px 8px;color:inherit;font-size:13px;text-decoration:underline;
+              text-underline-offset:2px;text-decoration-thickness:1px;
+              overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+  .s-row-link:hover{text-decoration-thickness:2px;background:#00000008}
+  [data-theme=dark] .s-row-link:hover{background:#ffffff0d}
   .s-cell{width:100%;padding:5px 6px;border:1px solid transparent;border-radius:4px;background:transparent;color:inherit;font-size:12px;font-family:inherit;color-scheme:dark}
   .s-cell:hover,.s-cell:focus{border-color:#4A90C2;background:#00000008;outline:none}
   .s-cell-cb{margin:5px 7px}
@@ -63,11 +66,15 @@ export const SHOSAI_CSS = `
   .s-ref-add{color:#bbb;font-size:10px;padding:0 2px;cursor:pointer}
   .s-chips:hover .s-ref-add{color:#4A90C2}
   /* リレーションは四角で囲わず下線。選択肢（チップ）と役割が違うことを形で分ける。 */
-  .s-ref{display:inline-block;font-size:11.5px;line-height:1.6;color:#2a6a9c;white-space:nowrap;
+  /* リレーションは本文と同じ黒字。青字だと外部リンクに見えるうえ、数が多いと騒がしい。 */
+  .s-ref{display:inline-block;font-size:11.5px;line-height:1.6;color:inherit;white-space:nowrap;
          text-decoration:underline;text-underline-offset:2px;text-decoration-thickness:1px;
-         max-width:180px;overflow:hidden;text-overflow:ellipsis;vertical-align:bottom}
-  .s-ref:hover{color:#1b5480;text-decoration-thickness:2px}
-  .s-ref + .s-ref{margin-left:8px}
+         flex:none;vertical-align:bottom}
+  .s-ref:hover{text-decoration-thickness:2px}
+  .s-ref + .s-ref{margin-left:10px}
+  /* 件数が多いときは折り返さず横スクロール。折り返すと行の高さが揃わず読みにくい。 */
+  .s-chips-scroll{flex-wrap:nowrap;overflow-x:auto;overflow-y:hidden;-webkit-overflow-scrolling:touch}
+  .s-chips-scroll::-webkit-scrollbar{height:0}
   .s-opt{display:flex;align-items:center;gap:6px}
   .s-opt-mark{width:12px;flex:none;color:#4A90C2;font-size:11px}
   .s-opt-done{text-align:center;color:#4A90C2;font-weight:600;border-top:1px solid #0001;margin-top:2px}
@@ -126,6 +133,21 @@ export const SHOSAI_CSS = `
   [data-theme=dark] .s-notion-src:hover{background:#ffffff0f}
   [data-theme=dark] .s-notion-progress{background:#4A90C222}
 
+  /* 長押しメニュー（画面下から出るシート）。指の下に出すと隠れるため。 */
+  .s-sheet{position:fixed;left:0;right:0;bottom:0;z-index:960;background:#fff;
+           border-top:1px solid #0002;border-radius:12px 12px 0 0;padding:6px 0 10px;
+           box-shadow:0 -6px 24px #00000022}
+  .s-sheet-t{padding:10px 16px 6px;font-size:12px;color:#888;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+  .s-sheet-item{display:block;width:100%;text-align:left;border:0;background:transparent;
+                padding:13px 16px;font-size:14px;color:#333;cursor:pointer;font-family:inherit}
+  .s-sheet-item:hover{background:#00000008}
+  .s-sheet-del{color:#c0392b}
+  .s-sheet-cancel{color:#888;border-top:1px solid #0001;margin-top:4px}
+  [data-theme=dark] .s-sheet{background:#1c1e22;border-top-color:#ffffff22}
+  [data-theme=dark] .s-sheet-item{color:#e6e6e6}
+  [data-theme=dark] .s-sheet-item:hover{background:#ffffff0f}
+  [data-theme=dark] .s-sheet-cancel{border-top-color:#ffffff1a}
+
   /* ── 共通 ── */
   .s-btn{border:1px solid #0002;background:#fff;color:#555;cursor:pointer;border-radius:5px;padding:4px 10px;font-size:12px;font-family:inherit}
   .s-btn:hover{border-color:#4A90C2;color:#333}
@@ -144,6 +166,7 @@ export const SHOSAI_CSS = `
   [data-theme=dark] .s-side,[data-theme=dark] .s-editor{border-color:#ffffff14}
   [data-theme=dark] .s-db-tabs,[data-theme=dark] .s-tbl th{border-color:#ffffff22}
   [data-theme=dark] .s-tbl td{border-color:#ffffff12}
+  [data-theme=dark] .s-tbl th{border-right-color:#ffffff12}
   [data-theme=dark] .s-tbl tr:hover td{background:#ffffff08}
   [data-theme=dark] .s-item:hover{background:#ffffff0f}
   [data-theme=dark] .s-item.on{background:#4A90C233}
@@ -176,7 +199,12 @@ export const SHOSAI_CSS = `
     .s-wrap[data-pane=main] .s-side,.s-wrap[data-pane=main] .s-editor{display:none}
     .s-wrap[data-pane=editor] .s-side,.s-wrap[data-pane=editor] .s-main{display:none}
     .s-foot{display:flex;position:fixed;left:0;right:0;bottom:0;z-index:950;border-top:1px solid #0002;background:#fff}
-    .s-foot-btn{flex:1;border:0;background:transparent;color:#888;font-size:13px;padding:11px 0;cursor:pointer;font-family:inherit}
+    .s-foot-btn{flex:1;min-width:0;border:0;background:transparent;color:#888;font-size:13px;
+                padding:11px 6px;cursor:pointer;font-family:inherit;display:flex;align-items:center;
+                justify-content:center;gap:4px}
+    .s-foot-lb{overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+    .s-foot-x{flex:none;font-size:14px;line-height:1;opacity:.55;padding:0 2px}
+    .s-foot-x:hover{opacity:1}
     .s-foot-btn.on{color:#1f2937;font-weight:700;box-shadow:inset 0 -2px 0 #4A90C2}
     [data-theme=dark] .s-foot{background:#14161a;border-top-color:#ffffff26}
     [data-theme=dark] .s-foot-btn{color:#8b95a3}
@@ -185,9 +213,7 @@ export const SHOSAI_CSS = `
     .s-tbl{font-size:12px}
     /* タッチ端末にホバーは無い。「開く」を常時出し、右パディングもその分だけにする。
        62px のままだと幅 72px の列で文字を描く余地が 2px しか残らない。 */
-    .s-open-btn{opacity:1;right:3px;padding:1px 5px;font-size:10px}
-    .s-row-ti{padding-right:38px}
-    .s-td-title{min-width:170px}
+    .s-td-title{min-width:160px}
   }
 
   .s-wrap ::-webkit-scrollbar{width:6px;height:6px}
