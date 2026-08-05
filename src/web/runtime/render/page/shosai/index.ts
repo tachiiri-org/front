@@ -79,6 +79,13 @@ export async function renderShosai(container: HTMLElement): Promise<void> {
   const editor = createEditorView({
     onError: showError,
     onTitleChange: () => { void refreshSide(); },
+    onOpenLink: (blockId) => {
+      activePageId = blockId;
+      void editor.open(blockId).then(() => {
+        openedPage?.(blockId, editor.currentTitle());
+        void refreshSide();
+      });
+    },
   });
   // 「開く」やリレーションのリンクからエディタへ移る。移らないと、モバイルでは
   // 読み込まれてもエディタペインが隠れたままで、中身が無いように見える。

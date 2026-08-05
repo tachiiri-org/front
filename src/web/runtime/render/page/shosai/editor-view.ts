@@ -32,6 +32,8 @@ export interface EditorView {
 export function createEditorView(opts: {
   onError: (message: string) => void;
   onTitleChange: (pageId: string, title: string) => void;
+  /** ページへのリンクを押したとき。 */
+  onOpenLink?: (blockId: string) => void;
 }): EditorView {
   let pageId: string | null = null;
   let detail: PageDetail | null = null;
@@ -72,6 +74,39 @@ export function createEditorView(opts: {
       await reload();
     });
   });
+  // 種別の変更。Ctrl+Enter の巡回だけだと、目当ての種別まで何度も押すことになる。
+  const TYPE_CHOICES: Array<[string, string]> = [
+    ['paragraph', '段落'], ['heading', '見出し'], ['bullet', '箇条書き'],
+    ['numbered', '番号付き'], ['todo', 'TODO'], ['quote', '引用'], ['code', 'コード'],
+  ];
+  const typeBtn = el('button', { class: 's-tool', text: '種別' });
+  typeBtn.addEventListener('click', () => {
+    const target = document.activeElement as HTMLTextAreaElement | null;
+    const blockId = target?.dataset?.blockId;
+    if (!blockId) { opts.onError('種別を変えるブロックを先に選んでください'); return; }
+    const overlay = el('div', { class: 's-overlay' });
+    const pop = el('div', { class: 's-pop' });
+    const r = typeBtn.getBoundingClientRect();
+    pop.style.position = 'fixed';
+    pop.style.left = `${Math.min(r.left, window.innerWidth - 180)}px`;
+    pop.style.bottom = `${window.innerHeight - r.top + 6}px`;
+    const close = (): void => { overlay.remove(); pop.remove(); };
+    for (const [key, label] of TYPE_CHOICES) {
+      const it = el('button', { class: 's-pop-item', text: label });
+      it.addEventListener('click', () => {
+        close();
+        void guard(async () => {
+          await api.patchBlock(blockId, { type: key as api.BlockType });
+          focusAfterRender = blockId;
+          await reload();
+        });
+      });
+      pop.append(it);
+    }
+    overlay.addEventListener('click', close);
+    document.body.append(overlay, pop);
+  });
+
   const addDivider = el('button', { class: 's-tool', text: '区切り' });
   addDivider.addEventListener('click', () => {
     void guard(async () => {
@@ -80,7 +115,7 @@ export function createEditorView(opts: {
       await reload();
     });
   });
-  bar.append(addBlock, addImage, addDivider, picker);
+  bar.append(addBlock, typeBtn, addImage, addDivider, picker);
 
   root.append(head, body, bar);
 
@@ -163,6 +198,17 @@ export function createEditorView(opts: {
 
     if (b.type === 'divider') {
       row.append(el('div', { class: 's-hr' }));
+      return row;
+    }
+
+    // 他のページへのリンク。押すとそのページを開く。
+    if (b.type === 'page_link') {
+      const a = el('a', { class: 's-blk-link', text: b.linkTargetTitle || b.text || '（無題のページ）', href: '#' });
+      a.addEventListener('click', (e) => {
+        e.preventDefault();
+        if (b.linkTargetId) opts.onOpenLink?.(b.linkTargetId);
+      });
+      row.append(a);
       return row;
     }
 
@@ -300,6 +346,30 @@ export function createEditorView(opts: {
     return row;
   };
 
+  /**
+   * 表を組み立てる。ブロックは平坦に並んで来るので、深さで行とセルを拾い直す。
+   * 行・セルは編集対象として別々に出さない（表として見せた方が分かる）。
+   */
+  const renderTable = (blocks: BlockRow[], index: number): { el: HTMLElement; consumed: number } => {
+    const base = blocks[index].depth;
+    const table = el('table', { class: 's-blk-tbl' });
+    let i = index + 1;
+    while (i < blocks.length && blocks[i].depth > base) {
+      if (blocks[i].type !== 'table_row') { i++; continue; }
+      const rowDepth = blocks[i].depth;
+      const tr = el('tr');
+      i++;
+      while (i < blocks.length && blocks[i].depth > rowDepth) {
+        if (blocks[i].type === 'table_cell') tr.append(el('td', { text: blocks[i].text }));
+        i++;
+      }
+      table.append(tr);
+    }
+    const wrap = el('div', { class: 's-blk-tbl-wrap' });
+    wrap.append(table);
+    return { el: wrap, consumed: i - index };
+  };
+
   const paint = (): void => {
     body.innerHTML = '';
     if (!detail) {
@@ -320,7 +390,21 @@ export function createEditorView(opts: {
       body.append(add);
       return;
     }
-    blocks.forEach((_, i) => body.append(renderBlock(blocks, i)));
+    for (let i = 0; i < blocks.length; i++) {
+      const b = blocks[i];
+      if (b.type === 'table') {
+        const row = el('div', { class: 's-blk' });
+        row.style.marginLeft = `${b.depth * 22}px`;
+        row.append(el('span', { class: 's-grip', text: '⠿' }));
+        const t = renderTable(blocks, i);
+        row.append(t.el);
+        body.append(row);
+        i += t.consumed - 1;   // 行とセルは表の中で描いたので飛ばす
+        continue;
+      }
+      if (b.type === 'table_row' || b.type === 'table_cell') continue;
+      body.append(renderBlock(blocks, i));
+    }
 
     const add = el('button', { class: 's-add-row', text: '＋ ブロックを追加' });
     add.addEventListener('click', () => {

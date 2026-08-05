@@ -168,6 +168,19 @@ export const SHOSAI_CSS = `
   [data-theme=dark] .s-toolbar{border-top-color:#ffffff1a}
   [data-theme=dark] .s-tool{color:#c8c8c8;border-color:#ffffff2b}
 
+  /* 本文中の表。ブロックの入れ子を畳んで見せる。 */
+  .s-blk-tbl-wrap{flex:1;min-width:0;overflow-x:auto;padding:4px 6px}
+  .s-blk-tbl{border-collapse:collapse;font-size:12.5px;min-width:100%}
+  .s-blk-tbl td{border:1px solid #0002;padding:5px 8px;vertical-align:top;line-height:1.6}
+  .s-blk-tbl tr:first-child td{background:#00000008;font-weight:600}
+  [data-theme=dark] .s-blk-tbl td{border-color:#ffffff2b}
+  [data-theme=dark] .s-blk-tbl tr:first-child td{background:#ffffff0d}
+  /* 他のページへのリンク。 */
+  .s-blk-link{flex:1;min-width:0;padding:4px 6px;color:inherit;font-size:13.5px;
+              text-decoration:underline;text-underline-offset:2px;text-decoration-thickness:1px}
+  .s-blk-link:hover{text-decoration-thickness:2px}
+  .s-blk-link::before{content:'▤ ';opacity:.5;font-size:11px}
+
   /* ── 共通 ── */
   .s-btn{border:1px solid #0002;background:#fff;color:#555;cursor:pointer;border-radius:5px;padding:4px 10px;font-size:12px;font-family:inherit}
   .s-btn:hover{border-color:#4A90C2;color:#333}

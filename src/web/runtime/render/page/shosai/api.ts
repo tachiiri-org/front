@@ -3,7 +3,7 @@
 
 export type BlockType =
   | 'page' | 'paragraph' | 'heading' | 'todo' | 'code' | 'quote' | 'bullet' | 'numbered' | 'divider' | 'database'
-  | 'image';
+  | 'image' | 'table' | 'table_row' | 'table_cell' | 'page_link';
 
 export type PropertyType =
   | 'text' | 'number' | 'date' | 'checkbox' | 'select' | 'multi_select' | 'relation';
@@ -13,6 +13,8 @@ export interface BlockRow {
   id: string; depth: number; type: BlockType; text: string; rank: string | null;
   /** 画像などの添付。fileUrl があれば外部 URL、無ければ /file/:id から読む。 */
   fileId?: string | null; fileUrl?: string | null;
+  /** ページへのリンクの相手。 */
+  linkTargetId?: string | null; linkTargetTitle?: string | null;
 }
 export interface PageDetail {
   page: { id: string; type: BlockType; title: string; created_at: number | null; updated_at: number | null };
