@@ -302,11 +302,39 @@ export function createDatabaseView(opts: {
     for (const row of detail.rows) {
       const tr = el('tr');
       const td = el('td', { class: 's-td-title' });
-      // タイトル自体を開く導線にする。ボタンを別に置くと、狭い列で文字の場所を奪う。
-      // 名前の変更はエディタ側か、一覧の長押しメニューから行う。
+      // タイトル自体が開く導線。名前の変更は鉛筆で入力に切り替える。
+      // 常時入力にすると、開きたいのか直したいのかが押すまで決まらない。
       const link = el('a', { class: 's-row-link', text: row.title || '（無題）', href: '#' });
       link.addEventListener('click', (e) => { e.preventDefault(); opts.onOpenPage(row.id); });
-      td.append(link);
+      const pen = el('button', { class: 's-row-pen', text: '✎', title: '名前を変更' });
+      pen.addEventListener('click', () => {
+        const input = el('input', { class: 's-row-ti' }) as HTMLInputElement;
+        input.value = row.title;
+        const finish = (save: boolean): void => {
+          if (save && input.value !== row.title) {
+            const next = input.value;
+            void guard(async () => {
+              await api.patchBlock(row.id, { text: next });
+              row.title = next;
+              opts.onChanged();
+            });
+          }
+          link.textContent = (save ? input.value : row.title) || '（無題）';
+          input.replaceWith(link);
+          pen.style.display = '';
+        };
+        input.addEventListener('blur', () => finish(true));
+        input.addEventListener('keydown', (ev) => {
+          const k = ev as KeyboardEvent;
+          if (k.key === 'Enter') { ev.preventDefault(); finish(true); }
+          if (k.key === 'Escape') { ev.preventDefault(); finish(false); }
+        });
+        link.replaceWith(input);
+        pen.style.display = 'none';
+        input.focus();
+        input.select();
+      });
+      td.append(link, pen);
       tr.append(td);
 
       for (const p of detail.properties) {

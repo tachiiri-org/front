@@ -44,7 +44,45 @@ export function createEditorView(opts: {
   const typeNote = el('span', { class: 's-note' });
   head.append(title, typeNote);
   const body = el('div', { class: 's-editor-body' });
-  root.append(head, body);
+
+  // 編集の道具はタブのすぐ上に固定する。本文の末尾まで送らないと足せないのは面倒なので。
+  const bar = el('div', { class: 's-toolbar' });
+  const picker = el('input', { class: 's-file', type: 'file', accept: 'image/*' }) as HTMLInputElement;
+  const addImage = el('button', { class: 's-tool', text: '画像', title: '画像を追加' });
+  addImage.addEventListener('click', () => picker.click());
+  picker.addEventListener('change', () => {
+    const file = picker.files?.[0];
+    picker.value = '';
+    if (!file || !pageId) return;
+    void guard(async () => {
+      addImage.textContent = '送信中…';
+      try {
+        const created = await api.createBlock({ parentId: pageId!, type: 'image', text: '' });
+        await api.uploadFile(created.id, file);
+        await reload();
+      } finally { addImage.textContent = '画像'; }
+    });
+  });
+  const addBlock = el('button', { class: 's-tool', text: '＋ ブロック' });
+  addBlock.addEventListener('click', () => {
+    void guard(async () => {
+      if (!pageId) return;
+      const created = await api.createBlock({ parentId: pageId, type: 'paragraph', text: '' });
+      focusAfterRender = created.id;
+      await reload();
+    });
+  });
+  const addDivider = el('button', { class: 's-tool', text: '区切り' });
+  addDivider.addEventListener('click', () => {
+    void guard(async () => {
+      if (!pageId) return;
+      await api.createBlock({ parentId: pageId, type: 'divider', text: '' });
+      await reload();
+    });
+  });
+  bar.append(addBlock, addImage, addDivider, picker);
+
+  root.append(head, body, bar);
 
   const guard = async (fn: () => Promise<void>): Promise<void> => {
     try { await fn(); } catch (e) {
@@ -185,8 +223,10 @@ export function createEditorView(opts: {
     input.addEventListener('keydown', (ev) => {
       const e = ev as KeyboardEvent;
 
-      // Enter: 同じ深さの直後に新しいブロックを作る（コードブロック内は改行のまま）。
-      if (e.key === 'Enter' && !e.shiftKey && b.type !== 'code') {
+      // Enter はブロック内の改行（textarea の既定のまま）。
+      // 段落の途中で改行したいことの方が多く、毎回ブロックが割れると書きにくい。
+      // 新しいブロックは Shift+Enter。
+      if (e.key === 'Enter' && e.shiftKey) {
         e.preventDefault();
         void guard(async () => {
           if (input.value !== b.text) await api.patchBlock(b.id, { text: input.value });
@@ -253,7 +293,7 @@ export function createEditorView(opts: {
     });
 
     input.addEventListener('focus', () => {
-      typeNote.textContent = `${TYPE_LABEL[b.type] ?? b.type}  ·  Ctrl+Enter で種別変更 / Tab でインデント`;
+      typeNote.textContent = `${TYPE_LABEL[b.type] ?? b.type}  ·  Shift+Enter で新しいブロック / Ctrl+Enter で種別変更 / Tab でインデント`;
     });
 
     row.append(input);

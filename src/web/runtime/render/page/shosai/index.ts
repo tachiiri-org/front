@@ -119,11 +119,16 @@ export async function renderShosai(container: HTMLElement): Promise<void> {
    * 一覧の項目を長押ししたときのメニュー。名前の変更と削除。
    * 触っている指の下に出すと隠れるので、画面下から出す（トースト風）。
    */
+  const closeSheets = (): void => {
+    document.querySelectorAll('.s-sheet, .s-overlay').forEach((n) => n.remove());
+  };
+
   const openItemMenu = (kind: 'database' | 'page', id: string, title: string): void => {
+    closeSheets();   // 前のものが残っていると二重に出る
     const overlay = el('div', { class: 's-overlay' });
     const sheet = el('div', { class: 's-sheet' });
     sheet.append(el('div', { class: 's-sheet-t', text: title || '（無題）' }));
-    const close = (): void => { overlay.remove(); sheet.remove(); };
+    const close = (): void => { overlay.remove(); sheet.remove(); closeSheets(); };
 
     const rename = el('button', { class: 's-sheet-item', text: '名前を変更' });
     rename.addEventListener('click', () => {
@@ -163,6 +168,7 @@ export async function renderShosai(container: HTMLElement): Promise<void> {
           }
           await refreshSide();
         } catch (e) { showError(e instanceof Error ? e.message : String(e)); }
+        finally { closeSheets(); }
       })();
     });
 
@@ -177,10 +183,13 @@ export async function renderShosai(container: HTMLElement): Promise<void> {
   const attachLongPress = (node: HTMLElement, run: () => void): void => {
     let timer: ReturnType<typeof setTimeout> | null = null;
     let moved = false;
+    let fired = false;
     const start = (): void => {
-      moved = false;
-      timer = setTimeout(() => { if (!moved) run(); }, 500);
+      moved = false; fired = false;
+      timer = setTimeout(() => { if (!moved) { fired = true; run(); } }, 500);
     };
+    // 長押しの直後に click が続くと、メニューの裏で項目まで開いてしまう。
+    node.addEventListener('click', (e) => { if (fired) { e.stopPropagation(); e.preventDefault(); fired = false; } }, true);
     const cancel = (): void => { if (timer) clearTimeout(timer); timer = null; };
     node.addEventListener('touchstart', start, { passive: true });
     node.addEventListener('touchmove', () => { moved = true; cancel(); }, { passive: true });

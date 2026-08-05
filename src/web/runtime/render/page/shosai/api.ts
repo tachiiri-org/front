@@ -169,3 +169,19 @@ export const relatedSources = (connectionId: string, dataSourceId: string):
 
 export const deleteDatabase = (databaseId: string): Promise<{ databaseId: string }> =>
   call(`/database/${encodeURIComponent(databaseId)}`, { method: 'DELETE' });
+
+/** 画像などを R2 へ。ブロックに紐づけて置き場所を記録する。 */
+export async function uploadFile(blockId: string, file: File): Promise<{ fileId: string }> {
+  const q = new URLSearchParams({ blockId, name: file.name });
+  const res = await fetch(`/api/v1/shosai/upload?${q}`, {
+    method: 'POST',
+    headers: { 'Content-Type': file.type || 'application/octet-stream' },
+    body: file,
+  });
+  if (!res.ok) {
+    let detail = `${res.status}`;
+    try { const b = (await res.json()) as { message?: string }; detail = b.message ?? detail; } catch { /* 本文が JSON でない */ }
+    throw new ShosaiApiError(res.status, detail);
+  }
+  return (await res.json()) as { fileId: string };
+}

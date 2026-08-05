@@ -48,6 +48,14 @@ export const SHOSAI_CSS = `
               overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
   .s-row-link:hover{text-decoration-thickness:2px;background:#00000008}
   [data-theme=dark] .s-row-link:hover{background:#ffffff0d}
+  .s-td-title{display:flex;align-items:center;gap:2px}
+  .s-row-link{flex:1;min-width:0}
+  .s-row-pen{flex:none;border:0;background:transparent;color:#ccc;cursor:pointer;font-size:12px;
+             padding:4px 6px;line-height:1;font-family:inherit}
+  .s-td-title:hover .s-row-pen{color:#4A90C2}
+  .s-row-ti{flex:1;min-width:0;padding:6px 8px;border:1px solid #4A90C2;border-radius:5px;
+            background:transparent;color:inherit;font-size:13px;font-family:inherit}
+  .s-row-ti:focus{outline:none}
   .s-cell{width:100%;padding:5px 6px;border:1px solid transparent;border-radius:4px;background:transparent;color:inherit;font-size:12px;font-family:inherit;color-scheme:dark}
   .s-cell:hover,.s-cell:focus{border-color:#4A90C2;background:#00000008;outline:none}
   .s-cell-cb{margin:5px 7px}
@@ -93,7 +101,8 @@ export const SHOSAI_CSS = `
   .s-grip:active{cursor:grabbing}
   .s-blk-in{flex:1;min-width:0;border:1px solid transparent;border-radius:5px;background:transparent;color:inherit;font-family:inherit;font-size:13.5px;line-height:1.7;padding:3px 6px;resize:none;overflow:hidden}
   .s-blk-in:hover{border-color:#0001}
-  .s-blk-in:focus{border-color:#4A90C2;background:#00000008;outline:none}
+  /* 選択中の背景は付けない。文章の途中が灰色に沈むと読みにくい。枠だけで十分。 */
+  .s-blk-in:focus{border-color:#4A90C2;background:transparent;outline:none}
   .s-blk-in.h{font-size:17px;font-weight:700;line-height:1.5}
   .s-blk-in.code{font-family:ui-monospace,SFMono-Regular,Menlo,monospace;font-size:12.5px;background:#00000008;border-color:#0001}
   .s-blk-in.quote{border-left:3px solid #4A90C2;border-radius:0 5px 5px 0;padding-left:10px;color:#666}
@@ -148,6 +157,15 @@ export const SHOSAI_CSS = `
   [data-theme=dark] .s-sheet-item:hover{background:#ffffff0f}
   [data-theme=dark] .s-sheet-cancel{border-top-color:#ffffff1a}
 
+  /* エディタの道具。タブのすぐ上に固定する。 */
+  .s-toolbar{display:flex;gap:6px;padding:6px 10px;border-top:1px solid #0001;background:inherit}
+  .s-tool{border:1px solid #0002;background:transparent;color:#555;border-radius:5px;
+          padding:5px 10px;font-size:12px;cursor:pointer;font-family:inherit}
+  .s-tool:hover{border-color:#4A90C2;color:#333}
+  .s-file{display:none}
+  [data-theme=dark] .s-toolbar{border-top-color:#ffffff1a}
+  [data-theme=dark] .s-tool{color:#c8c8c8;border-color:#ffffff2b}
+
   /* ── 共通 ── */
   .s-btn{border:1px solid #0002;background:#fff;color:#555;cursor:pointer;border-radius:5px;padding:4px 10px;font-size:12px;font-family:inherit}
   .s-btn:hover{border-color:#4A90C2;color:#333}
@@ -175,7 +193,7 @@ export const SHOSAI_CSS = `
   [data-theme=dark] .s-db-tab.on{color:#fff;border-bottom-color:#fff}
   [data-theme=dark] .s-blk:hover{background:#ffffff08}
   [data-theme=dark] .s-blk-in:hover{border-color:#ffffff14}
-  [data-theme=dark] .s-blk-in:focus,[data-theme=dark] .s-cell:focus,[data-theme=dark] .s-row-ti:focus{background:#ffffff0d}
+  [data-theme=dark] .s-cell:focus{background:#ffffff0d}
   [data-theme=dark] .s-blk-in.code{background:#ffffff0d;border-color:#ffffff1a}
   [data-theme=dark] .s-hr{background:#ffffff22}
   [data-theme=dark] .s-btn,[data-theme=dark] .s-open-btn{background:#2a2b2e;color:#ddd;border-color:#ffffff2b}
@@ -209,6 +227,12 @@ export const SHOSAI_CSS = `
     [data-theme=dark] .s-foot{background:#14161a;border-top-color:#ffffff26}
     [data-theme=dark] .s-foot-btn{color:#8b95a3}
     [data-theme=dark] .s-foot-btn.on{color:#f3f5f7}
+    /* 道具はタブのすぐ上。エディタを開いているときだけ出す。 */
+    .s-toolbar{display:none;position:fixed;left:0;right:0;bottom:44px;z-index:940;
+               background:#fff;border-top:1px solid #0002;overflow-x:auto}
+    [data-theme=dark] .s-toolbar{background:#14161a;border-top-color:#ffffff22}
+    .s-wrap[data-pane=editor] .s-toolbar{display:flex}
+    .s-editor{padding-bottom:112px}
     .s-notion-dialog{top:8vh;width:94vw;max-height:78vh}
     .s-tbl{font-size:12px}
     /* タッチ端末にホバーは無い。「開く」を常時出し、右パディングもその分だけにする。
