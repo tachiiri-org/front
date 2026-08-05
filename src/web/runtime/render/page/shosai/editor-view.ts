@@ -233,6 +233,21 @@ export function createEditorView(opts: {
       return row;
     }
 
+    // 埋め込み。中身は再現しない。行き先へ出られれば用は足りる。
+    if (b.type === 'embed') {
+      const href = b.url || (b.fileId ? `/api/v1/shosai/file/${encodeURIComponent(b.fileId)}` : '');
+      const wrap = el('div', { class: 's-embed' });
+      if (href) {
+        const a = el('a', { class: 's-embed-link', href, target: '_blank', rel: 'noopener noreferrer' });
+        a.textContent = b.text || b.url || '添付ファイル';
+        wrap.append(a);
+      } else {
+        wrap.append(el('span', { class: 's-note', text: b.text || '埋め込み（行き先が取れませんでした）' }));
+      }
+      row.append(wrap);
+      return row;
+    }
+
     // 画像。実体は R2 にあり /file/:id から読む。外部 URL のものはそのまま参照する。
     if (b.type === 'image') {
       const wrap = el('div', { class: 's-img-wrap' });

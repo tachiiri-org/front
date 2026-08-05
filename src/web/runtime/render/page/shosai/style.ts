@@ -180,6 +180,11 @@ export const SHOSAI_CSS = `
               text-decoration:underline;text-underline-offset:2px;text-decoration-thickness:1px}
   .s-blk-link:hover{text-decoration-thickness:2px}
   .s-blk-link::before{content:'▤ ';opacity:.5;font-size:11px}
+  /* 埋め込み。中身は再現せず、行き先へのリンクだけ出す。 */
+  .s-embed{flex:1;min-width:0;padding:4px 6px}
+  .s-embed-link{color:inherit;font-size:13px;text-decoration:underline;text-underline-offset:2px;
+                word-break:break-all}
+  .s-embed-link::before{content:'⧉ ';opacity:.5;font-size:11px}
 
   /* ── 共通 ── */
   .s-btn{border:1px solid #0002;background:#fff;color:#555;cursor:pointer;border-radius:5px;padding:4px 10px;font-size:12px;font-family:inherit}

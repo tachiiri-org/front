@@ -3,7 +3,7 @@
 
 export type BlockType =
   | 'page' | 'paragraph' | 'heading' | 'todo' | 'code' | 'quote' | 'bullet' | 'numbered' | 'divider' | 'database'
-  | 'image' | 'table' | 'table_row' | 'table_cell' | 'page_link';
+  | 'image' | 'table' | 'table_row' | 'table_cell' | 'page_link' | 'embed';
 
 export type PropertyType =
   | 'text' | 'number' | 'date' | 'checkbox' | 'select' | 'multi_select' | 'relation';
@@ -15,6 +15,8 @@ export interface BlockRow {
   fileId?: string | null; fileUrl?: string | null;
   /** ページへのリンクの相手。 */
   linkTargetId?: string | null; linkTargetTitle?: string | null;
+  /** 埋め込みの行き先。Notion がホストしていたものは fileId 側に入る。 */
+  url?: string | null;
 }
 export interface PageDetail {
   page: { id: string; type: BlockType; title: string; created_at: number | null; updated_at: number | null };
