@@ -2031,7 +2031,9 @@ function chartView(chart: Chart, birth: Birth | null | undefined, personId: stri
   const conceptNode = el("div", {});
   const CONCEPT_TABS: Array<{ kind: string; label: string }> = [
     { kind: "planet", label: "天体" }, { kind: "sign", label: "サイン" }, { kind: "house", label: "ハウス" },
-    { kind: "aspect_type", label: "アスペクト" }, { kind: "quadrant", label: "象限" },
+    { kind: "element", label: "エレメント" }, { kind: "quality", label: "クオリティ" },
+    { kind: "aspect_type", label: "アスペクト" }, { kind: "aspect_figure", label: "アスペクトパターン" },
+    { kind: "quadrant", label: "象限" },
     { kind: "shape", label: "配置型" }, { kind: "dignity", label: "ディグニティ" }, { kind: "phase", label: "位相" },
   ];
   let conceptKind = "planet";
