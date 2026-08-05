@@ -11,6 +11,7 @@ import { renderAdminPage } from './runtime/render/page/admin';
 import { renderGraphEditor } from './runtime/render/page/graph-editor';
 import { renderUranai } from './runtime/render/page/uranai';
 import { renderKakeibo } from './runtime/render/page/kakeibo';
+import { renderShosai } from './runtime/render/page/shosai';
 import { renderStorageExplorer } from './runtime/render/page/storage-explorer';
 import type { GraphEditorComponent } from './schema/component/kind/graph-editor';
 import type { StorageExplorerComponent } from './schema/component/kind/storage-explorer';
@@ -26,6 +27,7 @@ const PRODUCT_CONFIG: Record<string, { screens: string[] }> = {
   graph: { screens: ['graph-editor'] },
   uranai: { screens: ['uranai'] },
   kakeibo: { screens: ['kakeibo'] },
+  shosai: { screens: ['shosai'] },
   admin: { screens: ['org-members', 'admin-members', 'storage-explorer'] },
 };
 const PRODUCT_SCREENS = PRODUCT ? PRODUCT_CONFIG[PRODUCT]?.screens : undefined;
@@ -368,6 +370,15 @@ const renderScreen = async (screenId: string): Promise<void> => {
     root.innerHTML = '';
     root.style.position = 'relative';
     await renderKakeibo(root);
+    return;
+  }
+  // ショサイもカスタム画面（layouts スペック不要）。3ペインを画面高に収めるのでビューポート型。
+  if (screenId === 'shosai') {
+    applyViewportLayout();
+    void renderNav(screenId);
+    root.innerHTML = '';
+    root.style.position = 'relative';
+    await renderShosai(root);
     return;
   }
   const inlineData = readInlineScreenData();
