@@ -548,6 +548,23 @@ export const handleApiRequest = async (request: Request, env: Env): Promise<Resp
     return res;
   }
 
+  // ショサイ API — backend の /api/v1/shosai/* (ShosaiDO) へ中継する。
+  // kakeibo / graph と同型。テナント／実行者ごとのデータなので、識別子が欠けたまま転送しない。
+  const shosaiApiMatch = url.pathname.match(/^\/api\/v1\/shosai(\/.*)?$/);
+  if (shosaiApiMatch) {
+    const suffix = shosaiApiMatch[1] ?? '/';
+    const backendPath = `/api/v1/shosai${suffix}${url.search}`;
+    const body = request.method !== 'GET' && request.method !== 'HEAD' ? await request.text() : undefined;
+    const identity = await readIdentity(env, request);
+    const tenantContext = { tenantId: identity?.groupId, subjectId: identity?.userId };
+    if (!tenantContext.tenantId || !tenantContext.subjectId) {
+      return Response.json({ error: 'unauthenticated' }, { status: 401 });
+    }
+    const res = await authorizeFetch(env, { path: backendPath, method: request.method, body, tenantContext });
+    if (env.LOG_LEVEL === 'debug') console.log(`[shosai-proxy] ${request.method} ${backendPath} → ${res.status}`);
+    return res;
+  }
+
   // D1-backed graph API — proxy to backend /api/v1/graph/*
   const graphApiMatch = url.pathname.match(/^\/api\/v1\/graph(\/.*)?$/);
   if (graphApiMatch) {
