@@ -126,6 +126,26 @@ export function createEditorView(opts: {
       return row;
     }
 
+    // 画像。実体は R2 にあり /file/:id から読む。外部 URL のものはそのまま参照する。
+    if (b.type === 'image') {
+      const wrap = el('div', { class: 's-img-wrap' });
+      if (b.fileId) {
+        const img = el('img', { class: 's-img', loading: 'lazy' }) as HTMLImageElement;
+        img.src = b.fileUrl || `/api/v1/shosai/file/${encodeURIComponent(b.fileId)}`;
+        img.alt = b.text || '';
+        img.addEventListener('error', () => {
+          wrap.innerHTML = '';
+          wrap.append(el('div', { class: 's-img-miss', text: '画像を表示できません' }));
+        });
+        wrap.append(img);
+      } else {
+        wrap.append(el('div', { class: 's-img-miss', text: '画像（実体が取り込まれていません）' }));
+      }
+      if (b.text) wrap.append(el('div', { class: 's-img-cap', text: b.text }));
+      row.append(wrap);
+      return row;
+    }
+
     if (b.type === 'todo') {
       const cb = el('input', { class: 's-blk-cb', type: 'checkbox' }) as HTMLInputElement;
       // TODO の済/未済はまだ p_ に持たせていない。見た目だけ先に置き、状態は保存しない。

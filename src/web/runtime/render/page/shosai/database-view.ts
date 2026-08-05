@@ -25,13 +25,7 @@ export function createDatabaseView(opts: {
   onOpenPage: (blockId: string) => void;
   onChanged: () => void;
 }): DatabaseView {
-  // 選択肢の色。graph と同じ ID 空間だが、ここでは名前から安定した色を選ぶだけにする。
-  const CHIP_HUES = [8, 32, 55, 96, 150, 190, 215, 260, 295, 330];
-  const chipColor = (name: string): string => {
-    let h = 0;
-    for (let i = 0; i < name.length; i++) h = (h * 31 + name.charCodeAt(i)) >>> 0;
-    return `hsl(${CHIP_HUES[h % CHIP_HUES.length]}, 65%, 55%)`;
-  };
+
   let databaseId: string | null = null;
   let detail: DatabaseDetail | null = null;
   let dbTitle = '';
@@ -109,10 +103,7 @@ export function createDatabaseView(opts: {
     for (const o of options) {
       const item = el('button', { class: 's-pop-item s-opt' });
       const mark = el('span', { class: 's-opt-mark', text: chosen.has(o.id) ? '✓' : '' });
-      const chip = el('span', { class: 's-chip', text: o.name });
-      chip.style.background = `${chipColor(o.name)}2e`;
-      chip.style.borderColor = chipColor(o.name);
-      item.append(mark, chip);
+      item.append(mark, el('span', { class: 's-chip', text: o.name }));
       item.addEventListener('click', () => {
         if (prop.type === 'select') { chosen.clear(); chosen.add(o.id); commit(); return; }
         if (chosen.has(o.id)) chosen.delete(o.id); else chosen.add(o.id);
@@ -213,10 +204,7 @@ export function createDatabaseView(opts: {
         box.innerHTML = '';
         if (!list.length) { box.append(el('span', { class: 's-chip-empty', text: '—' })); return; }
         for (const c of list) {
-          const chip = el('span', { class: 's-chip', text: c.name });
-          chip.style.background = `${chipColor(c.name)}2e`;
-          chip.style.borderColor = chipColor(c.name);
-          box.append(chip);
+          box.append(el('span', { class: 's-chip', text: c.name }));
         }
       };
       paint(chosen);

@@ -2,13 +2,18 @@
 // ShosaiDO へ中継する。エラーは呼び出し側で握り潰さず、画面上に出すために投げ直す。
 
 export type BlockType =
-  | 'page' | 'paragraph' | 'heading' | 'todo' | 'code' | 'quote' | 'bullet' | 'numbered' | 'divider' | 'database';
+  | 'page' | 'paragraph' | 'heading' | 'todo' | 'code' | 'quote' | 'bullet' | 'numbered' | 'divider' | 'database'
+  | 'image';
 
 export type PropertyType =
   | 'text' | 'number' | 'date' | 'checkbox' | 'select' | 'multi_select' | 'relation';
 
 export interface PageSummary { id: string; title: string; updated_at: number | null }
-export interface BlockRow { id: string; depth: number; type: BlockType; text: string; rank: string | null }
+export interface BlockRow {
+  id: string; depth: number; type: BlockType; text: string; rank: string | null;
+  /** 画像などの添付。fileUrl があれば外部 URL、無ければ /file/:id から読む。 */
+  fileId?: string | null; fileUrl?: string | null;
+}
 export interface PageDetail {
   page: { id: string; type: BlockType; title: string; created_at: number | null; updated_at: number | null };
   blocks: BlockRow[];
@@ -156,3 +161,8 @@ export const importProgress = (databaseId: string): Promise<ImportProgress> =>
 /** リレーションの参照先の候補。その列が指しているデータベースの行を返す。 */
 export const relationCandidates = (propertyId: string): Promise<{ pages: Array<{ id: string; title: string }> }> =>
   call(`/relation-candidates?propertyId=${encodeURIComponent(propertyId)}`);
+
+/** relation で指している別データソース。取り込み時にまとめて選ぶために使う。 */
+export const relatedSources = (connectionId: string, dataSourceId: string):
+  Promise<{ related: Array<{ id: string; title: string }> }> =>
+  call(`/notion/related?connectionId=${encodeURIComponent(connectionId)}&dataSourceId=${encodeURIComponent(dataSourceId)}`);

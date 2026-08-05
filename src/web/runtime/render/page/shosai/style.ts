@@ -55,16 +55,19 @@ export const SHOSAI_CSS = `
   .s-chips{display:flex;flex-wrap:wrap;gap:4px;align-items:center;min-height:26px;padding:3px 6px;cursor:pointer;
            border:1px solid transparent;border-radius:4px}
   .s-chips:hover{border-color:#4A90C2;background:#00000008}
+  /* 選択肢は色分けしない。値の意味と色が結びつかないので、かえって読みにくい。 */
   .s-chip{display:inline-block;padding:1px 7px;border-radius:3px;font-size:11.5px;line-height:1.6;
-          border:1px solid #0002;white-space:nowrap;color:#333}
-  [data-theme=dark] .s-chip{color:#e6e6e6;border-color:#ffffff33}
+          border:1px solid #0002;background:#00000008;white-space:nowrap;color:#333}
+  [data-theme=dark] .s-chip{color:#e6e6e6;border-color:#ffffff2b;background:#ffffff12}
   .s-chip-empty{color:#bbb;font-size:12px}
   .s-ref-add{color:#bbb;font-size:10px;padding:0 2px;cursor:pointer}
   .s-chips:hover .s-ref-add{color:#4A90C2}
-  .s-ref{display:inline-block;padding:1px 7px;border-radius:3px;font-size:11.5px;line-height:1.6;
-         background:#4A90C218;border:1px solid #4A90C24d;color:#2a6a9c;text-decoration:none;white-space:nowrap;
-         max-width:180px;overflow:hidden;text-overflow:ellipsis}
-  .s-ref:hover{background:#4A90C233;text-decoration:underline}
+  /* リレーションは四角で囲わず下線。選択肢（チップ）と役割が違うことを形で分ける。 */
+  .s-ref{display:inline-block;font-size:11.5px;line-height:1.6;color:#2a6a9c;white-space:nowrap;
+         text-decoration:underline;text-underline-offset:2px;text-decoration-thickness:1px;
+         max-width:180px;overflow:hidden;text-overflow:ellipsis;vertical-align:bottom}
+  .s-ref:hover{color:#1b5480;text-decoration-thickness:2px}
+  .s-ref + .s-ref{margin-left:8px}
   .s-opt{display:flex;align-items:center;gap:6px}
   .s-opt-mark{width:12px;flex:none;color:#4A90C2;font-size:11px}
   .s-opt-done{text-align:center;color:#4A90C2;font-weight:600;border-top:1px solid #0001;margin-top:2px}
@@ -90,6 +93,11 @@ export const SHOSAI_CSS = `
   .s-blk-mk{flex:none;color:#aaa;font-size:13px;padding-top:5px;user-select:none;min-width:14px;text-align:right}
   .s-blk-cb{flex:none;margin-top:7px}
   .s-hr{flex:1;height:1px;background:#0002;margin:12px 4px}
+  .s-img-wrap{flex:1;min-width:0;padding:4px 6px}
+  .s-img{max-width:100%;height:auto;border-radius:6px;display:block}
+  .s-img-cap{margin-top:4px;color:#888;font-size:11.5px;line-height:1.5}
+  .s-img-miss{padding:12px;border:1px dashed #0002;border-radius:6px;color:#aaa;font-size:12px;text-align:center}
+  [data-theme=dark] .s-img-miss{border-color:#ffffff2b}
   .s-drop{box-shadow:0 -2px 0 #4A90C2}
 
   /* ── Notion 連携 ── */
@@ -99,7 +107,9 @@ export const SHOSAI_CSS = `
   .s-notion-body{padding:10px 16px 16px}
   .s-notion-opt{display:flex;align-items:center;gap:7px;margin:2px 0 12px;font-size:12.5px;color:#666;cursor:pointer}
   .s-notion-list{display:flex;flex-direction:column;gap:2px}
-  .s-notion-src{display:flex;align-items:center;gap:10px;padding:8px;border-radius:6px}
+  .s-notion-src{display:flex;align-items:center;gap:10px;padding:8px;border-radius:6px;cursor:pointer}
+  .s-notion-start{display:block;width:100%;margin-top:10px;padding:8px}
+  .s-notion-start:disabled{opacity:.5;cursor:default}
   .s-notion-src:hover{background:#00000008}
   .s-notion-src-tx{flex:1;min-width:0}
   .s-notion-src-t{font-size:13px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}

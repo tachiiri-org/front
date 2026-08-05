@@ -92,33 +92,86 @@ export function createNotionView(opts: {
     bodyToggleWrap.append(bodyToggle, el('span', { text: 'ページの本文（ブロック）も取り込む' }));
     body.append(bodyToggleWrap);
 
+    // 複数選べるようにする。リレーションは相手が入っていないと機能しないので、
+    // 1つ選んだら指し先も一緒に選べる必要がある。
+    const picked = new Map<string, string>();   // dataSourceId -> title
+    const known = new Map(sources.map((s) => [s.id, s.title] as const));
     const list = el('div', { class: 's-notion-list' });
-    for (const src of sources) {
+    const note = el('div', { class: 's-note' });
+
+    const rowOf = (id: string, title: string, count: string): HTMLElement => {
       const row = el('div', { class: 's-notion-src' });
+      const cb = el('input', { type: 'checkbox' }) as HTMLInputElement;
+      cb.checked = picked.has(id);
       const label = el('div', { class: 's-notion-src-tx' });
       label.append(
-        el('div', { class: 's-notion-src-t', text: src.title || '（無題のデータソース）' }),
-        el('div', { class: 's-notion-src-m', text: `${src.propertyCount} 列` }),
+        el('div', { class: 's-notion-src-t', text: title || '（無題のデータソース）' }),
+        el('div', { class: 's-notion-src-m', text: count }),
       );
-      const btn = el('button', { class: 's-btn', text: '取り込む' });
-      btn.addEventListener('click', () => {
-        void guard(async () => {
-          btn.disabled = true;
-          btn.textContent = '開始中…';
+      row.append(cb, label);
+      const toggle = (): void => {
+        if (cb.checked) picked.set(id, title); else picked.delete(id);
+        updateStart();
+        if (cb.checked) void addRelated(id);
+      };
+      cb.addEventListener('change', toggle);
+      label.addEventListener('click', () => { cb.checked = !cb.checked; toggle(); });
+      return row;
+    };
+
+    // 指し先をたどって候補に足す。既に一覧にあるものはチェックだけ入れる。
+    const addRelated = async (id: string): Promise<void> => {
+      note.textContent = 'リレーションの指し先を調べています…';
+      try {
+        const { related } = await api.relatedSources(conn.connectionId, id);
+        let added = 0;
+        for (const r of related) {
+          if (!picked.has(r.id)) { picked.set(r.id, r.title || known.get(r.id) || 'Notion'); added++; }
+          if (!known.has(r.id)) {
+            known.set(r.id, r.title);
+            list.append(rowOf(r.id, r.title, '（リレーションの指し先）'));
+          }
+        }
+        // 既に一覧にある行のチェック状態を反映し直す。
+        for (const [i, s2] of sources.entries()) {
+          const cb = list.children[i]?.querySelector('input') as HTMLInputElement | undefined;
+          if (cb) cb.checked = picked.has(s2.id);
+        }
+        note.textContent = added
+          ? `リレーションの指し先 ${added} 件も選びました（外すこともできます）`
+          : 'リレーションの指し先はありません';
+        updateStart();
+      } catch (e) {
+        note.textContent = `指し先を調べられませんでした: ${e instanceof Error ? e.message : String(e)}`;
+      }
+    };
+
+    for (const src of sources) list.append(rowOf(src.id, src.title, `${src.propertyCount} 列`));
+    body.append(list, note);
+
+    const start = el('button', { class: 's-btn s-notion-start', text: '取り込む' });
+    const updateStart = (): void => {
+      start.textContent = picked.size > 1 ? `${picked.size} 件を取り込む` : '取り込む';
+      (start as HTMLButtonElement).disabled = picked.size === 0;
+    };
+    updateStart();
+    start.addEventListener('click', () => {
+      void guard(async () => {
+        (start as HTMLButtonElement).disabled = true;
+        start.textContent = '開始中…';
+        const targets = [...picked.entries()];
+        overlay.remove(); pop.remove();
+        // 直列に投げる。同時に走らせると Notion のレート制限に当たる。
+        for (const [id, title] of targets) {
           const started = await api.startImport({
-            connectionId: conn.connectionId,
-            dataSourceId: src.id,
-            title: src.title || 'Notion',
-            includeBody: bodyToggle.checked,
+            connectionId: conn.connectionId, dataSourceId: id,
+            title: title || 'Notion', includeBody: bodyToggle.checked,
           });
-          overlay.remove(); pop.remove();
-          watchImport(started.importId, src.title || 'Notion', started.databaseId);
-        });
+          watchImport(started.importId, title || 'Notion', started.databaseId);
+        }
       });
-      row.append(label, btn);
-      list.append(row);
-    }
-    body.append(list);
+    });
+    body.append(start);
   };
 
   // ── 進捗表示 ─────────────────────────────────────────────────
