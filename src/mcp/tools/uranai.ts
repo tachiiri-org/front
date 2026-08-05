@@ -47,7 +47,7 @@ async function uranaiWrite(env: AuthorizeEnv, resource: string, body: unknown): 
 const CONCEPT_KINDS = [
   "planet", "sign", "house", "house_system", "aspect_type",
   "element", "quality", "dignity", "polarity", "ruleset", "body_role",
-  "quadrant", "phase", "motion", "shape", "note_type", "part",
+  "quadrant", "phase", "motion", "shape", "note_type", "part", "aspect_figure",
 ] as const;
 
 /** Build a query string from the caller's params, dropping empties. `ruleset` is threaded here too. */
