@@ -41,7 +41,10 @@ export interface NotionView {
 
 export function createNotionView(opts: {
   onError: (message: string) => void;
+  /** 取り込みが完了したときだけ呼ぶ。進捗中は呼ばない（左ペイン全体が点滅するため）。 */
   onImported: () => void;
+  /** 取り込み中の行数更新。中央ペインだけを静かに描き直す。 */
+  onProgress: (databaseId: string) => void;
 }): NotionView {
   const root = el('div', { class: 's-side-sec' });
 
@@ -109,7 +112,7 @@ export function createNotionView(opts: {
             includeBody: bodyToggle.checked,
           });
           overlay.remove(); pop.remove();
-          watchImport(started.importId, src.title || 'Notion');
+          watchImport(started.importId, src.title || 'Notion', started.databaseId);
         });
       });
       row.append(label, btn);
@@ -124,7 +127,7 @@ export function createNotionView(opts: {
   progress.style.display = 'none';
   root.append(progress);
 
-  const watchImport = (importId: string, title: string): void => {
+  const watchImport = (importId: string, title: string, databaseId: string): void => {
     progress.style.display = '';
     progress.innerHTML = '';
     const line = el('div', { class: 's-notion-prog-line', text: `${title} を取り込んでいます…` });
@@ -141,22 +144,26 @@ export function createNotionView(opts: {
           const out = res.status.output ?? {};
           progress.innerHTML = '';
           progress.append(el('div', { class: 's-notion-prog-done', text: `${title}: 完了` }));
+          const rows = out.rows ?? 0;
+          const blocks = out.blocks ?? 0;
           progress.append(el('div', {
             class: 's-note',
-            text: `${out.rows ?? 0} 行 / ${out.blocks ?? 0} ブロック`,
+            text: blocks === 0 && rows > 0
+              ? `${rows} 行（本文のあるページはありませんでした）`
+              : `${rows} 行 / ${blocks} ブロック`,
           }));
           for (const l of describeDropped(out.dropped ?? {})) {
             progress.append(el('div', { class: 's-notion-drop', text: l }));
           }
           if (out.unresolvedRelations) {
             progress.append(el('div', {
-              class: 's-notion-drop',
+              class: 's-notion-warn',
               text: `未解決のリレーション ${out.unresolvedRelations} 件（参照先が今回の取り込みに含まれていません）`,
             }));
           }
           if (out.failed?.length) {
             progress.append(el('div', {
-              class: 's-notion-drop',
+              class: 's-notion-warn',
               text: `取り込めなかったページ ${out.failed.length} 件: ${out.failed[0]}`,
             }));
           }
@@ -170,9 +177,17 @@ export function createNotionView(opts: {
           progress.append(el('div', { class: 's-note', text: String(res.status.error ?? '').slice(0, 200) }));
           return;
         }
-        line.textContent = `${title} を取り込んでいます…（${st}）`;
-        // 取り込み中も一覧を更新する。行が増えていくのが見える。
-        opts.onImported();
+        // 何件入ったかを実測して出す。ワークフローの状態だけでは進捗が分からない。
+        // 左ペイン全体は描き直さない（点滅する）。数字の行だけを書き換える。
+        let done = 0;
+        try {
+          const dbs = await api.listDatabases();
+          done = dbs.databases.find((d) => d.databaseId === databaseId)?.rowCount ?? 0;
+        } catch { /* 取れなくても進捗表示を止めない */ }
+        line.textContent = done
+          ? `${title}: ${done} 行を取り込みました…`
+          : `${title} を取り込んでいます…（${st}）`;
+        opts.onProgress(databaseId);
       } catch {
         // 進捗の取得に失敗しても取り込み自体は続いている。監視だけ諦める。
         line.textContent = `${title}: 進捗を取得できません（取り込みは継続中）`;
