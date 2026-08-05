@@ -51,6 +51,24 @@ export const SHOSAI_CSS = `
   .s-add-row{margin-top:6px;border:0;background:transparent;color:#888;cursor:pointer;font-size:12.5px;padding:6px 8px;border-radius:5px;text-align:left;width:100%}
   .s-add-row:hover{background:#0000000a;color:#333}
 
+  /* 選択肢のチップ・リレーションのリンク（Notion に寄せる） */
+  .s-chips{display:flex;flex-wrap:wrap;gap:4px;align-items:center;min-height:26px;padding:3px 6px;cursor:pointer;
+           border:1px solid transparent;border-radius:4px}
+  .s-chips:hover{border-color:#4A90C2;background:#00000008}
+  .s-chip{display:inline-block;padding:1px 7px;border-radius:3px;font-size:11.5px;line-height:1.6;
+          border:1px solid transparent;white-space:nowrap}
+  .s-chip-empty{color:#bbb;font-size:12px}
+  .s-ref{display:inline-block;padding:1px 7px;border-radius:3px;font-size:11.5px;line-height:1.6;
+         background:#4A90C218;border:1px solid #4A90C24d;color:#2a6a9c;text-decoration:none;white-space:nowrap;
+         max-width:180px;overflow:hidden;text-overflow:ellipsis}
+  .s-ref:hover{background:#4A90C233;text-decoration:underline}
+  .s-opt{display:flex;align-items:center;gap:6px}
+  .s-opt-mark{width:12px;flex:none;color:#4A90C2;font-size:11px}
+  .s-opt-done{text-align:center;color:#4A90C2;font-weight:600;border-top:1px solid #0001;margin-top:2px}
+  [data-theme=dark] .s-chips:hover{background:#ffffff0d}
+  [data-theme=dark] .s-ref{color:#8fc4ea}
+  [data-theme=dark] .s-opt-done{border-top-color:#ffffff22}
+
   /* ── 右: ブロックエディタ ── */
   .s-editor{flex:1;min-width:0;display:flex;flex-direction:column;border-left:1px solid #0001;overflow:hidden}
   .s-editor-head{display:flex;align-items:center;gap:8px;padding:12px 16px 6px}

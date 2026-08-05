@@ -4,7 +4,7 @@
 // 画面側は p_property_type を見て入力要素を選ぶだけで、EAV の型分岐は持たない。
 
 import * as api from './api';
-import type { DatabaseDetail, PropertyType } from './api';
+import type { DatabaseDetail, OptionDef, PropertyType } from './api';
 import { el } from './style';
 
 const TYPE_LABEL: Record<PropertyType, string> = {
@@ -25,6 +25,13 @@ export function createDatabaseView(opts: {
   onOpenPage: (blockId: string) => void;
   onChanged: () => void;
 }): DatabaseView {
+  // 選択肢の色。graph と同じ ID 空間だが、ここでは名前から安定した色を選ぶだけにする。
+  const CHIP_HUES = [8, 32, 55, 96, 150, 190, 215, 260, 295, 330];
+  const chipColor = (name: string): string => {
+    let h = 0;
+    for (let i = 0; i < name.length; i++) h = (h * 31 + name.charCodeAt(i)) >>> 0;
+    return `hsl(${CHIP_HUES[h % CHIP_HUES.length]}, 65%, 55%)`;
+  };
   let databaseId: string | null = null;
   let detail: DatabaseDetail | null = null;
   let dbTitle = '';
@@ -72,6 +79,56 @@ export function createDatabaseView(opts: {
     name.focus();
   };
 
+  /** 選択肢を選ぶポップオーバー。multi_select は複数、select は1つ。 */
+  const openOptionPicker = (
+    anchor: HTMLElement,
+    prop: { id: string; type: PropertyType },
+    selectedIds: string[],
+    onDone: (picked: OptionDef[]) => void,
+  ): void => {
+    const options = detail?.properties.find((p) => p.id === prop.id)?.options ?? [];
+    if (!options.length) {
+      opts.onError('この列にはまだ選択肢がありません（Notion 側で使われている値が選択肢になります）');
+      return;
+    }
+    const overlay = el('div', { class: 's-overlay' });
+    const pop = el('div', { class: 's-pop' });
+    const rect = anchor.getBoundingClientRect();
+    pop.style.position = 'fixed';
+    pop.style.left = `${Math.min(rect.left, window.innerWidth - 220)}px`;
+    pop.style.top = `${Math.min(rect.bottom + 4, window.innerHeight - 260)}px`;
+    pop.style.maxHeight = '240px';
+    pop.style.overflowY = 'auto';
+
+    const chosen = new Set(selectedIds);
+    const close = (): void => { overlay.remove(); pop.remove(); };
+    const commit = (): void => {
+      onDone(options.filter((o) => chosen.has(o.id)));
+      close();
+    };
+    for (const o of options) {
+      const item = el('button', { class: 's-pop-item s-opt' });
+      const mark = el('span', { class: 's-opt-mark', text: chosen.has(o.id) ? '✓' : '' });
+      const chip = el('span', { class: 's-chip', text: o.name });
+      chip.style.background = `${chipColor(o.name)}22`;
+      chip.style.borderColor = `${chipColor(o.name)}66`;
+      item.append(mark, chip);
+      item.addEventListener('click', () => {
+        if (prop.type === 'select') { chosen.clear(); chosen.add(o.id); commit(); return; }
+        if (chosen.has(o.id)) chosen.delete(o.id); else chosen.add(o.id);
+        mark.textContent = chosen.has(o.id) ? '✓' : '';
+      });
+      pop.append(item);
+    }
+    if (prop.type === 'multi_select') {
+      const done = el('button', { class: 's-pop-item s-opt-done', text: '決定' });
+      done.addEventListener('click', commit);
+      pop.append(done);
+    }
+    overlay.addEventListener('click', close);
+    document.body.append(overlay, pop);
+  };
+
   const cellInput = (blockId: string, prop: { id: string; type: PropertyType }, raw: unknown): HTMLElement => {
     const save = (value: unknown): void => {
       void guard(async () => {
@@ -87,16 +144,40 @@ export function createDatabaseView(opts: {
     }
 
     if (prop.type === 'select' || prop.type === 'multi_select') {
-      // 選択肢は j_choice（関係）なので、値は配列で返ってくる。
-      const chosen = Array.isArray(raw) ? (raw as Array<{ id: string; name: string }>) : [];
-      const box = el('div', { class: 's-cell', text: chosen.map((c) => c.name).join(', ') || '—' });
-      box.title = '選択肢の編集は未実装';
+      // Notion と同じく四角いチップで出す。クリックで選び直せる。
+      const chosen = Array.isArray(raw) ? (raw as OptionDef[]) : [];
+      const box = el('div', { class: 's-cell s-chips' });
+      const paint = (list: OptionDef[]): void => {
+        box.innerHTML = '';
+        if (!list.length) { box.append(el('span', { class: 's-chip-empty', text: '—' })); return; }
+        for (const c of list) {
+          const chip = el('span', { class: 's-chip', text: c.name });
+          chip.style.background = `${chipColor(c.name)}22`;
+          chip.style.borderColor = `${chipColor(c.name)}66`;
+          box.append(chip);
+        }
+      };
+      paint(chosen);
+      box.addEventListener('click', () => {
+        openOptionPicker(box, prop, chosen.map((c) => c.id), (picked) => {
+          save(picked.map((o) => o.id));
+          paint(picked);
+        });
+      });
       return box;
     }
 
     if (prop.type === 'relation') {
-      const ids = Array.isArray(raw) ? (raw as string[]) : [];
-      return el('div', { class: 's-cell', text: ids.length ? `${ids.length} 件` : '—' });
+      // 件数ではなく、相手のページを開けるようにする。
+      const refs = Array.isArray(raw) ? (raw as Array<{ id: string; title: string }>) : [];
+      const box = el('div', { class: 's-cell s-chips' });
+      if (!refs.length) { box.append(el('span', { class: 's-chip-empty', text: '—' })); return box; }
+      for (const r of refs) {
+        const link = el('a', { class: 's-ref', text: r.title || '（無題）', href: '#' });
+        link.addEventListener('click', (e) => { e.preventDefault(); opts.onOpenPage(r.id); });
+        box.append(link);
+      }
+      return box;
     }
 
     const input = el('input', { class: 's-cell' }) as HTMLInputElement;

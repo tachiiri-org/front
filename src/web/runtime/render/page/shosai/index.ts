@@ -64,9 +64,15 @@ export async function renderShosai(container: HTMLElement): Promise<void> {
     onError: showError,
     onTitleChange: () => { void refreshSide(); },
   });
+  // 「開く」やリレーションのリンクからエディタへ移る。移らないと、モバイルでは
+  // 読み込まれてもエディタペインが隠れたままで、中身が無いように見える。
+  let goEditor: (() => void) | null = null;
   const database = createDatabaseView({
     onError: showError,
-    onOpenPage: (blockId) => { void editor.open(blockId); },
+    onOpenPage: (blockId) => {
+      activePageId = blockId;
+      void editor.open(blockId).then(() => { goEditor?.(); void refreshSide(); });
+    },
     onChanged: () => { void refreshSide(); },
   });
 
@@ -207,12 +213,14 @@ export async function renderShosai(container: HTMLElement): Promise<void> {
 
   // ── モバイル: 固定フッターで3ペインを切り替える ────────────────
   // ウラナイと同型。data-pane で表示するペインを決める。
+  const isNarrowNow = (): boolean => window.matchMedia('(max-width: 640px)').matches;
   const PANES: Array<{ key: string; label: string }> = [
     { key: 'side', label: '一覧' },
     { key: 'main', label: 'データベース' },
     { key: 'editor', label: 'エディタ' },
   ];
   const foot = el('div', { class: 's-foot' });
+  // 幅が広いときは3ペインとも見えているので、切り替えではなくエディタへスクロールする。
   const footBtns: HTMLElement[] = [];
   const setPane = (key: string): void => {
     wrap.dataset.pane = key;
@@ -226,10 +234,14 @@ export async function renderShosai(container: HTMLElement): Promise<void> {
   }
   container.append(foot);
   setPane('side');
+  goEditor = () => {
+    if (isNarrowNow()) setPane('editor');
+    else editor.el.scrollIntoView({ block: 'nearest', inline: 'nearest' });
+  };
 
   // 一覧からデータベース／ページを開いたら、モバイルではそのペインへ移る。
   // 選んだのに画面が変わらないと、反応していないように見える。
-  const isNarrow = (): boolean => window.matchMedia('(max-width: 640px)').matches;
+  const isNarrow = isNarrowNow;
   sideList.addEventListener('click', (e) => {
     if (!isNarrow()) return;
     const t = e.target as HTMLElement;

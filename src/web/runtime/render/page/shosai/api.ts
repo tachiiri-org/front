@@ -13,8 +13,12 @@ export interface PageDetail {
   page: { id: string; type: BlockType; title: string; created_at: number | null; updated_at: number | null };
   blocks: BlockRow[];
 }
-export interface PropertyDef { id: string; name: string; type: PropertyType; rank: string | null }
-export interface OptionDef { id: string; name: string }
+export interface PropertyDef {
+  id: string; name: string; type: PropertyType; rank: string | null;
+  /** select / multi_select のときだけ入る。画面で選ばせるために使う。 */
+  options?: OptionDef[];
+}
+export interface OptionDef { id: string; name: string; colorId?: string | null }
 export interface ViewDef { id: string; type: string; name: string }
 export interface DatabaseSummary {
   databaseId: string; blockId: string | null; title: string; rowCount: number; propertyCount: number;
