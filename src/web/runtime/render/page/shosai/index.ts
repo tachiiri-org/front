@@ -8,6 +8,7 @@ import * as api from './api';
 import { SHOSAI_CSS, el } from './style';
 import { createEditorView } from './editor-view';
 import { createDatabaseView } from './database-view';
+import { createNotionView, notionReturnMessage } from './notion-view';
 
 export async function renderShosai(container: HTMLElement): Promise<void> {
   container.innerHTML = '';
@@ -30,6 +31,16 @@ export async function renderShosai(container: HTMLElement): Promise<void> {
   };
   container.insertBefore(errBar, wrap);
 
+  // Notion のコールバックから戻ったときの結果表示。URL に痕跡を残さない。
+  const back = notionReturnMessage();
+  if (back) {
+    const bar = el('div', { class: back.ok ? 's-notion-progress' : 's-err' });
+    bar.textContent = back.text;
+    container.insertBefore(bar, wrap);
+    history.replaceState(null, '', location.pathname);
+    if (back.ok) setTimeout(() => bar.remove(), 6000);
+  }
+
   // ── 左ペイン ─────────────────────────────────────────────────
   const side = el('div', { class: 's-side' });
   const sideList = el('div', { class: 's-side-list' });
@@ -49,6 +60,12 @@ export async function renderShosai(container: HTMLElement): Promise<void> {
     onError: showError,
     onOpenPage: (blockId) => { void editor.open(blockId); },
     onChanged: () => { void refreshSide(); },
+  });
+
+  const notion = createNotionView({
+    onError: showError,
+    // 取り込み中も一覧を更新する。行が増えていくのが見えるようにする。
+    onImported: () => { void refreshSide(); },
   });
 
   wrap.append(side, database.el, editor.el);
@@ -131,6 +148,10 @@ export async function renderShosai(container: HTMLElement): Promise<void> {
         });
         sideList.append(item);
       }
+
+      // Notion 連携は一覧の下。接続とデータソース選択はここから。
+      sideList.append(notion.el);
+      void notion.refresh();
     } catch (e) {
       showError(e instanceof Error ? e.message : String(e));
     }

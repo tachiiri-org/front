@@ -71,6 +71,27 @@ export const SHOSAI_CSS = `
   .s-hr{flex:1;height:1px;background:#0002;margin:12px 4px}
   .s-drop{box-shadow:0 -2px 0 #4A90C2}
 
+  /* ── Notion 連携 ── */
+  .s-notion-connect{text-decoration:none;color:inherit}
+  .s-notion-dialog{position:fixed;top:12vh;left:50%;transform:translateX(-50%);width:min(560px,92vw);max-height:70vh;overflow:auto;padding:0;gap:0}
+  .s-notion-head{padding:12px 16px;border-bottom:1px solid #0001;font-weight:700;font-size:14px}
+  .s-notion-body{padding:10px 16px 16px}
+  .s-notion-opt{display:flex;align-items:center;gap:7px;margin:2px 0 12px;font-size:12.5px;color:#666;cursor:pointer}
+  .s-notion-list{display:flex;flex-direction:column;gap:2px}
+  .s-notion-src{display:flex;align-items:center;gap:10px;padding:8px;border-radius:6px}
+  .s-notion-src:hover{background:#00000008}
+  .s-notion-src-tx{flex:1;min-width:0}
+  .s-notion-src-t{font-size:13px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+  .s-notion-src-m{font-size:11px;color:#aaa}
+  .s-notion-progress{padding:8px 10px;margin:4px 6px 0;border-radius:6px;background:#4A90C214;font-size:12px}
+  .s-notion-prog-line{color:#4A90C2}
+  .s-notion-prog-done{color:#2A7;font-weight:600}
+  .s-notion-prog-err{color:#c0392b;font-weight:600}
+  .s-notion-drop{margin-top:4px;color:#c26a00;font-size:11.5px;line-height:1.5}
+  [data-theme=dark] .s-notion-head{border-color:#ffffff22}
+  [data-theme=dark] .s-notion-src:hover{background:#ffffff0f}
+  [data-theme=dark] .s-notion-progress{background:#4A90C222}
+
   /* ── 共通 ── */
   .s-btn{border:1px solid #0002;background:#fff;color:#555;cursor:pointer;border-radius:5px;padding:4px 10px;font-size:12px;font-family:inherit}
   .s-btn:hover{border-color:#4A90C2;color:#333}
