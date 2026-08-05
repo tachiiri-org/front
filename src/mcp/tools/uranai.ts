@@ -146,11 +146,10 @@ export const URANAI_TOOLS = [
   {
     name: "uranai_set_concept_notes",
     description:
-      "[migration] Write the user's OWN meanings for astrology concepts (p_concept_note) in bulk — the layer that sits beside the school's meanings (p_ruleset_concept_meaning), not on top of them. Use this only to transfer meanings the user has already settled elsewhere (e.g. from the word graph); do not invent or edit meanings on your own. Each note is {concept_kind, concept_id, value}; an empty value DELETES that note. `concept_id` is not validated against the name table, so a concept with no seeded name still accepts a note but will render as a bare id. Notes are per-ruleset: pass `ruleset` or the tenant default is used. Read them back with uranai_read_reference → concept_notes.",
+      "[migration] Write the user's OWN meanings for astrology concepts (p_concept_note) in bulk — the layer that sits beside the school's meanings (p_ruleset_concept_meaning), not on top of them. Use this only to transfer meanings the user has already settled elsewhere (e.g. from the word graph); do not invent or edit meanings on your own. Each note is {concept_kind, concept_id, value}; an empty value DELETES that note. `concept_id` is not validated against the name table, so a concept with no seeded name still accepts a note but will render as a bare id. Notes are NOT scoped to a ruleset — one note per concept, visible from every 流派. Read them back with uranai_read_reference → concept_notes.",
     inputSchema: {
       type: "object",
       properties: {
-        ruleset: { type: "string", description: "Ruleset id (流派). Omit for the tenant's default." },
         notes: {
           type: "array",
           description: "Notes to upsert. Empty value deletes.",
@@ -241,8 +240,6 @@ export async function callUranaiTool(
       if (notes.length === 0) {
         return { content: [{ type: "text", text: "notes が空です。" }], isError: true };
       }
-      const ruleset = typeof args.ruleset === "string" && args.ruleset.trim() !== ""
-        ? args.ruleset.trim() : undefined;
       const ok: string[] = [];
       const failed: string[] = [];
       // One request per note: the API upserts a single (ruleset, kind, id, lang) row. Sequential
@@ -258,12 +255,12 @@ export async function callUranaiTool(
           continue;
         }
         const res = await uranaiWrite(env, "/astrology/concept-note",
-          { ...(ruleset ? { ruleset } : {}), concept_kind: kind, concept_id: id, value });
+          { concept_kind: kind, concept_id: id, value });
         if (res.ok) ok.push(`${label} = ${value === "" ? "(削除)" : value}`);
         else failed.push(`${label}: HTTP ${res.status}`);
       }
       const text = [
-        `自分の意味を書き込みました（流派: ${ruleset ?? "(既定)"}）`,
+        `自分の意味を書き込みました（流派をまたぐ共通の意味）`,
         `成功 ${ok.length}件 / 失敗 ${failed.length}件`,
         ...ok.map((s) => `  ok   ${s}`),
         ...failed.map((s) => `  NG   ${s}`),
