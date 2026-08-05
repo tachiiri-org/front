@@ -32,6 +32,10 @@ custom_domain = true
 pattern = "stage.kakeibo.tachiiri.com"
 custom_domain = true
 
+[[env.stage.routes]]
+pattern = "stage.shosai.tachiiri.com"
+custom_domain = true
+
 [env.stage.observability]
 enabled = true
 
@@ -71,6 +75,10 @@ custom_domain = true
 pattern = "kakeibo.tachiiri.com"
 custom_domain = true
 
+[[env.production.routes]]
+pattern = "shosai.tachiiri.com"
+custom_domain = true
+
 [env.production.observability]
 enabled = true
 
@@ -106,6 +114,10 @@ custom_domain = true
 
 [[env.dev.routes]]
 pattern = "dev.kakeibo.tachiiri.com"
+custom_domain = true
+
+[[env.dev.routes]]
+pattern = "dev.shosai.tachiiri.com"
 custom_domain = true
 
 [env.dev.observability]

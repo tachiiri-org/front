@@ -112,22 +112,6 @@ export const KAKEIBO_TOOLS = [
     },
   },
   {
-    name: "kakeibo_backup",
-    description:
-      "Dump this tenant's kakeibo data to R2 and return the object key. Use it to copy production data down to dev/stage: run this on production, then call kakeibo_restore with the same key on the lower environment. The dump carries its own schema, so it loads even if the two environments' code differ.",
-    inputSchema: { type: "object", properties: {}, required: [] },
-  },
-  {
-    name: "kakeibo_restore",
-    description:
-      "Rebuild this tenant's kakeibo data from an R2 dump key produced by kakeibo_backup. Destructive: every dumped table is dropped and reloaded, inside one transaction. Refused on production — production is the source of truth and must never be a restore target.",
-    inputSchema: {
-      type: "object",
-      properties: { key: { type: "string", description: "R2 object key from kakeibo_backup" } },
-      required: ["key"],
-    },
-  },
-  {
     name: "kakeibo_read_statements",
     description:
       "Read the statement rows of one billing month (請求年月). Returns each row with its shop, alias, 費目, amount and remark, plus the latest import's totals. Read-only: rows are replaced wholesale on every import, so they must not be edited individually.",
@@ -166,16 +150,6 @@ export async function callKakeiboTool(
 ): Promise<ToolResult> {
   if (name === "kakeibo_list_shops") {
     return asResult(await kakeiboFetch(env, "/shops"));
-  }
-
-  if (name === "kakeibo_backup") {
-    return asResult(await kakeiboFetch(env, "/admin/backup-do", "POST"));
-  }
-
-  if (name === "kakeibo_restore") {
-    const key = String(args.key ?? "");
-    if (!key) return { content: [{ type: "text", text: "key is required" }], isError: true };
-    return asResult(await kakeiboFetch(env, `/admin/restore-do?key=${encodeURIComponent(key)}`, "POST"));
   }
 
   if (name === "kakeibo_list_fixed") {

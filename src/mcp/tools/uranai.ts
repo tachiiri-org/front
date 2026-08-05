@@ -5,9 +5,10 @@ type ToolResult = {
   isError?: boolean;
 };
 
-// The uranai API is read/write, but these tools are read-only on purpose: the agent reads a
-// chart to interpret it, and every mutation (birth data, rulesets, life events, notes) is the
-// user's own act. Mirrors the rule that the agent does not edit the graph.
+// The uranai API is read/write, but these tools are read-only except for migration: the agent
+// reads a chart to interpret it, and authoring (birth data, rulesets, life events, readings) is
+// the user's own act. Mirrors the graph rule — the agent changes the graph only during a
+// migration — so the one write tool here is scoped to bulk transfer and marked [migration].
 
 function tenantCtx(env: AuthorizeEnv) {
   // Same shape the browser proxy in routes/layout.ts sends: the backend resolves the tenant's
@@ -29,6 +30,25 @@ async function readJson(env: AuthorizeEnv, resource: string, label: string): Pro
   if (!res.ok) throw new Error(`${label}_failed:${res.status}`);
   return res.json();
 }
+
+/** [migration] Write path. Same tenant attribution as the reads; only concept notes use this. */
+async function uranaiWrite(env: AuthorizeEnv, resource: string, body: unknown): Promise<Response> {
+  return authorizeFetch(env, {
+    path: `/api/v1/uranai${resource}`,
+    method: "PUT",
+    body: JSON.stringify(body),
+    tenantContext: tenantCtx(env),
+    scopes: env.actor?.scopes,
+  });
+}
+
+// Mirrors CONCEPT_KINDS in backend/src/routes/v1/uranai.ts. A kind missing here is rejected
+// before we spend a request; a kind missing THERE is rejected by the API with concept_invalid.
+const CONCEPT_KINDS = [
+  "planet", "sign", "house", "house_system", "aspect_type",
+  "element", "quality", "dignity", "polarity", "ruleset", "body_role",
+  "quadrant", "phase", "motion", "shape", "note_type", "part",
+] as const;
 
 /** Build a query string from the caller's params, dropping empties. `ruleset` is threaded here too. */
 function query(params: Record<string, unknown> | undefined, ruleset: unknown): string {
@@ -123,6 +143,30 @@ export const URANAI_TOOLS = [
       required: ["person_id", "technique"],
     },
   },
+  {
+    name: "uranai_set_concept_notes",
+    description:
+      "[migration] Write the user's OWN meanings for astrology concepts (p_concept_note) in bulk — the layer that sits beside the school's meanings (p_ruleset_concept_meaning), not on top of them. Use this only to transfer meanings the user has already settled elsewhere (e.g. from the word graph); do not invent or edit meanings on your own. Each note is {concept_kind, concept_id, value}; an empty value DELETES that note. `concept_id` is not validated against the name table, so a concept with no seeded name still accepts a note but will render as a bare id. Notes are NOT scoped to a ruleset — one note per concept, visible from every 流派. Read them back with uranai_read_reference → concept_notes.",
+    inputSchema: {
+      type: "object",
+      properties: {
+        notes: {
+          type: "array",
+          description: "Notes to upsert. Empty value deletes.",
+          items: {
+            type: "object",
+            properties: {
+              concept_kind: { type: "string", enum: [...CONCEPT_KINDS], description: "Concept kind" },
+              concept_id: { type: "string", description: "Concept id, e.g. 'sun', 'scorpio', 'house_9'" },
+              value: { type: "string", description: "The meaning. Empty string deletes the note." },
+            },
+            required: ["concept_kind", "concept_id", "value"],
+          },
+        },
+      },
+      required: ["notes"],
+    },
+  },
 ];
 
 // --- Tool handler ---
@@ -189,6 +233,39 @@ export async function callUranaiTool(
       const data = await readJson(env,
         `/astrology/person/${encodeURIComponent(personId)}/${technique}${q}`, "read_technique");
       return { content: [{ type: "text", text: json(data) }] };
+    }
+
+    if (name === "uranai_set_concept_notes") {
+      const notes = Array.isArray(args.notes) ? args.notes : [];
+      if (notes.length === 0) {
+        return { content: [{ type: "text", text: "notes が空です。" }], isError: true };
+      }
+      const ok: string[] = [];
+      const failed: string[] = [];
+      // One request per note: the API upserts a single (ruleset, kind, id, lang) row. Sequential
+      // on purpose — a partial failure should stop at a known point, not scatter.
+      for (const raw of notes) {
+        const n = (raw ?? {}) as Record<string, unknown>;
+        const kind = String(n.concept_kind ?? "");
+        const id = String(n.concept_id ?? "");
+        const value = String(n.value ?? "");
+        const label = `${kind}/${id}`;
+        if (!(CONCEPT_KINDS as readonly string[]).includes(kind) || id === "") {
+          failed.push(`${label}: 不正な concept_kind / concept_id`);
+          continue;
+        }
+        const res = await uranaiWrite(env, "/astrology/concept-note",
+          { concept_kind: kind, concept_id: id, value });
+        if (res.ok) ok.push(`${label} = ${value === "" ? "(削除)" : value}`);
+        else failed.push(`${label}: HTTP ${res.status}`);
+      }
+      const text = [
+        `自分の意味を書き込みました（流派をまたぐ共通の意味）`,
+        `成功 ${ok.length}件 / 失敗 ${failed.length}件`,
+        ...ok.map((s) => `  ok   ${s}`),
+        ...failed.map((s) => `  NG   ${s}`),
+      ].join("\n");
+      return { content: [{ type: "text", text }], isError: failed.length > 0 };
     }
 
     return { content: [{ type: "text", text: `Unknown uranai tool: ${name}` }], isError: true };
