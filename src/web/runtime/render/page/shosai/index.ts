@@ -23,11 +23,29 @@ export async function renderShosai(container: HTMLElement): Promise<void> {
   // 失敗を握り潰すと「保存したつもりで消えている」が起きるので、必ず画面に出す。
   const errBar = el('div', { class: 's-err' });
   errBar.style.display = 'none';
+  let errTimer: ReturnType<typeof setTimeout> | null = null;
+  /**
+   * 出すのは「人が何かできる」ものだけにする。
+   * "Failed to fetch"（通信断・取り込み中のリクエスト取りこぼしなど）を出しても
+   * 読んだ人にできることが無く、壊れている印象だけが残る。そういうものは
+   * コンソールに残して画面には出さない。
+   */
   const showError = (message: string): void => {
-    errBar.textContent = message.includes('unauthenticated')
-      ? 'ログインの有効期限が切れました。再読み込みしてログインし直してください。'
-      : `エラー: ${message}`;
+    if (/unauthenticated|401/.test(message)) {
+      errBar.textContent = 'ログインの有効期限が切れました。画面を再読み込みしてログインし直してください。';
+    } else if (/insufficient role|403|forbidden/i.test(message)) {
+      errBar.textContent = 'この操作の権限がありません。管理者に確認してください。';
+    } else if (/Failed to fetch|NetworkError|load failed/i.test(message)) {
+      // 通信が一時的に切れただけ。次の操作か自動更新で回復する。
+      console.warn('[shosai] 一時的な通信エラー:', message);
+      return;
+    } else {
+      errBar.textContent = `エラー: ${message}`;
+    }
     errBar.style.display = '';
+    // 出しっぱなしにすると、直った後も壊れているように見える。
+    if (errTimer) clearTimeout(errTimer);
+    errTimer = setTimeout(() => { errBar.style.display = 'none'; }, 12000);
   };
   container.insertBefore(errBar, wrap);
 
@@ -226,14 +244,40 @@ export async function renderShosai(container: HTMLElement): Promise<void> {
   };
   for (const p of PANES) {
     const b = el('button', { class: 's-foot-btn', type: 'button', text: p.label });
-    b.addEventListener('click', () => setPane(p.key));
+    b.addEventListener('click', () => goPane(p.key));
     footBtns.push(b);
     foot.append(b);
   }
   container.append(foot);
+
+  // モバイルの「戻る」でブラウザごと閉じないようにする。ペインの移動を履歴に積み、
+  // 戻る操作は前のペインへ返す。積まないと、最初の画面で戻る＝離脱になってしまう。
+  let poppingPane = false;
+  const goPane = (key: string, push = true): void => {
+    if (wrap.dataset.pane === key) return;
+    setPane(key);
+    if (push && !poppingPane) history.pushState({ shosaiPane: key }, '', location.pathname);
+  };
+  window.addEventListener('popstate', (e) => {
+    // ポップオーバー（選択肢・参照先・取り込み）が開いていれば、まずそれを閉じる。
+    // 開いたまま画面が切り替わると、何が起きたのか分からなくなる。
+    const overlays = document.querySelectorAll('.s-overlay, .s-pop');
+    if (overlays.length) {
+      overlays.forEach((n) => n.remove());
+      history.pushState({ shosaiPane: wrap.dataset.pane ?? 'side' }, '', location.pathname);
+      return;
+    }
+    const st = (e.state ?? null) as { shosaiPane?: string } | null;
+    poppingPane = true;
+    // 履歴に積んだペインが無ければ一覧へ戻す（最初の画面）。
+    setPane(st?.shosaiPane ?? 'side');
+    poppingPane = false;
+  });
   setPane('side');
+  // 最初の状態も履歴に持たせておく。これが無いと1回目の戻るで離脱する。
+  history.replaceState({ shosaiPane: 'side' }, '', location.pathname);
   goEditor = () => {
-    if (isNarrowNow()) setPane('editor');
+    if (isNarrowNow()) goPane('editor');
     else editor.el.scrollIntoView({ block: 'nearest', inline: 'nearest' });
   };
 
@@ -247,8 +291,8 @@ export async function renderShosai(container: HTMLElement): Promise<void> {
     // データベースかページかは activeDatabaseId / activePageId の更新後に判断できないので、
     // クリックされた項目のアイコンで見分ける。
     const ic = t.closest('.s-item')?.querySelector('.s-item-ic')?.textContent ?? '';
-    if (ic === '▦') setPane('main');
-    else if (ic === '▤') setPane('editor');
+    if (ic === '▦') goPane('main');
+    else if (ic === '▤') goPane('editor');
   });
 
   // 引き下げて更新はブラウザ標準に任せる（body が document スクロールなら効く）。
