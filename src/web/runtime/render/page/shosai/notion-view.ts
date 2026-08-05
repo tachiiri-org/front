@@ -233,7 +233,9 @@ export function createNotionView(opts: {
 
 /** コールバックから戻ったときの ?notion=... を人間に読める形にする。 */
 export function notionReturnMessage(): { text: string; ok: boolean } | null {
-  const v = new URLSearchParams(location.search).get('notion');
+  const q = new URLSearchParams(location.search);
+  const v = q.get('notion');
+  const reason = q.get('reason');
   if (!v) return null;
   const map: Record<string, { text: string; ok: boolean }> = {
     connected: { text: 'Notion と接続しました。', ok: true },
@@ -242,5 +244,8 @@ export function notionReturnMessage(): { text: string; ok: boolean } | null {
     unauthenticated: { text: 'ログインが切れていました。ログインし直してから接続してください。', ok: false },
     failed: { text: 'Notion との接続に失敗しました。', ok: false },
   };
-  return map[v] ?? null;
+  const hit = map[v];
+  if (!hit) return null;
+  // 理由が分かるならそのまま見せる。伏せると同じ失敗を繰り返すことになる。
+  return reason && !hit.ok ? { text: `${hit.text}（${reason}）`, ok: false } : hit;
 }

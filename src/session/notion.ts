@@ -64,13 +64,21 @@ export async function handleNotionCallback(request: Request, env: AuthorizeEnv):
   };
 
   // ユーザーが認可画面で「キャンセル」した場合もここに来る。
-  if (error) return new Response(null, { status: 302, headers: clear({ notion: 'cancelled' }) });
+  // 何が起きたかを worker ログに残す。?notion=failed だけだと切り分けができない。
+  console.log(`[notion-callback] code=${code ? 'yes' : 'no'} state=${state ? 'yes' : 'no'} error=${error ?? '-'}`);
+  if (error) {
+    return new Response(null, { status: 302, headers: clear({ notion: 'cancelled', reason: error.slice(0, 80) }) });
+  }
 
   const saved = parseCookies(request).get(STATE_COOKIE);
   // 定数時間比較までは要らない（state は毎回使い捨てで、当てる試行に意味がない）が、
   // 欠落と不一致は区別せず一律で撥ねる。
   if (!code || !state || !saved || saved !== state) {
-    return new Response(null, { status: 302, headers: clear({ notion: 'state_mismatch' }) });
+    // state Cookie が消えているのか、値が違うのかで原因が違う。
+    // 前者は 10 分の失効か Cookie が送られていない、後者は本物の不一致。
+    const why = !code ? 'no_code' : !state ? 'no_state_param' : !saved ? 'no_state_cookie' : 'state_differs';
+    console.log(`[notion-callback] rejected: ${why}`);
+    return new Response(null, { status: 302, headers: clear({ notion: 'state_mismatch', reason: why }) });
   }
 
   const identity = await readIdentity(env, request);
@@ -85,7 +93,16 @@ export async function handleNotionCallback(request: Request, env: AuthorizeEnv):
     tenantContext: { tenantId: identity.groupId, subjectId: identity.userId },
   });
   if (!res.ok) {
-    return new Response(null, { status: 302, headers: clear({ notion: 'failed' }) });
+    // backend のエラーを握り潰さない。Notion 側の拒否理由（redirect_uri 不一致など）は
+    // ここにしか出てこない。
+    const detail = (await res.text()).slice(0, 300);
+    console.log(`[notion-callback] backend ${res.status}: ${detail}`);
+    let reason = `http_${res.status}`;
+    try {
+      const j = JSON.parse(detail) as { message?: string; error_code?: string };
+      reason = (j.message ?? j.error_code ?? reason).slice(0, 120);
+    } catch { /* JSON でなければステータスだけ */ }
+    return new Response(null, { status: 302, headers: clear({ notion: 'failed', reason }) });
   }
   return new Response(null, { status: 302, headers: clear({ notion: 'connected' }) });
 }
