@@ -40,7 +40,7 @@ export const SHOSAI_CSS = `
   .s-col-add{width:36px}
   .s-col-add-btn{border:1px dashed #0003;background:transparent;color:#888;cursor:pointer;border-radius:4px;padding:2px 7px;font-size:12px}
   .s-col-add-btn:hover{color:#333;border-color:#4A90C2}
-  .s-td-title{position:relative}
+  .s-td-title{position:relative;min-width:150px}
   .s-row-ti{width:100%;padding:6px 62px 6px 8px;border:1px solid transparent;border-radius:5px;background:transparent;color:inherit;font-size:13px;font-family:inherit}
   .s-row-ti:hover,.s-row-ti:focus{border-color:#4A90C2;background:#00000008;outline:none}
   .s-open-btn{position:absolute;right:6px;top:50%;transform:translateY(-50%);opacity:0;font-size:11px;padding:1px 9px;border:1px solid #0002;border-radius:4px;background:#fff;color:#555;cursor:pointer;line-height:1.6}
@@ -147,6 +147,11 @@ export const SHOSAI_CSS = `
     [data-theme=dark] .s-foot-btn.on{color:#f3f5f7}
     .s-notion-dialog{top:8vh;width:94vw;max-height:78vh}
     .s-tbl{font-size:12px}
+    /* タッチ端末にホバーは無い。「開く」を常時出し、右パディングもその分だけにする。
+       62px のままだと幅 72px の列で文字を描く余地が 2px しか残らない。 */
+    .s-open-btn{opacity:1;right:3px;padding:1px 5px;font-size:10px}
+    .s-row-ti{padding-right:38px}
+    .s-td-title{min-width:170px}
   }
 
   /* ── 引き下げて更新 ── */
