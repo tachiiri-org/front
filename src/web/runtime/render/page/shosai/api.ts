@@ -86,3 +86,49 @@ export const addRow = (databaseId: string, body: { title: string; parentId?: str
 
 export const setCell = (body: { blockId: string; propertyId: string; value: unknown }): Promise<unknown> =>
   put('/cell', body);
+
+// ── Notion 連携 ────────────────────────────────────────────────────────────────
+
+export interface NotionConnection {
+  connectionId: string;
+  workspaceId: string | null;
+  workspaceName: string | null;
+  connected_at: number | null;
+  synced_at: number | null;
+  sourceCount: number;
+}
+
+export interface NotionSource {
+  id: string;          // data_source_id
+  title: string;
+  databaseId: string;  // Notion 側の database id（データソースの親）
+  propertyCount: number;
+}
+
+export interface ImportStatus {
+  importId: string;
+  status: {
+    status: string;                 // queued | running | paused | errored | complete ...
+    output?: {
+      rows?: number;
+      blocks?: number;
+      dropped?: Record<string, number>;
+      unresolvedRelations?: number;
+      failed?: string[];
+    };
+    error?: unknown;
+  };
+}
+
+export const listConnections = (): Promise<{ connections: NotionConnection[] }> =>
+  call('/notion/connections');
+
+export const listSources = (connectionId: string): Promise<{ sources: NotionSource[] }> =>
+  call(`/notion/sources?connectionId=${encodeURIComponent(connectionId)}`);
+
+export const startImport = (body: {
+  connectionId: string; dataSourceId: string; title: string; includeBody: boolean;
+}): Promise<{ importId: string; databaseId: string }> => post('/notion/import', body);
+
+export const importStatus = (importId: string): Promise<ImportStatus> =>
+  call(`/notion/import/${encodeURIComponent(importId)}`);
