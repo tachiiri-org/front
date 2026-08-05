@@ -336,6 +336,19 @@ export function createNotionView(opts: {
       root.insertBefore(item, progress);
     }
 
+    // 連携後に Notion 側で作ったページやデータベースは、そのままでは見えない。
+    // アクセス範囲は同意画面のページピッカーで決まり、後から自動では広がらないため、
+    // もう一度同意画面に行って選び直す導線を出す。
+    if (connections.length) {
+      const regrant = el('a', { class: 's-item s-notion-connect', href: '/auth/notion' });
+      regrant.append(
+        el('span', { class: 's-item-ic', text: '⟳' }),
+        el('span', { class: 's-item-tx', text: '共有するページを追加・見直す' }),
+      );
+      regrant.title = '連携後に作ったデータベースは、ここから選び直すと見えるようになります';
+      root.insertBefore(regrant, progress);
+    }
+
     // 接続の追加は常に出す（複数ワークスペースを繋げる）。
     const connect = el('a', { class: 's-item s-notion-connect', href: '/auth/notion' });
     connect.append(

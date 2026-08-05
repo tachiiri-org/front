@@ -65,14 +65,35 @@ export function createEditorView(opts: {
       } finally { addImage.textContent = '画像'; }
     });
   });
-  const addBlock = el('button', { class: 's-tool', text: '＋ ブロック' });
+  // 足すときに種別を選べるようにする。段落を足してから種別を変えるのは手数が多い。
+  const ADD_CHOICES: Array<[api.BlockType, string]> = [
+    ['paragraph', '段落'], ['heading', '見出し'], ['bullet', '箇条書き'],
+    ['numbered', '番号付き'], ['todo', 'TODO'], ['quote', '引用'], ['code', 'コード'],
+  ];
+  const addBlock = el('button', { class: 's-tool', text: '＋ 追加' });
   addBlock.addEventListener('click', () => {
-    void guard(async () => {
-      if (!pageId) return;
-      const created = await api.createBlock({ parentId: pageId, type: 'paragraph', text: '' });
-      focusAfterRender = created.id;
-      await reload();
-    });
+    const overlay = el('div', { class: 's-overlay' });
+    const pop = el('div', { class: 's-pop' });
+    const r = addBlock.getBoundingClientRect();
+    pop.style.position = 'fixed';
+    pop.style.left = `${Math.min(r.left, window.innerWidth - 180)}px`;
+    pop.style.bottom = `${window.innerHeight - r.top + 6}px`;
+    const close = (): void => { overlay.remove(); pop.remove(); };
+    for (const [key, label] of ADD_CHOICES) {
+      const it = el('button', { class: 's-pop-item', text: label });
+      it.addEventListener('click', () => {
+        close();
+        void guard(async () => {
+          if (!pageId) return;
+          const created = await api.createBlock({ parentId: pageId, type: key, text: '' });
+          focusAfterRender = created.id;
+          await reload();
+        });
+      });
+      pop.append(it);
+    }
+    overlay.addEventListener('click', close);
+    document.body.append(overlay, pop);
   });
   // 種別の変更。Ctrl+Enter の巡回だけだと、目当ての種別まで何度も押すことになる。
   const TYPE_CHOICES: Array<[string, string]> = [
