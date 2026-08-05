@@ -49,9 +49,7 @@ export async function renderShosai(container: HTMLElement): Promise<void> {
   const listBox = el('div');
   const notionBox = el('div');
   sideList.append(listBox, notionBox);
-  // 引き下げて更新（モバイル）。
-  const ptr = el('div', { class: 's-ptr', text: '引き下げて更新' });
-  sideList.insertBefore(ptr, listBox);
+
 
   const searchBox = el('div', { class: 's-side-head' });
   const searchInput = el('input', { class: 's-search', placeholder: '全文検索' }) as HTMLInputElement;
@@ -253,36 +251,8 @@ export async function renderShosai(container: HTMLElement): Promise<void> {
     else if (ic === '▤') setPane('editor');
   });
 
-  // ── 引き下げて更新 ────────────────────────────────────────────
-  // 左ペインを最上部で下へ引くと再読み込みする。モバイルのブラウザ標準の
-  // pull-to-refresh はページ全体を捨てるので、ここは自前で受ける。
-  let startY = 0;
-  let pulling = false;
-  sideList.addEventListener('touchstart', (e) => {
-    pulling = sideList.scrollTop <= 0;
-    startY = (e as TouchEvent).touches[0].clientY;
-  }, { passive: true });
-  sideList.addEventListener('touchmove', (e) => {
-    if (!pulling) return;
-    const dy = (e as TouchEvent).touches[0].clientY - startY;
-    if (dy <= 0) { ptr.classList.remove('on', 'armed'); return; }
-    ptr.classList.add('on');
-    ptr.classList.toggle('armed', dy > 64);
-    ptr.textContent = dy > 64 ? '離すと更新します' : '引き下げて更新';
-  }, { passive: true });
-  sideList.addEventListener('touchend', () => {
-    if (!pulling) return;
-    pulling = false;
-    const armed = ptr.classList.contains('armed');
-    ptr.classList.remove('on', 'armed');
-    if (!armed) return;
-    void (async () => {
-      await refreshSide();
-      await notion.refresh();
-      if (activeDatabaseId) await database.reload();
-      if (editor.currentPageId()) await editor.reload();
-    })();
-  }, { passive: true });
+  // 引き下げて更新はブラウザ標準に任せる（body が document スクロールなら効く）。
+  // 自前で touchmove を拾うとネイティブの挙動と二重になり、どちらも中途半端になる。
 
   await refreshSide();
 }

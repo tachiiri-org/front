@@ -372,9 +372,13 @@ const renderScreen = async (screenId: string): Promise<void> => {
     await renderKakeibo(root);
     return;
   }
-  // ショサイもカスタム画面（layouts スペック不要）。3ペインを画面高に収めるのでビューポート型。
+  // ショサイもカスタム画面（layouts スペック不要）。
+  // モバイルは document スクロールにする。body を overflow:hidden にすると
+  // ブラウザ標準の引き下げ更新（pull-to-refresh）が効かなくなるため。
+  // 広い画面では 3 ペインを画面高に収めたいので、幅で切り替える。
   if (screenId === 'shosai') {
-    applyViewportLayout();
+    const narrow = window.matchMedia('(max-width: 640px)').matches;
+    if (narrow) applyScrollableLayout(); else applyViewportLayout();
     void renderNav(screenId);
     root.innerHTML = '';
     root.style.position = 'relative';

@@ -110,8 +110,8 @@ export function createDatabaseView(opts: {
       const item = el('button', { class: 's-pop-item s-opt' });
       const mark = el('span', { class: 's-opt-mark', text: chosen.has(o.id) ? '✓' : '' });
       const chip = el('span', { class: 's-chip', text: o.name });
-      chip.style.background = `${chipColor(o.name)}22`;
-      chip.style.borderColor = `${chipColor(o.name)}66`;
+      chip.style.background = `${chipColor(o.name)}2e`;
+      chip.style.borderColor = chipColor(o.name);
       item.append(mark, chip);
       item.addEventListener('click', () => {
         if (prop.type === 'select') { chosen.clear(); chosen.add(o.id); commit(); return; }
@@ -125,6 +125,68 @@ export function createDatabaseView(opts: {
       done.addEventListener('click', commit);
       pop.append(done);
     }
+    overlay.addEventListener('click', close);
+    document.body.append(overlay, pop);
+  };
+
+  /**
+   * リレーションの参照先を選ぶ。候補は「その列が実際に指しているデータベース」の行。
+   * 指し先が未取り込みなら候補が出ないので、その旨を伝える。
+   */
+  const openPagePicker = async (
+    anchor: HTMLElement,
+    propertyId: string,
+    selectedIds: string[],
+    onDone: (picked: Array<{ id: string; title: string }>) => void,
+  ): Promise<void> => {
+    let candidates: Array<{ id: string; title: string }> = [];
+    try {
+      candidates = (await api.relationCandidates(propertyId)).pages;
+    } catch (e) {
+      opts.onError(e instanceof Error ? e.message : String(e));
+      return;
+    }
+    if (!candidates.length) {
+      opts.onError('参照先の候補がありません。指し先のデータベースをまだ取り込んでいない可能性があります。');
+      return;
+    }
+    const overlay = el('div', { class: 's-overlay' });
+    const pop = el('div', { class: 's-pop' });
+    const rect = anchor.getBoundingClientRect();
+    pop.style.position = 'fixed';
+    pop.style.left = `${Math.min(rect.left, window.innerWidth - 260)}px`;
+    pop.style.top = `${Math.min(rect.bottom + 4, window.innerHeight - 300)}px`;
+    pop.style.maxHeight = '280px';
+    pop.style.overflowY = 'auto';
+    pop.style.minWidth = '240px';
+
+    const chosen = new Set(selectedIds);
+    const close = (): void => { overlay.remove(); pop.remove(); };
+    const filter = el('input', { class: 's-search', placeholder: '絞り込み' }) as HTMLInputElement;
+    pop.append(filter);
+    const list = el('div');
+    pop.append(list);
+    const paint = (q: string): void => {
+      list.innerHTML = '';
+      for (const c of candidates.filter((x) => !q || (x.title || '').includes(q)).slice(0, 100)) {
+        const item = el('button', { class: 's-pop-item s-opt' });
+        const mark = el('span', { class: 's-opt-mark', text: chosen.has(c.id) ? '✓' : '' });
+        item.append(mark, el('span', { text: c.title || '（無題）' }));
+        item.addEventListener('click', () => {
+          if (chosen.has(c.id)) chosen.delete(c.id); else chosen.add(c.id);
+          mark.textContent = chosen.has(c.id) ? '✓' : '';
+        });
+        list.append(item);
+      }
+    };
+    paint('');
+    filter.addEventListener('input', () => paint(filter.value.trim()));
+    const done = el('button', { class: 's-pop-item s-opt-done', text: '決定' });
+    done.addEventListener('click', () => {
+      onDone(candidates.filter((c) => chosen.has(c.id)));
+      close();
+    });
+    pop.append(done);
     overlay.addEventListener('click', close);
     document.body.append(overlay, pop);
   };
@@ -152,8 +214,8 @@ export function createDatabaseView(opts: {
         if (!list.length) { box.append(el('span', { class: 's-chip-empty', text: '—' })); return; }
         for (const c of list) {
           const chip = el('span', { class: 's-chip', text: c.name });
-          chip.style.background = `${chipColor(c.name)}22`;
-          chip.style.borderColor = `${chipColor(c.name)}66`;
+          chip.style.background = `${chipColor(c.name)}2e`;
+          chip.style.borderColor = chipColor(c.name);
           box.append(chip);
         }
       };
@@ -168,15 +230,34 @@ export function createDatabaseView(opts: {
     }
 
     if (prop.type === 'relation') {
-      // 件数ではなく、相手のページを開けるようにする。
-      const refs = Array.isArray(raw) ? (raw as Array<{ id: string; title: string }>) : [];
+      // リンクを押せば相手のページを開く。余白を押せば参照先を選び直す。
+      // 両方を1つのセルに載せるので、押した場所で分ける。
       const box = el('div', { class: 's-cell s-chips' });
-      if (!refs.length) { box.append(el('span', { class: 's-chip-empty', text: '—' })); return box; }
-      for (const r of refs) {
-        const link = el('a', { class: 's-ref', text: r.title || '（無題）', href: '#' });
-        link.addEventListener('click', (e) => { e.preventDefault(); opts.onOpenPage(r.id); });
-        box.append(link);
-      }
+      const paintRefs = (refs: Array<{ id: string; title: string }>): void => {
+        box.innerHTML = '';
+        if (!refs.length) {
+          box.append(el('span', { class: 's-chip-empty', text: '＋ 選ぶ' }));
+        } else {
+          for (const r of refs) {
+            const link = el('a', { class: 's-ref', text: r.title || '（無題）', href: '#' });
+            link.addEventListener('click', (e) => {
+              e.preventDefault(); e.stopPropagation();
+              opts.onOpenPage(r.id);
+            });
+            box.append(link);
+          }
+        }
+        const add = el('span', { class: 's-ref-add', text: '▾', title: '参照先を選ぶ' });
+        box.append(add);
+      };
+      paintRefs(Array.isArray(raw) ? (raw as Array<{ id: string; title: string }>) : []);
+      box.addEventListener('click', () => {
+        const current = (Array.isArray(raw) ? (raw as Array<{ id: string }>) : []).map((r) => r.id);
+        void openPagePicker(box, prop.id, current, (picked) => {
+          save(picked.map((p) => p.id));
+          paintRefs(picked);
+        });
+      });
       return box;
     }
 

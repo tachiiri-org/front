@@ -152,3 +152,7 @@ export interface ImportProgress {
 /** 取り込みの進み具合と失敗。ワークフローの状態と違い、走行中でも中身が読める。 */
 export const importProgress = (databaseId: string): Promise<ImportProgress> =>
   call(`/notion/progress?databaseId=${encodeURIComponent(databaseId)}`);
+
+/** リレーションの参照先の候補。その列が指しているデータベースの行を返す。 */
+export const relationCandidates = (propertyId: string): Promise<{ pages: Array<{ id: string; title: string }> }> =>
+  call(`/relation-candidates?propertyId=${encodeURIComponent(propertyId)}`);

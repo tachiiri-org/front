@@ -56,8 +56,11 @@ export const SHOSAI_CSS = `
            border:1px solid transparent;border-radius:4px}
   .s-chips:hover{border-color:#4A90C2;background:#00000008}
   .s-chip{display:inline-block;padding:1px 7px;border-radius:3px;font-size:11.5px;line-height:1.6;
-          border:1px solid transparent;white-space:nowrap}
+          border:1px solid #0002;white-space:nowrap;color:#333}
+  [data-theme=dark] .s-chip{color:#e6e6e6;border-color:#ffffff33}
   .s-chip-empty{color:#bbb;font-size:12px}
+  .s-ref-add{color:#bbb;font-size:10px;padding:0 2px;cursor:pointer}
+  .s-chips:hover .s-ref-add{color:#4A90C2}
   .s-ref{display:inline-block;padding:1px 7px;border-radius:3px;font-size:11.5px;line-height:1.6;
          background:#4A90C218;border:1px solid #4A90C24d;color:#2a6a9c;text-decoration:none;white-space:nowrap;
          max-width:180px;overflow:hidden;text-overflow:ellipsis}
@@ -152,8 +155,11 @@ export const SHOSAI_CSS = `
   /* ── モバイル: 固定フッターで3ペインを切り替える（ウラナイと同型）── */
   .s-foot{display:none}
   @media (max-width: 640px){
-    .s-wrap{flex-direction:column;height:calc(100dvh - 36px)}
-    .s-side,.s-main,.s-editor{width:auto;flex:1;min-width:0;border:0;padding-bottom:64px}
+    /* 自然高にして document をスクロールさせる。これでブラウザ標準の引き下げ更新が効く。 */
+    .s-wrap{flex-direction:column;height:auto;overflow:visible}
+    .s-side,.s-main,.s-editor{width:auto;flex:none;min-width:0;border:0;padding-bottom:64px;
+                              overflow:visible;min-height:60vh}
+    .s-side-list,.s-main-body,.s-editor-body{overflow:visible;min-height:0}
     .s-side{border-bottom:0}
     .s-editor{border-left:0}
     .s-wrap[data-pane=side] .s-main,.s-wrap[data-pane=side] .s-editor{display:none}
@@ -173,12 +179,6 @@ export const SHOSAI_CSS = `
     .s-row-ti{padding-right:38px}
     .s-td-title{min-width:170px}
   }
-
-  /* ── 引き下げて更新 ── */
-  .s-ptr{height:0;overflow:hidden;display:flex;align-items:center;justify-content:center;
-         color:#888;font-size:12px;transition:height .18s ease}
-  .s-ptr.on{height:34px}
-  .s-ptr.armed{color:#4A90C2}
 
   .s-wrap ::-webkit-scrollbar{width:6px;height:6px}
   .s-wrap ::-webkit-scrollbar-track{background:transparent}
