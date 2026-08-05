@@ -346,7 +346,11 @@ export function createDatabaseView(opts: {
       tbody.append(tr);
     }
     table.append(tbody);
-    body.append(table);
+    // 表は自分の箱の中で横スクロールさせる。ページごとはみ出すと、モバイルの
+    // ブラウザが全体を縮小表示してしまい、固定フッターまで画面外へ行く。
+    const scroller = el('div', { class: 's-tbl-scroll' });
+    scroller.append(table);
+    body.append(scroller);
 
     const addRow = el('button', { class: 's-add-row', text: '＋ 行を追加' });
     addRow.addEventListener('click', () => {

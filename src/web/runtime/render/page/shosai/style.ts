@@ -32,7 +32,9 @@ export const SHOSAI_CSS = `
   .s-db-tab:hover{color:#333;background:#00000006}
   .s-db-tab.on{color:#333;font-weight:600;border-bottom-color:#333}
 
-  .s-tbl{width:100%;border-collapse:collapse;font-size:12.5px}
+  /* 表は自分の箱の中で横スクロール。ページを横に広げない。 */
+  .s-tbl-scroll{width:100%;max-width:100%;overflow-x:auto;-webkit-overflow-scrolling:touch}
+  .s-tbl{border-collapse:collapse;font-size:12.5px;min-width:100%}
   .s-tbl th{text-align:left;padding:4px 6px;border-bottom:1px solid #0002;border-right:1px solid #0001;white-space:nowrap;font-weight:700;font-size:11px;color:#888}
   .s-tbl th:last-child,.s-tbl td:last-child{border-right:0}
   .s-tbl td{padding:0;border-bottom:1px solid #0001;border-right:1px solid #0001;vertical-align:middle}
@@ -211,6 +213,8 @@ export const SHOSAI_CSS = `
     .s-side,.s-main,.s-editor{width:auto;flex:none;min-width:0;border:0;padding-bottom:64px;
                               overflow:visible;min-height:60vh}
     .s-side-list,.s-main-body,.s-editor-body{overflow:visible;min-height:0}
+    /* 縦は document スクロール（引き下げ更新のため）、横は広げない。 */
+    .s-main-body,.s-editor-body,.s-side-list{max-width:100vw}
     .s-side{border-bottom:0}
     .s-editor{border-left:0}
     .s-wrap[data-pane=side] .s-main,.s-wrap[data-pane=side] .s-editor{display:none}
