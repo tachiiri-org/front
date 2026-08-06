@@ -45,6 +45,8 @@ export interface DatabaseSummary {
   syncStatus?: string | null; syncPhase?: string | null; notionSourceId?: string | null;
   /** 仕組みが持つデータベース（取り込みログなど）。消せず、列も行も足せない。 */
   systemKind?: string | null;
+  /** 取り込みが落ちていれば 'errored'。続きからやり直せる。 */
+  bodyDone?: number | null; bodyTotal?: number | null;
 }
 export interface DatabaseDetail {
   databaseId: string;
@@ -109,6 +111,9 @@ export const search = (q: string): Promise<{ results: SearchHit[]; engine: strin
 export interface ImportInFlight {
   databaseId: string; title: string; rowCount: number;
   phase: string | null; importId: string | null;
+  /** 割合と残り時間を出すための素の数字。文言から数字を拾わない。 */
+  bodyDone?: number | null; bodyTotal?: number | null;
+  startedAt?: number | null; updatedAt?: number | null; attempt?: number | null;
 }
 
 export const listDatabases = (): Promise<{ databases: DatabaseSummary[]; imports?: ImportInFlight[] }> =>
@@ -249,3 +254,7 @@ export const deleteView = (viewId: string): Promise<{ viewId: string }> =>
 /** データベースそのものの設定。いまはタイトル列の呼び名だけ。 */
 export const updateDatabase = (databaseId: string, patch: { titleName?: string }): Promise<unknown> =>
   call(`/database/${encodeURIComponent(databaseId)}`, { method: 'PATCH', body: JSON.stringify(patch) });
+
+/** 落ちた取り込みを続きから。行と本文の済みは残っているので、残りだけを取り込む。 */
+export const resumeImport = (databaseId: string): Promise<{ importId: string }> =>
+  post('/notion/import/resume', { databaseId });
