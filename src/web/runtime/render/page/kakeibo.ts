@@ -409,6 +409,17 @@ async function renderSummary(host: HTMLElement): Promise<void> {
       issuerOfShop.set(r.shop_id, r.issuer);
     }
 
+    // そのカードに明細のある直近3か月（今月は除く）
+    const recentCache = new Map<string, string[]>();
+    const recentMonthsOf = (issuer: string): string[] => {
+      let w = recentCache.get(issuer);
+      if (!w) {
+        w = months.filter((m) => m !== months[0] && issuerHasMonth.has(`${issuer}\u0001${m}`)).slice(0, 3);
+        recentCache.set(issuer, w);
+      }
+      return w;
+    };
+
     const monthDiff = (from: string, to: string): number =>
       (Number(to.slice(0, 4)) - Number(from.slice(0, 4))) * 12
       + (Number(to.slice(5, 7)) - Number(from.slice(5, 7)));
@@ -450,9 +461,11 @@ async function renderSummary(host: HTMLElement): Promise<void> {
       // 変動費。カードの明細が届いていない月は日割りできないので過去の平均で置く。
       const issuer = issuerOfShop.get(shopId) ?? '';
       if (issuerHasMonth.has(`${issuer}\u0001${m0}`)) return Math.round(a0 * factor);
-      const past = months.slice(1).filter((m) => (mm.get(m) ?? 0) > 0).slice(0, 3);
-      if (!past.length) return 0;
-      return Math.round(past.reduce((acc, m) => acc + (mm.get(m) ?? 0), 0) / past.length);
+      // 窓は「そのカードに明細のある直近3か月」。0の月も分母に入れる。
+      // 金額のある月だけで平均すると、たまにしか使わない駅が毎月ぶんとして積み上がる。
+      const win = recentMonthsOf(issuer);
+      if (!win.length) return 0;
+      return Math.round(win.reduce((acc, m) => acc + (mm.get(m) ?? 0), 0) / win.length);
     };
 
     const projShops = (shops: Map<string, Map<string, number>> | undefined): number => {
