@@ -59,6 +59,8 @@ export interface DatabaseDetail {
     id: string; title: string; cells: Record<string, unknown>;
     /** Notion 側の作成・更新日時。ビューの並びや絞り込みが参照する。 */
     notionCreatedAt?: number | null; notionEditedAt?: number | null;
+    /** ショサイ側の更新日時。既定の並び（新しい順）に使う。 */
+    updatedAt?: number | null;
   }>;
 }
 export interface SearchHit { id: string; type: BlockType; text: string }

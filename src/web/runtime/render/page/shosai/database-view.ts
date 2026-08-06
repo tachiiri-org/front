@@ -5,7 +5,7 @@
 
 import * as api from './api';
 import type { DatabaseDetail, OptionDef, PropertyType } from './api';
-import { applyView } from './view-filter';
+import { applyView, byRecent } from './view-filter';
 import { openFilterEditor, type SortRule } from './filter-editor';
 import { el } from './style';
 
@@ -680,7 +680,9 @@ export function createDatabaseView(opts: {
     const applied = applyView(detail.rows, detail.properties, activeView, timeZone);
     // その場限りの条件はビューの結果にさらに掛ける。ビューの式と同じ形なので、
     // 同じ評価器をもう一度通せばよい。
-    const local = applyView(applied.rows, detail.properties, {
+    // ビューも並べ替えも指定していなければ、更新の新しい順にする。
+    const base = !activeView && !localSorts.length ? byRecent(applied.rows) : applied.rows;
+    const local = applyView(base, detail.properties, {
       id: 'local', type: 'table', name: '',
       quickFilters: Object.keys(localFilters).length ? JSON.stringify(localFilters) : null,
       sorts: localSorts.length ? JSON.stringify(localSorts) : null,
