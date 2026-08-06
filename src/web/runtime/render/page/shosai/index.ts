@@ -231,6 +231,9 @@ export async function renderShosai(container: HTMLElement): Promise<void> {
    * 走っているものの顔ぶれが変わったときだけ、一覧の方も引き直す。
    */
   let runningKey = '';
+  // 残り時間は、画面で見ている間の実測から出す。取り込み全体の平均だと、行の取り込みや
+  // 既に済んでいた分が混ざって当てにならない（実際、残り3分と出して7分かかった）。
+  const rateSample = new Map<string, { done: number; at: number; perPage: number }>();
   function paintImports(imports: api.ImportInFlight[]): void {
     runBox.innerHTML = '';
     if (!imports.length) return;
@@ -250,10 +253,17 @@ export async function renderShosai(container: HTMLElement): Promise<void> {
         tx.append(bar);
         // 残り時間は、その取り込みの実測から出す。1件も進んでいないうちは出さない
         // （根拠の無い見込みを出さない）。
-        const elapsed = im.startedAt && im.updatedAt ? im.updatedAt - im.startedAt : 0;
+        const now = Date.now();
+        const prev = rateSample.get(im.databaseId);
+        if (!prev) rateSample.set(im.databaseId, { done, at: now, perPage: 0 });
+        else if (done > prev.done && now > prev.at) {
+          // 直近の実測と、それまでの見立てを半々で混ぜる。1回の揺れで数字が飛ばないように。
+          const cur = (now - prev.at) / (done - prev.done);
+          rateSample.set(im.databaseId, { done, at: now, perPage: prev.perPage ? (prev.perPage + cur) / 2 : cur });
+        }
+        const perPage = rateSample.get(im.databaseId)?.perPage ?? 0;
         let eta = '';
-        if (done > 0 && elapsed > 20000) {
-          const perPage = elapsed / done;
+        if (perPage > 0 && total > done) {
           const left = Math.round(((total - done) * perPage) / 60000);
           eta = left <= 1 ? ' ・残り1分ほど' : left < 90 ? ` ・残り${left}分ほど`
             : ` ・残り${Math.round(left / 60)}時間ほど`;
