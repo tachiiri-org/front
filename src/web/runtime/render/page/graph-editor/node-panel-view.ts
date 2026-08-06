@@ -277,17 +277,39 @@ export function createNodePanelView(ctx: GraphEditorContext, nodePanelOpts?: Nod
     }
     return h;
   };
+  // アウトライン表示: 見出し行の代わりに、代表概念のノード行そのものを親行にして字下げで表す
+  // （ドメイン代表=0段、サブ代表=1段、その構成員=2段）。字下げは seriation の導出結果であって
+  // 保存された親子ではない。畳んだ親の id を持つ集合。
+  const collapsed = new Set<string>();
+  const rawDepthOf = (id: string): number => domainLayout?.depthById.get(id) ?? 0;
   const render = () => {
     rowMap.clear();
     listEl.innerHTML = '';
-    let prevKey = '';
-    for (const node of nodes) {
+    const visible = groupFilter
+      ? nodes.filter((n) => (domainLayout?.domainIndexById.get(n.id) ?? -1) === groupFilter!.di
+                         && (domainLayout?.subIndexById.get(n.id) ?? -1) === groupFilter!.si)
+      : nodes;
+    // 絞り込み・検索で親行が落ちている時は、残った中の最小段を 0 段目に詰める。
+    let base = Infinity;
+    for (const n of visible) base = Math.min(base, rawDepthOf(n.id));
+    if (!Number.isFinite(base)) base = 0;
+    const depths = visible.map((n) => Math.max(0, rawDepthOf(n.id) - base));
+    let prevDi = -2;
+    let hideBelow: number | null = null; // 畳まれた親の段。これより深い行は描かない
+    for (let i = 0; i < visible.length; i++) {
+      const node = visible[i];
+      const depth = depths[i];
+      if (hideBelow !== null) { if (depth > hideBelow) continue; hideBelow = null; }
       const di = domainLayout?.domainIndexById.get(node.id) ?? -1;
-      const si = domainLayout?.subIndexById.get(node.id) ?? -1;
-      if (groupFilter && (groupFilter.di !== di || groupFilter.si !== si)) continue; // グループ絞り込み
-      const key = `${di}:${si}`;
-      if (di >= 0 && key !== prevKey) { listEl.appendChild(makeGroupHeader(di, si)); prevKey = key; }
-      listEl.appendChild(buildRow(node));
+      // 見出しは代表概念を持たないグループ（その他・孤立）だけ。代表があるグループは代表ノードの
+      // 行自体が最上段になるので見出しは要らない。
+      if (di >= 0 && di !== prevDi) {
+        if (!domainLayout?.domainRepIds[di]) listEl.appendChild(makeGroupHeader(di, -1));
+        prevDi = di;
+      }
+      const hasChildren = i + 1 < visible.length && depths[i + 1] > depth;
+      listEl.appendChild(buildRow(node, depth, hasChildren));
+      if (hasChildren && collapsed.has(node.id)) hideBelow = depth;
     }
     updateDraftVisibility();
     updateSelectionHighlight();
@@ -376,7 +398,7 @@ export function createNodePanelView(ctx: GraphEditorContext, nodePanelOpts?: Nod
         if (!ta) return;
         const spacerW = spacer?.offsetWidth ?? 0;
         const textW = Math.ceil(c.measureText(ta.value).width);
-        maxW = Math.max(maxW, spacerW + 18 + textW + 48);
+        maxW = Math.max(maxW, spacerW + 12 + 18 + textW + 48); // 字下げ + 三角 + 四角 + 文字 + 余白
       });
       if (maxW === 0) { nodePanelOpts!.onContentWidthChange!(minW); return; }
       nodePanelOpts!.onContentWidthChange!(Math.min(Math.max(minW, maxW), maxCap));
@@ -390,15 +412,29 @@ export function createNodePanelView(ctx: GraphEditorContext, nodePanelOpts?: Nod
   };
 
   // ── Row builder ─────────────────────────────────────────────────────────
-  const buildRow = (node: ExplorerNode): HTMLElement => {
+  const buildRow = (node: ExplorerNode, depth = 0, hasChildren = false): HTMLElement => {
     const row = document.createElement('div');
     row.dataset.nodeId = node.id;
     row.style.cssText = `display:flex;align-items:center;padding:0;border:2px solid transparent;border-radius:3px;`;
     rowMap.set(node.id, row);
 
     const spacer = document.createElement('span');
-    spacer.style.cssText = `flex-shrink:0;width:6px;`;
+    spacer.style.cssText = `flex-shrink:0;width:${6 + depth * 14}px;`;
     row.appendChild(spacer);
+
+    // 折りたたみ。子（＝直後に続く一段深い行）を持つ行だけ三角を出す。
+    const caret = document.createElement('span');
+    caret.style.cssText = `flex-shrink:0;display:flex;align-items:center;justify-content:center;width:12px;font-size:8px;line-height:1;color:${TEXT_DIM};user-select:none;cursor:${hasChildren ? 'pointer' : 'default'};`;
+    caret.textContent = hasChildren ? (collapsed.has(node.id) ? '▶' : '▼') : '';
+    if (hasChildren) {
+      caret.addEventListener('mousedown', (e) => e.preventDefault());
+      caret.addEventListener('click', (e) => {
+        e.stopPropagation();
+        if (collapsed.has(node.id)) collapsed.delete(node.id); else collapsed.add(node.id);
+        render();
+      });
+    }
+    row.appendChild(caret);
 
     // Left square: left-click = focus/select this row; right-click = toggle participation in the
     // active relation.
@@ -629,7 +665,8 @@ export function createNodePanelView(ctx: GraphEditorContext, nodePanelOpts?: Nod
     nodeById.set(tempId, tempNode);
 
     // Targeted DOM insert (avoid a full re-render so any concurrent typing isn't lost).
-    const newRow = buildRow(tempNode);
+    // 新規行は直前の行と同じ段に置く（新ノードはまだ導出結果に含まれないため）。
+    const newRow = buildRow(tempNode, at > 0 ? rawDepthOf(nodes[at - 1].id) : 0);
     const nextNode = nodes[at + 1];
     const nextRow = nextNode ? rowMap.get(nextNode.id) : null;
     if (nextRow) listEl.insertBefore(newRow, nextRow); else listEl.appendChild(newRow);
