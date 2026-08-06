@@ -128,6 +128,10 @@ export async function renderShosai(container: HTMLElement): Promise<void> {
    * 一覧の項目を長押ししたときのメニュー。名前の変更と削除。
    * 触っている指の下に出すと隠れるので、画面下から出す（トースト風）。
    */
+  const closeSheets = (): void => {
+    document.querySelectorAll('.s-sheet, .s-overlay').forEach((n) => n.remove());
+  };
+
   /**
    * 設定。いまはタイムゾーンだけ。相対日付（今週・先月）をどこの時刻で
    * 解くかが変わるので、既定任せにせず選べるようにする。
@@ -176,10 +180,6 @@ export async function renderShosai(container: HTMLElement): Promise<void> {
     sheet.append(save, cancel);
     overlay.addEventListener('click', close);
     document.body.append(overlay, sheet);
-  };
-
-  const closeSheets = (): void => {
-    document.querySelectorAll('.s-sheet, .s-overlay').forEach((n) => n.remove());
   };
 
   const openItemMenu = (kind: 'database' | 'page', id: string, title: string): void => {
