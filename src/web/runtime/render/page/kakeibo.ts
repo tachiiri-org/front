@@ -216,11 +216,12 @@ type Summary = {
   months: string[];
   maxUsedOn: string;
   byCategory: { billing_month: string; category: string; total: number; cnt: number }[];
-  byShop: { billing_month: string; shop_id: string; label: string; name: string; category: string; total: number; cnt: number }[];
+  byShop: { billing_month: string; shop_id: string; label: string; name: string; category: string; issuer: string; total: number; cnt: number }[];
   income: { billing_month: string; label: string; total: number }[];
   bySource: { source: string; billing_month: string; total: number }[];
   fixedCategories: string[];
   fixedShops: string[];
+  issuers: string[];
   multiCategoryShops: number;
 };
 
@@ -377,12 +378,12 @@ async function renderSummary(host: HTMLElement): Promise<void> {
      * それ以外だけを経過日数で割り返して足し合わせる。
      * 費目が固定費でなくても店だけ固定ということがある（食費のうち定期便だけ、など）。
      */
-    const projCat = (cat: string): number => {
+    const projShops = (shops: Map<string, Map<string, number>> | undefined): number => {
       const [m0, m1, m2] = months;
       let sum = 0;
-      for (const [shopId, mm] of byCatShop.get(cat) ?? []) {
+      for (const [shopId, mm] of shops ?? []) {
         const a0 = mm.get(m0) ?? 0;
-        if (!(fixedCats.has(cat) || fixedShops.has(shopId))) { sum += Math.round(a0 * factor); continue; }
+        if (!isFixedShop(shopId, shopCatOf.get(shopId) ?? '')) { sum += Math.round(a0 * factor); continue; }
         if (a0 > 0) { sum += a0; continue; }   // 今月ぶんが既に立っている
         const a1 = mm.get(m1) ?? 0;
         const a2 = mm.get(m2) ?? 0;
@@ -391,11 +392,33 @@ async function renderSummary(host: HTMLElement): Promise<void> {
       }
       return sum;
     };
+    const projCat = (cat: string): number => projShops(byCatShop.get(cat));
 
-    const cardAt = new Map<string, number>();
+    // カードは発行元ごとに1行。ヨドバシとビューカードは別の引き落としなので分けて見せる。
+    const issuers = (s.issuers ?? []).length ? s.issuers : ['ヨドバシカード'];
+    const issuerAt = new Map<string, Map<string, number>>();
     for (const r of s.bySource ?? []) {
-      if (r.source === 'ヨドバシカード') cardAt.set(r.billing_month, r.total);
+      if (!issuers.includes(r.source)) continue;
+      let mm = issuerAt.get(r.source);
+      if (!mm) { mm = new Map(); issuerAt.set(r.source, mm); }
+      mm.set(r.billing_month, r.total);
     }
+    const cardAt = new Map<string, number>();
+    for (const mm of issuerAt.values()) {
+      for (const [m, v] of mm) cardAt.set(m, (cardAt.get(m) ?? 0) + v);
+    }
+
+    // 発行元ごとの店。着地予測を発行元単位でも同じ規則で出すために持つ。
+    const byIssuerShop = new Map<string, Map<string, Map<string, number>>>();
+    for (const r of s.byShop) {
+      let shops = byIssuerShop.get(r.issuer);
+      if (!shops) { shops = new Map(); byIssuerShop.set(r.issuer, shops); }
+      let mm = shops.get(r.shop_id);
+      if (!mm) { mm = new Map(); shops.set(r.shop_id, mm); }
+      mm.set(r.billing_month, (mm.get(r.billing_month) ?? 0) + r.total);
+    }
+    const shopCatOf = new Map<string, string>();
+    for (const r of s.byShop) shopCatOf.set(r.shop_id, r.category);
     const ovr = new Map<string, { id: string; amount: number }>();
     for (const e of fx.entries) {
       if (e.override_of) ovr.set(`${e.override_of}\u0001${e.occurred_month}`, { id: e.entry_id, amount: e.amount_jpy });
@@ -589,7 +612,17 @@ async function renderSummary(host: HTMLElement): Promise<void> {
       t.appendChild(totalRow('引落', debTotals, inProgress ? debTotals[0] : null, false));
       itemRows(debits, asIs);
 
-      t.appendChild(totalRow('ヨドバシ', cardTotals, inProgress ? cardProj : null, false));
+      // カード会社ごとの合計を並べ、その下に費目の内訳（全カード分）を出す。
+      // 「費目」の行はカード合計と同じ額になるが、内訳が何の合計なのかを示すために残す。
+      for (const iss of issuers) {
+        const mm = issuerAt.get(iss);
+        const vals = months.map((m) => mm?.get(m) ?? 0);
+        t.appendChild(totalRow(iss, vals,
+          inProgress ? projShops(byIssuerShop.get(iss)) : null, false));
+      }
+      if (issuers.length > 1) {
+        t.appendChild(totalRow('費目', cardTotals, inProgress ? cardProj : null, false));
+      }
       itemRows(catRows.map((r) => ({ key: r.key, sub: '', vals: r.vals, total: r.total })), catProjOf);
 
       scroll.appendChild(t);
@@ -987,8 +1020,8 @@ function renderCsvImport(status: HTMLElement, onDone: () => void): HTMLElement {
     for (const f of files) {
       try { parsed.push(await readGoldpointCsvFile(f)); }
       catch (e) {
-        parsed.push({ fileName: f.name, billingMonth: '', declaredTotal: null, rowCount: 0,
-          rowsTotal: 0, rows: [], errors: [String(e instanceof Error ? e.message : e)] });
+        parsed.push({ fileName: f.name, issuer: 'ヨドバシカード', billingMonth: '', declaredTotal: null,
+          rowCount: 0, rowsTotal: 0, rows: [], errors: [String(e instanceof Error ? e.message : e)] });
       }
     }
 
@@ -1029,7 +1062,8 @@ function renderCsvImport(status: HTMLElement, onDone: () => void): HTMLElement {
         await api('/import', {
           method: 'POST',
           body: JSON.stringify({
-            source: 'goldpoint-csv', billingMonth: p.billingMonth,
+            source: p.issuer === 'ビューカード' ? 'viewcard-csv' : 'goldpoint-csv',
+            issuer: p.issuer, billingMonth: p.billingMonth,
             capturedAt: new Date().toISOString(), rowCount: p.rowCount,
             rowsTotal: p.rowsTotal, shownTotal: p.declaredTotal, rows: p.rows,
           }),
