@@ -216,7 +216,7 @@ type Summary = {
   months: string[];
   maxUsedOn: string;
   byCategory: { billing_month: string; category: string; total: number; cnt: number }[];
-  byShop: { billing_month: string; shop_id: string; label: string; name: string; category: string; issuer: string; total: number; cnt: number }[];
+  byShop: { billing_month: string; shop_id: string; label: string; name: string; category: string; issuer: string; card: string; total: number; cnt: number }[];
   income: { billing_month: string; label: string; total: number }[];
   bySource: { source: string; billing_month: string; total: number }[];
   fixedCategories: string[];
@@ -409,15 +409,46 @@ async function renderSummary(host: HTMLElement): Promise<void> {
       for (const [m, v] of mm) cardAt.set(m, (cardAt.get(m) ?? 0) + v);
     }
 
-    // 発行元ごとの店。着地予測を発行元単位でも同じ規則で出すために持つ。
-    const byIssuerShop = new Map<string, Map<string, Map<string, number>>>();
+    // カード単位 = 発行元。ただし1枚に複数名義が乗るカードは名義まで割る。
+    // 「ビューカードの合計」より「駿のビューカード」「さやかのビューカード」で見たい。
+    const holdersOf = new Map<string, Set<string>>();
     for (const r of s.byShop) {
-      let shops = byIssuerShop.get(r.issuer);
-      if (!shops) { shops = new Map(); byIssuerShop.set(r.issuer, shops); }
+      let set = holdersOf.get(r.issuer);
+      if (!set) { set = new Set(); holdersOf.set(r.issuer, set); }
+      set.add(r.card);
+    }
+    const unitOf = (issuer: string, card: string): string =>
+      (holdersOf.get(issuer)?.size ?? 1) > 1 ? `${issuer}　${card}` : issuer;
+
+    // カード単位ごとの店。着地予測も費目の内訳もここから出す。
+    const byUnitShop = new Map<string, Map<string, Map<string, number>>>();
+    for (const r of s.byShop) {
+      const u = unitOf(r.issuer, r.card);
+      let shops = byUnitShop.get(u);
+      if (!shops) { shops = new Map(); byUnitShop.set(u, shops); }
       let mm = shops.get(r.shop_id);
       if (!mm) { mm = new Map(); shops.set(r.shop_id, mm); }
       mm.set(r.billing_month, (mm.get(r.billing_month) ?? 0) + r.total);
     }
+    const units = [...byUnitShop.keys()].sort();
+
+    // カード単位 × 費目 × 店 × 月。費目ごとの着地予測も同じ規則で出せるように店まで持つ。
+    const byUnitCatShop = new Map<string, Map<string, Map<string, Map<string, number>>>>();
+    for (const r of s.byShop) {
+      const u = unitOf(r.issuer, r.card);
+      let cats = byUnitCatShop.get(u);
+      if (!cats) { cats = new Map(); byUnitCatShop.set(u, cats); }
+      let shops = cats.get(r.category);
+      if (!shops) { shops = new Map(); cats.set(r.category, shops); }
+      let mm = shops.get(r.shop_id);
+      if (!mm) { mm = new Map(); shops.set(r.shop_id, mm); }
+      mm.set(r.billing_month, (mm.get(r.billing_month) ?? 0) + r.total);
+    }
+    const sumShops = (shops: Map<string, Map<string, number>> | undefined, m: string): number => {
+      let sum = 0;
+      for (const mm of shops?.values() ?? []) sum += mm.get(m) ?? 0;
+      return sum;
+    };
     // 発行元 → 名義 → 月 → 額
     const cardRows = new Map<string, Map<string, Map<string, number>>>();
     for (const r of s.byCard ?? []) {
@@ -450,6 +481,22 @@ async function renderSummary(host: HTMLElement): Promise<void> {
       const k = `${e.category ?? '未分類'}\u0001${e.occurred_month}`;
       fixedByCat.set(k, (fixedByCat.get(k) ?? 0) + e.amount_jpy);
     }
+
+    /**
+     * 予測セル。前月と比べて収支が1万円以上悪くなる見込みなら赤くする。
+     * 「悪い」の向きは行によって逆になる（支出は増えると悪い、収入と収支は減ると悪い）。
+     */
+    const WORSE = 10000;
+    const projCell = (projVal: number, prev: number, worseWhen: 'higher' | 'lower',
+      cls: string): HTMLElement => {
+      const td = el('td', cls, yen(projVal));
+      const delta = worseWhen === 'higher' ? projVal - prev : prev - projVal;
+      if (delta >= WORSE) {
+        td.style.color = 'var(--err)';
+        td.title = `前月より ${yen(delta)} 悪化する見込み`;
+      }
+      return td;
+    };
 
     const box = el('div', 'kk-card');
     const hd = el('div', 'kk-row');
@@ -494,21 +541,6 @@ async function renderSummary(host: HTMLElement): Promise<void> {
       h.appendChild(ht);
       t.appendChild(h);
 
-      /**
-       * 予測セル。前月と比べて収支が1万円以上悪くなる見込みなら赤くする。
-       * 「悪い」の向きは行によって逆になる（支出は増えると悪い、収入と収支は減ると悪い）。
-       */
-      const WORSE = 10000;
-      const projCell = (projVal: number, prev: number, worseWhen: 'higher' | 'lower',
-        cls: string): HTMLElement => {
-        const td = el('td', cls, yen(projVal));
-        const delta = worseWhen === 'higher' ? projVal - prev : prev - projVal;
-        if (delta >= WORSE) {
-          td.style.color = 'var(--err)';
-          td.title = `前月より ${yen(delta)} 悪化する見込み`;
-        }
-        return td;
-      };
 
       const totalRow = (label: string, vals: number[], projVal: number | null,
         emphasise: boolean, worseWhen: 'higher' | 'lower' = 'higher'): HTMLTableRowElement => {
@@ -623,31 +655,77 @@ async function renderSummary(host: HTMLElement): Promise<void> {
       t.appendChild(totalRow('引落', debTotals, inProgress ? debTotals[0] : null, false));
       itemRows(debits, asIs);
 
-      // カード会社ごとの合計を並べ、その下に費目の内訳（全カード分）を出す。
-      // 「費目」の行はカード合計と同じ額になるが、内訳が何の合計なのかを示すために残す。
-      for (const iss of issuers) {
-        const mm = issuerAt.get(iss);
-        const vals = months.map((m) => mm?.get(m) ?? 0);
-        t.appendChild(totalRow(iss, vals,
-          inProgress ? projShops(byIssuerShop.get(iss)) : null, false));
-        // 名義が複数あるカードは誰がいくらかを並べる。1人しかいないなら合計と同じなので出さない。
-        const holders = cardRows.get(iss);
-        if (holders && holders.size > 1) {
-          itemRows([...holders].map(([card, hm]) => {
-            const hv = months.map((m) => hm.get(m) ?? 0);
-            return { key: card, sub: '', vals: hv, total: hv.reduce((a, b) => a + b, 0) };
-          }), (r) => r.vals[0] ?? 0);
-        }
-      }
-      if (issuers.length > 1) {
-        t.appendChild(totalRow('費目', cardTotals, inProgress ? cardProj : null, false));
-      }
+      // ここは全カードを足した費目の額だけ出す。カード別の内訳は「カード別」の表に分けた。
+      // 交通費の累計のような「カードを跨いだ費目の合計」を読むための表なので、分けない。
+      t.appendChild(totalRow('カード', cardTotals, inProgress ? cardProj : null, false));
       itemRows(catRows.map((r) => ({ key: r.key, sub: '', vals: r.vals, total: r.total })), catProjOf);
 
       scroll.appendChild(t);
     };
     draw();
     host.appendChild(box);
+
+    // カード別。カードごとに費目の内訳を出す。1枚に複数名義が乗るカードは名義まで割る。
+    // 費目別の表と分けているのは、あちらが「カードを跨いだ費目の合計」を読むためのものだから。
+    if (units.length > 1) {
+      const cbox = el('div', 'kk-card');
+      const chd = el('div', 'kk-row');
+      chd.appendChild(el('span', 'kk-note', 'カード別'));
+      cbox.appendChild(chd);
+      const cscroll = el('div', 'kk-scroll');
+      cbox.appendChild(cscroll);
+      let csort = inProgress ? 1 : 0;
+
+      const cdraw = (): void => {
+        cscroll.innerHTML = '';
+        const t = el('table', 'kk-tb');
+        const h = el('tr');
+        h.appendChild(el('th', '', ''));
+        months.forEach((m, i) => {
+          const dim = inProgress && i === 0;
+          const th = el('th', 'kk-num kk-clk' + (csort === i ? ' kk-on' : '') + (dim ? ' kk-sub' : ''),
+            m.slice(2) + (csort === i ? ' ▼' : ''));
+          th.addEventListener('click', () => { csort = i; cdraw(); });
+          h.appendChild(th);
+          if (dim) h.appendChild(el('th', 'kk-num', '予測'));
+        });
+        const ht = el('th', 'kk-num kk-clk' + (csort === -1 ? ' kk-on' : ''),
+          '合計' + (csort === -1 ? ' ▼' : ''));
+        ht.addEventListener('click', () => { csort = -1; cdraw(); });
+        h.appendChild(ht);
+        t.appendChild(h);
+
+        const line = (label: string, vals: number[], projVal: number | null, sum: boolean): void => {
+          const tr = el('tr', sum ? 'kk-sum' : '');
+          tr.appendChild(el('td', '', label));
+          vals.forEach((v, i) => {
+            const dim = inProgress && i === 0;
+            tr.appendChild(el('td', 'kk-num' + (dim ? ' kk-sub' : ''), yen(v)));
+            if (dim) {
+              tr.appendChild(projVal === null
+                ? el('td', 'kk-num', '')
+                : projCell(projVal, vals[1] ?? 0, 'higher', 'kk-num'));
+            }
+          });
+          tr.appendChild(el('td', 'kk-num', yen(vals.reduce((a, b) => a + b, 0))));
+          t.appendChild(tr);
+        };
+
+        for (const u of units) {
+          const uv = months.map((m) => sumShops(byUnitShop.get(u), m));
+          line(u, uv, inProgress ? projShops(byUnitShop.get(u)) : null, true);
+          const cats = [...(byUnitCatShop.get(u) ?? [])].map(([cat, shops]) => {
+            const vals = months.map((m) => sumShops(shops, m));
+            return { cat, shops, vals, total: vals.reduce((a, b) => a + b, 0) };
+          });
+          cats.sort((a, b) => (csort === -1 ? b.total - a.total : (b.vals[csort] ?? 0) - (a.vals[csort] ?? 0)));
+          for (const c of cats) line(c.cat, c.vals, inProgress ? projShops(c.shops) : null, false);
+        }
+        cscroll.appendChild(t);
+      };
+      cdraw();
+      host.appendChild(cbox);
+    }
   }
 
   // 略名 × 月（費目つき・費目で絞り込める）
@@ -769,8 +847,8 @@ async function renderSummary(host: HTMLElement): Promise<void> {
     const base = shopRowsOf(cardFilter.value);
     const rows = filter.value ? base.filter((r) => r.subs?.[0] === filter.value) : base;
     const ctrl = el('div', 'kk-row');
-    if (shopIssuers.size > 1) ctrl.appendChild(cardFilter);
     ctrl.appendChild(filter);
+    if (shopIssuers.size > 1) ctrl.appendChild(cardFilter);
     shopHost.appendChild(matrix('店舗別', rows, ['費目', '区分'], (k) => void showDetail(k), ctrl));
   };
   filter.addEventListener('change', drawShops);
