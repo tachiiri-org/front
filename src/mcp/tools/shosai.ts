@@ -118,7 +118,7 @@ export const SHOSAI_TOOLS = [
   {
     name: "shosai_import_progress",
     description:
-      "Read the progress and recorded failures of a Notion import for one database: phase, rows imported so far, and what could not be imported (with the Notion block id). Also see the 「Notion 取り込みログ」 database for the same failures as browsable rows.",
+      "Read the progress and recorded failures of a Notion import for one database: phase, rows imported so far, and what could not be imported (with the Notion block id). Also see the 「インポートログ」 database for the same failures as browsable rows.",
     inputSchema: {
       type: "object",
       properties: { databaseId: { type: "string" } },

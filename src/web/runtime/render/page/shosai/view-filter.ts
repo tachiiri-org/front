@@ -158,8 +158,13 @@ export function applyView(
   rows: RowLike[], props: PropertyDef[], view: ViewDef | null, timeZone: string, now = Date.now(),
 ): Applied {
   if (!view) return { rows, unsupported: [] };
+  // 鍵は Notion のプロパティ ID。ただし画面で組んだ条件は自前の列 ID で来る
+  // （Notion 由来でない列にも条件を付けられるようにするため）。どちらも引けるようにする。
   const byNotionId = new Map<string, PropertyDef>();
-  for (const p of props) if (p.notionId) byNotionId.set(p.notionId, p);
+  for (const p of props) {
+    if (p.notionId) byNotionId.set(p.notionId, p);
+    byNotionId.set(p.id, p);
+  }
   const unsupported = new Set<string>();
 
   const valueOf = (row: RowLike, notionId: string): { value: unknown; known: boolean } => {
