@@ -241,18 +241,24 @@ export async function renderShosai(container: HTMLElement): Promise<void> {
         listBox.append(el('div', { class: 's-empty', text: 'まだありません' }));
       }
       for (const d of dbs.databases) {
-        const item = el('div', { class: `s-item${d.databaseId === activeDatabaseId ? ' on' : ''}` });
+        // 仕組みが持つもの（取り込みログ）は、ユーザーの作ったものと並べない。
+        // 印を変え、消させない。
+        const managed = !!d.systemKind;
+        const item = el('div', {
+          class: `s-item${d.databaseId === activeDatabaseId ? ' on' : ''}${managed ? ' s-item-sys' : ''}`,
+        });
         item.append(
-          el('span', { class: 's-item-ic', text: '▦' }),
+          el('span', { class: 's-item-ic', text: managed ? '⚙' : '▦' }),
           el('span', { class: 's-item-tx', text: d.title || '無題のデータベース' }),
           el('span', { class: 's-item-ct', text: String(d.rowCount) }),
         );
+        if (managed) item.title = '取り込みの記録です。仕組みが管理しているため削除できません。';
         item.addEventListener('click', () => {
           activeDatabaseId = d.databaseId;
           openedDatabase?.(d.databaseId, d.title || 'データベース');
           void database.open(d.databaseId).then(refreshSide);
         });
-        attachLongPress(item, () => openItemMenu('database', d.databaseId, d.title));
+        if (!managed) attachLongPress(item, () => openItemMenu('database', d.databaseId, d.title));
         listBox.append(item);
       }
 
@@ -352,10 +358,11 @@ export async function renderShosai(container: HTMLElement): Promise<void> {
       b.addEventListener('click', () => goPane(t.key));
       foot.append(b);
     }
-    // 開いていないペインは畳む。広い画面では常に3ペインとも出す。
+    // 開いていないペインは畳む。広い画面でも、開いていないものは出さない。
+    // 何も選んでいないのに空のエディタが場所を取っているのは落ち着かない。
     const narrow = isNarrowNow();
-    database.el.style.display = !narrow || openDb ? '' : 'none';
-    editor.el.style.display = !narrow || openPage ? '' : 'none';
+    database.el.style.display = openDb || (!narrow && !openPage) ? '' : 'none';
+    editor.el.style.display = openPage ? '' : 'none';
   }
 
   // 開いたものをタブとして登録する。ここが唯一の登録点。

@@ -247,6 +247,15 @@ export function createDatabaseView(opts: {
       return box;
     }
 
+    // URL が入っているテキストはリンクにする。取り込みログから元のページへ飛ぶため。
+    if (prop.type === 'text' && typeof raw === 'string' && /^https?:\/\//.test(raw)) {
+      const box = el('div', { class: 's-cell s-chips' });
+      const a = el('a', { class: 's-ref', href: raw, target: '_blank', rel: 'noopener noreferrer' });
+      a.textContent = raw.replace(/^https?:\/\/(www\.)?/, '').slice(0, 40);
+      box.append(a);
+      return box;
+    }
+
     const input = el('input', { class: 's-cell' }) as HTMLInputElement;
     if (prop.type === 'number') {
       input.type = 'number';
@@ -265,6 +274,10 @@ export function createDatabaseView(opts: {
   const paint = (): void => {
     body.innerHTML = '';
     titleEl.textContent = dbTitle || 'データベース';
+    if (detail?.systemKind) {
+      titleEl.textContent = `${dbTitle || 'データベース'}`;
+      titleEl.title = '仕組みが管理しているデータベースです';
+    }
     if (!detail) {
       body.append(el('div', { class: 's-note', text: '左からデータベースを選んでください。' }));
       return;
@@ -290,10 +303,14 @@ export function createDatabaseView(opts: {
       th.append(el('span', { class: 's-col-kind', text: TYPE_LABEL[p.type] ?? p.type }));
       hr.append(th);
     }
+    // 仕組みが持つデータベース（取り込みログ）は列が決まっている。足せないようにする。
+    const managed = !!detail.systemKind;
     const addTh = el('th', { class: 's-col-add' });
-    const addBtn = el('button', { class: 's-col-add-btn', text: '＋', title: '列を追加' });
-    addBtn.addEventListener('click', () => openAddColumn(addBtn));
-    addTh.append(addBtn);
+    if (!managed) {
+      const addBtn = el('button', { class: 's-col-add-btn', text: '＋', title: '列を追加' });
+      addBtn.addEventListener('click', () => openAddColumn(addBtn));
+      addTh.append(addBtn);
+    }
     hr.append(addTh);
     thead.append(hr);
     table.append(thead);
@@ -352,15 +369,22 @@ export function createDatabaseView(opts: {
     scroller.append(table);
     body.append(scroller);
 
-    const addRow = el('button', { class: 's-add-row', text: '＋ 行を追加' });
-    addRow.addEventListener('click', () => {
-      void guard(async () => {
-        await api.addRow(databaseId!, { title: '' });
-        opts.onChanged();
-        await reload();
+    if (!managed) {
+      const addRow = el('button', { class: 's-add-row', text: '＋ 行を追加' });
+      addRow.addEventListener('click', () => {
+        void guard(async () => {
+          await api.addRow(databaseId!, { title: '' });
+          opts.onChanged();
+          await reload();
+        });
       });
-    });
-    body.append(addRow);
+      body.append(addRow);
+    } else {
+      body.append(el('div', {
+        class: 's-note',
+        text: '取り込みの記録です。列と行は取り込みが作ります。元のページは「Notion リンク」から開けます。',
+      }));
+    }
 
     if (!detail.properties.length) {
       body.append(el('div', {

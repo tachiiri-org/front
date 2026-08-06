@@ -15,6 +15,9 @@ export const SHOSAI_CSS = `
   .s-item{display:flex;align-items:center;gap:6px;padding:5px 8px;border-radius:5px;cursor:pointer;white-space:nowrap;overflow:hidden}
   .s-item:hover{background:#0000000a}
   .s-item.on{background:#4A90C222;font-weight:600}
+  /* 仕組みが持つもの（取り込みログ）。ユーザーの作ったものと見分ける。 */
+  .s-item-sys .s-item-tx{color:#888}
+  .s-item-sys .s-item-ic{opacity:.7}
   .s-item-ic{opacity:.5;flex:none;font-size:11px}
   .s-item-tx{flex:1;min-width:0;overflow:hidden;text-overflow:ellipsis}
   .s-item-ct{flex:none;font-size:10px;color:#aaa;font-variant-numeric:tabular-nums}
