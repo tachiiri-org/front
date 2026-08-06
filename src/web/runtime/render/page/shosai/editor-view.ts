@@ -15,11 +15,6 @@ const MARKER: Partial<Record<BlockType, string>> = {
 
 const CYCLE: BlockType[] = ['paragraph', 'heading', 'bullet', 'numbered', 'todo', 'quote', 'code'];
 
-const TYPE_LABEL: Record<string, string> = {
-  paragraph: '段落', heading: '見出し', bullet: '箇条書き', numbered: '番号付き',
-  todo: 'TODO', quote: '引用', code: 'コード', divider: '区切り', page: 'ページ', database: 'データベース',
-};
-
 export interface EditorView {
   el: HTMLElement;
   open: (pageId: string) => Promise<void>;
@@ -45,11 +40,10 @@ export function createEditorView(opts: {
   const root = el('div', { class: 's-editor' });
   const head = el('div', { class: 's-editor-head' });
   const title = el('input', { class: 's-title', placeholder: '無題' }) as HTMLInputElement;
-  const typeNote = el('span', { class: 's-note' });
   // 閉じる口を見出しに置く。モバイルはタブの × があるが、PC にはそれが無い。
   const closeBtn = el('button', { class: 's-editor-close', text: '×', title: '閉じる' });
   closeBtn.addEventListener('click', () => opts.onClose?.());
-  head.append(title, typeNote, closeBtn);
+  head.append(title, closeBtn);
   const body = el('div', { class: 's-editor-body' });
 
   // 編集の道具はタブのすぐ上に固定する。本文の末尾まで送らないと足せないのは面倒なので。
@@ -377,10 +371,6 @@ export function createEditorView(opts: {
           await reload();
         });
       }
-    });
-
-    input.addEventListener('focus', () => {
-      typeNote.textContent = `${TYPE_LABEL[b.type] ?? b.type}  ·  Shift+Enter で新しいブロック / Ctrl+Enter で種別変更 / Tab でインデント`;
     });
 
     row.append(input);

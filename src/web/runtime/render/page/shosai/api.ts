@@ -49,6 +49,8 @@ export interface DatabaseSummary {
 export interface DatabaseDetail {
   databaseId: string;
   systemKind?: string | null;
+  /** タイトル列の呼び名。行そのものが持つ値なので、他の列と置き場所が違う。 */
+  titleName?: string | null;
   properties: PropertyDef[];
   views: ViewDef[];
   rows: Array<{
@@ -232,3 +234,7 @@ export const deleteProperty = (propertyId: string): Promise<{ propertyId: string
 /** ビューを消す。表そのものは「すべて」で見られる。 */
 export const deleteView = (viewId: string): Promise<{ viewId: string }> =>
   call(`/view/${encodeURIComponent(viewId)}`, { method: 'DELETE' });
+
+/** データベースそのものの設定。いまはタイトル列の呼び名だけ。 */
+export const updateDatabase = (databaseId: string, patch: { titleName?: string }): Promise<unknown> =>
+  call(`/database/${encodeURIComponent(databaseId)}`, { method: 'PATCH', body: JSON.stringify(patch) });

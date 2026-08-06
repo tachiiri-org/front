@@ -27,7 +27,7 @@ export const SHOSAI_CSS = `
   .s-main{flex:1.35;min-width:0;display:flex;flex-direction:column;overflow:hidden}
   .s-main-head{display:flex;align-items:center;gap:8px;padding:12px 16px 6px}
   .s-title{font-size:17px;font-weight:700;flex:1;min-width:0;border:1px solid transparent;border-radius:5px;padding:3px 6px;background:transparent;color:inherit;font-family:inherit}
-  .s-title:hover,.s-title:focus{border-color:#4A90C2;background:#00000008;outline:none}
+  .s-title:hover,.s-title:focus{border-color:transparent;background:transparent;outline:none}
   .s-main-body{flex:1;min-height:0;overflow:auto;padding:0 16px 24px}
 
   /* 横だけスクロールさせる。overflow-x:auto だけだと縦のバーまで出る環境がある。 */
@@ -42,8 +42,13 @@ export const SHOSAI_CSS = `
   .s-head-btn:hover{border-color:#4A90C2;color:#333}
   .s-head-search{width:200px;font-size:12px;padding:4px 8px}
   /* 列の見出しは押せる。名前・種類・削除をそこに集めた。 */
-  .s-col-head{cursor:pointer}
-  .s-col-head:hover{background:#4A90C20F}
+  .s-col-name{cursor:pointer;border-radius:3px;padding:1px 2px}
+  .s-col-name:hover{background:#4A90C21f}
+  /* 漏斗と並び替えの印。押した列だけ色を付け、掛かっていることが見て分かるようにする。 */
+  .s-col-mk{border:0;background:transparent;color:#ccc;cursor:pointer;font-size:10px;
+    padding:0 2px;line-height:1;font-family:inherit}
+  .s-col-mk:hover{color:#666}
+  .s-col-mk.on{color:#4A90C2}
   .s-db-filter{flex:none;margin-left:8px;border:1px solid #0002;background:transparent;color:#666;
                border-radius:5px;padding:3px 10px;font-size:11.5px;cursor:pointer;font-family:inherit}
   .s-db-filter:hover{border-color:#4A90C2;color:#333}
@@ -203,9 +208,6 @@ export const SHOSAI_CSS = `
                 padding:13px 16px;font-size:14px;color:#333;cursor:pointer;font-family:inherit}
   .s-sheet-item:hover{background:#00000008}
   .s-sheet-del{color:#c0392b}
-  .s-set-row{display:flex;align-items:center;gap:10px;padding:8px 16px}
-  .s-set-label{flex:none;font-size:13px;color:#666}
-  [data-theme=dark] .s-set-label{color:#aaa}
   .s-sheet-cancel{color:#888;border-top:1px solid #0001;margin-top:4px}
   [data-theme=dark] .s-sheet{background:#1c1e22;border-top-color:#ffffff22}
   [data-theme=dark] .s-sheet-item{color:#e6e6e6}

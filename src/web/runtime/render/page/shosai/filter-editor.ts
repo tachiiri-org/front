@@ -41,9 +41,11 @@ export function openFilterEditor(opts: {
    * その場限りの絞り込みは自前の列 ID で持つ（Notion 由来でない列にも付けられる）。
    */
   keyBy?: 'notion' | 'id';
-  /** 並べ替えも編集させるか。ビューの並びは Notion 側に合わせるので既定は編集しない。 */
   sorts?: SortRule[];
+  /** 並べ替えも編集させるか。 */
   withSort?: boolean;
+  /** 絞り込みか並べ替えの片方だけを出す。menu から用を選んで入るとき。 */
+  only?: 'filter' | 'sort';
   /** 最初から選んでおく列。列の見出しから開いたときに、その列を選ばせ直さないため。 */
   preselect?: string;
 }): void {
@@ -173,8 +175,13 @@ export function openFilterEditor(opts: {
   cancel.addEventListener('click', close);
   foot.append(save, cancel);
 
-  pop.append(el('div', { class: 's-filter-head', text: opts.title ?? 'このビューの絞り込み' }), list, add);
-  if (opts.withSort) pop.append(el('div', { class: 's-filter-head', text: '並べ替え' }), sortList, sortAdd);
+  if (opts.only !== 'sort') {
+    pop.append(el('div', { class: 's-filter-head', text: opts.title ?? 'フィルタ' }), list, add);
+  }
+  if (opts.withSort && opts.only !== 'filter') {
+    pop.append(el('div', { class: 's-filter-head', text: opts.only === 'sort' ? (opts.title ?? '並び替え') : '並び替え' }),
+      sortList, sortAdd);
+  }
   pop.append(foot);
   document.body.append(overlay, pop);
 }

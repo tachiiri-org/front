@@ -19,8 +19,14 @@ const TYPE_ORDER: PropertyType[] = ['text', 'number', 'date', 'checkbox', 'selec
 export interface DatabaseView {
   el: HTMLElement;
   open: (databaseId: string) => Promise<void>;
+  /** 設定も同じ場所に、同じ表の形で出す。別の見た目の画面を増やさない。 */
+  openSettings: () => Promise<void>;
   reload: () => Promise<void>;
 }
+
+/** よく使うタイムゾーンだけ並べる。ここに無いものは、いま入っている値として残す。 */
+const ZONES = ['Asia/Tokyo', 'Asia/Seoul', 'Asia/Shanghai', 'Asia/Singapore',
+  'Europe/London', 'Europe/Paris', 'America/New_York', 'America/Los_Angeles', 'UTC'];
 
 export function createDatabaseView(opts: {
   onError: (message: string) => void;
@@ -44,6 +50,9 @@ export function createDatabaseView(opts: {
   // 描き直しで横スクロールが左端に戻るのを防ぐ。取り込み中は数秒ごとに描き直すので、
   // 位置を覚えていないと表を横に見ていられない。
   let scrollLeft = 0;
+  // 設定を出しているか。データベースと同じ場所・同じ表の形で見せる。
+  let showSettings = false;
+  let settings: Record<string, string> = {};
 
   const root = el('div', { class: 's-main' });
   const head = el('div', { class: 's-main-head' });
@@ -288,35 +297,64 @@ export function createDatabaseView(opts: {
   };
 
   /** 小さな選択肢の吹き出し。列やビューの「直す・消す」をここに集める。 */
-  const openMenu = (anchor: HTMLElement, items: Array<[string, () => void]>, extra?: HTMLElement): void => {
+  interface MenuItem { label: string; run?: () => void; sub?: MenuItem[] }
+  const openMenu = (anchor: HTMLElement, items: MenuItem[], extra?: HTMLElement): void => {
     const overlay = el('div', { class: 's-overlay' });
     const pop = el('div', { class: 's-pop' });
     const r = anchor.getBoundingClientRect();
     pop.style.position = 'fixed';
     pop.style.left = `${Math.min(r.left, window.innerWidth - 220)}px`;
-    pop.style.top = `${Math.min(r.bottom + 4, window.innerHeight - 240)}px`;
-    pop.style.maxHeight = '260px';
+    pop.style.top = `${Math.min(r.bottom + 4, window.innerHeight - 260)}px`;
+    pop.style.maxHeight = '280px';
     pop.style.overflowY = 'auto';
     const close = (): void => { overlay.remove(); pop.remove(); };
-    if (extra) pop.append(extra);
-    for (const [label, run] of items) {
-      const b = el('button', { class: 's-pop-item', text: label });
-      b.addEventListener('click', () => { close(); run(); });
-      pop.append(b);
-    }
+    // 入れ子は別の吹き出しを出さず、同じ吹き出しの中身を差し替える。
+    // 小さな menu が二枚重なると、どちらを押しているのか分からなくなる。
+    const paintMenu = (list: MenuItem[], back?: MenuItem[]): void => {
+      pop.innerHTML = '';
+      if (back) {
+        const b = el('button', { class: 's-pop-item s-pop-back', text: '← 戻る' });
+        b.addEventListener('click', () => paintMenu(back));
+        pop.append(b);
+      } else if (extra) {
+        pop.append(extra);
+      }
+      for (const it of list) {
+        const b = el('button', { class: 's-pop-item', text: it.sub ? `${it.label} ▶` : it.label });
+        b.addEventListener('click', () => {
+          if (it.sub) { paintMenu(it.sub, list); return; }
+          close();
+          it.run?.();
+        });
+        pop.append(b);
+      }
+    };
+    paintMenu(items);
     overlay.addEventListener('click', close);
     document.body.append(overlay, pop);
-    return void (extra?.querySelector('input') as HTMLInputElement | null)?.focus();
+    (extra?.querySelector('input') ?? extra)?.focus?.();
   };
 
-  /** 列の見出しを押したときの menu。名前・種類・削除。 */
-  const openColumnMenu = (anchor: HTMLElement, prop: { id: string; name: string; type: PropertyType }): void => {
+  /**
+   * 列の見出しを押したときの menu。
+   * 名前は入力欄でその場で直せるので、項目としては出さない。
+   * タイトル列は行そのものが持つので、種類の変更も削除もできない。
+   */
+  const openColumnMenu = (
+    anchor: HTMLElement,
+    prop: { id: string; name: string; type: PropertyType },
+    isTitle = false,
+  ): void => {
     const name = el('input', { class: 's-search', value: prop.name }) as HTMLInputElement;
     name.value = prop.name;
     const rename = (): void => {
       const next = name.value.trim();
       if (!next || next === prop.name) return;
-      void guard(async () => { await api.updateProperty(prop.id, { name: next }); await reload(); });
+      void guard(async () => {
+        if (isTitle) await api.updateDatabase(databaseId!, { titleName: next });
+        else await api.updateProperty(prop.id, { name: next });
+        await reload();
+      });
     };
     name.addEventListener('keydown', (ev) => {
       if ((ev as KeyboardEvent).key === 'Enter') {
@@ -325,20 +363,13 @@ export function createDatabaseView(opts: {
         rename();
       }
     });
-    const sortBy = (direction: SortRule['direction']): void => {
-      // 同じ列を選び直したら差し替える。段を増やしたいときは menu の「絞り込み・並べ替え」から。
-      localSorts = [{ property: prop.id, direction }, ...localSorts.filter((r) => r.property !== prop.id)];
-      paint();
-    };
-    const items: Array<[string, () => void]> = [
-      ['名前を変える', rename],
-      ['この列で絞り込む', () => openLocalEditor(anchor, prop.id)],
-      ['昇順で並べ替え', () => sortBy('ascending')],
-      ['降順で並べ替え', () => sortBy('descending')],
-    ];
-    for (const t of TYPE_ORDER) {
-      if (t === prop.type) continue;
-      items.push([`種類を「${TYPE_LABEL[t]}」に変える`, () => {
+    name.addEventListener('blur', rename);
+
+    if (isTitle) { openMenu(anchor, [], name); return; }
+
+    const types: MenuItem[] = TYPE_ORDER.filter((t) => t !== prop.type).map((t) => ({
+      label: TYPE_LABEL[t],
+      run: () => {
         void guard(async () => {
           const r = await api.updateProperty(prop.id, { type: t });
           if (r.converted?.dropped) {
@@ -346,22 +377,28 @@ export function createDatabaseView(opts: {
           }
           await reload();
         });
-      }]);
-    }
-    items.push([`「${prop.name}」を削除`, () => {
-      if (!window.confirm(`列「${prop.name}」を消します。この列の値も消えます。`)) return;
-      void guard(async () => { await api.deleteProperty(prop.id); await reload(); });
-    }]);
-    openMenu(anchor, items, name);
+      },
+    }));
+    openMenu(anchor, [
+      { label: '種類を変える', sub: types },
+      {
+        label: `「${prop.name}」を削除`,
+        run: () => {
+          if (!window.confirm(`列「${prop.name}」を消します。この列の値も消えます。`)) return;
+          void guard(async () => { await api.deleteProperty(prop.id); await reload(); });
+        },
+      },
+    ], name);
   };
 
   /**
    * ビューに保存しない、その場限りの絞り込みと並べ替え。
    * ビューの条件（Notion と同じ形で保存する）とは別物なので、掛け合わせて使う。
    */
-  const openLocalEditor = (anchor: HTMLElement, preselect?: string): void => {
+  const openLocalEditor = (anchor: HTMLElement, preselect?: string, only?: 'filter' | 'sort'): void => {
     openFilterEditor({
       anchor,
+      only,
       // タイトルは列ではなく行そのものが持つが、並べ替えの相手としては列と同じ。
       // ここだけ列のふりをさせる（評価器は 'title' を特別に扱う）。
       properties: [{ id: 'title', name: 'タイトル', type: 'text', rank: null }, ...(detail?.properties ?? [])],
@@ -370,7 +407,7 @@ export function createDatabaseView(opts: {
       withSort: true,
       keyBy: 'id',
       preselect,
-      title: 'この表だけの絞り込み（保存しません）',
+      title: only === 'sort' ? '並び替え（この表だけ）' : 'フィルタ（この表だけ）',
       onSave: (f, srt) => {
         localFilters = (f ?? {}) as Record<string, Record<string, unknown>>;
         localSorts = srt ?? [];
@@ -379,23 +416,42 @@ export function createDatabaseView(opts: {
     });
   };
 
-  /** ビューに保存する絞り込み。Notion と同じ形で持つので、取り込み直しても残る。 */
-  const openViewFilter = (anchor: HTMLElement, view: { id: string; quickFilters?: string | null }): void => {
+  /**
+   * ビューに保存するフィルタと並び替え。Notion と同じ形（プロパティ ID を鍵にした式）で
+   * 持つので、取り込み直しても壊れず、MCP から触ったものとも行き来できる。
+   */
+  const openViewEditor = (
+    anchor: HTMLElement,
+    view: { id: string; quickFilters?: string | null; sorts?: string | null },
+    only: 'filter' | 'sort',
+  ): void => {
+    let sorts: SortRule[] = [];
+    try { sorts = view.sorts ? (JSON.parse(view.sorts) as SortRule[]) : []; } catch { sorts = []; }
     openFilterEditor({
       anchor,
+      only,
+      withSort: true,
       properties: detail!.properties,
       current: view.quickFilters ? (JSON.parse(view.quickFilters) as Record<string, Record<string, unknown>>) : {},
-      onSave: (quickFilters) => {
+      sorts,
+      title: only === 'sort' ? '並び替え' : 'フィルタ',
+      onSave: (quickFilters, srt) => {
         void guard(async () => {
-          await api.updateView(view.id, { quickFilters: quickFilters ?? null });
+          // 開いていない側を消さないよう、触った側だけ送る。
+          await api.updateView(view.id, only === 'sort'
+            ? { sorts: srt ?? null }
+            : { quickFilters: quickFilters ?? null });
           await reload();
         });
       },
     });
   };
 
-  /** ビューのタブを押したときの menu。絞り込みと、名前・削除。 */
-  const openViewMenu = (anchor: HTMLElement, view: { id: string; name: string; quickFilters?: string | null }): void => {
+  /** ビューのタブを押したときの menu。フィルタ・並び替えと、名前・削除。 */
+  const openViewMenu = (
+    anchor: HTMLElement,
+    view: { id: string; name: string; quickFilters?: string | null; sorts?: string | null },
+  ): void => {
     const name = el('input', { class: 's-search', value: view.name }) as HTMLInputElement;
     name.value = view.name;
     const rename = (): void => {
@@ -410,23 +466,71 @@ export function createDatabaseView(opts: {
         rename();
       }
     });
+    name.addEventListener('blur', rename);
     const q = view.quickFilters ? Object.keys(JSON.parse(view.quickFilters) as object).length : 0;
     openMenu(anchor, [
-      [q ? `ビューの絞り込み（${q}）` : 'ビューの絞り込み', () => openViewFilter(anchor, view)],
-      ['この表だけの絞り込み・並べ替え', () => openLocalEditor(anchor)],
-      ['名前を変える', rename],
-      [`「${view.name}」を削除`, () => {
-        if (!window.confirm(`ビュー「${view.name}」を消します。行は消えません。`)) return;
-        void guard(async () => {
-          await api.deleteView(view.id);
-          if (activeViewId === view.id) activeViewId = null;
-          await reload();
-        });
-      }],
+      { label: q ? `フィルタ（${q}）` : 'フィルタ', run: () => openViewEditor(anchor, view, 'filter') },
+      { label: '並び替え', run: () => openViewEditor(anchor, view, 'sort') },
+      { label: '名前の変更', run: rename },
+      {
+        label: `「${view.name}」を削除`,
+        run: () => {
+          if (!window.confirm(`ビュー「${view.name}」を消します。行は消えません。`)) return;
+          void guard(async () => {
+            await api.deleteView(view.id);
+            if (activeViewId === view.id) activeViewId = null;
+            await reload();
+          });
+        },
+      },
     ], name);
   };
 
+  /** 設定。行が設定の名前、値が入力。表の形にすると、他の画面と読み方が同じになる。 */
+  const paintSettings = (): void => {
+    body.innerHTML = '';
+    headTools.innerHTML = '';
+    titleEl.textContent = '設定';
+    titleEl.title = '';
+    const table = el('table', { class: 's-tbl' });
+    const thead = el('thead');
+    const hr = el('tr');
+    hr.append(el('th', { text: '設定' }), el('th', { text: '値' }), el('th', { class: 's-col-add' }));
+    thead.append(hr);
+    const tbody = el('tbody');
+
+    const tr = el('tr');
+    const td = el('td', { class: 's-td-title' });
+    td.append(el('span', { class: 's-row-link', text: 'タイムゾーン' }));
+    tr.append(td);
+    const vtd = el('td');
+    const sel = el('select', { class: 's-cell' }) as HTMLSelectElement;
+    const current = settings.timezone || 'Asia/Tokyo';
+    const zones = ZONES.includes(current) ? ZONES : [current, ...ZONES];
+    for (const z of zones) sel.append(el('option', { value: z, text: z }));
+    sel.value = current;
+    sel.addEventListener('change', () => {
+      void guard(async () => {
+        await api.saveSettings({ timezone: sel.value });
+        settings.timezone = sel.value;
+        timeZone = sel.value;
+      });
+    });
+    vtd.append(sel);
+    tr.append(vtd, el('td'));
+    tbody.append(tr);
+    table.append(thead, tbody);
+    const scroller = el('div', { class: 's-tbl-scroll' });
+    scroller.append(table);
+    body.append(scroller);
+    body.append(el('div', {
+      class: 's-note',
+      text: 'ビューの「今週」「過去1か月」などを、どこの時刻で解くかに使います。',
+    }));
+  };
+
   const paint = (): void => {
+    if (showSettings) { paintSettings(); return; }
     body.innerHTML = '';
     titleEl.textContent = dbTitle || 'データベース';
     if (detail?.systemKind) {
@@ -440,7 +544,7 @@ export function createDatabaseView(opts: {
     }
 
     // 検索は右上に出しっぱなしにする。畳むと、探せることに気づけない。
-    const find = el('input', { class: 's-search s-head-search', placeholder: 'この表の中を探す' }) as HTMLInputElement;
+    const find = el('input', { class: 's-search s-head-search', placeholder: '検索' }) as HTMLInputElement;
     find.value = filterText;
     find.addEventListener('input', () => {
       filterText = find.value;
@@ -457,10 +561,16 @@ export function createDatabaseView(opts: {
       const allOn = !activeViewId;
       const all = el('button', {
         class: `s-db-tab s-db-tab-all${allOn ? ' on' : ''}`, text: '▦',
-        title: allOn ? 'もう一度押すと、この表だけの絞り込み・並べ替え' : 'ビューの絞り込みを外して全部を見る',
+        title: allOn ? 'もう一度押すとフィルタ・並び替え' : 'ビューのフィルタを外して全部を見る',
       });
       all.addEventListener('click', () => {
-        if (allOn) { openLocalEditor(all); return; }
+        if (allOn) {
+          openMenu(all, [
+            { label: 'フィルタ', run: () => openLocalEditor(all, undefined, 'filter') },
+            { label: '並び替え', run: () => openLocalEditor(all, undefined, 'sort') },
+          ]);
+          return;
+        }
         activeViewId = null;
         void guard(reload);
       });
@@ -468,11 +578,11 @@ export function createDatabaseView(opts: {
       for (const v of detail.views) {
         const on = activeViewId ? v.id === activeViewId : false;
         const t = el('button', { class: `s-db-tab${on ? ' on' : ''}`, text: v.name || v.type });
-        t.title = on ? 'もう一度押すと絞り込み・名前の変更・削除' : (v.quickFilters ? '絞り込みが効いています' : '');
+        t.title = on ? 'もう一度押すとフィルタ・並び替え・名前の変更・削除' : (v.quickFilters ? 'フィルタが効いています' : '');
         t.addEventListener('click', () => {
           // 選んでいるタブをもう一度押したら menu。別のタブなら切り替える。
           if (on && !detail!.systemKind) {
-            openViewMenu(t, { id: v.id, name: v.name || v.type, quickFilters: v.quickFilters });
+            openViewMenu(t, { id: v.id, name: v.name || v.type, quickFilters: v.quickFilters, sorts: v.sorts });
             return;
           }
           activeViewId = v.id;
@@ -486,18 +596,52 @@ export function createDatabaseView(opts: {
     const table = el('table', { class: 's-tbl' });
     const thead = el('thead');
     const hr = el('tr');
-    hr.append(el('th', { text: 'タイトル' }));
     // 仕組みが持つデータベース（取り込みログ）は列が決まっている。触らせない。
     const managed = !!detail.systemKind;
+
+    /**
+     * 列の見出し。名前を押すと menu、漏斗でフィルタ、⇅ で並び替え。
+     * どちらの印もこの表だけのもの（ビューには保存しない）。
+     */
+    const headCell = (key: string, name: string, kind: string | null, onMenu: ((a: HTMLElement) => void) | null): HTMLElement => {
+      const th = el('th', { class: 's-col-head' });
+      const nm = el('span', { class: onMenu ? 's-col-name' : '', text: name });
+      if (onMenu) nm.addEventListener('click', () => onMenu(nm));
+      th.append(nm);
+      if (kind) th.append(el('span', { class: 's-col-kind', text: kind }));
+
+      const on = !!localFilters[key];
+      const f = el('button', { class: `s-col-mk${on ? ' on' : ''}`, text: '▽', title: 'フィルタ' });
+      f.addEventListener('click', (e) => { e.stopPropagation(); openLocalEditor(f, key, 'filter'); });
+
+      const cur = localSorts.find((r) => r.property === key);
+      const mark = cur ? (cur.direction === 'ascending' ? '▲' : '▼') : '⇅';
+      const sbtn = el('button', { class: `s-col-mk${cur ? ' on' : ''}`, text: mark, title: '並び替え' });
+      sbtn.addEventListener('click', (e) => {
+        e.stopPropagation();
+        // 押すたびに 昇順 → 降順 → 外す。同じ列を選び直したら先頭に置き直す。
+        const rest = localSorts.filter((r) => r.property !== key);
+        localSorts = !cur ? [{ property: key, direction: 'ascending' }, ...rest]
+          : cur.direction === 'ascending' ? [{ property: key, direction: 'descending' }, ...rest]
+          : rest;
+        paint();
+      });
+      th.append(f, sbtn);
+      return th;
+    };
+
+    hr.append(headCell('title', detail.titleName || 'タイトル', null, managed ? null : (a) =>
+      openColumnMenu(a, { id: 'title', name: detail!.titleName || 'タイトル', type: 'text' }, true)));
     for (const p of detail.properties) {
-      const th = el('th', { class: managed ? '' : 's-col-head' });
-      th.append(document.createTextNode(p.name));
-      th.append(el('span', { class: 's-col-kind', text: TYPE_LABEL[p.type] ?? p.type }));
-      if (!managed) {
-        th.title = '押すと名前・種類の変更、削除';
-        th.addEventListener('click', () => openColumnMenu(th, { id: p.id, name: p.name, type: p.type }));
+      if (managed) {
+        const th = el('th');
+        th.append(document.createTextNode(p.name));
+        th.append(el('span', { class: 's-col-kind', text: TYPE_LABEL[p.type] ?? p.type }));
+        hr.append(th);
+        continue;
       }
-      hr.append(th);
+      hr.append(headCell(p.id, p.name, TYPE_LABEL[p.type] ?? p.type, (a) =>
+        openColumnMenu(a, { id: p.id, name: p.name, type: p.type })));
     }
     const addTh = el('th', { class: 's-col-add' });
     if (!managed) {
@@ -626,6 +770,7 @@ export function createDatabaseView(opts: {
   return {
     el: root,
     open: async (id: string) => {
+      showSettings = false;
       databaseId = id;
       activeViewId = null;
       filterText = '';
@@ -640,6 +785,17 @@ export function createDatabaseView(opts: {
       const list = await api.listDatabases().catch(() => null);
       dbTitle = list?.databases.find((d) => d.databaseId === id)?.title ?? '';
       await guard(reload);
+    },
+    openSettings: async () => {
+      showSettings = true;
+      databaseId = null;
+      detail = null;
+      await guard(async () => {
+        const st = await api.readSettings();
+        settings = st.settings;
+        if (settings.timezone) timeZone = settings.timezone;
+      });
+      paint();
     },
     reload: () => guard(reload),
   };
