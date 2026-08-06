@@ -268,6 +268,32 @@ export async function renderShosai(container: HTMLElement): Promise<void> {
         listBox.append(item);
       }
 
+      // 取り込みの途中のものは、データベースとしては出さない（中身が揃っていない表は
+      // 開いても使えない）。ただし隠さない。落ちたときにデータベースごと消えたように
+      // 見えてしまい、実際そう見えた。状況として出し、中止できるようにする。
+      for (const im of dbs.imports ?? []) {
+        const item = el('div', { class: 's-item s-item-run' });
+        item.append(
+          el('span', { class: 's-item-ic', text: '⟳' }),
+          el('span', { class: 's-item-tx', text: `${im.title || '無題'}（取り込み中）` }),
+          el('span', { class: 's-item-ct', text: String(im.rowCount) }),
+        );
+        item.title = im.phase ?? '取り込んでいます';
+        const stop = el('button', { class: 's-item-stop', text: '中止', title: '取り込みを中止する' });
+        stop.addEventListener('click', (ev) => {
+          ev.stopPropagation();
+          if (!window.confirm(`「${im.title || '無題'}」の取り込みを中止します。ここまでの分は残ります。`)) return;
+          void (async () => {
+            try {
+              await api.cancelImport(im.importId ?? '', im.databaseId);
+              await refreshSide();
+            } catch (e) { showError(e instanceof Error ? e.message : String(e)); }
+          })();
+        });
+        item.append(stop);
+        listBox.append(item);
+      }
+
       // ページの一覧は出さない。取り込みで入るページはデータベースの行か、
       // 本文からリンクされたものなので、データベースかリンク、検索から辿れる。
       // 一覧に並べると、リンク先のページが何十件も積み上がって邪魔になる。

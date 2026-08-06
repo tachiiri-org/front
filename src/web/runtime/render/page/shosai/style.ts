@@ -15,6 +15,11 @@ export const SHOSAI_CSS = `
   .s-item{display:flex;align-items:center;gap:6px;padding:5px 8px;border-radius:5px;cursor:pointer;white-space:nowrap;overflow:hidden}
   .s-item:hover{background:#0000000a}
   .s-item.on{background:#4A90C222;font-weight:600}
+  /* 取り込みの途中。データベースとしては開けないが、走っていることは見せる。 */
+  .s-item-run{color:#888;cursor:default}
+  .s-item-stop{flex:none;border:1px solid #0002;background:transparent;color:#888;border-radius:4px;
+    padding:1px 6px;font-size:11px;cursor:pointer;font-family:inherit}
+  .s-item-stop:hover{border-color:#c0392b;color:#c0392b}
   /* 仕組みが持つもの（取り込みログ）。ユーザーの作ったものと見分ける。 */
   .s-item-sys .s-item-tx{color:#888}
   .s-item-sys .s-item-ic{opacity:.7}

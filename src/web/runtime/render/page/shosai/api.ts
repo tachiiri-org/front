@@ -105,7 +105,14 @@ export const deleteBlock = (id: string): Promise<{ removed: number }> =>
 export const search = (q: string): Promise<{ results: SearchHit[]; engine: string }> =>
   call(`/search?q=${encodeURIComponent(q)}`);
 
-export const listDatabases = (): Promise<{ databases: DatabaseSummary[] }> => call('/databases');
+/** 取り込み中のものは databases に入らず imports に来る。表として出せる状態にないため。 */
+export interface ImportInFlight {
+  databaseId: string; title: string; rowCount: number;
+  phase: string | null; importId: string | null;
+}
+
+export const listDatabases = (): Promise<{ databases: DatabaseSummary[]; imports?: ImportInFlight[] }> =>
+  call('/databases');
 export const readDatabase = (id: string, viewId?: string): Promise<DatabaseDetail> =>
   call(`/database/${encodeURIComponent(id)}${viewId ? `?viewId=${encodeURIComponent(viewId)}` : ''}`);
 
