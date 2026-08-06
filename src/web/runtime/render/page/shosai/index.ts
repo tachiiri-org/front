@@ -285,7 +285,7 @@ export async function renderShosai(container: HTMLElement): Promise<void> {
           if (!window.confirm(`「${im.title || '無題'}」の取り込みを中止します。ここまでの分は残ります。`)) return;
           void (async () => {
             try {
-              await api.cancelImport(im.importId ?? '', im.databaseId);
+              await api.cancelImport(im.importId, im.databaseId);
               await refreshSide();
             } catch (e) { showError(e instanceof Error ? e.message : String(e)); }
           })();

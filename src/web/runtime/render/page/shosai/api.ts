@@ -220,9 +220,13 @@ export async function uploadFile(blockId: string, file: File): Promise<{ fileId:
 export const readSettings = (): Promise<{ settings: Record<string, string> }> => call('/settings');
 export const saveSettings = (patch: Record<string, string>): Promise<unknown> => put('/settings', patch);
 
-/** 取り込みを止める。走っているワークフローを終わらせ、状態も残す。 */
-export const cancelImport = (importId: string, databaseId?: string): Promise<unknown> =>
-  call(`/notion/import/${encodeURIComponent(importId)}${databaseId ? `?databaseId=${encodeURIComponent(databaseId)}` : ''}`,
+/**
+ * 取り込みを止める。走っているワークフローを終わらせ、状態も残す。
+ * ワークフローの実体 ID が分からないことがある（実体ごと失われた等）ので、
+ * その場合は databaseId だけで止める。
+ */
+export const cancelImport = (importId: string | null, databaseId?: string): Promise<unknown> =>
+  call(`/notion/import${importId ? `/${encodeURIComponent(importId)}` : ''}${databaseId ? `?databaseId=${encodeURIComponent(databaseId)}` : ''}`,
     { method: 'DELETE' });
 
 /** ビューの絞り込み・並び・名前を変える。式は Notion のプロパティ ID を鍵にする。 */
