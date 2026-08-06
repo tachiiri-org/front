@@ -46,6 +46,25 @@ export const KAKEIBO_TOOLS = [
     inputSchema: { type: "object", properties: {}, required: [] },
   },
   {
+    name: "kakeibo_list_categories",
+    description:
+      "List every 費目 with whether it is marked as a fixed cost (固定費). A fixed 費目 is one whose monthly amount does not depend on how far through the month you are — 通信費, サブスク, 公共料金. The landing projection never prorates these by elapsed days, and carries them forward from earlier months even before the charge appears.",
+    inputSchema: { type: "object", properties: {}, required: [] },
+  },
+  {
+    name: "kakeibo_set_category",
+    description:
+      "Mark a 費目 as a fixed cost, or clear the mark. Set it for 費目 billed at a flat rate (subscriptions, utilities, phone) and leave it off for spending that accumulates with daily activity (食費, 外食, 日用品) — those are the ones the projection should prorate.",
+    inputSchema: {
+      type: "object",
+      properties: {
+        category: { type: "string", description: "費目 name, e.g. '通信費'" },
+        fixed: { type: "boolean", description: "true で固定費にする" },
+      },
+      required: ["category", "fixed"],
+    },
+  },
+  {
     name: "kakeibo_list_months",
     description:
       "List the billing months (請求年月, YYYY-MM) that have imported statements.",
@@ -150,6 +169,18 @@ export async function callKakeiboTool(
 ): Promise<ToolResult> {
   if (name === "kakeibo_list_shops") {
     return asResult(await kakeiboFetch(env, "/shops"));
+  }
+
+  if (name === "kakeibo_list_categories") {
+    return asResult(await kakeiboFetch(env, "/categories"));
+  }
+
+  if (name === "kakeibo_set_category") {
+    const category = String(args.category ?? "");
+    if (!category || typeof args.fixed !== "boolean") {
+      return { content: [{ type: "text", text: "category and fixed (boolean) are required" }], isError: true };
+    }
+    return asResult(await kakeiboFetch(env, `/categories/${encodeURIComponent(category)}`, "PUT", { fixed: args.fixed }));
   }
 
   if (name === "kakeibo_list_fixed") {
