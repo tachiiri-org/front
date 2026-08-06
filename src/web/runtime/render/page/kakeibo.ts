@@ -220,6 +220,7 @@ type Summary = {
   income: { billing_month: string; label: string; total: number }[];
   bySource: { source: string; billing_month: string; total: number }[];
   fixedCategories: string[];
+  fixedShops: string[];
   multiCategoryShops: number;
 };
 
@@ -357,6 +358,7 @@ async function renderSummary(host: HTMLElement): Promise<void> {
      * 3 番目を 0 にするのは控えめな側への誤りで、解約を引きずるより good。
      */
     const fixedCats = new Set(s.fixedCategories ?? []);
+    const fixedShops = new Set(s.fixedShops ?? []);
     // 費目 → 店 → 月 → 額
     const byCatShop = new Map<string, Map<string, Map<string, number>>>();
     for (const r of s.byShop) {
@@ -366,11 +368,18 @@ async function renderSummary(host: HTMLElement): Promise<void> {
       if (!mm) { mm = new Map(); shops.set(r.shop_id, mm); }
       mm.set(r.billing_month, (mm.get(r.billing_month) ?? 0) + r.total);
     }
-    const projFixedCat = (cat: string): number => {
+
+    /**
+     * 費目の着地予測。店ごとに固定費かどうかを見て、固定費は過去から補い、
+     * それ以外だけを経過日数で割り返して足し合わせる。
+     * 費目が固定費でなくても店だけ固定ということがある（食費のうち定期便だけ、など）。
+     */
+    const projCat = (cat: string): number => {
       const [m0, m1, m2] = months;
       let sum = 0;
-      for (const mm of byCatShop.get(cat)?.values() ?? []) {
+      for (const [shopId, mm] of byCatShop.get(cat) ?? []) {
         const a0 = mm.get(m0) ?? 0;
+        if (!(fixedCats.has(cat) || fixedShops.has(shopId))) { sum += Math.round(a0 * factor); continue; }
         if (a0 > 0) { sum += a0; continue; }   // 今月ぶんが既に立っている
         const a1 = mm.get(m1) ?? 0;
         const a2 = mm.get(m2) ?? 0;
@@ -428,12 +437,15 @@ async function renderSummary(host: HTMLElement): Promise<void> {
       // ヘッダは表全体で1つ。節ごとに繰り返すと縦に間延びして読みにくい。
       const h = el('tr');
       h.appendChild(el('th', '', ''));
-      if (inProgress) h.appendChild(el('th', 'kk-num', '予測'));
+      // 予測は最新月の右。月の途中の実績より着地見込みのほうが読みたい数字なので、
+      // 大きさも入れ替えて予測を主、最新月の実績を従にする。
       months.forEach((m, i) => {
-        const th = el('th', 'kk-num kk-clk' + (sortAt === i ? ' kk-on' : ''),
+        const dim = inProgress && i === 0;
+        const th = el('th', 'kk-num kk-clk' + (sortAt === i ? ' kk-on' : '') + (dim ? ' kk-sub' : ''),
           m.slice(2) + (sortAt === i ? ' ▼' : ''));
         th.addEventListener('click', () => { sortAt = i; draw(); });
         h.appendChild(th);
+        if (dim) h.appendChild(el('th', 'kk-num', '予測'));
       });
       const ht = el('th', 'kk-num kk-clk' + (sortAt === -1 ? ' kk-on' : ''),
         '合計' + (sortAt === -1 ? ' ▼' : ''));
@@ -441,19 +453,37 @@ async function renderSummary(host: HTMLElement): Promise<void> {
       h.appendChild(ht);
       t.appendChild(h);
 
-      // 変動費の着地。経過日数で割り返す。
-      const proj = (base: number): number => Math.round(base * factor);
+      /**
+       * 予測セル。前月と比べて収支が1万円以上悪くなる見込みなら赤くする。
+       * 「悪い」の向きは行によって逆になる（支出は増えると悪い、収入と収支は減ると悪い）。
+       */
+      const WORSE = 10000;
+      const projCell = (projVal: number, prev: number, worseWhen: 'higher' | 'lower',
+        cls: string): HTMLElement => {
+        const td = el('td', cls, yen(projVal));
+        const delta = worseWhen === 'higher' ? projVal - prev : prev - projVal;
+        if (delta >= WORSE) {
+          td.style.color = 'var(--err)';
+          td.title = `前月より ${yen(delta)} 悪化する見込み`;
+        }
+        return td;
+      };
 
       const totalRow = (label: string, vals: number[], projVal: number | null,
-        emphasise: boolean): HTMLTableRowElement => {
+        emphasise: boolean, worseWhen: 'higher' | 'lower' = 'higher'): HTMLTableRowElement => {
         const tr = el('tr', 'kk-sum');
         tr.appendChild(el('td', '', label));
-        if (inProgress) tr.appendChild(el('td', 'kk-num kk-sub', projVal === null ? '' : yen(projVal)));
-        for (const v of vals) {
-          const td = el('td', 'kk-num', yen(v));
+        vals.forEach((v, i) => {
+          const dim = inProgress && i === 0;
+          const td = el('td', 'kk-num' + (dim ? ' kk-sub' : ''), yen(v));
           if (emphasise && v < 0) td.style.color = 'var(--err)';
           tr.appendChild(td);
-        }
+          if (dim) {
+            tr.appendChild(projVal === null
+              ? el('td', 'kk-num', '')
+              : projCell(projVal, vals[1] ?? 0, worseWhen, 'kk-num'));
+          }
+        });
         const tot = vals.reduce((a, b) => a + b, 0);
         const tdT = el('td', 'kk-num', yen(tot));
         if (emphasise && tot < 0) tdT.style.color = 'var(--err)';
@@ -461,19 +491,23 @@ async function renderSummary(host: HTMLElement): Promise<void> {
         return tr;
       };
 
-      const itemRows = (rows: SRow[], projOf: (r: SRow) => number): void => {
+      const itemRows = (rows: SRow[], projOf: (r: SRow) => number,
+        worseWhen: 'higher' | 'lower' = 'higher'): void => {
         const sorted = [...rows].sort((a, b) =>
           sortAt === -1 ? b.total - a.total : (b.vals[sortAt] ?? 0) - (a.vals[sortAt] ?? 0));
         for (const r of sorted) {
           const tr = el('tr');
           tr.appendChild(el('td', '', r.key));
-          if (inProgress) tr.appendChild(el('td', 'kk-num kk-sub', yen(projOf(r))));
           months.forEach((m, i) => {
             const v = r.vals[i] ?? 0;
-            if (!r.edit) { tr.appendChild(el('td', 'kk-num', yen(v))); return; }
+            const dim = inProgress && i === 0;
+            const after = (): void => {
+              if (dim) tr.appendChild(projCell(projOf(r), r.vals[1] ?? 0, worseWhen, 'kk-num'));
+            };
+            if (!r.edit) { tr.appendChild(el('td', 'kk-num' + (dim ? ' kk-sub' : ''), yen(v))); after(); return; }
             const rec = r.edit.rec;
             const o = ovr.get(`${rec.recurring_id}\u0001${m}`);
-            const td = el('td', 'kk-num kk-edit', yen(v));
+            const td = el('td', 'kk-num kk-edit' + (dim ? ' kk-sub' : ''), yen(v));
             if (o) td.style.color = 'var(--accent)';
             td.title = o ? 'この月は上書き済み。空にすると既定額に戻ります' : 'クリックでこの月だけ変更';
             td.addEventListener('click', () => {
@@ -505,6 +539,7 @@ async function renderSummary(host: HTMLElement): Promise<void> {
               });
             });
             tr.appendChild(td);
+            after();
           });
           tr.appendChild(el('td', 'kk-num', yen(r.total)));
           t.appendChild(tr);
@@ -530,21 +565,19 @@ async function renderSummary(host: HTMLElement): Promise<void> {
       const debTotals = sumOf(debits);
       const cardTotals = months.map((m) => cardAt.get(m) ?? 0);
 
-      // 費目ごとの着地予測。固定費は日割りせず過去から補い、それ以外だけを割り返す。
       // カードの予測は費目の予測の合計にする（表に出ている行と足し算が合うように）。
-      const catProjOf = (r: SRow): number =>
-        fixedCats.has(r.key) ? projFixedCat(r.key) : proj(r.vals[0] ?? 0);
-      const cardProj = catRows.reduce(
-        (a, r) => a + catProjOf({ key: r.key, sub: '', vals: r.vals, total: r.total }), 0);
+      const catProjOf = (r: SRow): number => projCat(r.key);
+      const cardProj = catRows.reduce((a, r) => a + projCat(r.key), 0);
       const asIs = (r: SRow): number => r.vals[0] ?? 0;
 
       // 合計は各節の先頭に置く。まず結果、次に内訳という順で読める。
       t.appendChild(totalRow('収支',
         months.map((_, i) => incTotals[i] - debTotals[i] - cardTotals[i]),
-        inProgress ? incTotals[0] - debTotals[0] - cardProj : null, true));
+        inProgress ? incTotals[0] - debTotals[0] - cardProj : null, true, 'lower'));
 
-      t.appendChild(totalRow('振込', incTotals, inProgress ? incTotals[0] : null, false));
-      itemRows(incs, asIs);
+      // 収入は減ると悪い。支出は増えると悪い。
+      t.appendChild(totalRow('振込', incTotals, inProgress ? incTotals[0] : null, false, 'lower'));
+      itemRows(incs, asIs, 'lower');
 
       t.appendChild(totalRow('引落', debTotals, inProgress ? debTotals[0] : null, false));
       itemRows(debits, asIs);
