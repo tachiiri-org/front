@@ -29,6 +29,8 @@ export function createDatabaseView(opts: {
   let databaseId: string | null = null;
   let detail: DatabaseDetail | null = null;
   let dbTitle = '';
+  let activeViewId: string | null = null;
+  let filterText = '';
 
   const root = el('div', { class: 's-main' });
   const head = el('div', { class: 's-main-head' });
@@ -285,13 +287,36 @@ export function createDatabaseView(opts: {
 
     if (detail.views.length) {
       const tabs = el('div', { class: 's-db-tabs' });
-      detail.views.forEach((v, i) => {
-        const t = el('button', { class: `s-db-tab${i === 0 ? ' on' : ''}`, text: v.name || v.type });
-        // ビューの切り替え（フィルタ・ソート）はまだ持たせていない。タブは表示だけ。
+      for (const v of detail.views) {
+        const on = activeViewId ? v.id === activeViewId : false;
+        const t = el('button', { class: `s-db-tab${on ? ' on' : ''}`, text: v.name || v.type });
+        if (v.entryCount != null) t.title = `${v.entryCount} 行`;
+        t.addEventListener('click', () => {
+          activeViewId = v.id;
+          void guard(reload);
+        });
         tabs.append(t);
-      });
+      }
+      // ビューの絞り込みを外して全件を見たいことがある。
+      const all = el('button', { class: `s-db-tab${activeViewId ? '' : ' on'}`, text: 'すべて' });
+      all.addEventListener('click', () => { activeViewId = null; void guard(reload); });
+      tabs.append(all);
       body.append(tabs);
     }
+
+    // データベースの中を絞る。件数が多いと目で探せない。
+    const findWrap = el('div', { class: 's-db-find' });
+    const find = el('input', { class: 's-search', placeholder: 'この表の中を絞り込む' }) as HTMLInputElement;
+    find.value = filterText;
+    find.addEventListener('input', () => {
+      filterText = find.value;
+      paintRows();
+      // 入力欄が消えないよう、描き直しのあとで焦点を戻す。
+      const again = body.querySelector('.s-db-find input') as HTMLInputElement | null;
+      if (again && again !== find) { again.value = filterText; again.focus(); }
+    });
+    findWrap.append(find);
+    body.append(findWrap);
 
     const table = el('table', { class: 's-tbl' });
     const thead = el('thead');
@@ -316,7 +341,15 @@ export function createDatabaseView(opts: {
     table.append(thead);
 
     const tbody = el('tbody');
-    for (const row of detail.rows) {
+    const q = filterText.trim();
+    const visible = q
+      ? detail.rows.filter((r) => {
+          if ((r.title || '').includes(q)) return true;
+          // セルの中身も見る。担当や状態で絞りたいことが多い。
+          return Object.values(r.cells).some((v) => JSON.stringify(v ?? '').includes(q));
+        })
+      : detail.rows;
+    for (const row of visible) {
       const tr = el('tr');
       const td = el('td', { class: 's-td-title' });
       // タイトル自体が開く導線。名前の変更は鉛筆で入力に切り替える。
@@ -368,6 +401,9 @@ export function createDatabaseView(opts: {
     const scroller = el('div', { class: 's-tbl-scroll' });
     scroller.append(table);
     body.append(scroller);
+    if (q && !visible.length) {
+      body.append(el('div', { class: 's-note', text: `「${q}」に当てはまる行はありません` }));
+    }
 
     if (!managed) {
       const addRow = el('button', { class: 's-add-row', text: '＋ 行を追加' });
@@ -394,9 +430,11 @@ export function createDatabaseView(opts: {
     }
   };
 
+  const paintRows = (): void => paint();
+
   const reload = async (): Promise<void> => {
     if (!databaseId) return;
-    detail = await api.readDatabase(databaseId);
+    detail = await api.readDatabase(databaseId, activeViewId ?? undefined);
     paint();
   };
 
@@ -404,6 +442,8 @@ export function createDatabaseView(opts: {
     el: root,
     open: async (id: string) => {
       databaseId = id;
+      activeViewId = null;
+      filterText = '';
       const list = await api.listDatabases().catch(() => null);
       dbTitle = list?.databases.find((d) => d.databaseId === id)?.title ?? '';
       await guard(reload);

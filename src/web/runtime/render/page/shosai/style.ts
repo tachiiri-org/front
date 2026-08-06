@@ -30,7 +30,10 @@ export const SHOSAI_CSS = `
   .s-title:hover,.s-title:focus{border-color:#4A90C2;background:#00000008;outline:none}
   .s-main-body{flex:1;min-height:0;overflow:auto;padding:0 16px 24px}
 
-  .s-db-tabs{display:flex;gap:2px;align-items:center;border-bottom:1px solid #0001;margin:0 0 8px;flex-wrap:nowrap}
+  .s-db-tabs{display:flex;gap:2px;align-items:center;border-bottom:1px solid #0001;margin:0 0 8px;
+             flex-wrap:nowrap;overflow-x:auto}
+  .s-db-find{margin:0 0 8px}
+  .s-db-find input{max-width:320px}
   .s-db-tab{display:inline-flex;align-items:center;gap:5px;border:0;background:transparent;color:#888;cursor:pointer;font-size:13px;padding:6px 10px;border-bottom:2px solid transparent;white-space:nowrap;margin-bottom:-1px}
   .s-db-tab:hover{color:#333;background:#00000006}
   .s-db-tab.on{color:#333;font-weight:600;border-bottom-color:#333}
@@ -98,6 +101,10 @@ export const SHOSAI_CSS = `
   /* ── 右: ブロックエディタ ── */
   .s-editor{flex:1;min-width:0;display:flex;flex-direction:column;border-left:1px solid #0001;overflow:hidden}
   .s-editor-head{display:flex;align-items:center;gap:8px;padding:12px 16px 6px}
+  .s-editor-close{flex:none;border:0;background:transparent;color:#bbb;cursor:pointer;font-size:18px;
+                  line-height:1;padding:2px 6px;font-family:inherit}
+  .s-editor-close:hover{color:#333}
+  [data-theme=dark] .s-editor-close:hover{color:#eee}
   .s-editor-body{flex:1;min-height:0;overflow-y:auto;padding:4px 16px 40vh}
   .s-blk{display:flex;align-items:flex-start;gap:4px;border-radius:5px}
   .s-blk:hover{background:#00000005}

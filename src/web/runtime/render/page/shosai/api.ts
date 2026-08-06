@@ -28,7 +28,7 @@ export interface PropertyDef {
   options?: OptionDef[];
 }
 export interface OptionDef { id: string; name: string; colorId?: string | null }
-export interface ViewDef { id: string; type: string; name: string }
+export interface ViewDef { id: string; type: string; name: string; entryCount?: number }
 export interface DatabaseSummary {
   databaseId: string; blockId: string | null; title: string; rowCount: number; propertyCount: number;
   /** Notion 由来なら data_source_id が入る。取り込み中は syncStatus が 'running'。 */
@@ -90,7 +90,8 @@ export const search = (q: string): Promise<{ results: SearchHit[]; engine: strin
   call(`/search?q=${encodeURIComponent(q)}`);
 
 export const listDatabases = (): Promise<{ databases: DatabaseSummary[] }> => call('/databases');
-export const readDatabase = (id: string): Promise<DatabaseDetail> => call(`/database/${encodeURIComponent(id)}`);
+export const readDatabase = (id: string, viewId?: string): Promise<DatabaseDetail> =>
+  call(`/database/${encodeURIComponent(id)}${viewId ? `?viewId=${encodeURIComponent(viewId)}` : ''}`);
 
 export const createDatabase = (body: { title: string; parentId?: string }):
   Promise<{ databaseId: string; blockId: string; viewId: string }> => post('/database', body);

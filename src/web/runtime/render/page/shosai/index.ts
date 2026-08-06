@@ -79,6 +79,7 @@ export async function renderShosai(container: HTMLElement): Promise<void> {
   const editor = createEditorView({
     onError: showError,
     onTitleChange: () => { void refreshSide(); },
+    onClose: () => closeTabByKey('editor'),
     onOpenLink: (blockId) => {
       activePageId = blockId;
       void editor.open(blockId).then(() => {
