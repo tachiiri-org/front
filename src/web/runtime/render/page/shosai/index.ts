@@ -220,8 +220,9 @@ export async function renderShosai(container: HTMLElement): Promise<void> {
   async function refreshSide(): Promise<void> {
     listBox.innerHTML = '';
     try {
-      const [dbs, pages] = await Promise.all([api.listDatabases(), api.listPages()]);
+      const dbs = await api.listDatabases();
 
+      // ページの新規作成はデータベース見出しの右に置く。一覧を消しても作れるように。
       listBox.append(sectionHead('データベース', () => {
         const title = prompt('データベースの名前');
         if (title === null) return;
@@ -255,37 +256,9 @@ export async function renderShosai(container: HTMLElement): Promise<void> {
         listBox.append(item);
       }
 
-      const pageSec = el('div', { class: 's-side-sec' });
-      pageSec.append(sectionHead('ページ', () => {
-        void (async () => {
-          try {
-            const created = await api.createBlock({ type: 'page', text: '無題' });
-            activePageId = created.id;
-            openedPage?.(created.id, '無題');
-            await editor.open(created.id);
-            await refreshSide();
-          } catch (e) { showError(e instanceof Error ? e.message : String(e)); }
-        })();
-      }));
-      listBox.append(pageSec);
-
-      if (!pages.pages.length) {
-        listBox.append(el('div', { class: 's-empty', text: 'まだありません' }));
-      }
-      for (const p of pages.pages) {
-        const item = el('div', { class: `s-item${p.id === activePageId ? ' on' : ''}` });
-        item.append(
-          el('span', { class: 's-item-ic', text: '▤' }),
-          el('span', { class: 's-item-tx', text: p.title || '無題' }),
-        );
-        item.addEventListener('click', () => {
-          activePageId = p.id;
-          openedPage?.(p.id, p.title || '無題');
-          void editor.open(p.id).then(refreshSide);
-        });
-        attachLongPress(item, () => openItemMenu('page', p.id, p.title));
-        listBox.append(item);
-      }
+      // ページの一覧は出さない。取り込みで入るページはデータベースの行か、
+      // 本文からリンクされたものなので、データベースかリンク、検索から辿れる。
+      // 一覧に並べると、リンク先のページが何十件も積み上がって邪魔になる。
 
       // NOTION セクションは作り直さない。初回だけ組み立てる。
       if (!notionBox.contains(notion.el)) {

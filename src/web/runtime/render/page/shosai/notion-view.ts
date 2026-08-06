@@ -65,7 +65,12 @@ export function createNotionView(opts: {
     document.body.append(overlay, pop);
 
     const head = el('div', { class: 's-notion-head' });
-    head.append(el('span', { text: `${conn.workspaceName ?? 'Notion'} から取り込む` }));
+    head.append(el('span', { class: 's-notion-head-t', text: `${conn.workspaceName ?? 'Notion'} から取り込む` }));
+    // 見えるデータソースは Notion 側で共有したものだけ。連携後に作ったものや、
+    // 共有していないページはここに出てこないので、選び直しに行く導線を同じ画面に置く。
+    const regrant = el('a', { class: 's-notion-regrant', href: '/auth/notion', text: '⟳ 共有を見直す' });
+    regrant.title = '連携後に作ったデータベースや、未共有のページはここから追加できます';
+    head.append(regrant);
     pop.append(head);
 
     const body = el('div', { class: 's-notion-body' });
@@ -85,7 +90,7 @@ export function createNotionView(opts: {
     if (!sources.length) {
       body.append(el('div', {
         class: 's-note',
-        text: '見えるデータソースがありません。Notion 側の接続設定で、取り込みたいページ／データベースを共有してください。',
+        text: '見えるデータソースがありません。上の「共有を見直す」から、取り込みたいページ／データベースを選んでください。',
       }));
       return;
     }
@@ -344,16 +349,6 @@ export function createNotionView(opts: {
     // 連携後に Notion 側で作ったページやデータベースは、そのままでは見えない。
     // アクセス範囲は同意画面のページピッカーで決まり、後から自動では広がらないため、
     // もう一度同意画面に行って選び直す導線を出す。
-    if (connections.length) {
-      const regrant = el('a', { class: 's-item s-notion-connect', href: '/auth/notion' });
-      regrant.append(
-        el('span', { class: 's-item-ic', text: '⟳' }),
-        el('span', { class: 's-item-tx', text: '共有するページを追加・見直す' }),
-      );
-      regrant.title = '連携後に作ったデータベースは、ここから選び直すと見えるようになります';
-      root.insertBefore(regrant, progress);
-    }
-
     // 接続の追加は常に出す（複数ワークスペースを繋げる）。
     const connect = el('a', { class: 's-item s-notion-connect', href: '/auth/notion' });
     connect.append(

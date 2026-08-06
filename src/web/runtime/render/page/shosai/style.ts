@@ -121,7 +121,12 @@ export const SHOSAI_CSS = `
   /* ── Notion 連携 ── */
   .s-notion-connect{text-decoration:none;color:inherit}
   .s-notion-dialog{position:fixed;top:12vh;left:50%;transform:translateX(-50%);width:min(560px,92vw);max-height:70vh;overflow:auto;padding:0;gap:0}
-  .s-notion-head{padding:12px 16px;border-bottom:1px solid #0001;font-weight:700;font-size:14px}
+  .s-notion-head{display:flex;align-items:center;gap:8px;padding:12px 16px;border-bottom:1px solid #0001;
+                 font-weight:700;font-size:14px}
+  .s-notion-head-t{flex:1;min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+  .s-notion-regrant{flex:none;font-size:11.5px;font-weight:400;color:#4A90C2;text-decoration:none;
+                    border:1px solid #4A90C24d;border-radius:5px;padding:3px 8px;white-space:nowrap}
+  .s-notion-regrant:hover{background:#4A90C218}
   .s-notion-body{padding:10px 16px 16px}
   .s-notion-opt{display:flex;align-items:center;gap:7px;margin:2px 0 12px;font-size:12.5px;color:#666;cursor:pointer}
   .s-notion-list{display:flex;flex-direction:column;gap:2px}
