@@ -5,6 +5,7 @@
 
 import * as api from './api';
 import type { DatabaseDetail, OptionDef, PropertyType } from './api';
+import { applyView } from './view-filter';
 import { el } from './style';
 
 const TYPE_LABEL: Record<PropertyType, string> = {
@@ -31,6 +32,8 @@ export function createDatabaseView(opts: {
   let dbTitle = '';
   let activeViewId: string | null = null;
   let filterText = '';
+  // 相対日付（今週・先月）の起点。設定で変えられる。
+  let timeZone = 'Asia/Tokyo';
 
   const root = el('div', { class: 's-main' });
   const head = el('div', { class: 's-main-head' });
@@ -290,7 +293,7 @@ export function createDatabaseView(opts: {
       for (const v of detail.views) {
         const on = activeViewId ? v.id === activeViewId : false;
         const t = el('button', { class: `s-db-tab${on ? ' on' : ''}`, text: v.name || v.type });
-        if (v.entryCount != null) t.title = `${v.entryCount} 行`;
+        if (v.quickFilters) t.title = 'Notion の絞り込みが効いています';
         t.addEventListener('click', () => {
           activeViewId = v.id;
           void guard(reload);
@@ -341,14 +344,18 @@ export function createDatabaseView(opts: {
     table.append(thead);
 
     const tbody = el('tbody');
+    // ビューの式（絞り込みと並び）を手元で解く。取り込んでいない列を参照する条件は
+    // 効かせず、そのことを画面に断る。
+    const view = activeViewId ? detail.views.find((v) => v.id === activeViewId) ?? null : null;
+    const applied = applyView(detail.rows, detail.properties, view, timeZone);
     const q = filterText.trim();
     const visible = q
-      ? detail.rows.filter((r) => {
+      ? applied.rows.filter((r) => {
           if ((r.title || '').includes(q)) return true;
           // セルの中身も見る。担当や状態で絞りたいことが多い。
           return Object.values(r.cells).some((v) => JSON.stringify(v ?? '').includes(q));
         })
-      : detail.rows;
+      : applied.rows;
     for (const row of visible) {
       const tr = el('tr');
       const td = el('td', { class: 's-td-title' });
@@ -404,6 +411,13 @@ export function createDatabaseView(opts: {
     if (q && !visible.length) {
       body.append(el('div', { class: 's-note', text: `「${q}」に当てはまる行はありません` }));
     }
+    if (applied.unsupported.length) {
+      // 黙って全件出すと「絞り込めているつもり」になる。
+      body.append(el('div', {
+        class: 's-notion-warn',
+        text: `この列の条件は効かせられません（取り込んでいないため）: ${applied.unsupported.join(' / ')}`,
+      }));
+    }
 
     if (!managed) {
       const addRow = el('button', { class: 's-add-row', text: '＋ 行を追加' });
@@ -434,7 +448,7 @@ export function createDatabaseView(opts: {
 
   const reload = async (): Promise<void> => {
     if (!databaseId) return;
-    detail = await api.readDatabase(databaseId, activeViewId ?? undefined);
+    detail = await api.readDatabase(databaseId);
     paint();
   };
 
@@ -444,6 +458,10 @@ export function createDatabaseView(opts: {
       databaseId = id;
       activeViewId = null;
       filterText = '';
+      try {
+        const st = await api.readSettings();
+        if (st.settings.timezone) timeZone = st.settings.timezone;
+      } catch { /* 既定のまま */ }
       const list = await api.listDatabases().catch(() => null);
       dbTitle = list?.databases.find((d) => d.databaseId === id)?.title ?? '';
       await guard(reload);

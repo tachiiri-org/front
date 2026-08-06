@@ -24,11 +24,21 @@ export interface PageDetail {
 }
 export interface PropertyDef {
   id: string; name: string; type: PropertyType; rank: string | null;
+  /** Notion のプロパティ ID。ビューの式がこれで参照する。 */
+  notionId?: string | null;
   /** select / multi_select のときだけ入る。画面で選ばせるために使う。 */
   options?: OptionDef[];
 }
 export interface OptionDef { id: string; name: string; colorId?: string | null }
-export interface ViewDef { id: string; type: string; name: string; entryCount?: number }
+export interface ViewDef {
+  id: string; type: string; name: string;
+  /** Notion の式をそのまま預かったもの。画面側で解く。 */
+  filter?: string | null; sorts?: string | null;
+  /** 絞り込みの実体はこちら（filter は null で来る）。鍵は Notion のプロパティ ID。 */
+  quickFilters?: string | null;
+  /** 表示する列と幅。 */
+  configuration?: string | null;
+}
 export interface DatabaseSummary {
   databaseId: string; blockId: string | null; title: string; rowCount: number; propertyCount: number;
   /** Notion 由来なら data_source_id が入る。取り込み中は syncStatus が 'running'。 */
@@ -41,7 +51,11 @@ export interface DatabaseDetail {
   systemKind?: string | null;
   properties: PropertyDef[];
   views: ViewDef[];
-  rows: Array<{ id: string; title: string; cells: Record<string, unknown> }>;
+  rows: Array<{
+    id: string; title: string; cells: Record<string, unknown>;
+    /** Notion 側の作成・更新日時。ビューの並びや絞り込みが参照する。 */
+    notionCreatedAt?: number | null; notionEditedAt?: number | null;
+  }>;
 }
 export interface SearchHit { id: string; type: BlockType; text: string }
 
@@ -193,3 +207,6 @@ export async function uploadFile(blockId: string, file: File): Promise<{ fileId:
   }
   return (await res.json()) as { fileId: string };
 }
+
+export const readSettings = (): Promise<{ settings: Record<string, string> }> => call('/settings');
+export const saveSettings = (patch: Record<string, string>): Promise<unknown> => put('/settings', patch);
