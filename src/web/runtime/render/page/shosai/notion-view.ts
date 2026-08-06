@@ -9,7 +9,7 @@ import type { NotionConnection, NotionSource } from './api';
 import { el } from './style';
 
 const DROP_LABEL: Record<string, string> = {
-  '未共有のページへのリンク': '未共有のページへのリンク',
+  '未共有のページへのリンク': 'ページリンク（連携対象外）',
   people: '担当者', files: 'ファイル', formula: '数式', rollup: 'ロールアップ',
   created_by: '作成者', last_edited_by: '最終更新者', verification: '検証', button: 'ボタン',
   image: '画像', video: '動画', audio: '音声', file: 'ファイル', pdf: 'PDF',
@@ -33,7 +33,7 @@ function describeDropped(dropped: Record<string, number>): string[] {
   if (lost.length) out.push(`取り込めなかったもの: ${lost.join(' / ')}`);
   // 共有不足は人が直せるので、直し方まで書く。
   if (dropped['block:未共有のページへのリンク']) {
-    out.push('リンク先を Notion 側で連携に共有すると取り込めます（ページの ••• → 接続）');
+    out.push('「Notion 取り込みログ」に記録しました。リンク先を Notion 側で共有すると取り込めます（ページの ••• → 接続）');
   }
   if (flattened.length) out.push(`段落に均したもの（中身は残っています）: ${flattened.join(' / ')}`);
   return out;
@@ -68,7 +68,7 @@ export function createNotionView(opts: {
     head.append(el('span', { class: 's-notion-head-t', text: `${conn.workspaceName ?? 'Notion'} から取り込む` }));
     // 見えるデータソースは Notion 側で共有したものだけ。連携後に作ったものや、
     // 共有していないページはここに出てこないので、選び直しに行く導線を同じ画面に置く。
-    const regrant = el('a', { class: 's-notion-regrant', href: '/auth/notion', text: '⟳ 共有を見直す' });
+    const regrant = el('a', { class: 's-notion-regrant', href: '/auth/notion', text: '⟳ 再連携' });
     regrant.title = '連携後に作ったデータベースや、未共有のページはここから追加できます';
     head.append(regrant);
     pop.append(head);
@@ -90,7 +90,7 @@ export function createNotionView(opts: {
     if (!sources.length) {
       body.append(el('div', {
         class: 's-note',
-        text: '見えるデータソースがありません。上の「共有を見直す」から、取り込みたいページ／データベースを選んでください。',
+        text: '見えるデータソースがありません。上の「再連携」から、取り込みたいページ／データベースを選んでください。',
       }));
       return;
     }
@@ -205,7 +205,7 @@ export function createNotionView(opts: {
     progress.append(el('div', { class: 's-note', text: `${rows} 行 / ${blocks} ブロック` }));
     const fails = p?.failures ?? [];
     if (fails.length) {
-      const head = el('div', { class: 's-notion-warn', text: `失敗 ${fails.length} 件（新しい順）` });
+      const head = el('div', { class: 's-notion-warn', text: `取りこぼし ${fails.length} 件（新しい順・「Notion 取り込みログ」に記録）` });
       progress.append(head);
       for (const f of fails.slice(0, 5)) {
         progress.append(el('div', {
