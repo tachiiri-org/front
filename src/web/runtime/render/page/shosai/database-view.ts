@@ -394,7 +394,9 @@ export function createDatabaseView(opts: {
     lbtn.addEventListener('click', () => {
       openFilterEditor({
         anchor: lbtn,
-        properties: detail!.properties,
+        // タイトルは列ではなく行そのものが持つが、並べ替えの相手としては列と同じ。
+        // ここだけ列のふりをさせる（評価器は 'title' を特別に扱う）。
+        properties: [{ id: 'title', name: 'タイトル', type: 'text', rank: null }, ...detail!.properties],
         current: localFilters,
         sorts: localSorts,
         withSort: true,
