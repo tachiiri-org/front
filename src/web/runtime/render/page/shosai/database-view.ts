@@ -4,7 +4,7 @@
 // 画面側は p_property_type を見て入力要素を選ぶだけで、EAV の型分岐は持たない。
 
 import * as api from './api';
-import type { DatabaseDetail, PropertyType } from './api';
+import type { DatabaseDetail, OptionDef, PropertyType } from './api';
 import { el } from './style';
 
 const TYPE_LABEL: Record<PropertyType, string> = {
@@ -25,6 +25,7 @@ export function createDatabaseView(opts: {
   onOpenPage: (blockId: string) => void;
   onChanged: () => void;
 }): DatabaseView {
+
   let databaseId: string | null = null;
   let detail: DatabaseDetail | null = null;
   let dbTitle = '';
@@ -72,6 +73,113 @@ export function createDatabaseView(opts: {
     name.focus();
   };
 
+  /** 選択肢を選ぶポップオーバー。multi_select は複数、select は1つ。 */
+  const openOptionPicker = (
+    anchor: HTMLElement,
+    prop: { id: string; type: PropertyType },
+    selectedIds: string[],
+    onDone: (picked: OptionDef[]) => void,
+  ): void => {
+    const options = detail?.properties.find((p) => p.id === prop.id)?.options ?? [];
+    if (!options.length) {
+      opts.onError('この列にはまだ選択肢がありません（Notion 側で使われている値が選択肢になります）');
+      return;
+    }
+    const overlay = el('div', { class: 's-overlay' });
+    const pop = el('div', { class: 's-pop' });
+    const rect = anchor.getBoundingClientRect();
+    pop.style.position = 'fixed';
+    pop.style.left = `${Math.min(rect.left, window.innerWidth - 220)}px`;
+    pop.style.top = `${Math.min(rect.bottom + 4, window.innerHeight - 260)}px`;
+    pop.style.maxHeight = '240px';
+    pop.style.overflowY = 'auto';
+
+    const chosen = new Set(selectedIds);
+    const close = (): void => { overlay.remove(); pop.remove(); };
+    // 選んだ時点で保存する。「決定」を押さずに閉じると消える作りだと、
+    // 選んだのに保存されていないことに気づけない。
+    const apply = (): void => onDone(options.filter((o) => chosen.has(o.id)));
+    for (const o of options) {
+      const item = el('button', { class: 's-pop-item s-opt' });
+      const mark = el('span', { class: 's-opt-mark', text: chosen.has(o.id) ? '✓' : '' });
+      item.append(mark, el('span', { class: 's-chip', text: o.name }));
+      item.addEventListener('click', () => {
+        if (prop.type === 'select') { chosen.clear(); chosen.add(o.id); apply(); close(); return; }
+        if (chosen.has(o.id)) chosen.delete(o.id); else chosen.add(o.id);
+        mark.textContent = chosen.has(o.id) ? '✓' : '';
+        apply();
+      });
+      pop.append(item);
+    }
+    if (prop.type === 'multi_select') {
+      const done = el('button', { class: 's-pop-item s-opt-done', text: '閉じる' });
+      done.addEventListener('click', close);
+      pop.append(done);
+    }
+    overlay.addEventListener('click', close);
+    document.body.append(overlay, pop);
+  };
+
+  /**
+   * リレーションの参照先を選ぶ。候補は「その列が実際に指しているデータベース」の行。
+   * 指し先が未取り込みなら候補が出ないので、その旨を伝える。
+   */
+  const openPagePicker = async (
+    anchor: HTMLElement,
+    propertyId: string,
+    selectedIds: string[],
+    onDone: (picked: Array<{ id: string; title: string }>) => void,
+  ): Promise<void> => {
+    let candidates: Array<{ id: string; title: string }> = [];
+    try {
+      candidates = (await api.relationCandidates(propertyId)).pages;
+    } catch (e) {
+      opts.onError(e instanceof Error ? e.message : String(e));
+      return;
+    }
+    if (!candidates.length) {
+      opts.onError('参照先の候補がありません。指し先のデータベースをまだ取り込んでいない可能性があります。');
+      return;
+    }
+    const overlay = el('div', { class: 's-overlay' });
+    const pop = el('div', { class: 's-pop' });
+    const rect = anchor.getBoundingClientRect();
+    pop.style.position = 'fixed';
+    pop.style.left = `${Math.min(rect.left, window.innerWidth - 260)}px`;
+    pop.style.top = `${Math.min(rect.bottom + 4, window.innerHeight - 300)}px`;
+    pop.style.maxHeight = '280px';
+    pop.style.overflowY = 'auto';
+    pop.style.minWidth = '240px';
+
+    const chosen = new Set(selectedIds);
+    const close = (): void => { overlay.remove(); pop.remove(); };
+    const filter = el('input', { class: 's-search', placeholder: '絞り込み' }) as HTMLInputElement;
+    pop.append(filter);
+    const list = el('div');
+    pop.append(list);
+    const paint = (q: string): void => {
+      list.innerHTML = '';
+      for (const c of candidates.filter((x) => !q || (x.title || '').includes(q)).slice(0, 100)) {
+        const item = el('button', { class: 's-pop-item s-opt' });
+        const mark = el('span', { class: 's-opt-mark', text: chosen.has(c.id) ? '✓' : '' });
+        item.append(mark, el('span', { text: c.title || '（無題）' }));
+        item.addEventListener('click', () => {
+          if (chosen.has(c.id)) chosen.delete(c.id); else chosen.add(c.id);
+          mark.textContent = chosen.has(c.id) ? '✓' : '';
+          onDone(candidates.filter((x) => chosen.has(x.id)));   // 選んだ時点で保存する
+        });
+        list.append(item);
+      }
+    };
+    paint('');
+    filter.addEventListener('input', () => paint(filter.value.trim()));
+    const done = el('button', { class: 's-pop-item s-opt-done', text: '閉じる' });
+    done.addEventListener('click', close);
+    pop.append(done);
+    overlay.addEventListener('click', close);
+    document.body.append(overlay, pop);
+  };
+
   const cellInput = (blockId: string, prop: { id: string; type: PropertyType }, raw: unknown): HTMLElement => {
     const save = (value: unknown): void => {
       void guard(async () => {
@@ -87,16 +195,56 @@ export function createDatabaseView(opts: {
     }
 
     if (prop.type === 'select' || prop.type === 'multi_select') {
-      // 選択肢は j_choice（関係）なので、値は配列で返ってくる。
-      const chosen = Array.isArray(raw) ? (raw as Array<{ id: string; name: string }>) : [];
-      const box = el('div', { class: 's-cell', text: chosen.map((c) => c.name).join(', ') || '—' });
-      box.title = '選択肢の編集は未実装';
+      // Notion と同じく四角いチップで出す。クリックで選び直せる。
+      const chosen = Array.isArray(raw) ? (raw as OptionDef[]) : [];
+      const box = el('div', { class: 's-cell s-chips' });
+      const paint = (list: OptionDef[]): void => {
+        box.innerHTML = '';
+        if (!list.length) { box.append(el('span', { class: 's-chip-empty', text: '—' })); return; }
+        for (const c of list) {
+          box.append(el('span', { class: 's-chip', text: c.name }));
+        }
+      };
+      paint(chosen);
+      box.addEventListener('click', () => {
+        openOptionPicker(box, prop, chosen.map((c) => c.id), (picked) => {
+          save(picked.map((o) => o.id));
+          paint(picked);
+        });
+      });
       return box;
     }
 
     if (prop.type === 'relation') {
-      const ids = Array.isArray(raw) ? (raw as string[]) : [];
-      return el('div', { class: 's-cell', text: ids.length ? `${ids.length} 件` : '—' });
+      // リンクを押せば相手のページを開く。余白を押せば参照先を選び直す。
+      // 両方を1つのセルに載せるので、押した場所で分ける。
+      const box = el('div', { class: 's-cell s-chips s-chips-scroll' });
+      const paintRefs = (refs: Array<{ id: string; title: string }>): void => {
+        box.innerHTML = '';
+        if (!refs.length) {
+          box.append(el('span', { class: 's-chip-empty', text: '＋ 選ぶ' }));
+        } else {
+          for (const r of refs) {
+            const link = el('a', { class: 's-ref', text: r.title || '（無題）', href: '#' });
+            link.addEventListener('click', (e) => {
+              e.preventDefault(); e.stopPropagation();
+              opts.onOpenPage(r.id);
+            });
+            box.append(link);
+          }
+        }
+        const add = el('span', { class: 's-ref-add', text: '▾', title: '参照先を選ぶ' });
+        box.append(add);
+      };
+      paintRefs(Array.isArray(raw) ? (raw as Array<{ id: string; title: string }>) : []);
+      box.addEventListener('click', () => {
+        const current = (Array.isArray(raw) ? (raw as Array<{ id: string }>) : []).map((r) => r.id);
+        void openPagePicker(box, prop.id, current, (picked) => {
+          save(picked.map((p) => p.id));
+          paintRefs(picked);
+        });
+      });
+      return box;
     }
 
     const input = el('input', { class: 's-cell' }) as HTMLInputElement;
@@ -154,17 +302,39 @@ export function createDatabaseView(opts: {
     for (const row of detail.rows) {
       const tr = el('tr');
       const td = el('td', { class: 's-td-title' });
-      const ti = el('input', { class: 's-row-ti', placeholder: '無題' }) as HTMLInputElement;
-      ti.value = row.title;
-      ti.addEventListener('change', () => {
-        void guard(async () => {
-          await api.patchBlock(row.id, { text: ti.value });
-          opts.onChanged();
+      // タイトル自体が開く導線。名前の変更は鉛筆で入力に切り替える。
+      // 常時入力にすると、開きたいのか直したいのかが押すまで決まらない。
+      const link = el('a', { class: 's-row-link', text: row.title || '（無題）', href: '#' });
+      link.addEventListener('click', (e) => { e.preventDefault(); opts.onOpenPage(row.id); });
+      const pen = el('button', { class: 's-row-pen', text: '✎', title: '名前を変更' });
+      pen.addEventListener('click', () => {
+        const input = el('input', { class: 's-row-ti' }) as HTMLInputElement;
+        input.value = row.title;
+        const finish = (save: boolean): void => {
+          if (save && input.value !== row.title) {
+            const next = input.value;
+            void guard(async () => {
+              await api.patchBlock(row.id, { text: next });
+              row.title = next;
+              opts.onChanged();
+            });
+          }
+          link.textContent = (save ? input.value : row.title) || '（無題）';
+          input.replaceWith(link);
+          pen.style.display = '';
+        };
+        input.addEventListener('blur', () => finish(true));
+        input.addEventListener('keydown', (ev) => {
+          const k = ev as KeyboardEvent;
+          if (k.key === 'Enter') { ev.preventDefault(); finish(true); }
+          if (k.key === 'Escape') { ev.preventDefault(); finish(false); }
         });
+        link.replaceWith(input);
+        pen.style.display = 'none';
+        input.focus();
+        input.select();
       });
-      const open = el('button', { class: 's-open-btn', text: '開く' });
-      open.addEventListener('click', () => opts.onOpenPage(row.id));
-      td.append(ti, open);
+      td.append(link, pen);
       tr.append(td);
 
       for (const p of detail.properties) {
@@ -176,7 +346,11 @@ export function createDatabaseView(opts: {
       tbody.append(tr);
     }
     table.append(tbody);
-    body.append(table);
+    // 表は自分の箱の中で横スクロールさせる。ページごとはみ出すと、モバイルの
+    // ブラウザが全体を縮小表示してしまい、固定フッターまで画面外へ行く。
+    const scroller = el('div', { class: 's-tbl-scroll' });
+    scroller.append(table);
+    body.append(scroller);
 
     const addRow = el('button', { class: 's-add-row', text: '＋ 行を追加' });
     addRow.addEventListener('click', () => {

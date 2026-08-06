@@ -23,11 +23,29 @@ export async function renderShosai(container: HTMLElement): Promise<void> {
   // 失敗を握り潰すと「保存したつもりで消えている」が起きるので、必ず画面に出す。
   const errBar = el('div', { class: 's-err' });
   errBar.style.display = 'none';
+  let errTimer: ReturnType<typeof setTimeout> | null = null;
+  /**
+   * 出すのは「人が何かできる」ものだけにする。
+   * "Failed to fetch"（通信断・取り込み中のリクエスト取りこぼしなど）を出しても
+   * 読んだ人にできることが無く、壊れている印象だけが残る。そういうものは
+   * コンソールに残して画面には出さない。
+   */
   const showError = (message: string): void => {
-    errBar.textContent = message.includes('unauthenticated')
-      ? 'ログインの有効期限が切れました。再読み込みしてログインし直してください。'
-      : `エラー: ${message}`;
+    if (/unauthenticated|401/.test(message)) {
+      errBar.textContent = 'ログインの有効期限が切れました。画面を再読み込みしてログインし直してください。';
+    } else if (/insufficient role|403|forbidden/i.test(message)) {
+      errBar.textContent = 'この操作の権限がありません。管理者に確認してください。';
+    } else if (/Failed to fetch|NetworkError|load failed/i.test(message)) {
+      // 通信が一時的に切れただけ。次の操作か自動更新で回復する。
+      console.warn('[shosai] 一時的な通信エラー:', message);
+      return;
+    } else {
+      errBar.textContent = `エラー: ${message}`;
+    }
     errBar.style.display = '';
+    // 出しっぱなしにすると、直った後も壊れているように見える。
+    if (errTimer) clearTimeout(errTimer);
+    errTimer = setTimeout(() => { errBar.style.display = 'none'; }, 12000);
   };
   container.insertBefore(errBar, wrap);
 
@@ -49,9 +67,7 @@ export async function renderShosai(container: HTMLElement): Promise<void> {
   const listBox = el('div');
   const notionBox = el('div');
   sideList.append(listBox, notionBox);
-  // 引き下げて更新（モバイル）。
-  const ptr = el('div', { class: 's-ptr', text: '引き下げて更新' });
-  sideList.insertBefore(ptr, listBox);
+
 
   const searchBox = el('div', { class: 's-side-head' });
   const searchInput = el('input', { class: 's-search', placeholder: '全文検索' }) as HTMLInputElement;
@@ -63,10 +79,30 @@ export async function renderShosai(container: HTMLElement): Promise<void> {
   const editor = createEditorView({
     onError: showError,
     onTitleChange: () => { void refreshSide(); },
+    onOpenLink: (blockId) => {
+      activePageId = blockId;
+      void editor.open(blockId).then(() => {
+        openedPage?.(blockId, editor.currentTitle());
+        void refreshSide();
+      });
+    },
   });
+  // 「開く」やリレーションのリンクからエディタへ移る。移らないと、モバイルでは
+  // 読み込まれてもエディタペインが隠れたままで、中身が無いように見える。
+  // 開いたデータベース／ページをフッターのタブに登録する口。
+  // 実体はフッターの組み立てのところで入れる（そこでしか状態を持たないため）。
+  let openedDatabase: ((id: string, title: string) => void) | null = null;
+  let openedPage: ((id: string, title: string) => void) | null = null;
+  let closeTabByKey: (key: 'main' | 'editor') => void = () => { /* フッター組み立て後に入る */ };
   const database = createDatabaseView({
     onError: showError,
-    onOpenPage: (blockId) => { void editor.open(blockId); },
+    onOpenPage: (blockId) => {
+      activePageId = blockId;
+      void editor.open(blockId).then(() => {
+        openedPage?.(blockId, editor.currentTitle());
+        void refreshSide();
+      });
+    },
     onChanged: () => { void refreshSide(); },
   });
 
@@ -86,6 +122,90 @@ export async function renderShosai(container: HTMLElement): Promise<void> {
   let activeDatabaseId: string | null = null;
   let activePageId: string | null = null;
 
+  /**
+   * 一覧の項目を長押ししたときのメニュー。名前の変更と削除。
+   * 触っている指の下に出すと隠れるので、画面下から出す（トースト風）。
+   */
+  const closeSheets = (): void => {
+    document.querySelectorAll('.s-sheet, .s-overlay').forEach((n) => n.remove());
+  };
+
+  const openItemMenu = (kind: 'database' | 'page', id: string, title: string): void => {
+    closeSheets();   // 前のものが残っていると二重に出る
+    const overlay = el('div', { class: 's-overlay' });
+    const sheet = el('div', { class: 's-sheet' });
+    sheet.append(el('div', { class: 's-sheet-t', text: title || '（無題）' }));
+    const close = (): void => { overlay.remove(); sheet.remove(); closeSheets(); };
+
+    const rename = el('button', { class: 's-sheet-item', text: '名前を変更' });
+    rename.addEventListener('click', () => {
+      close();
+      const next = prompt('新しい名前', title);
+      if (next === null) return;
+      void (async () => {
+        try {
+          if (kind === 'database') {
+            // データベースの名前は、それを表示しているブロックの本文。
+            const dbs = await api.listDatabases();
+            const target = dbs.databases.find((d) => d.databaseId === id);
+            if (target?.blockId) await api.patchBlock(target.blockId, { text: next });
+          } else {
+            await api.patchBlock(id, { text: next });
+          }
+          await refreshSide();
+          if (kind === 'page' && editor.currentPageId() === id) await editor.reload();
+        } catch (e) { showError(e instanceof Error ? e.message : String(e)); }
+      })();
+    });
+
+    const del = el('button', { class: 's-sheet-item s-sheet-del', text: '削除' });
+    del.addEventListener('click', () => {
+      close();
+      // 取り消せない操作なので、何が消えるかを名指しで確認する。
+      const what = kind === 'database' ? 'データベース（中の行ごと）' : 'ページ（中のブロックごと）';
+      if (!confirm(`${title || '（無題）'} を削除します。\nこの${what}は元に戻せません。`)) return;
+      void (async () => {
+        try {
+          if (kind === 'database') {
+            await api.deleteDatabase(id);
+            if (activeDatabaseId === id) closeTabByKey('main');
+          } else {
+            await api.deleteBlock(id);
+            if (activePageId === id) closeTabByKey('editor');
+          }
+          await refreshSide();
+        } catch (e) { showError(e instanceof Error ? e.message : String(e)); }
+        finally { closeSheets(); }
+      })();
+    });
+
+    const cancel = el('button', { class: 's-sheet-item s-sheet-cancel', text: 'やめる' });
+    cancel.addEventListener('click', close);
+    sheet.append(rename, del, cancel);
+    overlay.addEventListener('click', close);
+    document.body.append(overlay, sheet);
+  };
+
+  /** 長押しを拾う。押したまま 500ms でメニュー、動かしたら取り消し。 */
+  const attachLongPress = (node: HTMLElement, run: () => void): void => {
+    let timer: ReturnType<typeof setTimeout> | null = null;
+    let moved = false;
+    let fired = false;
+    const start = (): void => {
+      moved = false; fired = false;
+      timer = setTimeout(() => { if (!moved) { fired = true; run(); } }, 500);
+    };
+    // 長押しの直後に click が続くと、メニューの裏で項目まで開いてしまう。
+    node.addEventListener('click', (e) => { if (fired) { e.stopPropagation(); e.preventDefault(); fired = false; } }, true);
+    const cancel = (): void => { if (timer) clearTimeout(timer); timer = null; };
+    node.addEventListener('touchstart', start, { passive: true });
+    node.addEventListener('touchmove', () => { moved = true; cancel(); }, { passive: true });
+    node.addEventListener('touchend', cancel);
+    node.addEventListener('touchcancel', cancel);
+    // マウスでも同じ操作ができるように、右クリックを同じメニューに割り当てる。
+    node.addEventListener('contextmenu', (e) => { e.preventDefault(); run(); });
+  };
+
   const sectionHead = (label: string, onAdd?: () => void): HTMLElement => {
     const h = el('div', { class: 's-side-head' });
     h.append(el('span', { text: label }), el('span', { class: 's-side-head-sp' }));
@@ -100,8 +220,9 @@ export async function renderShosai(container: HTMLElement): Promise<void> {
   async function refreshSide(): Promise<void> {
     listBox.innerHTML = '';
     try {
-      const [dbs, pages] = await Promise.all([api.listDatabases(), api.listPages()]);
+      const dbs = await api.listDatabases();
 
+      // ページの新規作成はデータベース見出しの右に置く。一覧を消しても作れるように。
       listBox.append(sectionHead('データベース', () => {
         const title = prompt('データベースの名前');
         if (title === null) return;
@@ -109,6 +230,7 @@ export async function renderShosai(container: HTMLElement): Promise<void> {
           try {
             const created = await api.createDatabase({ title: title || '無題のデータベース' });
             activeDatabaseId = created.databaseId;
+            openedDatabase?.(created.databaseId, title || '無題のデータベース');
             await database.open(created.databaseId);
             await refreshSide();
           } catch (e) { showError(e instanceof Error ? e.message : String(e)); }
@@ -127,39 +249,16 @@ export async function renderShosai(container: HTMLElement): Promise<void> {
         );
         item.addEventListener('click', () => {
           activeDatabaseId = d.databaseId;
+          openedDatabase?.(d.databaseId, d.title || 'データベース');
           void database.open(d.databaseId).then(refreshSide);
         });
+        attachLongPress(item, () => openItemMenu('database', d.databaseId, d.title));
         listBox.append(item);
       }
 
-      const pageSec = el('div', { class: 's-side-sec' });
-      pageSec.append(sectionHead('ページ', () => {
-        void (async () => {
-          try {
-            const created = await api.createBlock({ type: 'page', text: '無題' });
-            activePageId = created.id;
-            await editor.open(created.id);
-            await refreshSide();
-          } catch (e) { showError(e instanceof Error ? e.message : String(e)); }
-        })();
-      }));
-      listBox.append(pageSec);
-
-      if (!pages.pages.length) {
-        listBox.append(el('div', { class: 's-empty', text: 'まだありません' }));
-      }
-      for (const p of pages.pages) {
-        const item = el('div', { class: `s-item${p.id === activePageId ? ' on' : ''}` });
-        item.append(
-          el('span', { class: 's-item-ic', text: '▤' }),
-          el('span', { class: 's-item-tx', text: p.title || '無題' }),
-        );
-        item.addEventListener('click', () => {
-          activePageId = p.id;
-          void editor.open(p.id).then(refreshSide);
-        });
-        listBox.append(item);
-      }
+      // ページの一覧は出さない。取り込みで入るページはデータベースの行か、
+      // 本文からリンクされたものなので、データベースかリンク、検索から辿れる。
+      // 一覧に並べると、リンク先のページが何十件も積み上がって邪魔になる。
 
       // NOTION セクションは作り直さない。初回だけ組み立てる。
       if (!notionBox.contains(notion.el)) {
@@ -205,72 +304,90 @@ export async function renderShosai(container: HTMLElement): Promise<void> {
     }, 250);
   });
 
-  // ── モバイル: 固定フッターで3ペインを切り替える ────────────────
-  // ウラナイと同型。data-pane で表示するペインを決める。
-  const PANES: Array<{ key: string; label: string }> = [
-    { key: 'side', label: '一覧' },
-    { key: 'main', label: 'データベース' },
-    { key: 'editor', label: 'エディタ' },
-  ];
+  // ── モバイル: 開いているものだけをタブにする ──────────────────
+  // 「一覧 / データベース / エディタ」を常に並べると、何も選んでいないのに
+  // エディタを開けてしまい直感に反する。開いたものがタブになり、閉じられる形にする。
+  const isNarrowNow = (): boolean => window.matchMedia('(max-width: 640px)').matches;
   const foot = el('div', { class: 's-foot' });
-  const footBtns: HTMLElement[] = [];
-  const setPane = (key: string): void => {
-    wrap.dataset.pane = key;
-    footBtns.forEach((b, i) => b.classList.toggle('on', PANES[i].key === key));
-  };
-  for (const p of PANES) {
-    const b = el('button', { class: 's-foot-btn', type: 'button', text: p.label });
-    b.addEventListener('click', () => setPane(p.key));
-    footBtns.push(b);
-    foot.append(b);
-  }
-  container.append(foot);
-  setPane('side');
+  let openDb: { id: string; title: string } | null = null;
+  let openPage: { id: string; title: string } | null = null;
 
-  // 一覧からデータベース／ページを開いたら、モバイルではそのペインへ移る。
-  // 選んだのに画面が変わらないと、反応していないように見える。
-  const isNarrow = (): boolean => window.matchMedia('(max-width: 640px)').matches;
-  sideList.addEventListener('click', (e) => {
-    if (!isNarrow()) return;
-    const t = e.target as HTMLElement;
-    if (!t.closest('.s-item') || t.closest('.s-notion-connect')) return;
-    // データベースかページかは activeDatabaseId / activePageId の更新後に判断できないので、
-    // クリックされた項目のアイコンで見分ける。
-    const ic = t.closest('.s-item')?.querySelector('.s-item-ic')?.textContent ?? '';
-    if (ic === '▦') setPane('main');
-    else if (ic === '▤') setPane('editor');
+  const setPane = (key: string): void => {
+    // 閉じたタブが選ばれたままにならないよう、無ければ一覧へ戻す。
+    const ok = key === 'side' || (key === 'main' && openDb) || (key === 'editor' && openPage);
+    wrap.dataset.pane = ok ? key : 'side';
+    paintFoot();
+  };
+
+  let poppingPane = false;
+  const goPane = (key: string, push = true): void => {
+    if (wrap.dataset.pane === key) return;
+    setPane(key);
+    if (push && !poppingPane) history.pushState({ shosai: true, shosaiPane: key }, '', location.pathname);
+  };
+
+  const closeTab = (key: 'main' | 'editor'): void => {
+    if (key === 'main') { openDb = null; activeDatabaseId = null; }
+    else { openPage = null; activePageId = null; }
+    if (wrap.dataset.pane === key) setPane('side'); else paintFoot();
+    void refreshSide();
+  };
+
+  function paintFoot(): void {
+    foot.innerHTML = '';
+    const cur = wrap.dataset.pane ?? 'side';
+    const tabs: Array<{ key: string; label: string; closable: boolean }> = [
+      { key: 'side', label: '一覧', closable: false },
+    ];
+    if (openDb) tabs.push({ key: 'main', label: openDb.title || 'データベース', closable: true });
+    if (openPage) tabs.push({ key: 'editor', label: openPage.title || 'ページ', closable: true });
+    for (const t of tabs) {
+      const b = el('button', { class: `s-foot-btn${t.key === cur ? ' on' : ''}`, type: 'button' });
+      b.append(el('span', { class: 's-foot-lb', text: t.label }));
+      if (t.closable) {
+        const x = el('span', { class: 's-foot-x', text: '×', title: '閉じる' });
+        x.addEventListener('click', (ev) => { ev.stopPropagation(); closeTab(t.key as 'main' | 'editor'); });
+        b.append(x);
+      }
+      b.addEventListener('click', () => goPane(t.key));
+      foot.append(b);
+    }
+    // 開いていないペインは畳む。広い画面では常に3ペインとも出す。
+    const narrow = isNarrowNow();
+    database.el.style.display = !narrow || openDb ? '' : 'none';
+    editor.el.style.display = !narrow || openPage ? '' : 'none';
+  }
+
+  // 開いたものをタブとして登録する。ここが唯一の登録点。
+  openedDatabase = (id, title) => { openDb = { id, title }; goPane('main'); };
+  openedPage = (id, title) => { openPage = { id, title }; goPane('editor'); };
+  closeTabByKey = closeTab;
+
+  container.append(foot);
+
+  // モバイルの「戻る」でブラウザごと閉じないようにする。ペインの移動を履歴に積み、
+  // 戻る操作は前のペインへ返す。積まないと、最初の画面で戻る＝離脱になってしまう。
+  window.addEventListener('popstate', (e) => {
+    // ポップオーバー（選択肢・参照先・取り込み）が開いていれば、まずそれを閉じる。
+    const overlays = document.querySelectorAll('.s-overlay, .s-pop');
+    if (overlays.length) {
+      overlays.forEach((n) => n.remove());
+      history.pushState({ shosai: true, shosaiPane: wrap.dataset.pane ?? 'side' }, '', location.pathname);
+      return;
+    }
+    const st = (e.state ?? null) as { shosaiPane?: string } | null;
+    poppingPane = true;
+    setPane(st?.shosaiPane ?? 'side');
+    poppingPane = false;
   });
 
-  // ── 引き下げて更新 ────────────────────────────────────────────
-  // 左ペインを最上部で下へ引くと再読み込みする。モバイルのブラウザ標準の
-  // pull-to-refresh はページ全体を捨てるので、ここは自前で受ける。
-  let startY = 0;
-  let pulling = false;
-  sideList.addEventListener('touchstart', (e) => {
-    pulling = sideList.scrollTop <= 0;
-    startY = (e as TouchEvent).touches[0].clientY;
-  }, { passive: true });
-  sideList.addEventListener('touchmove', (e) => {
-    if (!pulling) return;
-    const dy = (e as TouchEvent).touches[0].clientY - startY;
-    if (dy <= 0) { ptr.classList.remove('on', 'armed'); return; }
-    ptr.classList.add('on');
-    ptr.classList.toggle('armed', dy > 64);
-    ptr.textContent = dy > 64 ? '離すと更新します' : '引き下げて更新';
-  }, { passive: true });
-  sideList.addEventListener('touchend', () => {
-    if (!pulling) return;
-    pulling = false;
-    const armed = ptr.classList.contains('armed');
-    ptr.classList.remove('on', 'armed');
-    if (!armed) return;
-    void (async () => {
-      await refreshSide();
-      await notion.refresh();
-      if (activeDatabaseId) await database.reload();
-      if (editor.currentPageId()) await editor.reload();
-    })();
-  }, { passive: true });
+  setPane((history.state as { shosaiPane?: string } | null)?.shosaiPane ?? 'side');
+  history.replaceState(
+    { shosai: true, shosaiPane: wrap.dataset.pane ?? 'side' }, '', location.pathname,
+  );
+
+  // 引き下げて更新はブラウザ標準に任せる（body が document スクロールなら効く）。
+  // 自前で touchmove を拾うとネイティブの挙動と二重になり、どちらも中途半端になる。
 
   await refreshSide();
 }

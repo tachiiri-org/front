@@ -372,9 +372,13 @@ const renderScreen = async (screenId: string): Promise<void> => {
     await renderKakeibo(root);
     return;
   }
-  // ショサイもカスタム画面（layouts スペック不要）。3ペインを画面高に収めるのでビューポート型。
+  // ショサイもカスタム画面（layouts スペック不要）。
+  // モバイルは document スクロールにする。body を overflow:hidden にすると
+  // ブラウザ標準の引き下げ更新（pull-to-refresh）が効かなくなるため。
+  // 広い画面では 3 ペインを画面高に収めたいので、幅で切り替える。
   if (screenId === 'shosai') {
-    applyViewportLayout();
+    const narrow = window.matchMedia('(max-width: 640px)').matches;
+    if (narrow) applyScrollableLayout(); else applyViewportLayout();
     void renderNav(screenId);
     root.innerHTML = '';
     root.style.position = 'relative';
@@ -583,9 +587,11 @@ const loadEditorBootstrap = async (): Promise<void> => {
 };
 
 window.addEventListener('popstate', (e) => {
-  // uranai の内部ナビゲーション（history.state.uranai を持つ）は uranai 側の
-  // popstate ハンドラが復元するため、ここでの全体再ブートストラップはスキップ。
-  if ((e.state as { uranai?: unknown } | null)?.uranai) return;
+  // uranai / shosai の内部ナビゲーション（history.state に自分の印を持つ）は
+  // それぞれの popstate ハンドラが復元するため、ここでの全体再ブートストラップは
+  // スキップする。再ブートストラップすると画面状態（開いているペインなど）が消える。
+  const st = e.state as { uranai?: unknown; shosai?: unknown } | null;
+  if (st?.uranai || st?.shosai) return;
   void loadEditorBootstrap();
 });
 

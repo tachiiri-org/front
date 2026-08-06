@@ -9,6 +9,7 @@ import type { NotionConnection, NotionSource } from './api';
 import { el } from './style';
 
 const DROP_LABEL: Record<string, string> = {
+  '未共有のページへのリンク': 'ページリンク（連携対象外）',
   people: '担当者', files: 'ファイル', formula: '数式', rollup: 'ロールアップ',
   created_by: '作成者', last_edited_by: '最終更新者', verification: '検証', button: 'ボタン',
   image: '画像', video: '動画', audio: '音声', file: 'ファイル', pdf: 'PDF',
@@ -30,6 +31,10 @@ function describeDropped(dropped: Record<string, number>): string[] {
   }
   const out: string[] = [];
   if (lost.length) out.push(`取り込めなかったもの: ${lost.join(' / ')}`);
+  // 共有不足は人が直せるので、直し方まで書く。
+  if (dropped['block:未共有のページへのリンク']) {
+    out.push('「Notion 取り込みログ」に記録しました。リンク先を Notion 側で共有すると取り込めます（ページの ••• → 接続）');
+  }
   if (flattened.length) out.push(`段落に均したもの（中身は残っています）: ${flattened.join(' / ')}`);
   return out;
 }
@@ -60,7 +65,12 @@ export function createNotionView(opts: {
     document.body.append(overlay, pop);
 
     const head = el('div', { class: 's-notion-head' });
-    head.append(el('span', { text: `${conn.workspaceName ?? 'Notion'} から取り込む` }));
+    head.append(el('span', { class: 's-notion-head-t', text: `${conn.workspaceName ?? 'Notion'} から取り込む` }));
+    // 見えるデータソースは Notion 側で共有したものだけ。連携後に作ったものや、
+    // 共有していないページはここに出てこないので、選び直しに行く導線を同じ画面に置く。
+    const regrant = el('a', { class: 's-notion-regrant', href: '/auth/notion', text: '⟳ 再連携' });
+    regrant.title = '連携後に作ったデータベースや、未共有のページはここから追加できます';
+    head.append(regrant);
     pop.append(head);
 
     const body = el('div', { class: 's-notion-body' });
@@ -80,7 +90,7 @@ export function createNotionView(opts: {
     if (!sources.length) {
       body.append(el('div', {
         class: 's-note',
-        text: '見えるデータソースがありません。Notion 側の接続設定で、取り込みたいページ／データベースを共有してください。',
+        text: '見えるデータソースがありません。上の「再連携」から、取り込みたいページ／データベースを選んでください。',
       }));
       return;
     }
@@ -92,33 +102,86 @@ export function createNotionView(opts: {
     bodyToggleWrap.append(bodyToggle, el('span', { text: 'ページの本文（ブロック）も取り込む' }));
     body.append(bodyToggleWrap);
 
+    // 複数選べるようにする。リレーションは相手が入っていないと機能しないので、
+    // 1つ選んだら指し先も一緒に選べる必要がある。
+    const picked = new Map<string, string>();   // dataSourceId -> title
+    const known = new Map(sources.map((s) => [s.id, s.title] as const));
     const list = el('div', { class: 's-notion-list' });
-    for (const src of sources) {
+    const note = el('div', { class: 's-note' });
+
+    const rowOf = (id: string, title: string, count: string): HTMLElement => {
       const row = el('div', { class: 's-notion-src' });
+      const cb = el('input', { type: 'checkbox' }) as HTMLInputElement;
+      cb.checked = picked.has(id);
       const label = el('div', { class: 's-notion-src-tx' });
       label.append(
-        el('div', { class: 's-notion-src-t', text: src.title || '（無題のデータソース）' }),
-        el('div', { class: 's-notion-src-m', text: `${src.propertyCount} 列` }),
+        el('div', { class: 's-notion-src-t', text: title || '（無題のデータソース）' }),
+        el('div', { class: 's-notion-src-m', text: count }),
       );
-      const btn = el('button', { class: 's-btn', text: '取り込む' });
-      btn.addEventListener('click', () => {
-        void guard(async () => {
-          btn.disabled = true;
-          btn.textContent = '開始中…';
+      row.append(cb, label);
+      const toggle = (): void => {
+        if (cb.checked) picked.set(id, title); else picked.delete(id);
+        updateStart();
+        if (cb.checked) void addRelated(id);
+      };
+      cb.addEventListener('change', toggle);
+      label.addEventListener('click', () => { cb.checked = !cb.checked; toggle(); });
+      return row;
+    };
+
+    // 指し先をたどって候補に足す。既に一覧にあるものはチェックだけ入れる。
+    const addRelated = async (id: string): Promise<void> => {
+      note.textContent = 'リレーションの指し先を調べています…';
+      try {
+        const { related } = await api.relatedSources(conn.connectionId, id);
+        let added = 0;
+        for (const r of related) {
+          if (!picked.has(r.id)) { picked.set(r.id, r.title || known.get(r.id) || 'Notion'); added++; }
+          if (!known.has(r.id)) {
+            known.set(r.id, r.title);
+            list.append(rowOf(r.id, r.title, '（リレーションの指し先）'));
+          }
+        }
+        // 既に一覧にある行のチェック状態を反映し直す。
+        for (const [i, s2] of sources.entries()) {
+          const cb = list.children[i]?.querySelector('input') as HTMLInputElement | undefined;
+          if (cb) cb.checked = picked.has(s2.id);
+        }
+        note.textContent = added
+          ? `リレーションの指し先 ${added} 件も選びました（外すこともできます）`
+          : 'リレーションの指し先はありません';
+        updateStart();
+      } catch (e) {
+        note.textContent = `指し先を調べられませんでした: ${e instanceof Error ? e.message : String(e)}`;
+      }
+    };
+
+    for (const src of sources) list.append(rowOf(src.id, src.title, `${src.propertyCount} 列`));
+    body.append(list, note);
+
+    const start = el('button', { class: 's-btn s-notion-start', text: '取り込む' });
+    const updateStart = (): void => {
+      start.textContent = picked.size > 1 ? `${picked.size} 件を取り込む` : '取り込む';
+      (start as HTMLButtonElement).disabled = picked.size === 0;
+    };
+    updateStart();
+    start.addEventListener('click', () => {
+      void guard(async () => {
+        (start as HTMLButtonElement).disabled = true;
+        start.textContent = '開始中…';
+        const targets = [...picked.entries()];
+        overlay.remove(); pop.remove();
+        // 直列に投げる。同時に走らせると Notion のレート制限に当たる。
+        for (const [id, title] of targets) {
           const started = await api.startImport({
-            connectionId: conn.connectionId,
-            dataSourceId: src.id,
-            title: src.title || 'Notion',
-            includeBody: bodyToggle.checked,
+            connectionId: conn.connectionId, dataSourceId: id,
+            title: title || 'Notion', includeBody: bodyToggle.checked,
           });
-          overlay.remove(); pop.remove();
-          watchImport(started.importId, src.title || 'Notion', started.databaseId);
-        });
+          watchImport(started.importId, title || 'Notion', started.databaseId);
+        }
       });
-      row.append(label, btn);
-      list.append(row);
-    }
-    body.append(list);
+    });
+    body.append(start);
   };
 
   // ── 進捗表示 ─────────────────────────────────────────────────
@@ -126,6 +189,32 @@ export function createNotionView(opts: {
   const progress = el('div', { class: 's-notion-progress' });
   progress.style.display = 'none';
   root.append(progress);
+
+  /** 進捗の枠を描き直す。走行中でも失敗が見えることが要点。 */
+  const paintProgress = async (databaseId: string, title: string, workflowStatus: string): Promise<void> => {
+    let p: api.ImportProgress | null = null;
+    try { p = await api.importProgress(databaseId); } catch { /* 取れなくても表示は続ける */ }
+    progress.innerHTML = '';
+    const st = p?.state;
+    const rows = st?.rows ?? p?.rowsInDb ?? 0;
+    const blocks = st?.blocks ?? 0;
+    progress.append(el('div', {
+      class: 's-notion-prog-line',
+      text: `${title}: ${st?.phase ?? workflowStatus}`,
+    }));
+    progress.append(el('div', { class: 's-note', text: `${rows} 行 / ${blocks} ブロック` }));
+    const fails = p?.failures ?? [];
+    if (fails.length) {
+      const head = el('div', { class: 's-notion-warn', text: `取りこぼし ${fails.length} 件（新しい順・「Notion 取り込みログ」に記録）` });
+      progress.append(head);
+      for (const f of fails.slice(0, 5)) {
+        progress.append(el('div', {
+          class: 's-notion-fail',
+          text: `${f.notionId ? f.notionId.slice(0, 8) + '… ' : ''}${f.message}`,
+        }));
+      }
+    }
+  };
 
   const watchImport = (importId: string, title: string, databaseId: string): void => {
     progress.style.display = '';
@@ -163,9 +252,11 @@ export function createNotionView(opts: {
           }
           if (out.failed?.length) {
             progress.append(el('div', {
-              class: 's-notion-warn',
-              text: `取り込めなかったページ ${out.failed.length} 件: ${out.failed[0]}`,
+              class: 's-notion-warn', text: `取り込めなかったページ ${out.failed.length} 件`,
             }));
+            for (const f of out.failed.slice(0, 5)) {
+              progress.append(el('div', { class: 's-notion-fail', text: f }));
+            }
           }
           opts.onImported();
           return;
@@ -175,18 +266,19 @@ export function createNotionView(opts: {
           progress.innerHTML = '';
           progress.append(el('div', { class: 's-notion-prog-err', text: `${title}: 失敗しました` }));
           progress.append(el('div', { class: 's-note', text: String(res.status.error ?? '').slice(0, 200) }));
+          // どこまで進んで何で落ちたかは DO 側の記録にしかない。
+          try {
+            const p = await api.importProgress(databaseId);
+            progress.append(el('div', { class: 's-note', text: `${p.rowsInDb} 行まで取り込み済み` }));
+            for (const f of p.failures.slice(0, 5)) {
+              progress.append(el('div', { class: 's-notion-fail', text: `${f.notionId ? f.notionId.slice(0,8) + '… ' : ''}${f.message}` }));
+            }
+          } catch { /* 取れなければ諦める */ }
           return;
         }
-        // 何件入ったかを実測して出す。ワークフローの状態だけでは進捗が分からない。
-        // 左ペイン全体は描き直さない（点滅する）。数字の行だけを書き換える。
-        let done = 0;
-        try {
-          const dbs = await api.listDatabases();
-          done = dbs.databases.find((d) => d.databaseId === databaseId)?.rowCount ?? 0;
-        } catch { /* 取れなくても進捗表示を止めない */ }
-        line.textContent = done
-          ? `${title}: ${done} 行を取り込みました…`
-          : `${title} を取り込んでいます…（${st}）`;
+        // ワークフローの状態は running としか言わないので、DO に書かれた進捗を読む。
+        // 左ペイン全体は描き直さない（点滅する）。この枠の中だけを書き換える。
+        await paintProgress(databaseId, title, st);
         opts.onProgress(databaseId);
       } catch {
         // 進捗の取得に失敗しても取り込み自体は続いている。監視だけ諦める。
@@ -198,6 +290,33 @@ export function createNotionView(opts: {
   };
 
   // ── 一覧の描画 ───────────────────────────────────────────────
+  /**
+   * 走行中の取り込みを拾い直す。画面を再読み込みしても進捗に戻れるようにする。
+   * ワークフローの importId は覚えていないので、DO 側の状態だけを見て表示する。
+   */
+  const resumeRunning = async (): Promise<void> => {
+    try {
+      const dbs = await api.listDatabases();
+      const running = dbs.databases.find((d) => d.syncStatus === 'running');
+      if (!running) return;
+      progress.style.display = '';
+      await paintProgress(running.databaseId, running.title || 'Notion', 'running');
+      // importId が無いので、DO の進捗だけを見張る。完了すると status が complete になる。
+      const poll = async (): Promise<void> => {
+        const p = await api.importProgress(running.databaseId).catch(() => null);
+        if (p?.state?.status === 'complete') {
+          await paintProgress(running.databaseId, running.title || 'Notion', 'complete');
+          opts.onImported();
+          return;
+        }
+        await paintProgress(running.databaseId, running.title || 'Notion', 'running');
+        opts.onProgress(running.databaseId);
+        setTimeout(() => { void poll(); }, 3000);
+      };
+      setTimeout(() => { void poll(); }, 3000);
+    } catch { /* 拾えなくても画面は動く */ }
+  };
+
   const refresh = async (): Promise<void> => {
     // 進捗表示は消さずに残す（取り込み中の再描画で消えると不安になる）。
     [...root.children].forEach((c) => { if (c !== progress) c.remove(); });
@@ -227,6 +346,9 @@ export function createNotionView(opts: {
       root.insertBefore(item, progress);
     }
 
+    // 連携後に Notion 側で作ったページやデータベースは、そのままでは見えない。
+    // アクセス範囲は同意画面のページピッカーで決まり、後から自動では広がらないため、
+    // もう一度同意画面に行って選び直す導線を出す。
     // 接続の追加は常に出す（複数ワークスペースを繋げる）。
     const connect = el('a', { class: 's-item s-notion-connect', href: '/auth/notion' });
     connect.append(
@@ -241,6 +363,7 @@ export function createNotionView(opts: {
         text: '接続すると、Notion 側で選んだページ／データベースだけが見えます。',
       }), progress);
     }
+    void resumeRunning();
   };
 
   return { el: root, refresh };
