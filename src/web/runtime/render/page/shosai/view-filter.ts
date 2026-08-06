@@ -15,6 +15,17 @@ import type { PropertyDef, ViewDef } from './api';
 export interface RowLike {
   id: string; title: string; cells: Record<string, unknown>;
   notionCreatedAt?: number | null; notionEditedAt?: number | null;
+  updatedAt?: number | null;
+}
+
+/**
+ * 既定の並び。ビューも並べ替えも指定していないときに使う。
+ * 更新の新しい順。取り込んだままの順（作成順）だと、直したものが下に埋もれる。
+ * Notion 側の更新日時があればそれを優先する（取り込み日時は全行ほぼ同じ値になる）。
+ */
+export function byRecent<T extends RowLike>(rows: T[]): T[] {
+  const at = (r: RowLike): number => r.notionEditedAt ?? r.updatedAt ?? r.notionCreatedAt ?? 0;
+  return [...rows].sort((a, b) => at(b) - at(a));
 }
 
 export interface Applied {

@@ -65,9 +65,12 @@ export async function renderShosai(container: HTMLElement): Promise<void> {
   // 一覧（データベース／ページ）と NOTION セクションを分ける。混ぜると取り込み中の
   // 更新で NOTION セクションまで作り直され、接続名やボタンが点滅する。
   const listBox = el('div');
+  // 取り込み中のものだけを入れる箱。5秒ごとの更新でここだけを描き直す。
+  // 一覧ごと描き直すと、開いている項目や検索の途中まで作り直されて落ち着かない。
+  const runBox = el('div');
   const notionBox = el('div');
   const toolBox = el('div', { class: 's-side-sec' });
-  sideList.append(listBox, notionBox, toolBox);
+  sideList.append(listBox, runBox, notionBox, toolBox);
 
 
   const searchBox = el('div', { class: 's-side-head' });
@@ -222,6 +225,87 @@ export async function renderShosai(container: HTMLElement): Promise<void> {
   // 取り込み中だけ動かす見張り。用が済んだら必ず止める（重なると何度も引きに行く）。
   let watchTimer: ReturnType<typeof setTimeout> | null = null;
 
+  /**
+   * 取り込み中の表示だけを描き直す。5秒ごとに呼ばれるので、ここで一覧まで
+   * 作り直すと、左ペイン全体が数秒ごとに点滅することになる。
+   * 走っているものの顔ぶれが変わったときだけ、一覧の方も引き直す。
+   */
+  let runningKey = '';
+  // 残り時間は、画面で見ている間の実測から出す。取り込み全体の平均だと、行の取り込みや
+  // 既に済んでいた分が混ざって当てにならない（実際、残り3分と出して7分かかった）。
+  const rateSample = new Map<string, { done: number; at: number; perPage: number }>();
+  function paintImports(imports: api.ImportInFlight[]): void {
+    runBox.innerHTML = '';
+    if (!imports.length) return;
+    runBox.append(sectionHead('取り込み中'));
+    for (const im of imports) {
+      const item = el('div', { class: 's-item s-item-run' });
+      const tx = el('div', { class: 's-item-tx' });
+      tx.append(el('div', { text: im.title || '無題' }));
+      const done = im.bodyDone ?? 0;
+      const total = im.bodyTotal ?? 0;
+      if (total > 0) {
+        const pct = Math.min(100, Math.round((done / total) * 100));
+        const bar = el('div', { class: 's-bar' });
+        const fill = el('div', { class: 's-bar-in' });
+        fill.style.width = `${pct}%`;
+        bar.append(fill);
+        tx.append(bar);
+        // 残り時間は、その取り込みの実測から出す。1件も進んでいないうちは出さない
+        // （根拠の無い見込みを出さない）。
+        const now = Date.now();
+        const prev = rateSample.get(im.databaseId);
+        if (!prev) rateSample.set(im.databaseId, { done, at: now, perPage: 0 });
+        else if (done > prev.done && now > prev.at) {
+          // 直近の実測と、それまでの見立てを半々で混ぜる。1回の揺れで数字が飛ばないように。
+          const cur = (now - prev.at) / (done - prev.done);
+          rateSample.set(im.databaseId, { done, at: now, perPage: prev.perPage ? (prev.perPage + cur) / 2 : cur });
+        }
+        const perPage = rateSample.get(im.databaseId)?.perPage ?? 0;
+        let eta = '';
+        if (perPage > 0 && total > done) {
+          const left = Math.round(((total - done) * perPage) / 60000);
+          eta = left <= 1 ? ' ・残り1分ほど' : left < 90 ? ` ・残り${left}分ほど`
+            : ` ・残り${Math.round(left / 60)}時間ほど`;
+        }
+        tx.append(el('div', { class: 's-item-sub', text: `${pct}%（${done}/${total} ページ）${eta}` }));
+      } else {
+        tx.append(el('div', { class: 's-item-sub', text: im.phase ?? '取り込んでいます' }));
+      }
+      if (im.attempt) tx.append(el('div', { class: 's-item-sub', text: `やり直し ${im.attempt} 回目` }));
+      item.append(el('span', { class: 's-item-ic', text: '⟳' }), tx);
+      const stop = el('button', { class: 's-item-stop', text: '中止', title: '取り込みを中止する' });
+      stop.addEventListener('click', (ev) => {
+        ev.stopPropagation();
+        if (!window.confirm(`「${im.title || '無題'}」の取り込みを中止します。ここまでの分は残ります。`)) return;
+        void (async () => {
+          try {
+            await api.cancelImport(im.importId, im.databaseId);
+            await refreshSide();
+          } catch (e) { showError(e instanceof Error ? e.message : String(e)); }
+        })();
+      });
+      item.append(stop);
+      runBox.append(item);
+    }
+  }
+
+  /** 走っているものだけを見に行く。顔ぶれが変わったときだけ一覧も引き直す。 */
+  async function refreshImports(): Promise<void> {
+    let dbs: { imports?: api.ImportInFlight[] };
+    try { dbs = await api.listDatabases(); } catch { return; }
+    const imports = dbs.imports ?? [];
+    const key = imports.map((i) => i.databaseId).sort().join(',');
+    if (key !== runningKey) { runningKey = key; void refreshSide(); return; }
+    paintImports(imports);
+    scheduleWatch(imports.length > 0);
+  }
+
+  function scheduleWatch(on: boolean): void {
+    if (watchTimer) { clearTimeout(watchTimer); watchTimer = null; }
+    if (on) watchTimer = setTimeout(() => { void refreshImports(); }, 5000);
+  }
+
   async function refreshSide(): Promise<void> {
     listBox.innerHTML = '';
     try {
@@ -287,58 +371,12 @@ export async function renderShosai(container: HTMLElement): Promise<void> {
       }
 
       // 取り込みの途中のものは、データベースとしては出さない（中身が揃っていない表は
-      // 開いても使えない）。ただし隠さない。落ちたときにデータベースごと消えたように
-      // 見えてしまい、実際そう見えた。状況として出し、中止できるようにする。
-      for (const im of dbs.imports ?? []) {
-        const item = el('div', { class: 's-item s-item-run' });
-        const tx = el('div', { class: 's-item-tx' });
-        tx.append(el('div', { text: im.title || '無題' }));
-        // 進み具合は文字で出す。ここが見えないと、止まっているのか進んでいるのかが
-        // 分からない。実際「本文の取り込みに入ると何も見えなくなる」ことになっていた。
-        const done = im.bodyDone ?? 0;
-        const total = im.bodyTotal ?? 0;
-        if (total > 0) {
-          const pct = Math.min(100, Math.round((done / total) * 100));
-          const bar = el('div', { class: 's-bar' });
-          const fill = el('div', { class: 's-bar-in' });
-          fill.style.width = `${pct}%`;
-          bar.append(fill);
-          tx.append(bar);
-          // 残り時間は、この取り込みが始まってからの実測から出す。見込みなので幅を持たせない
-          // かわりに、根拠のある間だけ出す（1件も進んでいないうちは出さない）。
-          const elapsed = im.startedAt && im.updatedAt ? im.updatedAt - im.startedAt : 0;
-          let eta = '';
-          if (done > 0 && elapsed > 20000) {
-            const perPage = elapsed / done;
-            const left = Math.round(((total - done) * perPage) / 60000);
-            eta = left <= 1 ? ' ・残り1分ほど' : left < 90 ? ` ・残り${left}分ほど`
-              : ` ・残り${Math.round(left / 60)}時間ほど`;
-          }
-          tx.append(el('div', { class: 's-item-sub', text: `${pct}%（${done}/${total} ページ）${eta}` }));
-        } else {
-          tx.append(el('div', { class: 's-item-sub', text: im.phase ?? '取り込んでいます' }));
-        }
-        if (im.attempt) {
-          tx.append(el('div', { class: 's-item-sub', text: `やり直し ${im.attempt} 回目` }));
-        }
-        item.append(el('span', { class: 's-item-ic', text: '⟳' }), tx);
-        const stop = el('button', { class: 's-item-stop', text: '中止', title: '取り込みを中止する' });
-        stop.addEventListener('click', (ev) => {
-          ev.stopPropagation();
-          if (!window.confirm(`「${im.title || '無題'}」の取り込みを中止します。ここまでの分は残ります。`)) return;
-          void (async () => {
-            try {
-              await api.cancelImport(im.importId, im.databaseId);
-              await refreshSide();
-            } catch (e) { showError(e instanceof Error ? e.message : String(e)); }
-          })();
-        });
-        item.append(stop);
-        listBox.append(item);
-      }
-      // 走っている間は自分で見に行く。何かの操作を待っていると、数字が止まって見える。
-      if (watchTimer) { clearTimeout(watchTimer); watchTimer = null; }
-      if ((dbs.imports ?? []).length) watchTimer = setTimeout(() => { void refreshSide(); }, 5000);
+      // 開いても使えない）。ただし隠さない。NOTION の上に「取り込み中」として出し、
+      // 割合と残り時間、中止する手立てを添える。
+      const imports = dbs.imports ?? [];
+      runningKey = imports.map((i) => i.databaseId).sort().join(',');
+      paintImports(imports);
+      scheduleWatch(imports.length > 0);
 
       // ページの一覧は出さない。取り込みで入るページはデータベースの行か、
       // 本文からリンクされたものなので、データベースかリンク、検索から辿れる。
