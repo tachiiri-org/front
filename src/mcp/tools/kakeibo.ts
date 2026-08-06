@@ -156,6 +156,11 @@ export const KAKEIBO_TOOLS = [
           description: "費目 names, e.g. ['食費']. Replaces the existing set.",
         },
         alias: { type: "string", description: "略名, e.g. 'ライフ'. Empty string clears it." },
+        fixed: {
+          type: "boolean",
+          description:
+            "Mark this shop as a fixed cost even when its 費目 is not one — a subscription box under 食費, for example. The projection then carries it forward from earlier months instead of prorating it by elapsed days.",
+        },
       },
       required: ["shop_id"],
     },
@@ -239,11 +244,12 @@ export async function callKakeiboTool(
     if (!shopId) {
       return { content: [{ type: "text", text: "shop_id is required" }], isError: true };
     }
-    const body: { categories?: string[]; alias?: string } = {};
+    const body: { categories?: string[]; alias?: string; fixed?: boolean } = {};
     if (Array.isArray(args.categories)) body.categories = args.categories.map((c) => String(c));
     if (typeof args.alias === "string") body.alias = args.alias;
-    if (body.categories === undefined && body.alias === undefined) {
-      return { content: [{ type: "text", text: "nothing to update: pass categories and/or alias" }], isError: true };
+    if (typeof args.fixed === "boolean") body.fixed = args.fixed;
+    if (body.categories === undefined && body.alias === undefined && body.fixed === undefined) {
+      return { content: [{ type: "text", text: "nothing to update: pass categories, alias and/or fixed" }], isError: true };
     }
     return asResult(await kakeiboFetch(env, `/shops/${encodeURIComponent(shopId)}`, "PUT", body));
   }
