@@ -354,6 +354,8 @@ export async function renderShosai(container: HTMLElement): Promise<void> {
       settingItem.addEventListener('click', () => { void openSettings(); });
       toolBox.append(settingItem);
     } catch (e) {
+      // 一時的な調査用。原因の位置が分からないと直しようがない。
+      console.error('[shosai] refreshSide 失敗', e);
       showError(e instanceof Error ? e.message : String(e));
     }
   }
