@@ -6,6 +6,7 @@
 import * as api from './api';
 import type { DatabaseDetail, OptionDef, PropertyType } from './api';
 import { applyView } from './view-filter';
+import { openFilterEditor } from './filter-editor';
 import { el } from './style';
 
 const TYPE_LABEL: Record<PropertyType, string> = {
@@ -307,6 +308,27 @@ export function createDatabaseView(opts: {
       const all = el('button', { class: `s-db-tab${activeViewId ? '' : ' on'}`, text: 'すべて' });
       all.addEventListener('click', () => { activeViewId = null; void guard(reload); });
       tabs.append(all);
+      // 絞り込みはビューに属する。ビューを選んでいるときだけ触れる。
+      const view = activeViewId ? detail.views.find((v) => v.id === activeViewId) ?? null : null;
+      if (view) {
+        const fbtn = el('button', { class: 's-db-filter', text: '絞り込み' });
+        const q = view.quickFilters ? Object.keys(JSON.parse(view.quickFilters) as object).length : 0;
+        if (q) fbtn.textContent = `絞り込み ${q}`;
+        fbtn.addEventListener('click', () => {
+          openFilterEditor({
+            anchor: fbtn,
+            properties: detail!.properties,
+            current: view.quickFilters ? (JSON.parse(view.quickFilters) as Record<string, Record<string, unknown>>) : {},
+            onSave: (quickFilters) => {
+              void guard(async () => {
+                await api.updateView(view.id, { quickFilters: quickFilters ?? null });
+                await reload();
+              });
+            },
+          });
+        });
+        tabs.append(fbtn);
+      }
       body.append(tabs);
     }
 
@@ -349,8 +371,8 @@ export function createDatabaseView(opts: {
     const tbody = el('tbody');
     // ビューの式（絞り込みと並び）を手元で解く。取り込んでいない列を参照する条件は
     // 効かせず、そのことを画面に断る。
-    const view = activeViewId ? detail.views.find((v) => v.id === activeViewId) ?? null : null;
-    const applied = applyView(detail.rows, detail.properties, view, timeZone);
+    const activeView = activeViewId ? detail.views.find((v) => v.id === activeViewId) ?? null : null;
+    const applied = applyView(detail.rows, detail.properties, activeView, timeZone);
     const q = filterText.trim();
     const visible = q
       ? applied.rows.filter((r) => {

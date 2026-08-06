@@ -66,7 +66,8 @@ export async function renderShosai(container: HTMLElement): Promise<void> {
   // 更新で NOTION セクションまで作り直され、接続名やボタンが点滅する。
   const listBox = el('div');
   const notionBox = el('div');
-  sideList.append(listBox, notionBox);
+  const toolBox = el('div', { class: 's-side-sec' });
+  sideList.append(listBox, notionBox, toolBox);
 
 
   const searchBox = el('div', { class: 's-side-head' });
@@ -127,6 +128,56 @@ export async function renderShosai(container: HTMLElement): Promise<void> {
    * 一覧の項目を長押ししたときのメニュー。名前の変更と削除。
    * 触っている指の下に出すと隠れるので、画面下から出す（トースト風）。
    */
+  /**
+   * 設定。いまはタイムゾーンだけ。相対日付（今週・先月）をどこの時刻で
+   * 解くかが変わるので、既定任せにせず選べるようにする。
+   */
+  const openSettings = async (): Promise<void> => {
+    closeSheets();
+    let current = 'Asia/Tokyo';
+    try {
+      const st = await api.readSettings();
+      if (st.settings.timezone) current = st.settings.timezone;
+    } catch { /* 既定のまま */ }
+    const overlay = el('div', { class: 's-overlay' });
+    const sheet = el('div', { class: 's-sheet' });
+    const close = (): void => { overlay.remove(); sheet.remove(); };
+    sheet.append(el('div', { class: 's-sheet-t', text: '設定' }));
+
+    const row = el('div', { class: 's-set-row' });
+    row.append(el('span', { class: 's-set-label', text: 'タイムゾーン' }));
+    const sel = el('select', { class: 's-filter-sel' }) as HTMLSelectElement;
+    // よく使うものだけ並べ、それ以外は現在値として残す。
+    const zones = ['Asia/Tokyo', 'Asia/Seoul', 'Asia/Shanghai', 'Asia/Singapore',
+      'Europe/London', 'Europe/Paris', 'America/New_York', 'America/Los_Angeles', 'UTC'];
+    if (!zones.includes(current)) zones.unshift(current);
+    for (const z of zones) sel.append(el('option', { value: z, text: z, ...(z === current ? { selected: 'selected' } : {}) }));
+    sel.value = current;
+    row.append(sel);
+    sheet.append(row);
+    sheet.append(el('div', {
+      class: 's-note',
+      text: 'ビューの「今週」「過去1か月」などを、どこの時刻で解くかに使います。',
+    }));
+
+    const save = el('button', { class: 's-sheet-item', text: '保存' });
+    save.addEventListener('click', () => {
+      const next = sel.value;
+      close();
+      void (async () => {
+        try {
+          await api.saveSettings({ timezone: next });
+          if (activeDatabaseId) await database.reload();
+        } catch (e) { showError(e instanceof Error ? e.message : String(e)); }
+      })();
+    });
+    const cancel = el('button', { class: 's-sheet-item s-sheet-cancel', text: 'やめる' });
+    cancel.addEventListener('click', close);
+    sheet.append(save, cancel);
+    overlay.addEventListener('click', close);
+    document.body.append(overlay, sheet);
+  };
+
   const closeSheets = (): void => {
     document.querySelectorAll('.s-sheet, .s-overlay').forEach((n) => n.remove());
   };
@@ -238,10 +289,14 @@ export async function renderShosai(container: HTMLElement): Promise<void> {
         })();
       }));
 
-      if (!dbs.databases.length) {
+      if (!userDbs.length) {
         listBox.append(el('div', { class: 's-empty', text: 'まだありません' }));
       }
-      for (const d of dbs.databases) {
+      // 仕組みが持つもの（取り込みログ）は、ユーザーの作ったものと同じ並びに置かない。
+      // 下部の「ツール」にまとめる。
+      const userDbs = dbs.databases.filter((d) => !d.systemKind);
+      const sysDbs = dbs.databases.filter((d) => d.systemKind);
+      for (const d of userDbs) {
         // 仕組みが持つもの（取り込みログ）は、ユーザーの作ったものと並べない。
         // 印を変え、消させない。
         const managed = !!d.systemKind;
@@ -272,6 +327,32 @@ export async function renderShosai(container: HTMLElement): Promise<void> {
         notionBox.append(notion.el);
         void notion.refresh();
       }
+
+      // 一番下に、仕組みのもの（取り込みログ）と設定をまとめる。
+      toolBox.innerHTML = '';
+      toolBox.append(sectionHead('ツール'));
+      for (const d of sysDbs) {
+        const item = el('div', { class: `s-item s-item-sys${d.databaseId === activeDatabaseId ? ' on' : ''}` });
+        item.append(
+          el('span', { class: 's-item-ic', text: '⚙' }),
+          el('span', { class: 's-item-tx', text: d.title || '記録' }),
+          el('span', { class: 's-item-ct', text: String(d.rowCount) }),
+        );
+        item.title = '取り込みの記録です。仕組みが管理しているため削除できません。';
+        item.addEventListener('click', () => {
+          activeDatabaseId = d.databaseId;
+          openedDatabase?.(d.databaseId, d.title || '記録');
+          void database.open(d.databaseId).then(refreshSide);
+        });
+        toolBox.append(item);
+      }
+      const settingItem = el('div', { class: 's-item s-item-sys' });
+      settingItem.append(
+        el('span', { class: 's-item-ic', text: '⚙' }),
+        el('span', { class: 's-item-tx', text: '設定' }),
+      );
+      settingItem.addEventListener('click', () => { void openSettings(); });
+      toolBox.append(settingItem);
     } catch (e) {
       showError(e instanceof Error ? e.message : String(e));
     }

@@ -215,3 +215,7 @@ export const saveSettings = (patch: Record<string, string>): Promise<unknown> =>
 export const cancelImport = (importId: string, databaseId?: string): Promise<unknown> =>
   call(`/notion/import/${encodeURIComponent(importId)}${databaseId ? `?databaseId=${encodeURIComponent(databaseId)}` : ''}`,
     { method: 'DELETE' });
+
+/** ビューの絞り込み・並び・名前を変える。式は Notion のプロパティ ID を鍵にする。 */
+export const updateView = (viewId: string, patch: Record<string, unknown>): Promise<unknown> =>
+  put(`/view/${encodeURIComponent(viewId)}`, patch);
