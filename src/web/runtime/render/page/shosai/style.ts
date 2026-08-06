@@ -16,7 +16,13 @@ export const SHOSAI_CSS = `
   .s-item:hover{background:#0000000a}
   .s-item.on{background:#4A90C222;font-weight:600}
   /* 取り込みの途中。データベースとしては開けないが、走っていることは見せる。 */
-  .s-item-run{color:#888;cursor:default}
+  .s-item-run{color:#888;cursor:default;align-items:flex-start}
+  .s-item-run .s-item-tx{white-space:normal}
+  .s-item-sub{font-size:11px;color:#aaa;line-height:1.4}
+  /* 割合のゲージ。数字だけだと、残りがどれくらいかが一目で入らない。 */
+  .s-bar{height:3px;border-radius:2px;background:#0001;margin:4px 0 3px;overflow:hidden}
+  .s-bar-in{height:100%;background:#4A90C2;border-radius:2px;transition:width .4s}
+  [data-theme=dark] .s-bar{background:#ffffff1f}
   .s-item-stop{flex:none;border:1px solid #0002;background:transparent;color:#888;border-radius:4px;
     padding:1px 6px;font-size:11px;cursor:pointer;font-family:inherit}
   .s-item-stop:hover{border-color:#c0392b;color:#c0392b}
