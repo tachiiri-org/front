@@ -296,40 +296,62 @@ export function createDatabaseView(opts: {
     return input;
   };
 
-  /** 小さな選択肢の吹き出し。列やビューの「直す・消す」をここに集める。 */
-  interface MenuItem { label: string; run?: () => void; sub?: MenuItem[] }
+  /**
+   * 小さな選択肢の吹き出し。列やビューの「直す・消す」をここに集める。
+   * 入れ子は、その項目の横に開く（元の項目が見えたまま選べる）。
+   */
+  interface MenuItem { label: string; run?: () => void; sub?: MenuItem[]; row?: MenuItem[] }
   const openMenu = (anchor: HTMLElement, items: MenuItem[], extra?: HTMLElement): void => {
     const overlay = el('div', { class: 's-overlay' });
     const pop = el('div', { class: 's-pop' });
     const r = anchor.getBoundingClientRect();
     pop.style.position = 'fixed';
-    pop.style.left = `${Math.min(r.left, window.innerWidth - 220)}px`;
+    pop.style.left = `${Math.min(r.left, window.innerWidth - 230)}px`;
     pop.style.top = `${Math.min(r.bottom + 4, window.innerHeight - 260)}px`;
-    pop.style.maxHeight = '280px';
-    pop.style.overflowY = 'auto';
-    const close = (): void => { overlay.remove(); pop.remove(); };
-    // 入れ子は別の吹き出しを出さず、同じ吹き出しの中身を差し替える。
-    // 小さな menu が二枚重なると、どちらを押しているのか分からなくなる。
-    const paintMenu = (list: MenuItem[], back?: MenuItem[]): void => {
-      pop.innerHTML = '';
-      if (back) {
-        const b = el('button', { class: 's-pop-item s-pop-back', text: '← 戻る' });
-        b.addEventListener('click', () => paintMenu(back));
-        pop.append(b);
-      } else if (extra) {
-        pop.append(extra);
+    let flyout: HTMLElement | null = null;
+    const close = (): void => { overlay.remove(); pop.remove(); flyout?.remove(); };
+    if (extra) pop.append(extra);
+    for (const it of items) {
+      // 横並びの組（昇順・降順など）。上下に並べると、対になっていることが伝わらない。
+      if (it.row) {
+        const row = el('div', { class: 's-pop-row' });
+        for (const sub of it.row) {
+          const b = el('button', { class: 's-pop-item s-pop-half', text: sub.label });
+          b.addEventListener('click', () => { close(); sub.run?.(); });
+          row.append(b);
+        }
+        pop.append(row);
+        continue;
       }
-      for (const it of list) {
-        const b = el('button', { class: 's-pop-item', text: it.sub ? `${it.label} ▶` : it.label });
-        b.addEventListener('click', () => {
-          if (it.sub) { paintMenu(it.sub, list); return; }
-          close();
-          it.run?.();
-        });
-        pop.append(b);
+      const b = el('button', { class: `s-pop-item${it.sub ? ' s-pop-more' : ''}`, text: it.label });
+      if (it.sub) {
+        const openFly = (): void => {
+          flyout?.remove();
+          const fly = el('div', { class: 's-pop s-pop-fly' });
+          const br = b.getBoundingClientRect();
+          fly.style.position = 'fixed';
+          // 右に出す。画面の端に当たるなら左へ回す。
+          const w = 150;
+          fly.style.left = `${br.right + w > window.innerWidth ? br.left - w : br.right + 2}px`;
+          fly.style.top = `${Math.min(br.top, window.innerHeight - 240)}px`;
+          fly.style.width = `${w}px`;
+          for (const sub of it.sub!) {
+            const sb = el('button', { class: 's-pop-item', text: sub.label });
+            sb.addEventListener('click', () => { close(); sub.run?.(); });
+            fly.append(sb);
+          }
+          document.body.append(fly);
+          flyout = fly;
+        };
+        b.addEventListener('mouseenter', openFly);
+        b.addEventListener('focus', openFly);
+        b.addEventListener('click', openFly);   // 触る画面には hover が無い
+      } else {
+        b.addEventListener('mouseenter', () => { flyout?.remove(); flyout = null; });
+        b.addEventListener('click', () => { close(); it.run?.(); });
       }
-    };
-    paintMenu(items);
+      pop.append(b);
+    }
     overlay.addEventListener('click', close);
     document.body.append(overlay, pop);
     (extra?.querySelector('input') ?? extra)?.focus?.();
@@ -365,7 +387,24 @@ export function createDatabaseView(opts: {
     });
     name.addEventListener('blur', rename);
 
-    if (isTitle) { openMenu(anchor, [], name); return; }
+    // 並べ替えはこの表を見ている間だけのもの。ビューには保存しない。
+    const sortBy = (direction: SortRule['direction']): void => {
+      const rest = localSorts.filter((r) => r.property !== prop.id);
+      const cur = localSorts.find((r) => r.property === prop.id);
+      // 同じ向きをもう一度選んだら外す。掛けたものを外す道が無いと戻れない。
+      localSorts = cur && cur.direction === direction ? rest : [{ property: prop.id, direction }, ...rest];
+      paint();
+    };
+    const cur = localSorts.find((r) => r.property === prop.id);
+    const sortRow: MenuItem = {
+      label: '',
+      row: [
+        { label: cur?.direction === 'ascending' ? '▲ 昇順' : '昇順', run: () => sortBy('ascending') },
+        { label: cur?.direction === 'descending' ? '▼ 降順' : '降順', run: () => sortBy('descending') },
+      ],
+    };
+
+    if (isTitle) { openMenu(anchor, [sortRow], name); return; }
 
     const types: MenuItem[] = TYPE_ORDER.filter((t) => t !== prop.type).map((t) => ({
       label: TYPE_LABEL[t],
@@ -380,7 +419,8 @@ export function createDatabaseView(opts: {
       },
     }));
     openMenu(anchor, [
-      { label: '種類を変える', sub: types },
+      sortRow,
+      { label: `種類（${TYPE_LABEL[prop.type]}）`, sub: types },
       {
         label: `「${prop.name}」を削除`,
         run: () => {
@@ -599,38 +639,18 @@ export function createDatabaseView(opts: {
     // 仕組みが持つデータベース（取り込みログ）は列が決まっている。触らせない。
     const managed = !!detail.systemKind;
 
-    /**
-     * 列の見出し。名前を押すと menu、漏斗でフィルタ、⇅ で並び替え。
-     * どちらの印もこの表だけのもの（ビューには保存しない）。
-     */
-    const headCell = (key: string, name: string, kind: string | null, onMenu: ((a: HTMLElement) => void) | null): HTMLElement => {
+    /** 列の見出し。名前を押すと menu（並び替え・種類・削除）。 */
+    const headCell = (name: string, kind: string | null, onMenu: ((a: HTMLElement) => void) | null): HTMLElement => {
       const th = el('th', { class: 's-col-head' });
       const nm = el('span', { class: onMenu ? 's-col-name' : '', text: name });
       if (onMenu) nm.addEventListener('click', () => onMenu(nm));
       th.append(nm);
       if (kind) th.append(el('span', { class: 's-col-kind', text: kind }));
 
-      const on = !!localFilters[key];
-      const f = el('button', { class: `s-col-mk${on ? ' on' : ''}`, text: '▽', title: 'フィルタ' });
-      f.addEventListener('click', (e) => { e.stopPropagation(); openLocalEditor(f, key, 'filter'); });
-
-      const cur = localSorts.find((r) => r.property === key);
-      const mark = cur ? (cur.direction === 'ascending' ? '▲' : '▼') : '⇅';
-      const sbtn = el('button', { class: `s-col-mk${cur ? ' on' : ''}`, text: mark, title: '並び替え' });
-      sbtn.addEventListener('click', (e) => {
-        e.stopPropagation();
-        // 押すたびに 昇順 → 降順 → 外す。同じ列を選び直したら先頭に置き直す。
-        const rest = localSorts.filter((r) => r.property !== key);
-        localSorts = !cur ? [{ property: key, direction: 'ascending' }, ...rest]
-          : cur.direction === 'ascending' ? [{ property: key, direction: 'descending' }, ...rest]
-          : rest;
-        paint();
-      });
-      th.append(f, sbtn);
       return th;
     };
 
-    hr.append(headCell('title', detail.titleName || 'タイトル', null, managed ? null : (a) =>
+    hr.append(headCell(detail.titleName || 'タイトル', null, managed ? null : (a) =>
       openColumnMenu(a, { id: 'title', name: detail!.titleName || 'タイトル', type: 'text' }, true)));
     for (const p of detail.properties) {
       if (managed) {
@@ -640,7 +660,7 @@ export function createDatabaseView(opts: {
         hr.append(th);
         continue;
       }
-      hr.append(headCell(p.id, p.name, TYPE_LABEL[p.type] ?? p.type, (a) =>
+      hr.append(headCell(p.name, TYPE_LABEL[p.type] ?? p.type, (a) =>
         openColumnMenu(a, { id: p.id, name: p.name, type: p.type })));
     }
     const addTh = el('th', { class: 's-col-add' });
