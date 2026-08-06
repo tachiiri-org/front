@@ -15,6 +15,12 @@ const BASE = `https://${PREFIX}kakeibo.tachiiri.com`;
 const STATE = path.join(path.dirname(fileURLToPath(import.meta.url)), `.auth/${PREFIX}kakeibo-tachiiri-com.json`);
 if (!existsSync(STATE)) { console.error(`認証状態がありません: ${STATE}`); process.exit(1); }
 
+// 何か月ごとに立つか。定期券や年会費のように、前月・前々月を見ても周期が分からないもの。
+const CYCLES: [string, number][] = [
+  ['モバイルＳｕｉｃａ定期', 6],
+  ['カード年会費', 12],
+];
+
 // 上から順に見て最初に当たった規則を使う。alias が null なら店名のまま。
 const RULES: [string, string, string | null][] = [
   ['オート.{0,4}（モバイル）|モバイルＳｕｉｃａ入金', '交通費', 'Suicaチャージ'],
@@ -37,6 +43,7 @@ await page.waitForSelector('.kk', { timeout: 30000 });
 
 const out = (await page.evaluate(`(async () => {
   const rules = ${JSON.stringify(RULES)};
+  const cycles = ${JSON.stringify(CYCLES)};
   const dry = ${DRY};
   const base = '/api/v1/kakeibo';
   const shops = (await (await fetch(base + '/shops')).json()).shops;
@@ -44,6 +51,16 @@ const out = (await page.evaluate(`(async () => {
   for (const r of (await (await fetch(base + '/summary')).json()).byShop) cur[r.shop_id] = r.category;
   const done = [];
   for (const s of shops) {
+    const cyc = cycles.find(([re]) => new RegExp(re).test(s.name || ''));
+    if (cyc && s.cycle_months !== cyc[1]) {
+      if (!dry) {
+        await fetch(base + '/shops/' + encodeURIComponent(s.shop_id), {
+          method: 'PUT', headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ fixed: true, cycleMonths: cyc[1] }) });
+        await new Promise((res) => setTimeout(res, 400));
+      }
+      done.push('周期 ' + cyc[1] + 'か月 / 固定費  ' + s.name);
+    }
     const hit = rules.find(([re]) => new RegExp(re).test(s.name || ''));
     if (!hit) continue;
     const [, cat, alias] = hit;
