@@ -219,6 +219,9 @@ export async function renderShosai(container: HTMLElement): Promise<void> {
     return h;
   };
 
+  // 取り込み中だけ動かす見張り。用が済んだら必ず止める（重なると何度も引きに行く）。
+  let watchTimer: ReturnType<typeof setTimeout> | null = null;
+
   async function refreshSide(): Promise<void> {
     listBox.innerHTML = '';
     try {
@@ -273,12 +276,12 @@ export async function renderShosai(container: HTMLElement): Promise<void> {
       // 見えてしまい、実際そう見えた。状況として出し、中止できるようにする。
       for (const im of dbs.imports ?? []) {
         const item = el('div', { class: 's-item s-item-run' });
-        item.append(
-          el('span', { class: 's-item-ic', text: '⟳' }),
-          el('span', { class: 's-item-tx', text: `${im.title || '無題'}（取り込み中）` }),
-          el('span', { class: 's-item-ct', text: String(im.rowCount) }),
-        );
-        item.title = im.phase ?? '取り込んでいます';
+        const tx = el('div', { class: 's-item-tx' });
+        tx.append(el('div', { text: im.title || '無題' }));
+        // 進み具合は文字で出す。ここが見えないと、止まっているのか進んでいるのかが
+        // 分からない。実際「本文の取り込みに入ると何も見えなくなる」ことになっていた。
+        tx.append(el('div', { class: 's-item-sub', text: im.phase ?? '取り込んでいます' }));
+        item.append(el('span', { class: 's-item-ic', text: '⟳' }), tx);
         const stop = el('button', { class: 's-item-stop', text: '中止', title: '取り込みを中止する' });
         stop.addEventListener('click', (ev) => {
           ev.stopPropagation();
@@ -293,6 +296,9 @@ export async function renderShosai(container: HTMLElement): Promise<void> {
         item.append(stop);
         listBox.append(item);
       }
+      // 走っている間は自分で見に行く。何かの操作を待っていると、数字が止まって見える。
+      if (watchTimer) { clearTimeout(watchTimer); watchTimer = null; }
+      if ((dbs.imports ?? []).length) watchTimer = setTimeout(() => { void refreshSide(); }, 5000);
 
       // ページの一覧は出さない。取り込みで入るページはデータベースの行か、
       // 本文からリンクされたものなので、データベースかリンク、検索から辿れる。
