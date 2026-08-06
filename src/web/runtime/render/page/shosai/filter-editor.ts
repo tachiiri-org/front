@@ -27,13 +27,31 @@ const OPS: Record<string, Array<[string, string]>> = {
 const NO_VALUE = new Set(['is_empty', 'is_not_empty', 'past_week', 'past_month', 'past_year',
   'this_week', 'next_week', 'next_month', 'next_year']);
 
+export interface SortRule { property: string; direction: 'ascending' | 'descending' }
+
 export function openFilterEditor(opts: {
   anchor: HTMLElement;
   properties: PropertyDef[];
   current: Record<string, Record<string, unknown>>;
-  onSave: (quickFilters: Record<string, unknown> | null) => void;
+  onSave: (quickFilters: Record<string, unknown> | null, sorts: SortRule[] | null) => void;
+  /** 見出し。ビューに保存するものと、その場限りのものを見分けるために変える。 */
+  title?: string;
+  /**
+   * 条件の鍵。ビューの式は Notion のプロパティ ID で持つ（取り込み直しても壊れないため）。
+   * その場限りの絞り込みは自前の列 ID で持つ（Notion 由来でない列にも付けられる）。
+   */
+  keyBy?: 'notion' | 'id';
+  sorts?: SortRule[];
+  /** 並べ替えも編集させるか。 */
+  withSort?: boolean;
+  /** 絞り込みか並べ替えの片方だけを出す。menu から用を選んで入るとき。 */
+  only?: 'filter' | 'sort';
+  /** 最初から選んでおく列。列の見出しから開いたときに、その列を選ばせ直さないため。 */
+  preselect?: string;
 }): void {
-  const usable = opts.properties.filter((p) => p.notionId && OPS[p.type]);
+  const byId = opts.keyBy === 'id';
+  const keyOf = (p: PropertyDef): string | null => (byId ? p.id : p.notionId ?? null);
+  const usable = opts.properties.filter((p) => keyOf(p) && OPS[p.type]);
   const overlay = el('div', { class: 's-overlay' });
   const pop = el('div', { class: 's-pop s-filter' });
   const r = opts.anchor.getBoundingClientRect();
@@ -51,7 +69,7 @@ export function openFilterEditor(opts: {
     const keys = Object.keys(draft);
     if (!keys.length) list.append(el('div', { class: 's-note', text: '条件はありません' }));
     for (const notionId of keys) {
-      const p = usable.find((x) => x.notionId === notionId);
+      const p = usable.find((x) => keyOf(x) === notionId);
       const cond = draft[notionId];
       const kind = Object.keys(cond)[0] ?? '';
       const body = (cond[kind] ?? {}) as Record<string, unknown>;
@@ -74,23 +92,25 @@ export function openFilterEditor(opts: {
   const add = el('div', { class: 's-filter-add' });
   const col = el('select', { class: 's-filter-sel' }) as HTMLSelectElement;
   col.append(el('option', { value: '', text: '列を選ぶ' }));
-  for (const p of usable) col.append(el('option', { value: p.notionId ?? '', text: p.name }));
+  for (const p of usable) col.append(el('option', { value: keyOf(p) ?? '', text: p.name }));
   const opSel = el('select', { class: 's-filter-sel' }) as HTMLSelectElement;
   const valInput = el('input', { class: 's-search s-filter-val', placeholder: '値' }) as HTMLInputElement;
   const refreshOps = (): void => {
-    const p = usable.find((x) => x.notionId === col.value);
+    const p = usable.find((x) => keyOf(x) === col.value);
     opSel.innerHTML = '';
     for (const [o, label] of OPS[p?.type ?? 'text'] ?? []) opSel.append(el('option', { value: o, text: label }));
     valInput.style.display = NO_VALUE.has(opSel.value) ? 'none' : '';
   };
   col.addEventListener('change', refreshOps);
   opSel.addEventListener('change', () => { valInput.style.display = NO_VALUE.has(opSel.value) ? 'none' : ''; });
+  if (opts.preselect && usable.some((p) => keyOf(p) === opts.preselect)) col.value = opts.preselect;
   refreshOps();
 
   const addBtn = el('button', { class: 's-btn', text: '条件を足す' });
   addBtn.addEventListener('click', () => {
-    const p = usable.find((x) => x.notionId === col.value);
-    if (!p?.notionId) return;
+    const p = usable.find((x) => keyOf(x) === col.value);
+    const key = p ? keyOf(p) : null;
+    if (!p || !key) return;
     const op = opSel.value;
     // 型の名前は Notion の式の鍵になる。checkbox は真偽、それ以外は入力そのまま。
     const kind = p.type === 'select' ? 'select' : p.type;
@@ -99,22 +119,69 @@ export function openFilterEditor(opts: {
       : p.type === 'number' ? Number(valInput.value)
       : p.type === 'checkbox' ? valInput.value === 'true' || valInput.value === '1'
       : valInput.value;
-    draft[p.notionId] = { [kind]: { [op]: value } };
+    draft[key] = { [kind]: { [op]: value } };
     valInput.value = '';
     paint();
   });
   add.append(col, opSel, valInput, addBtn);
 
+  // 並べ替え。上から順に効かせる。
+  const sortDraft: SortRule[] = opts.sorts ? opts.sorts.map((r) => ({ ...r })) : [];
+  const sortList = el('div', { class: 's-filter-list' });
+  const paintSorts = (): void => {
+    sortList.innerHTML = '';
+    if (!sortDraft.length) sortList.append(el('div', { class: 's-note', text: '並べ替えはありません' }));
+    for (const [i, r] of sortDraft.entries()) {
+      const p = usable.find((x) => keyOf(x) === r.property);
+      const row = el('div', { class: 's-filter-row' });
+      row.append(el('span', {
+        class: 's-filter-tx',
+        text: `${p?.name ?? r.property} ${r.direction === 'descending' ? '降順' : '昇順'}`,
+      }));
+      const flip = el('button', { class: 's-filter-del', text: '⇅', title: '向きを変える' });
+      flip.addEventListener('click', () => {
+        sortDraft[i].direction = r.direction === 'descending' ? 'ascending' : 'descending';
+        paintSorts();
+      });
+      const del = el('button', { class: 's-filter-del', text: '×', title: '外す' });
+      del.addEventListener('click', () => { sortDraft.splice(i, 1); paintSorts(); });
+      row.append(flip, del);
+      sortList.append(row);
+    }
+  };
+  const sortAdd = el('div', { class: 's-filter-add' });
+  const sortCol = el('select', { class: 's-filter-sel' }) as HTMLSelectElement;
+  sortCol.append(el('option', { value: '', text: '列を選ぶ' }));
+  for (const p of usable) sortCol.append(el('option', { value: keyOf(p) ?? '', text: p.name }));
+  if (opts.preselect && usable.some((p) => keyOf(p) === opts.preselect)) sortCol.value = opts.preselect;
+  const sortDir = el('select', { class: 's-filter-sel' }) as HTMLSelectElement;
+  sortDir.append(el('option', { value: 'ascending', text: '昇順' }), el('option', { value: 'descending', text: '降順' }));
+  const sortBtn = el('button', { class: 's-btn', text: '並べ替えを足す' });
+  sortBtn.addEventListener('click', () => {
+    if (!sortCol.value) return;
+    sortDraft.push({ property: sortCol.value, direction: sortDir.value as SortRule['direction'] });
+    paintSorts();
+  });
+  sortAdd.append(sortCol, sortDir, sortBtn);
+  paintSorts();
+
   const foot = el('div', { class: 's-filter-foot' });
   const save = el('button', { class: 's-btn s-filter-save', text: '適用' });
   save.addEventListener('click', () => {
-    opts.onSave(Object.keys(draft).length ? draft : null);
+    opts.onSave(Object.keys(draft).length ? draft : null, sortDraft.length ? sortDraft : null);
     close();
   });
   const cancel = el('button', { class: 's-btn', text: 'やめる' });
   cancel.addEventListener('click', close);
   foot.append(save, cancel);
 
-  pop.append(el('div', { class: 's-filter-head', text: 'このビューの絞り込み' }), list, add, foot);
+  if (opts.only !== 'sort') {
+    pop.append(el('div', { class: 's-filter-head', text: opts.title ?? 'フィルタ' }), list, add);
+  }
+  if (opts.withSort && opts.only !== 'filter') {
+    pop.append(el('div', { class: 's-filter-head', text: opts.only === 'sort' ? (opts.title ?? '並び替え') : '並び替え' }),
+      sortList, sortAdd);
+  }
+  pop.append(foot);
   document.body.append(overlay, pop);
 }

@@ -15,6 +15,11 @@ export const SHOSAI_CSS = `
   .s-item{display:flex;align-items:center;gap:6px;padding:5px 8px;border-radius:5px;cursor:pointer;white-space:nowrap;overflow:hidden}
   .s-item:hover{background:#0000000a}
   .s-item.on{background:#4A90C222;font-weight:600}
+  /* 取り込みの途中。データベースとしては開けないが、走っていることは見せる。 */
+  .s-item-run{color:#888;cursor:default}
+  .s-item-stop{flex:none;border:1px solid #0002;background:transparent;color:#888;border-radius:4px;
+    padding:1px 6px;font-size:11px;cursor:pointer;font-family:inherit}
+  .s-item-stop:hover{border-color:#c0392b;color:#c0392b}
   /* 仕組みが持つもの（取り込みログ）。ユーザーの作ったものと見分ける。 */
   .s-item-sys .s-item-tx{color:#888}
   .s-item-sys .s-item-ic{opacity:.7}
@@ -27,7 +32,7 @@ export const SHOSAI_CSS = `
   .s-main{flex:1.35;min-width:0;display:flex;flex-direction:column;overflow:hidden}
   .s-main-head{display:flex;align-items:center;gap:8px;padding:12px 16px 6px}
   .s-title{font-size:17px;font-weight:700;flex:1;min-width:0;border:1px solid transparent;border-radius:5px;padding:3px 6px;background:transparent;color:inherit;font-family:inherit}
-  .s-title:hover,.s-title:focus{border-color:#4A90C2;background:#00000008;outline:none}
+  .s-title:hover,.s-title:focus{border-color:transparent;background:transparent;outline:none}
   .s-main-body{flex:1;min-height:0;overflow:auto;padding:0 16px 24px}
 
   /* 横だけスクロールさせる。overflow-x:auto だけだと縦のバーまで出る環境がある。 */
@@ -35,6 +40,15 @@ export const SHOSAI_CSS = `
              flex-wrap:nowrap;overflow-x:auto;overflow-y:hidden;scrollbar-width:none}
   .s-db-tabs::-webkit-scrollbar{height:0;width:0}
   .s-db-find{margin:0 0 8px}
+  /* 表の上の道具。検索は虫眼鏡に畳み、押した時だけ入力欄を出す。 */
+  .s-head-tools{margin-left:auto;display:flex;align-items:center;gap:6px}
+  .s-head-btn{border:1px solid #0002;background:transparent;color:#666;border-radius:4px;
+    padding:3px 8px;font-size:12px;cursor:pointer;line-height:1.6}
+  .s-head-btn:hover{border-color:#4A90C2;color:#333}
+  .s-head-search{width:200px;font-size:12px;padding:4px 8px}
+  /* 列の見出しは押せる。名前・種類・削除をそこに集めた。 */
+  .s-col-name{cursor:pointer;border-radius:3px;padding:1px 3px}
+  .s-col-name:hover{background:#4A90C21f}
   .s-db-filter{flex:none;margin-left:8px;border:1px solid #0002;background:transparent;color:#666;
                border-radius:5px;padding:3px 10px;font-size:11.5px;cursor:pointer;font-family:inherit}
   .s-db-filter:hover{border-color:#4A90C2;color:#333}
@@ -57,6 +71,8 @@ export const SHOSAI_CSS = `
   .s-db-tab{display:inline-flex;align-items:center;gap:5px;border:0;background:transparent;color:#888;cursor:pointer;font-size:13px;padding:6px 10px;border-bottom:2px solid transparent;white-space:nowrap;margin-bottom:-1px}
   .s-db-tab:hover{color:#333;background:#00000006}
   .s-db-tab.on{color:#333;font-weight:600;border-bottom-color:#333}
+  /* 一番左はデータベースそのもの。ビューの絞り込みが掛かっていない状態を表す。 */
+  .s-db-tab-all{font-size:14px;padding:6px 9px}
 
   /* 表は自分の箱の中で横スクロール。ページを横に広げない。 */
   .s-tbl-scroll{width:100%;max-width:100%;overflow-x:auto;-webkit-overflow-scrolling:touch}
@@ -127,14 +143,15 @@ export const SHOSAI_CSS = `
   [data-theme=dark] .s-editor-close:hover{color:#eee}
   .s-editor-body{flex:1;min-height:0;overflow-y:auto;padding:4px 16px 40vh}
   .s-blk{display:flex;align-items:flex-start;gap:4px;border-radius:5px}
-  .s-blk:hover{background:#00000005}
+
   .s-grip{flex:none;width:16px;cursor:grab;color:transparent;font-size:12px;user-select:none;text-align:center;padding-top:5px;line-height:1.6}
   .s-blk:hover .s-grip{color:#bbb}
   .s-grip:active{cursor:grabbing}
   .s-blk-in{flex:1;min-width:0;border:1px solid transparent;border-radius:5px;background:transparent;color:inherit;font-family:inherit;font-size:13.5px;line-height:1.7;padding:3px 6px;resize:none;overflow:hidden}
-  .s-blk-in:hover{border-color:#0001}
+
   /* 選択中の背景は付けない。文章の途中が灰色に沈むと読みにくい。枠だけで十分。 */
-  .s-blk-in:focus{border-color:#4A90C2;background:transparent;outline:none}
+  /* 書いている場所はカーソルで分かる。枠や網掛けで囲うと、かえって字が読みにくい。 */
+  .s-blk-in:focus{border-color:transparent;background:transparent;outline:none}
   .s-blk-in.h{font-size:17px;font-weight:700;line-height:1.5}
   .s-blk-in.code{font-family:ui-monospace,SFMono-Regular,Menlo,monospace;font-size:12.5px;background:#00000008;border-color:#0001}
   .s-blk-in.quote{border-left:3px solid #4A90C2;border-radius:0 5px 5px 0;padding-left:10px;color:#666}
@@ -191,9 +208,6 @@ export const SHOSAI_CSS = `
                 padding:13px 16px;font-size:14px;color:#333;cursor:pointer;font-family:inherit}
   .s-sheet-item:hover{background:#00000008}
   .s-sheet-del{color:#c0392b}
-  .s-set-row{display:flex;align-items:center;gap:10px;padding:8px 16px}
-  .s-set-label{flex:none;font-size:13px;color:#666}
-  [data-theme=dark] .s-set-label{color:#aaa}
   .s-sheet-cancel{color:#888;border-top:1px solid #0001;margin-top:4px}
   [data-theme=dark] .s-sheet{background:#1c1e22;border-top-color:#ffffff22}
   [data-theme=dark] .s-sheet-item{color:#e6e6e6}
@@ -232,7 +246,17 @@ export const SHOSAI_CSS = `
   .s-btn:hover{border-color:#4A90C2;color:#333}
   .s-search{width:100%;padding:5px 8px;border:1px solid #0002;border-radius:5px;background:transparent;color:inherit;font-size:12px;font-family:inherit}
   .s-search:focus{border-color:#4A90C2;outline:none}
-  .s-pop{position:absolute;z-index:40;background:#fff;border:1px solid #0002;border-radius:6px;box-shadow:0 4px 16px #0003;padding:4px;min-width:150px;display:flex;flex-direction:column;gap:1px}
+  /* 吹き出しは .s-wrap の外（body 直下）に出るので、box-sizing を継げない。
+     指定しないと、幅 100% の入力欄が padding のぶんはみ出して横スクロールバーが出る。 */
+  .s-pop{position:absolute;z-index:40;background:#fff;border:1px solid #0002;border-radius:6px;box-shadow:0 4px 16px #0003;padding:4px;min-width:150px;display:flex;flex-direction:column;gap:1px;overflow-x:hidden}
+  .s-pop,.s-pop *{box-sizing:border-box;max-width:100%}
+  /* 対になる選択肢（昇順・降順）は横に並べる。 */
+  .s-pop-row{display:flex;gap:4px}
+  .s-pop-half{flex:1;text-align:center;border:1px solid #0002;border-radius:4px}
+  .s-pop-half:hover{border-color:#4A90C2}
+  /* 横に開く入れ子。矢印は出さず、当てれば開く。 */
+  .s-pop-more{position:relative}
+  .s-pop-fly{z-index:41}
   .s-pop-item{text-align:left;border:0;background:transparent;color:#333;cursor:pointer;font-size:12px;padding:6px 10px;border-radius:4px;white-space:nowrap;font-family:inherit}
   .s-pop-item:hover{background:#00000010}
   .s-pop-del{color:#c0392b}

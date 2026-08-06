@@ -49,6 +49,8 @@ export interface DatabaseSummary {
 export interface DatabaseDetail {
   databaseId: string;
   systemKind?: string | null;
+  /** タイトル列の呼び名。行そのものが持つ値なので、他の列と置き場所が違う。 */
+  titleName?: string | null;
   properties: PropertyDef[];
   views: ViewDef[];
   rows: Array<{
@@ -103,7 +105,14 @@ export const deleteBlock = (id: string): Promise<{ removed: number }> =>
 export const search = (q: string): Promise<{ results: SearchHit[]; engine: string }> =>
   call(`/search?q=${encodeURIComponent(q)}`);
 
-export const listDatabases = (): Promise<{ databases: DatabaseSummary[] }> => call('/databases');
+/** 取り込み中のものは databases に入らず imports に来る。表として出せる状態にないため。 */
+export interface ImportInFlight {
+  databaseId: string; title: string; rowCount: number;
+  phase: string | null; importId: string | null;
+}
+
+export const listDatabases = (): Promise<{ databases: DatabaseSummary[]; imports?: ImportInFlight[] }> =>
+  call('/databases');
 export const readDatabase = (id: string, viewId?: string): Promise<DatabaseDetail> =>
   call(`/database/${encodeURIComponent(id)}${viewId ? `?viewId=${encodeURIComponent(viewId)}` : ''}`);
 
@@ -211,11 +220,32 @@ export async function uploadFile(blockId: string, file: File): Promise<{ fileId:
 export const readSettings = (): Promise<{ settings: Record<string, string> }> => call('/settings');
 export const saveSettings = (patch: Record<string, string>): Promise<unknown> => put('/settings', patch);
 
-/** 取り込みを止める。走っているワークフローを終わらせ、状態も残す。 */
-export const cancelImport = (importId: string, databaseId?: string): Promise<unknown> =>
-  call(`/notion/import/${encodeURIComponent(importId)}${databaseId ? `?databaseId=${encodeURIComponent(databaseId)}` : ''}`,
+/**
+ * 取り込みを止める。走っているワークフローを終わらせ、状態も残す。
+ * ワークフローの実体 ID が分からないことがある（実体ごと失われた等）ので、
+ * その場合は databaseId だけで止める。
+ */
+export const cancelImport = (importId: string | null, databaseId?: string): Promise<unknown> =>
+  call(`/notion/import${importId ? `/${encodeURIComponent(importId)}` : ''}${databaseId ? `?databaseId=${encodeURIComponent(databaseId)}` : ''}`,
     { method: 'DELETE' });
 
 /** ビューの絞り込み・並び・名前を変える。式は Notion のプロパティ ID を鍵にする。 */
 export const updateView = (viewId: string, patch: Record<string, unknown>): Promise<unknown> =>
   put(`/view/${encodeURIComponent(viewId)}`, patch);
+
+/** 列の名前と種類を直す。種類を変えると、値は変換できるものだけが残る。 */
+export const updateProperty = (propertyId: string, patch: { name?: string; type?: PropertyType }):
+  Promise<{ propertyId: string; converted: { moved: number; dropped: number } | null }> =>
+  call(`/property/${encodeURIComponent(propertyId)}`, { method: 'PATCH', body: JSON.stringify(patch) });
+
+/** 列を消す。その列の値も一緒に消える。 */
+export const deleteProperty = (propertyId: string): Promise<{ propertyId: string }> =>
+  call(`/property/${encodeURIComponent(propertyId)}`, { method: 'DELETE' });
+
+/** ビューを消す。表そのものは「すべて」で見られる。 */
+export const deleteView = (viewId: string): Promise<{ viewId: string }> =>
+  call(`/view/${encodeURIComponent(viewId)}`, { method: 'DELETE' });
+
+/** データベースそのものの設定。いまはタイトル列の呼び名だけ。 */
+export const updateDatabase = (databaseId: string, patch: { titleName?: string }): Promise<unknown> =>
+  call(`/database/${encodeURIComponent(databaseId)}`, { method: 'PATCH', body: JSON.stringify(patch) });

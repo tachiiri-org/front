@@ -33,7 +33,7 @@ function describeDropped(dropped: Record<string, number>): string[] {
   if (lost.length) out.push(`取り込めなかったもの: ${lost.join(' / ')}`);
   // 共有不足は人が直せるので、直し方まで書く。
   if (dropped['block:未共有のページへのリンク']) {
-    out.push('「Notion 取り込みログ」に記録しました。リンク先を Notion 側で共有すると取り込めます（ページの ••• → 接続）');
+    out.push('「インポートログ」に記録しました。リンク先を Notion 側で共有すると取り込めます（ページの ••• → 接続）');
   }
   if (flattened.length) out.push(`段落に均したもの（中身は残っています）: ${flattened.join(' / ')}`);
   return out;
@@ -205,8 +205,6 @@ export function createNotionView(opts: {
     void blocks;
     const fails = p?.failures ?? [];
     if (fails.length) {
-      const head = el('div', { class: 's-notion-warn', text: `取りこぼし ${fails.length} 件（新しい順・「Notion 取り込みログ」に記録）` });
-      progress.append(head);
       for (const f of fails.slice(0, 5)) {
         progress.append(el('div', {
           class: 's-notion-fail',
