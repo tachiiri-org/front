@@ -234,13 +234,18 @@ async function renderSummary(host: HTMLElement): Promise<void> {
   const [s, fx] = await Promise.all([api<Summary>('/summary'), api<FixedData>('/fixed')]);
   host.innerHTML = '';
   const months = s.months;
+  const fixedCats = new Set(s.fixedCategories ?? []);
+  const fixedShops = new Set(s.fixedShops ?? []);
+  // 店が固定費かどうか。店の印が無くても、費目が固定費ならその店も固定費として扱う。
+  const isFixedShop = (shopId: string, cat: string): boolean =>
+    fixedShops.has(shopId) || fixedCats.has(cat);
 
   if (s.multiCategoryShops > 0) {
     host.appendChild(el('div', 'kk-note',
       `費目を複数持つ店が ${s.multiCategoryShops} 件あります。合計が実額とずれないよう、集計では名前順の先頭1つに畳んでいます。`));
   }
 
-  type Row = { key: string; sub?: string; vals: number[]; total: number };
+  type Row = { key: string; subs?: string[]; vals: number[]; total: number };
 
   /**
    * 月×行のマトリクス。月ヘッダのクリックでその月の降順に並べ替える。
@@ -254,7 +259,7 @@ async function renderSummary(host: HTMLElement): Promise<void> {
   const matrix = (
     title: string,
     rows: Row[],
-    subHead: string | undefined,
+    subHeads: string[],
     onClick?: (key: string) => void,
     controls?: HTMLElement,
   ): HTMLElement => {
@@ -274,7 +279,7 @@ async function renderSummary(host: HTMLElement): Promise<void> {
       const t = el('table', 'kk-tb');
       const h = el('tr');
       h.appendChild(el('th', '', ''));
-      if (subHead !== undefined) h.appendChild(el('th', '', subHead));
+      for (const sh of subHeads) h.appendChild(el('th', '', sh));
       months.forEach((m, i) => {
         const th = el('th', 'kk-num kk-clk' + (sortAt === i ? ' kk-on' : ''),
           m.slice(2) + (sortAt === i ? ' ▼' : ''));
@@ -296,7 +301,7 @@ async function renderSummary(host: HTMLElement): Promise<void> {
         const c0 = el('td', onClick ? 'kk-clk' : '', r.key);
         if (onClick) c0.addEventListener('click', () => onClick(r.key));
         tr.appendChild(c0);
-        if (subHead !== undefined) tr.appendChild(el('td', 'kk-sub', r.sub ?? ''));
+        subHeads.forEach((_, i) => tr.appendChild(el('td', 'kk-sub', r.subs?.[i] ?? '')));
         for (const v of r.vals) tr.appendChild(el('td', 'kk-num', yen(v)));
         tr.appendChild(el('td', 'kk-num', yen(r.total)));
         t.appendChild(tr);
@@ -304,7 +309,7 @@ async function renderSummary(host: HTMLElement): Promise<void> {
 
       const sum = el('tr', 'kk-sum');
       sum.appendChild(el('td', '', '合計'));
-      if (subHead !== undefined) sum.appendChild(el('td', '', ''));
+      for (let i = 0; i < subHeads.length; i++) sum.appendChild(el('td', '', ''));
       let grand = 0;
       months.forEach((_, i) => {
         const v = sorted.reduce((a, r) => a + (r.vals[i] ?? 0), 0);
@@ -357,8 +362,6 @@ async function renderSummary(host: HTMLElement): Promise<void> {
      * 「前月にあれば入れる」だけだと NHK が毎月になり、隔月を取りこぼす。
      * 3 番目を 0 にするのは控えめな側への誤りで、解約を引きずるより good。
      */
-    const fixedCats = new Set(s.fixedCategories ?? []);
-    const fixedShops = new Set(s.fixedShops ?? []);
     // 費目 → 店 → 月 → 額
     const byCatShop = new Map<string, Map<string, Map<string, number>>>();
     for (const r of s.byShop) {
@@ -416,11 +419,11 @@ async function renderSummary(host: HTMLElement): Promise<void> {
 
     const box = el('div', 'kk-card');
     const hd = el('div', 'kk-row');
-    hd.appendChild(el('span', 'kk-note', '収支（引落・振込の金額はクリックで修正）'));
-    if (inProgress) {
-      hd.appendChild(el('span', 'kk-sub',
-        `${curMonth} は ${s.maxUsedOn} まで。「予測」列は変動費を残り日数ぶん割り返し、固定費は過去の実績から補った着地見込みです`));
-    }
+    hd.appendChild(el('span', 'kk-note', '費目別'));
+    // 予測の説明は見出しに出さず、列のツールチップに置く（画面の文字数を増やさない）
+    const projNote = inProgress
+      ? `${curMonth} は ${s.maxUsedOn} まで。変動費は残り日数ぶん割り返し、固定費は過去の実績から補った着地見込み。前月より1万円以上悪化する見込みなら赤`
+      : '';
     box.appendChild(hd);
 
     let sortAt = fixedIdx;
@@ -445,7 +448,11 @@ async function renderSummary(host: HTMLElement): Promise<void> {
           m.slice(2) + (sortAt === i ? ' ▼' : ''));
         th.addEventListener('click', () => { sortAt = i; draw(); });
         h.appendChild(th);
-        if (dim) h.appendChild(el('th', 'kk-num', '予測'));
+        if (dim) {
+          const pth = el('th', 'kk-num', '予測');
+          pth.title = projNote;
+          h.appendChild(pth);
+        }
       });
       const ht = el('th', 'kk-num kk-clk' + (sortAt === -1 ? ' kk-on' : ''),
         '合計' + (sortAt === -1 ? ' ▼' : ''));
@@ -604,7 +611,9 @@ async function renderSummary(host: HTMLElement): Promise<void> {
   }
   const allShopRows: Row[] = [...shopId.keys()].map((k) => {
     const vals = months.map((m) => shopAt.get(`${k}\u0001${m}`) ?? 0);
-    return { key: k, sub: shopCat.get(k) ?? '', vals, total: vals.reduce((a, b) => a + b, 0) };
+    const cat = shopCat.get(k) ?? '';
+    return { key: k, subs: [cat, isFixedShop(shopId.get(k) ?? '', cat) ? '固定費' : '変動費'],
+      vals, total: vals.reduce((a, b) => a + b, 0) };
   });
 
   const showDetail = async (label: string): Promise<void> => {
@@ -671,7 +680,7 @@ async function renderSummary(host: HTMLElement): Promise<void> {
 
   const shopHost = el('div', '');
   const filter = el('select', 'kk-in') as HTMLSelectElement;
-  for (const c of ['（費目で絞り込み）', ...new Set(allShopRows.map((r) => r.sub ?? '').filter(Boolean))].sort()) {
+  for (const c of ['（費目で絞り込み）', ...new Set(allShopRows.map((r) => r.subs?.[0] ?? '').filter(Boolean))].sort()) {
     const o = el('option', '', c) as HTMLOptionElement;
     o.value = c === '（費目で絞り込み）' ? '' : c;
     filter.appendChild(o);
@@ -679,10 +688,10 @@ async function renderSummary(host: HTMLElement): Promise<void> {
   filter.value = '';
   const drawShops = (): void => {
     shopHost.innerHTML = '';
-    const rows = filter.value ? allShopRows.filter((r) => r.sub === filter.value) : allShopRows;
+    const rows = filter.value ? allShopRows.filter((r) => r.subs?.[0] === filter.value) : allShopRows;
     const ctrl = el('div', 'kk-row');
     ctrl.appendChild(filter);
-    shopHost.appendChild(matrix('略名 × 利用月（クリックで明細）', rows, '費目', (k) => void showDetail(k), ctrl));
+    shopHost.appendChild(matrix('店舗別', rows, ['費目', '区分'], (k) => void showDetail(k), ctrl));
   };
   filter.addEventListener('change', drawShops);
   drawShops();
