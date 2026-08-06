@@ -190,8 +190,10 @@ export type OrderMode = { importance: 'count' | 'evc'; intra: 'flow' | 'fiedler'
 // rank: id→表示順。domainIndexById: id→ドメイン番号(表示順)。domainLabels[i]: ドメイン i の代表概念ラベル。
 // domainRepIds[i]: ドメイン i の代表概念ノード id（ヘッダのノードリンク用。孤立グループは ''）。
 // subIndexById: id→サブグループ番号（ドメイン内の再帰分割。分割なしなら未設定＝ヘッダ無し）。subLabels[i]: サブ i の代表ラベル。
-export type NodeOrder = { rank: Map<string, number>; domainIndexById: Map<string, number>; domainLabels: string[]; domainRepIds: string[]; subIndexById: Map<string, number>; subLabels: string[]; subRepIds: string[] };
-const emptyOrder = (): NodeOrder => ({ rank: new Map(), domainIndexById: new Map(), domainLabels: [], domainRepIds: [], subIndexById: new Map(), subLabels: [], subRepIds: [] });
+// depthById: id→アウトライン表示の字下げ段（0=ドメイン代表 / 1=サブ代表・代表サブの構成員 / 2=サブの構成員）。
+// 保存された親子ではなく「代表概念とその構成員」という導出関係を、rank の並びに沿って字下げで表すためのもの。
+export type NodeOrder = { rank: Map<string, number>; domainIndexById: Map<string, number>; domainLabels: string[]; domainRepIds: string[]; subIndexById: Map<string, number>; subLabels: string[]; subRepIds: string[]; depthById: Map<string, number> };
+const emptyOrder = (): NodeOrder => ({ rank: new Map(), domainIndexById: new Map(), domainLabels: [], domainRepIds: [], subIndexById: new Map(), subLabels: [], subRepIds: [], depthById: new Map() });
 const orderCache = new Map<string, Promise<NodeOrder>>();
 export function getNodeOrder(graphId: string, mode: OrderMode): Promise<NodeOrder> {
   const key = `${graphId}|${mode.importance}|${mode.intra}`;
@@ -232,6 +234,13 @@ async function computeOrder(graphId: string, mode: OrderMode): Promise<NodeOrder
   const subLabels: string[] = [];
   const subRepIds: string[] = [];
   const sumImp = (S: number[]) => S.reduce((t, g) => t + imp[g], 0);
+  // 代表概念を必ずグループの先頭に置く（アウトラインの親行になるため。flow では既に先頭だが
+  // fiedler では中央付近に来るので明示的に前へ出す）。
+  const repFirst = (S: number[], rep: number): number[] => {
+    const i = S.indexOf(rep);
+    return i <= 0 ? S : [rep, ...S.slice(0, i), ...S.slice(i + 1)];
+  };
+  const depthById = new Map<string, number>();
   let subSeq = 0;
   scored.forEach(({ D }, di) => {
     const rep = D.reduce((b, g) => (imp[g] > imp[b] ? g : b), D[0]); // 代表＝重要度最大の概念
@@ -241,28 +250,37 @@ async function computeOrder(graphId: string, mode: OrderMode): Promise<NodeOrder
     // ドメイン内を再帰サブ分割（重要度合計の降順）。2つ以上に割れた時だけサブ見出しを付ける。
     const subs = subdivide(D, a, 10, 1).sort((x, y) => sumImp(y) - sumImp(x));
     if (subs.length >= 2) {
+      // ドメイン代表を含むサブを必ず先頭に。代表がアウトラインの最上段（深さ0）になるため。
+      const ri = subs.findIndex((S) => S.includes(rep));
+      if (ri > 0) subs.unshift(subs.splice(ri, 1)[0]);
       for (const S of subs) {
         const sRep = S.reduce((b, g) => (imp[g] > imp[b] ? g : b), S[0]);
         const si = subSeq++;
         subLabels[si] = a.labels[sRep] ?? '';
         subRepIds[si] = a.ids[sRep] ?? '';
         for (const g of S) subIndexById.set(a.ids[g], si);
-        order.push(...intraOrder(S));
+        const ord = repFirst(intraOrder(S), sRep);
+        // 代表サブ（サブ代表＝ドメイン代表）だけ一段浅い: 代表は深さ0、構成員は深さ1。
+        const repDepth = sRep === rep ? 0 : 1;
+        for (const g of ord) depthById.set(a.ids[g], g === sRep ? repDepth : repDepth + 1);
+        order.push(...ord);
       }
     } else {
-      order.push(...intraOrder(D));
+      const ord = repFirst(intraOrder(D), rep);
+      for (const g of ord) depthById.set(a.ids[g], g === rep ? 0 : 1);
+      order.push(...ord);
     }
   });
-  // 孤立ノード群は最後に1グループ（重要度降順）としてまとめる。
+  // 孤立ノード群は最後に1グループ（重要度降順）としてまとめる。代表概念が無いので全て深さ0。
   if (isolated.length) {
     const di = scored.length;
     domainLabels.push(`その他・孤立 (${isolated.length})`);
     domainRepIds.push(''); // 単一代表なし
     const iso = isolated.slice().sort((x, y) => imp[y] - imp[x]);
-    for (const g of iso) domainIndexById.set(a.ids[g], di);
+    for (const g of iso) { domainIndexById.set(a.ids[g], di); depthById.set(a.ids[g], 0); }
     order.push(...iso);
   }
   const rank = new Map<string, number>();
   order.forEach((g, r) => rank.set(a.ids[g], r));
-  return { rank, domainIndexById, domainLabels, domainRepIds, subIndexById, subLabels, subRepIds };
+  return { rank, domainIndexById, domainLabels, domainRepIds, subIndexById, subLabels, subRepIds, depthById };
 }

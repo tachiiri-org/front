@@ -32,6 +32,8 @@ export type ParsedRow = {
 
 export type ParsedCsv = {
   fileName: string;
+  /** カード会社。取り込みの差し替え単位（同じ請求年月に複数社が並ぶ） */
+  issuer: string;
   billingMonth: string;
   /** CSV 末尾の合計行に書かれた金額。無ければ null */
   declaredTotal: number | null;
@@ -60,6 +62,30 @@ const toInt = (s: string | undefined): number | null => {
   return Number.isFinite(n) ? Math.round(n) : null;
 };
 
+/**
+ * 引用符を尊重して1行を分割する。ビューカードは千区切りのために "1,000" と囲ってくる。
+ * ゴールドポイント側は引用符を使わないので、そちらに通しても結果は変わらない。
+ */
+function splitCsvLine(line: string): string[] {
+  const out: string[] = [];
+  let cur = '';
+  let inQ = false;
+  for (let i = 0; i < line.length; i++) {
+    const ch = line[i];
+    if (inQ) {
+      if (ch === '"') {
+        if (line[i + 1] === '"') { cur += '"'; i++; } else inQ = false;
+      } else cur += ch;
+    } else if (ch === '"') {
+      inQ = true;
+    } else if (ch === ',') {
+      out.push(cur); cur = '';
+    } else cur += ch;
+  }
+  out.push(cur);
+  return out;
+}
+
 const norm = (s: string): string => String(s).normalize('NFKC').replace(/\s+/g, ' ').trim();
 
 /**
@@ -86,19 +112,113 @@ function parseForeignRemark(remark: string): { amount: string; currency: string;
   return m ? { amount: m[1], currency: m[2], rate: m[3], date: m[4] } : null;
 }
 
+/**
+ * ビューカードの明細 CSV。
+ *
+ * 実測仕様: 先頭に4行のヘッダ（会員番号/対象カード/お支払日/今回お支払金額）、
+ * 続いて列見出し1行、以降は明細。明細の途中に「****-****-****-9526 伊藤　駿」という
+ * 1列の名義行が挟まり、そこから次の名義行までがその人の利用。
+ *
+ * 列は11。金額は「今回ご請求額」（8列目）を使う。分割払いだと「ご利用額」と食い違い、
+ * 実際に引き落ちるのは今回ご請求額のほうだから。ヘッダの「今回お支払金額」と一致する。
+ */
+function parseViewCard(lines: string[], fileName: string): ParsedCsv | null {
+  const head = new Map<string, string>();
+  for (const l of lines.slice(0, 8)) {
+    const c = splitCsvLine(l);
+    if (c.length >= 2) head.set(c[0].trim(), c.slice(1).join(',').trim());
+  }
+  if (!head.has('会員番号') && !head.has('対象カード')) return null;
+
+  const errors: string[] = [];
+  const rows: ParsedRow[] = [];
+
+  // 請求年月は「お支払日」から取る。利用日は前々月から前月に散らばるので使えない。
+  const pay = /(\d{4})年\s*(\d{1,2})月/.exec(head.get('お支払日') ?? '');
+  const billingMonth = pay ? `${pay[1]}-${zero(pay[2])}` : '';
+  if (!billingMonth) errors.push('お支払日から請求年月を読み取れませんでした');
+  const declaredTotal = toInt(head.get('今回お支払金額'));
+
+  let holder = 'ご本人';
+  lines.forEach((line, i) => {
+    const raw = splitCsvLine(line);
+    const first = (raw[0] ?? '').trim();
+    if (raw.length <= 2 && /^(会員番号|対象カード|お支払日|今回お支払金額)$/.test(first)) return;
+    if (first.startsWith('ご利用年月日')) return;
+    // 名義行。以降の明細はこの人のもの。
+    if (raw.length <= 2 && /\*{2,}/.test(first)) {
+      const m = /\*[-*\d]*\s+(.+)$/.exec(first);
+      holder = m ? norm(m[1]) : first;
+      return;
+    }
+    const c = fitColumns(raw, 11, 9);
+    if (!c) {
+      errors.push(`${i + 1}行目: 列数 ${raw.length}（11のはず）: ${line.slice(0, 80)}`);
+      return;
+    }
+    const usedOn = toDate(c[0]);
+    if (!usedOn) { errors.push(`${i + 1}行目: 利用日が不正 ${c[0]}`); return; }
+    const amount = toInt(c[7]);
+    if (amount === null) { errors.push(`${i + 1}行目: 今回ご請求額が不正 ${c[7]}`); return; }
+    const fa = (c[8] ?? '').trim();
+    const isForeign = fa !== '' || (c[9] ?? '').trim() !== '';
+    rows.push({
+      usedOn,
+      shop: c[1].trim(), shopKey: norm(c[1]),
+      card: holder, cardKey: norm(holder),
+      payType: norm(c[5]), installments: norm(c[6]),
+      payMonth: billingMonth,
+      amountJpy: amount,
+      paymentTotal: toInt(c[4]), feeJpy: null,
+      isForeign,
+      foreignAmount: isForeign ? fa : '',
+      currency: isForeign ? (c[9] ?? '').trim() : '',
+      fxRate: isForeign ? (c[10] ?? '').trim() : '',
+      fxDate: '',
+      remark: '',
+      dupIndex: 0,
+    });
+  });
+
+  numberDuplicates(rows);
+  const rowsTotal = rows.reduce((a, r) => a + r.amountJpy, 0);
+  if (declaredTotal !== null && declaredTotal !== rowsTotal) {
+    errors.push(`合計が一致しません（今回お支払金額 ${declaredTotal} / 明細合計 ${rowsTotal}）`);
+  }
+  return {
+    fileName, issuer: 'ビューカード', billingMonth, declaredTotal,
+    rowCount: rows.length, rowsTotal, rows, errors,
+  };
+}
+
+/** 同一(利用日+店+カード)内の連番 */
+function numberDuplicates(rows: ParsedRow[]): void {
+  const counter = new Map<string, number>();
+  for (const r of rows) {
+    const k = [r.usedOn, r.shopKey, r.cardKey].join('\u0001');
+    const n = counter.get(k) ?? 0;
+    r.dupIndex = n;
+    counter.set(k, n + 1);
+  }
+}
+
 export function parseGoldpointCsv(text: string, fileName: string): ParsedCsv {
   const lines = text.split(/\r?\n/).filter((l) => l.trim() !== '');
   const rows: ParsedRow[] = [];
   const errors: string[] = [];
 
   if (!lines.length) {
-    return { fileName, billingMonth: '', declaredTotal: null, rowCount: 0, rowsTotal: 0, rows: [], errors: ['中身が空です'] };
+    return { fileName, issuer: 'ヨドバシカード', billingMonth: '', declaredTotal: null, rowCount: 0, rowsTotal: 0, rows: [], errors: ['中身が空です'] };
   }
   if (/^\s*(<!DOCTYPE|<html)/i.test(text)) {
-    return { fileName, billingMonth: '', declaredTotal: null, rowCount: 0, rowsTotal: 0, rows: [], errors: ['CSV ではなく HTML です'] };
+    return { fileName, issuer: 'ヨドバシカード', billingMonth: '', declaredTotal: null, rowCount: 0, rowsTotal: 0, rows: [], errors: ['CSV ではなく HTML です'] };
   }
 
-  // CSV は2種類ある。
+  // ビューカードは別会社の別形式。ヘッダの「会員番号／対象カード」で見分ける。
+  const view = parseViewCard(lines, fileName);
+  if (view) return view;
+
+  // ゴールドポイントカード+ の CSV は2種類ある。
   //  A) 確定前（支払予定分）: 13列・ヘッダ無し・支払予定月の列あり
   //  B) 確定済み: 7列・先頭に3列のヘッダ行（氏名/カード番号/カード名称）・支払予定月の列なし
   // B は請求年月を中身から決められないので、ファイル名 yyyyMM.csv（支払月）を使う。
@@ -232,6 +352,7 @@ export function parseGoldpointCsv(text: string, fileName: string): ParsedCsv {
 
   return {
     fileName,
+    issuer: 'ヨドバシカード',
     billingMonth,
     declaredTotal,
     rowCount: rows.length,
