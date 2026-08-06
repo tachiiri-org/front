@@ -219,3 +219,16 @@ export const cancelImport = (importId: string, databaseId?: string): Promise<unk
 /** ビューの絞り込み・並び・名前を変える。式は Notion のプロパティ ID を鍵にする。 */
 export const updateView = (viewId: string, patch: Record<string, unknown>): Promise<unknown> =>
   put(`/view/${encodeURIComponent(viewId)}`, patch);
+
+/** 列の名前と種類を直す。種類を変えると、値は変換できるものだけが残る。 */
+export const updateProperty = (propertyId: string, patch: { name?: string; type?: PropertyType }):
+  Promise<{ propertyId: string; converted: { moved: number; dropped: number } | null }> =>
+  call(`/property/${encodeURIComponent(propertyId)}`, { method: 'PATCH', body: JSON.stringify(patch) });
+
+/** 列を消す。その列の値も一緒に消える。 */
+export const deleteProperty = (propertyId: string): Promise<{ propertyId: string }> =>
+  call(`/property/${encodeURIComponent(propertyId)}`, { method: 'DELETE' });
+
+/** ビューを消す。表そのものは「すべて」で見られる。 */
+export const deleteView = (viewId: string): Promise<{ viewId: string }> =>
+  call(`/view/${encodeURIComponent(viewId)}`, { method: 'DELETE' });

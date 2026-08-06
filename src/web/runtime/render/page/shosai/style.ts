@@ -35,6 +35,15 @@ export const SHOSAI_CSS = `
              flex-wrap:nowrap;overflow-x:auto;overflow-y:hidden;scrollbar-width:none}
   .s-db-tabs::-webkit-scrollbar{height:0;width:0}
   .s-db-find{margin:0 0 8px}
+  /* 表の上の道具。検索は虫眼鏡に畳み、押した時だけ入力欄を出す。 */
+  .s-head-tools{margin-left:auto;display:flex;align-items:center;gap:6px}
+  .s-head-btn{border:1px solid #0002;background:transparent;color:#666;border-radius:4px;
+    padding:3px 8px;font-size:12px;cursor:pointer;line-height:1.6}
+  .s-head-btn:hover{border-color:#4A90C2;color:#333}
+  .s-head-search{width:180px;font-size:12px;padding:3px 6px}
+  /* 列の見出しは押せる。名前・種類・削除をそこに集めた。 */
+  .s-col-head{cursor:pointer}
+  .s-col-head:hover{background:#4A90C20F}
   .s-db-filter{flex:none;margin-left:8px;border:1px solid #0002;background:transparent;color:#666;
                border-radius:5px;padding:3px 10px;font-size:11.5px;cursor:pointer;font-family:inherit}
   .s-db-filter:hover{border-color:#4A90C2;color:#333}
