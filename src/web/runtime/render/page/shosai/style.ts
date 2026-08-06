@@ -227,7 +227,7 @@ export const SHOSAI_CSS = `
   [data-theme=dark] .s-sheet-cancel{border-top-color:#ffffff1a}
 
   /* エディタの道具。タブのすぐ上に固定する。 */
-  .s-toolbar{display:flex;gap:6px;padding:6px 10px;border-top:1px solid #0001;background:inherit}
+  .s-toolbar{display:flex;flex-wrap:wrap;gap:5px;padding:6px 10px;border-top:1px solid #0001;background:inherit}
   .s-tool{border:1px solid #0002;background:transparent;color:#555;border-radius:5px;
           padding:5px 10px;font-size:12px;cursor:pointer;font-family:inherit}
   .s-tool:hover{border-color:#4A90C2;color:#333}

@@ -117,7 +117,9 @@ export async function renderShosai(container: HTMLElement): Promise<void> {
     onError: showError,
     onOpenPage: (blockId) => {
       activePageId = blockId;
-      void editor.open(blockId).then(() => {
+      // いま見ているデータベースを伝える。行のブロックは取り込み直すと複数の
+      // データベースに属するので、伝えないと古い方の列が出て値が空に見える。
+      void editor.open(blockId, activeDatabaseId ?? undefined).then(() => {
         openedPage?.(blockId, editor.currentTitle());
         void refreshSide();
       });

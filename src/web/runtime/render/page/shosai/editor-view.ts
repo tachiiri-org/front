@@ -18,7 +18,7 @@ const CYCLE: BlockType[] = ['paragraph', 'heading', 'bullet', 'numbered', 'todo'
 
 export interface EditorView {
   el: HTMLElement;
-  open: (pageId: string) => Promise<void>;
+  open: (pageId: string, databaseId?: string) => Promise<void>;
   reload: () => Promise<void>;
   currentPageId: () => string | null;
   /** いま開いているページのタイトル。タブの見出しに使う。 */
@@ -74,42 +74,31 @@ export function createEditorView(opts: {
     ['numbered', '番号付き'], ['todo', 'TODO'], ['quote', '引用'], ['code', 'コード'],
     ['divider', '区切り'], ['table', '表'],
   ];
-  const addBlock = el('button', { class: 's-tool', text: '＋ 追加' });
-  addBlock.addEventListener('click', () => {
-    const overlay = el('div', { class: 's-overlay' });
-    const pop = el('div', { class: 's-pop' });
-    const r = addBlock.getBoundingClientRect();
-    pop.style.position = 'fixed';
-    pop.style.left = `${Math.min(r.left, window.innerWidth - 180)}px`;
-    pop.style.bottom = `${window.innerHeight - r.top + 6}px`;
-    const close = (): void => { overlay.remove(); pop.remove(); };
-    for (const [key, label] of ADD_CHOICES) {
-      const it = el('button', { class: 's-pop-item', text: label });
-      it.addEventListener('click', () => {
-        close();
-        void guard(async () => {
-          if (!pageId) return;
-          const created = await api.createBlock({ parentId: pageId, type: key, text: '' });
-          // 表は入れ子で持つ（表 > 行 > セル）。空の表だけ作っても書けないので、
-          // 2行2列を用意する。足りなければ行や列は後から足せる。
-          if (key === 'table') {
-            for (let r = 0; r < 2; r++) {
-              const row = await api.createBlock({ parentId: created.id, type: 'table_row', text: '' });
-              for (let c = 0; c < 2; c++) {
-                await api.createBlock({ parentId: row.id, type: 'table_cell', text: '' });
-              }
+  // 足せるものはボタンとして並べる。menu の中に畳むと、何が足せるのか分からない。
+  const addButtons = ADD_CHOICES.map(([key, label]) => {
+    const btn = el('button', { class: 's-tool', text: label });
+    btn.addEventListener('click', () => {
+      void guard(async () => {
+        if (!pageId) return;
+        const created = await api.createBlock({ parentId: pageId, type: key, text: '' });
+        // 表は入れ子で持つ（表 > 行 > セル）。空の表だけ作っても書けないので、
+        // 2行2列を用意する。
+        if (key === 'table') {
+          for (let r = 0; r < 2; r++) {
+            const row = await api.createBlock({ parentId: created.id, type: 'table_row', text: '' });
+            for (let c = 0; c < 2; c++) {
+              await api.createBlock({ parentId: row.id, type: 'table_cell', text: '' });
             }
-          } else {
-            focusAfterRender = created.id;
           }
-          await reload();
-        });
+        } else {
+          focusAfterRender = created.id;
+        }
+        await reload();
       });
-      pop.append(it);
-    }
-    overlay.addEventListener('click', close);
-    document.body.append(overlay, pop);
+    });
+    return btn;
   });
+
   // 種別の変更。Ctrl+Enter の巡回だけだと、目当ての種別まで何度も押すことになる。
   const TYPE_CHOICES: Array<[string, string]> = [
     ['paragraph', '段落'], ['heading', '見出し'], ['bullet', '箇条書き'],
@@ -143,16 +132,7 @@ export function createEditorView(opts: {
     document.body.append(overlay, pop);
   });
 
-  const addDivider = el('button', { class: 's-tool', text: '区切り' });
-  addDivider.addEventListener('click', () => {
-    void guard(async () => {
-      if (!pageId) return;
-      await api.createBlock({ parentId: pageId, type: 'divider', text: '' });
-      await reload();
-    });
-  });
-  bar.append(addBlock, typeBtn, addImage, addDivider, picker);
-
+  bar.append(...addButtons, addImage, typeBtn, picker);
   root.append(head, propBox, body, bar);
 
   const { cellInput } = createCellInputs({
@@ -161,10 +141,12 @@ export function createEditorView(opts: {
   });
 
   /** プロパティを描く。列が無ければ何も出さない（単体のページには列が無い）。 */
-  const paintProps = async (id: string): Promise<void> => {
+  const paintProps = async (id: string, databaseId?: string): Promise<void> => {
     propBox.innerHTML = '';
     let p: api.PageProperties | null = null;
-    try { p = await api.readPageProperties(id); } catch { return; }
+    // 行のブロックは取り込み直すと複数のデータベースに属する。どちらとして見るかを
+    // 呼び出し側から渡す。渡さないと、古い方の列が出て値が空に見える。
+    try { p = await api.readPageProperties(id, databaseId); } catch { return; }
     if (!p.databaseId || !p.properties.length) return;
     for (const prop of p.properties) {
       const row = el('div', { class: 's-prop' });
@@ -521,11 +503,11 @@ export function createEditorView(opts: {
 
   return {
     el: root,
-    open: async (id: string) => {
+    open: async (id: string, databaseId?: string) => {
       pageId = id;
       propBox.innerHTML = '';
       await guard(reload);
-      await paintProps(id);
+      await paintProps(id, databaseId);
     },
     reload: () => guard(reload),
     currentPageId: () => pageId,

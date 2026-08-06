@@ -269,5 +269,5 @@ export interface PageProperties {
   properties: PropertyDef[];
   cells: Record<string, unknown>;
 }
-export const readPageProperties = (blockId: string): Promise<PageProperties> =>
-  call(`/page/${encodeURIComponent(blockId)}/properties`);
+export const readPageProperties = (blockId: string, databaseId?: string): Promise<PageProperties> =>
+  call(`/page/${encodeURIComponent(blockId)}/properties${databaseId ? `?databaseId=${encodeURIComponent(databaseId)}` : ''}`);
