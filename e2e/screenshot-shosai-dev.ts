@@ -5,21 +5,34 @@
 import './load-dev-vars.ts';
 import { chromium } from '@playwright/test';
 import * as OTPAuth from 'otpauth';
+import { existsSync, mkdirSync } from 'node:fs';
 
 const BASE = 'https://dev.shosai.tachiiri.com';
 const OUT = process.env.OUT_DIR ?? '/tmp';
 const env = (k: string) => (process.env[k] ?? process.env[`${k} `] ?? '').trim();
 
-// storageState は使わない。既存セッションがあると GitHub が /switch_account に飛ばし、
-// 「The account you were attempting to add has already been added」で止まってしまう。
+// セッションは使い回す。毎回 GitHub にログインし直すと再認可を要求され
+// （"unusually high number of requests"）、そのうち通らなくなる。
+// 保存済みの状態があればそれで始め、認証が切れていたときだけログインする。
+const STATE = new URL('./.auth/dev-shosai.json', import.meta.url).pathname;
 const browser = await chromium.launch({ headless: true });
-const ctx = await browser.newContext({ viewport: { width: 1600, height: 950 } });
+const ctx = await browser.newContext({
+  viewport: { width: 1600, height: 950 },
+  ...(existsSync(STATE) ? { storageState: STATE } : {}),
+});
 const page = await ctx.newPage();
 page.on('console', (m) => { if (m.type() === 'error') console.log('[perr]', m.text()); });
 page.on('pageerror', (e) => console.log('[pageerror]', e.message));
 page.on('response', (r) => { if (r.status() >= 400) console.log('[http]', r.status(), r.url()); });
 
+// 既にショサイに入れるなら、GitHub には触らない。
+await page.goto(`${BASE}/`, { waitUntil: 'domcontentloaded' });
+await page.waitForTimeout(1500);
+const alreadyIn = page.url().startsWith(BASE) && await page.locator('.s-wrap').count() > 0;
+console.log('[auth] 保存済みセッション:', alreadyIn ? '有効' : '無効（ログインし直します）');
+
 // github.com にログイン
+if (!alreadyIn) {
 await page.goto('https://github.com/login', { waitUntil: 'domcontentloaded' });
 if (await page.waitForSelector('#login_field', { timeout: 4000 }).catch(() => null)) {
   await page.fill('#login_field', env('GITHUB_EMAIL'));
@@ -43,8 +56,10 @@ if (await page.waitForSelector('#login_field', { timeout: 4000 }).catch(() => nu
   }
   console.log('[auth] github logged in:', page.url());
 } else console.log('[auth] github already logged in');
+}
 
 // RP フロー: dev.shosai → dev.authn ログインページ
+if (!alreadyIn) {
 await page.goto(`${BASE}/`, { waitUntil: 'domcontentloaded' });
 await page.waitForTimeout(2000);
 console.log('[auth] login page url:', page.url());
@@ -71,7 +86,11 @@ if (page.url().includes('/oauth/mcp/select-org')) {
 
 await page.waitForURL((u) => u.toString().startsWith(BASE), { timeout: 40000 }).catch(() => console.log('[auth] dev.shosai に戻らず'));
 await page.waitForTimeout(2500);
+}
 console.log('[auth] final url:', page.url());
+// 次回のためにセッションを保存する。これで GitHub への再ログインを避けられる。
+try { mkdirSync(new URL('./.auth/', import.meta.url).pathname, { recursive: true }); } catch { /* 既にある */ }
+await ctx.storageState({ path: STATE });
 if (!page.url().startsWith(BASE)) {
   await page.screenshot({ path: `${OUT}/shosai-auth-fail.png` });
   console.log('!! 認証失敗'); await browser.close(); process.exit(2);

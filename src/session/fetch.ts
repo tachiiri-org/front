@@ -22,7 +22,8 @@ export async function authorizeFetch(
   input: {
     path: string;
     method: string;
-    body?: string;
+    /** テキストだけでなくバイナリも通す。text() で読むと画像などが壊れる。 */
+    body?: string | ArrayBuffer;
     headers?: HeadersInit;
     audience?: string;
     tenantContext?: { tenantId?: string; subjectId?: string; orgId?: string };

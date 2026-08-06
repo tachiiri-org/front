@@ -2,22 +2,37 @@
 // ShosaiDO へ中継する。エラーは呼び出し側で握り潰さず、画面上に出すために投げ直す。
 
 export type BlockType =
-  | 'page' | 'paragraph' | 'heading' | 'todo' | 'code' | 'quote' | 'bullet' | 'numbered' | 'divider' | 'database';
+  | 'page' | 'paragraph' | 'heading' | 'todo' | 'code' | 'quote' | 'bullet' | 'numbered' | 'divider' | 'database'
+  | 'image' | 'table' | 'table_row' | 'table_cell' | 'page_link' | 'embed';
 
 export type PropertyType =
   | 'text' | 'number' | 'date' | 'checkbox' | 'select' | 'multi_select' | 'relation';
 
 export interface PageSummary { id: string; title: string; updated_at: number | null }
-export interface BlockRow { id: string; depth: number; type: BlockType; text: string; rank: string | null }
+export interface BlockRow {
+  id: string; depth: number; type: BlockType; text: string; rank: string | null;
+  /** 画像などの添付。fileUrl があれば外部 URL、無ければ /file/:id から読む。 */
+  fileId?: string | null; fileUrl?: string | null;
+  /** ページへのリンクの相手。 */
+  linkTargetId?: string | null; linkTargetTitle?: string | null;
+  /** 埋め込みの行き先。Notion がホストしていたものは fileId 側に入る。 */
+  url?: string | null;
+}
 export interface PageDetail {
   page: { id: string; type: BlockType; title: string; created_at: number | null; updated_at: number | null };
   blocks: BlockRow[];
 }
-export interface PropertyDef { id: string; name: string; type: PropertyType; rank: string | null }
-export interface OptionDef { id: string; name: string }
+export interface PropertyDef {
+  id: string; name: string; type: PropertyType; rank: string | null;
+  /** select / multi_select のときだけ入る。画面で選ばせるために使う。 */
+  options?: OptionDef[];
+}
+export interface OptionDef { id: string; name: string; colorId?: string | null }
 export interface ViewDef { id: string; type: string; name: string }
 export interface DatabaseSummary {
   databaseId: string; blockId: string | null; title: string; rowCount: number; propertyCount: number;
+  /** Notion 由来なら data_source_id が入る。取り込み中は syncStatus が 'running'。 */
+  syncStatus?: string | null; syncPhase?: string | null; notionSourceId?: string | null;
 }
 export interface DatabaseDetail {
   databaseId: string;
@@ -132,3 +147,45 @@ export const startImport = (body: {
 
 export const importStatus = (importId: string): Promise<ImportStatus> =>
   call(`/notion/import/${encodeURIComponent(importId)}`);
+
+export interface ImportProgress {
+  state: {
+    databaseId: string; cursor: string | null; synced_at: number | null;
+    status: string | null; phase: string | null;
+    rows: number | null; blocks: number | null; importId: string | null; updated_at: number | null;
+  } | null;
+  rowsInDb: number;
+  failures: Array<{ seq: number; at: number; notionId: string | null; message: string }>;
+}
+
+/** 取り込みの進み具合と失敗。ワークフローの状態と違い、走行中でも中身が読める。 */
+export const importProgress = (databaseId: string): Promise<ImportProgress> =>
+  call(`/notion/progress?databaseId=${encodeURIComponent(databaseId)}`);
+
+/** リレーションの参照先の候補。その列が指しているデータベースの行を返す。 */
+export const relationCandidates = (propertyId: string): Promise<{ pages: Array<{ id: string; title: string }> }> =>
+  call(`/relation-candidates?propertyId=${encodeURIComponent(propertyId)}`);
+
+/** relation で指している別データソース。取り込み時にまとめて選ぶために使う。 */
+export const relatedSources = (connectionId: string, dataSourceId: string):
+  Promise<{ related: Array<{ id: string; title: string }> }> =>
+  call(`/notion/related?connectionId=${encodeURIComponent(connectionId)}&dataSourceId=${encodeURIComponent(dataSourceId)}`);
+
+export const deleteDatabase = (databaseId: string): Promise<{ databaseId: string }> =>
+  call(`/database/${encodeURIComponent(databaseId)}`, { method: 'DELETE' });
+
+/** 画像などを R2 へ。ブロックに紐づけて置き場所を記録する。 */
+export async function uploadFile(blockId: string, file: File): Promise<{ fileId: string }> {
+  const q = new URLSearchParams({ blockId, name: file.name });
+  const res = await fetch(`/api/v1/shosai/upload?${q}`, {
+    method: 'POST',
+    headers: { 'Content-Type': file.type || 'application/octet-stream' },
+    body: file,
+  });
+  if (!res.ok) {
+    let detail = `${res.status}`;
+    try { const b = (await res.json()) as { message?: string }; detail = b.message ?? detail; } catch { /* 本文が JSON でない */ }
+    throw new ShosaiApiError(res.status, detail);
+  }
+  return (await res.json()) as { fileId: string };
+}

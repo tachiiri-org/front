@@ -25,11 +25,15 @@ export interface EditorView {
   open: (pageId: string) => Promise<void>;
   reload: () => Promise<void>;
   currentPageId: () => string | null;
+  /** いま開いているページのタイトル。タブの見出しに使う。 */
+  currentTitle: () => string;
 }
 
 export function createEditorView(opts: {
   onError: (message: string) => void;
   onTitleChange: (pageId: string, title: string) => void;
+  /** ページへのリンクを押したとき。 */
+  onOpenLink?: (blockId: string) => void;
 }): EditorView {
   let pageId: string | null = null;
   let detail: PageDetail | null = null;
@@ -42,7 +46,99 @@ export function createEditorView(opts: {
   const typeNote = el('span', { class: 's-note' });
   head.append(title, typeNote);
   const body = el('div', { class: 's-editor-body' });
-  root.append(head, body);
+
+  // 編集の道具はタブのすぐ上に固定する。本文の末尾まで送らないと足せないのは面倒なので。
+  const bar = el('div', { class: 's-toolbar' });
+  const picker = el('input', { class: 's-file', type: 'file', accept: 'image/*' }) as HTMLInputElement;
+  const addImage = el('button', { class: 's-tool', text: '画像', title: '画像を追加' });
+  addImage.addEventListener('click', () => picker.click());
+  picker.addEventListener('change', () => {
+    const file = picker.files?.[0];
+    picker.value = '';
+    if (!file || !pageId) return;
+    void guard(async () => {
+      addImage.textContent = '送信中…';
+      try {
+        const created = await api.createBlock({ parentId: pageId!, type: 'image', text: '' });
+        await api.uploadFile(created.id, file);
+        await reload();
+      } finally { addImage.textContent = '画像'; }
+    });
+  });
+  // 足すときに種別を選べるようにする。段落を足してから種別を変えるのは手数が多い。
+  const ADD_CHOICES: Array<[api.BlockType, string]> = [
+    ['paragraph', '段落'], ['heading', '見出し'], ['bullet', '箇条書き'],
+    ['numbered', '番号付き'], ['todo', 'TODO'], ['quote', '引用'], ['code', 'コード'],
+  ];
+  const addBlock = el('button', { class: 's-tool', text: '＋ 追加' });
+  addBlock.addEventListener('click', () => {
+    const overlay = el('div', { class: 's-overlay' });
+    const pop = el('div', { class: 's-pop' });
+    const r = addBlock.getBoundingClientRect();
+    pop.style.position = 'fixed';
+    pop.style.left = `${Math.min(r.left, window.innerWidth - 180)}px`;
+    pop.style.bottom = `${window.innerHeight - r.top + 6}px`;
+    const close = (): void => { overlay.remove(); pop.remove(); };
+    for (const [key, label] of ADD_CHOICES) {
+      const it = el('button', { class: 's-pop-item', text: label });
+      it.addEventListener('click', () => {
+        close();
+        void guard(async () => {
+          if (!pageId) return;
+          const created = await api.createBlock({ parentId: pageId, type: key, text: '' });
+          focusAfterRender = created.id;
+          await reload();
+        });
+      });
+      pop.append(it);
+    }
+    overlay.addEventListener('click', close);
+    document.body.append(overlay, pop);
+  });
+  // 種別の変更。Ctrl+Enter の巡回だけだと、目当ての種別まで何度も押すことになる。
+  const TYPE_CHOICES: Array<[string, string]> = [
+    ['paragraph', '段落'], ['heading', '見出し'], ['bullet', '箇条書き'],
+    ['numbered', '番号付き'], ['todo', 'TODO'], ['quote', '引用'], ['code', 'コード'],
+  ];
+  const typeBtn = el('button', { class: 's-tool', text: '種別' });
+  typeBtn.addEventListener('click', () => {
+    const target = document.activeElement as HTMLTextAreaElement | null;
+    const blockId = target?.dataset?.blockId;
+    if (!blockId) { opts.onError('種別を変えるブロックを先に選んでください'); return; }
+    const overlay = el('div', { class: 's-overlay' });
+    const pop = el('div', { class: 's-pop' });
+    const r = typeBtn.getBoundingClientRect();
+    pop.style.position = 'fixed';
+    pop.style.left = `${Math.min(r.left, window.innerWidth - 180)}px`;
+    pop.style.bottom = `${window.innerHeight - r.top + 6}px`;
+    const close = (): void => { overlay.remove(); pop.remove(); };
+    for (const [key, label] of TYPE_CHOICES) {
+      const it = el('button', { class: 's-pop-item', text: label });
+      it.addEventListener('click', () => {
+        close();
+        void guard(async () => {
+          await api.patchBlock(blockId, { type: key as api.BlockType });
+          focusAfterRender = blockId;
+          await reload();
+        });
+      });
+      pop.append(it);
+    }
+    overlay.addEventListener('click', close);
+    document.body.append(overlay, pop);
+  });
+
+  const addDivider = el('button', { class: 's-tool', text: '区切り' });
+  addDivider.addEventListener('click', () => {
+    void guard(async () => {
+      if (!pageId) return;
+      await api.createBlock({ parentId: pageId, type: 'divider', text: '' });
+      await reload();
+    });
+  });
+  bar.append(addBlock, typeBtn, addImage, addDivider, picker);
+
+  root.append(head, body, bar);
 
   const guard = async (fn: () => Promise<void>): Promise<void> => {
     try { await fn(); } catch (e) {
@@ -126,6 +222,52 @@ export function createEditorView(opts: {
       return row;
     }
 
+    // 他のページへのリンク。押すとそのページを開く。
+    if (b.type === 'page_link') {
+      const a = el('a', { class: 's-blk-link', text: b.linkTargetTitle || b.text || '（無題のページ）', href: '#' });
+      a.addEventListener('click', (e) => {
+        e.preventDefault();
+        if (b.linkTargetId) opts.onOpenLink?.(b.linkTargetId);
+      });
+      row.append(a);
+      return row;
+    }
+
+    // 埋め込み。中身は再現しない。行き先へ出られれば用は足りる。
+    if (b.type === 'embed') {
+      const href = b.url || (b.fileId ? `/api/v1/shosai/file/${encodeURIComponent(b.fileId)}` : '');
+      const wrap = el('div', { class: 's-embed' });
+      if (href) {
+        const a = el('a', { class: 's-embed-link', href, target: '_blank', rel: 'noopener noreferrer' });
+        a.textContent = b.text || b.url || '添付ファイル';
+        wrap.append(a);
+      } else {
+        wrap.append(el('span', { class: 's-note', text: b.text || '埋め込み（行き先が取れませんでした）' }));
+      }
+      row.append(wrap);
+      return row;
+    }
+
+    // 画像。実体は R2 にあり /file/:id から読む。外部 URL のものはそのまま参照する。
+    if (b.type === 'image') {
+      const wrap = el('div', { class: 's-img-wrap' });
+      if (b.fileId) {
+        const img = el('img', { class: 's-img', loading: 'lazy' }) as HTMLImageElement;
+        img.src = b.fileUrl || `/api/v1/shosai/file/${encodeURIComponent(b.fileId)}`;
+        img.alt = b.text || '';
+        img.addEventListener('error', () => {
+          wrap.innerHTML = '';
+          wrap.append(el('div', { class: 's-img-miss', text: '画像を表示できません' }));
+        });
+        wrap.append(img);
+      } else {
+        wrap.append(el('div', { class: 's-img-miss', text: '画像（実体が取り込まれていません）' }));
+      }
+      if (b.text) wrap.append(el('div', { class: 's-img-cap', text: b.text }));
+      row.append(wrap);
+      return row;
+    }
+
     if (b.type === 'todo') {
       const cb = el('input', { class: 's-blk-cb', type: 'checkbox' }) as HTMLInputElement;
       // TODO の済/未済はまだ p_ に持たせていない。見た目だけ先に置き、状態は保存しない。
@@ -163,8 +305,10 @@ export function createEditorView(opts: {
     input.addEventListener('keydown', (ev) => {
       const e = ev as KeyboardEvent;
 
-      // Enter: 同じ深さの直後に新しいブロックを作る（コードブロック内は改行のまま）。
-      if (e.key === 'Enter' && !e.shiftKey && b.type !== 'code') {
+      // Enter はブロック内の改行（textarea の既定のまま）。
+      // 段落の途中で改行したいことの方が多く、毎回ブロックが割れると書きにくい。
+      // 新しいブロックは Shift+Enter。
+      if (e.key === 'Enter' && e.shiftKey) {
         e.preventDefault();
         void guard(async () => {
           if (input.value !== b.text) await api.patchBlock(b.id, { text: input.value });
@@ -231,11 +375,35 @@ export function createEditorView(opts: {
     });
 
     input.addEventListener('focus', () => {
-      typeNote.textContent = `${TYPE_LABEL[b.type] ?? b.type}  ·  Ctrl+Enter で種別変更 / Tab でインデント`;
+      typeNote.textContent = `${TYPE_LABEL[b.type] ?? b.type}  ·  Shift+Enter で新しいブロック / Ctrl+Enter で種別変更 / Tab でインデント`;
     });
 
     row.append(input);
     return row;
+  };
+
+  /**
+   * 表を組み立てる。ブロックは平坦に並んで来るので、深さで行とセルを拾い直す。
+   * 行・セルは編集対象として別々に出さない（表として見せた方が分かる）。
+   */
+  const renderTable = (blocks: BlockRow[], index: number): { el: HTMLElement; consumed: number } => {
+    const base = blocks[index].depth;
+    const table = el('table', { class: 's-blk-tbl' });
+    let i = index + 1;
+    while (i < blocks.length && blocks[i].depth > base) {
+      if (blocks[i].type !== 'table_row') { i++; continue; }
+      const rowDepth = blocks[i].depth;
+      const tr = el('tr');
+      i++;
+      while (i < blocks.length && blocks[i].depth > rowDepth) {
+        if (blocks[i].type === 'table_cell') tr.append(el('td', { text: blocks[i].text }));
+        i++;
+      }
+      table.append(tr);
+    }
+    const wrap = el('div', { class: 's-blk-tbl-wrap' });
+    wrap.append(table);
+    return { el: wrap, consumed: i - index };
   };
 
   const paint = (): void => {
@@ -258,7 +426,21 @@ export function createEditorView(opts: {
       body.append(add);
       return;
     }
-    blocks.forEach((_, i) => body.append(renderBlock(blocks, i)));
+    for (let i = 0; i < blocks.length; i++) {
+      const b = blocks[i];
+      if (b.type === 'table') {
+        const row = el('div', { class: 's-blk' });
+        row.style.marginLeft = `${b.depth * 22}px`;
+        row.append(el('span', { class: 's-grip', text: '⠿' }));
+        const t = renderTable(blocks, i);
+        row.append(t.el);
+        body.append(row);
+        i += t.consumed - 1;   // 行とセルは表の中で描いたので飛ばす
+        continue;
+      }
+      if (b.type === 'table_row' || b.type === 'table_cell') continue;
+      body.append(renderBlock(blocks, i));
+    }
 
     const add = el('button', { class: 's-add-row', text: '＋ ブロックを追加' });
     add.addEventListener('click', () => {
@@ -297,5 +479,6 @@ export function createEditorView(opts: {
     },
     reload: () => guard(reload),
     currentPageId: () => pageId,
+    currentTitle: () => detail?.page.title ?? title.value ?? '',
   };
 }

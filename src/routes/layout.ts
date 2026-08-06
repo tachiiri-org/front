@@ -554,13 +554,23 @@ export const handleApiRequest = async (request: Request, env: Env): Promise<Resp
   if (shosaiApiMatch) {
     const suffix = shosaiApiMatch[1] ?? '/';
     const backendPath = `/api/v1/shosai${suffix}${url.search}`;
-    const body = request.method !== 'GET' && request.method !== 'HEAD' ? await request.text() : undefined;
+    // 画像などのバイナリを text() で読むと UTF-8 として解釈されて壊れる。
+    // 中身の型に応じて読み分け、Content-Type もそのまま渡す。
+    const contentType = request.headers.get('Content-Type') ?? '';
+    const isTextBody = contentType === '' || contentType.includes('json') || contentType.startsWith('text/');
+    const hasBody = request.method !== 'GET' && request.method !== 'HEAD';
+    const body = hasBody
+      ? (isTextBody ? await request.text() : await request.arrayBuffer())
+      : undefined;
     const identity = await readIdentity(env, request);
     const tenantContext = { tenantId: identity?.groupId, subjectId: identity?.userId };
     if (!tenantContext.tenantId || !tenantContext.subjectId) {
       return Response.json({ error: 'unauthenticated' }, { status: 401 });
     }
-    const res = await authorizeFetch(env, { path: backendPath, method: request.method, body, tenantContext });
+    const res = await authorizeFetch(env, {
+      path: backendPath, method: request.method, body, tenantContext,
+      ...(hasBody && !isTextBody ? { headers: { 'Content-Type': contentType } } : {}),
+    });
     if (env.LOG_LEVEL === 'debug') console.log(`[shosai-proxy] ${request.method} ${backendPath} → ${res.status}`);
     return res;
   }
