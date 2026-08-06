@@ -34,6 +34,9 @@ export function createDatabaseView(opts: {
   let filterText = '';
   // 相対日付（今週・先月）の起点。設定で変えられる。
   let timeZone = 'Asia/Tokyo';
+  // 描き直しで横スクロールが左端に戻るのを防ぐ。取り込み中は数秒ごとに描き直すので、
+  // 位置を覚えていないと表を横に見ていられない。
+  let scrollLeft = 0;
 
   const root = el('div', { class: 's-main' });
   const head = el('div', { class: 's-main-head' });
@@ -407,7 +410,9 @@ export function createDatabaseView(opts: {
     // ブラウザが全体を縮小表示してしまい、固定フッターまで画面外へ行く。
     const scroller = el('div', { class: 's-tbl-scroll' });
     scroller.append(table);
+    scroller.addEventListener('scroll', () => { scrollLeft = scroller.scrollLeft; });
     body.append(scroller);
+    if (scrollLeft) requestAnimationFrame(() => { scroller.scrollLeft = scrollLeft; });
     if (q && !visible.length) {
       body.append(el('div', { class: 's-note', text: `「${q}」に当てはまる行はありません` }));
     }
@@ -458,6 +463,7 @@ export function createDatabaseView(opts: {
       databaseId = id;
       activeViewId = null;
       filterText = '';
+      scrollLeft = 0;
       try {
         const st = await api.readSettings();
         if (st.settings.timezone) timeZone = st.settings.timezone;

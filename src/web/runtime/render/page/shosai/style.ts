@@ -149,6 +149,9 @@ export const SHOSAI_CSS = `
   .s-notion-src-m{font-size:11px;color:#aaa}
   .s-notion-progress{padding:8px 10px;margin:4px 6px 0;border-radius:6px;background:#4A90C214;font-size:12px}
   .s-notion-prog-line{color:#4A90C2}
+  .s-notion-stop{margin-top:6px;border:1px solid #0002;background:transparent;color:#c0392b;
+                 border-radius:5px;padding:3px 10px;font-size:11.5px;cursor:pointer;font-family:inherit}
+  .s-notion-stop:hover{border-color:#c0392b}
   .s-notion-prog-done{color:#2A7;font-weight:600}
   .s-notion-prog-err{color:#c0392b;font-weight:600}
   .s-notion-drop{margin-top:4px;color:#888;font-size:11.5px;line-height:1.5}

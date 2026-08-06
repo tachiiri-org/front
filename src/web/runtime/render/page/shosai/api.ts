@@ -210,3 +210,8 @@ export async function uploadFile(blockId: string, file: File): Promise<{ fileId:
 
 export const readSettings = (): Promise<{ settings: Record<string, string> }> => call('/settings');
 export const saveSettings = (patch: Record<string, string>): Promise<unknown> => put('/settings', patch);
+
+/** 取り込みを止める。走っているワークフローを終わらせ、状態も残す。 */
+export const cancelImport = (importId: string, databaseId?: string): Promise<unknown> =>
+  call(`/notion/import/${encodeURIComponent(importId)}${databaseId ? `?databaseId=${encodeURIComponent(databaseId)}` : ''}`,
+    { method: 'DELETE' });
