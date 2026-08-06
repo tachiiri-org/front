@@ -24,21 +24,38 @@ export interface PageDetail {
 }
 export interface PropertyDef {
   id: string; name: string; type: PropertyType; rank: string | null;
+  /** Notion のプロパティ ID。ビューの式がこれで参照する。 */
+  notionId?: string | null;
   /** select / multi_select のときだけ入る。画面で選ばせるために使う。 */
   options?: OptionDef[];
 }
 export interface OptionDef { id: string; name: string; colorId?: string | null }
-export interface ViewDef { id: string; type: string; name: string }
+export interface ViewDef {
+  id: string; type: string; name: string;
+  /** Notion の式をそのまま預かったもの。画面側で解く。 */
+  filter?: string | null; sorts?: string | null;
+  /** 絞り込みの実体はこちら（filter は null で来る）。鍵は Notion のプロパティ ID。 */
+  quickFilters?: string | null;
+  /** 表示する列と幅。 */
+  configuration?: string | null;
+}
 export interface DatabaseSummary {
   databaseId: string; blockId: string | null; title: string; rowCount: number; propertyCount: number;
   /** Notion 由来なら data_source_id が入る。取り込み中は syncStatus が 'running'。 */
   syncStatus?: string | null; syncPhase?: string | null; notionSourceId?: string | null;
+  /** 仕組みが持つデータベース（取り込みログなど）。消せず、列も行も足せない。 */
+  systemKind?: string | null;
 }
 export interface DatabaseDetail {
   databaseId: string;
+  systemKind?: string | null;
   properties: PropertyDef[];
   views: ViewDef[];
-  rows: Array<{ id: string; title: string; cells: Record<string, unknown> }>;
+  rows: Array<{
+    id: string; title: string; cells: Record<string, unknown>;
+    /** Notion 側の作成・更新日時。ビューの並びや絞り込みが参照する。 */
+    notionCreatedAt?: number | null; notionEditedAt?: number | null;
+  }>;
 }
 export interface SearchHit { id: string; type: BlockType; text: string }
 
@@ -87,7 +104,8 @@ export const search = (q: string): Promise<{ results: SearchHit[]; engine: strin
   call(`/search?q=${encodeURIComponent(q)}`);
 
 export const listDatabases = (): Promise<{ databases: DatabaseSummary[] }> => call('/databases');
-export const readDatabase = (id: string): Promise<DatabaseDetail> => call(`/database/${encodeURIComponent(id)}`);
+export const readDatabase = (id: string, viewId?: string): Promise<DatabaseDetail> =>
+  call(`/database/${encodeURIComponent(id)}${viewId ? `?viewId=${encodeURIComponent(viewId)}` : ''}`);
 
 export const createDatabase = (body: { title: string; parentId?: string }):
   Promise<{ databaseId: string; blockId: string; viewId: string }> => post('/database', body);
@@ -189,3 +207,15 @@ export async function uploadFile(blockId: string, file: File): Promise<{ fileId:
   }
   return (await res.json()) as { fileId: string };
 }
+
+export const readSettings = (): Promise<{ settings: Record<string, string> }> => call('/settings');
+export const saveSettings = (patch: Record<string, string>): Promise<unknown> => put('/settings', patch);
+
+/** 取り込みを止める。走っているワークフローを終わらせ、状態も残す。 */
+export const cancelImport = (importId: string, databaseId?: string): Promise<unknown> =>
+  call(`/notion/import/${encodeURIComponent(importId)}${databaseId ? `?databaseId=${encodeURIComponent(databaseId)}` : ''}`,
+    { method: 'DELETE' });
+
+/** ビューの絞り込み・並び・名前を変える。式は Notion のプロパティ ID を鍵にする。 */
+export const updateView = (viewId: string, patch: Record<string, unknown>): Promise<unknown> =>
+  put(`/view/${encodeURIComponent(viewId)}`, patch);

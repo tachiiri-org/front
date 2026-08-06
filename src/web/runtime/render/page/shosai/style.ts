@@ -15,6 +15,9 @@ export const SHOSAI_CSS = `
   .s-item{display:flex;align-items:center;gap:6px;padding:5px 8px;border-radius:5px;cursor:pointer;white-space:nowrap;overflow:hidden}
   .s-item:hover{background:#0000000a}
   .s-item.on{background:#4A90C222;font-weight:600}
+  /* 仕組みが持つもの（取り込みログ）。ユーザーの作ったものと見分ける。 */
+  .s-item-sys .s-item-tx{color:#888}
+  .s-item-sys .s-item-ic{opacity:.7}
   .s-item-ic{opacity:.5;flex:none;font-size:11px}
   .s-item-tx{flex:1;min-width:0;overflow:hidden;text-overflow:ellipsis}
   .s-item-ct{flex:none;font-size:10px;color:#aaa;font-variant-numeric:tabular-nums}
@@ -27,7 +30,30 @@ export const SHOSAI_CSS = `
   .s-title:hover,.s-title:focus{border-color:#4A90C2;background:#00000008;outline:none}
   .s-main-body{flex:1;min-height:0;overflow:auto;padding:0 16px 24px}
 
-  .s-db-tabs{display:flex;gap:2px;align-items:center;border-bottom:1px solid #0001;margin:0 0 8px;flex-wrap:nowrap}
+  /* 横だけスクロールさせる。overflow-x:auto だけだと縦のバーまで出る環境がある。 */
+  .s-db-tabs{display:flex;gap:2px;align-items:center;border-bottom:1px solid #0001;margin:0 0 8px;
+             flex-wrap:nowrap;overflow-x:auto;overflow-y:hidden;scrollbar-width:none}
+  .s-db-tabs::-webkit-scrollbar{height:0;width:0}
+  .s-db-find{margin:0 0 8px}
+  .s-db-filter{flex:none;margin-left:8px;border:1px solid #0002;background:transparent;color:#666;
+               border-radius:5px;padding:3px 10px;font-size:11.5px;cursor:pointer;font-family:inherit}
+  .s-db-filter:hover{border-color:#4A90C2;color:#333}
+  /* 絞り込みの組み立て */
+  .s-filter{min-width:340px;max-width:92vw;padding:10px 12px;gap:8px}
+  .s-filter-head{font-weight:700;font-size:13px;padding-bottom:4px}
+  .s-filter-list{display:flex;flex-direction:column;gap:3px;max-height:160px;overflow-y:auto}
+  .s-filter-row{display:flex;align-items:center;gap:6px;padding:4px 6px;border-radius:4px;background:#00000008}
+  .s-filter-tx{flex:1;min-width:0;font-size:12px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+  .s-filter-del{border:0;background:transparent;color:#c0392b;cursor:pointer;font-size:13px;padding:0 4px}
+  .s-filter-add{display:flex;flex-wrap:wrap;gap:5px;align-items:center;padding-top:6px;border-top:1px solid #0001}
+  .s-filter-sel{border:1px solid #0002;border-radius:5px;padding:4px 6px;font-size:12px;background:transparent;
+                color:inherit;font-family:inherit;max-width:130px}
+  .s-filter-val{max-width:110px}
+  .s-filter-foot{display:flex;gap:6px;justify-content:flex-end;padding-top:8px;border-top:1px solid #0001}
+  .s-filter-save{color:#4A90C2;border-color:#4A90C2}
+  [data-theme=dark] .s-filter-row{background:#ffffff0f}
+  [data-theme=dark] .s-filter-add,[data-theme=dark] .s-filter-foot{border-top-color:#ffffff1a}
+  .s-db-find input{max-width:320px}
   .s-db-tab{display:inline-flex;align-items:center;gap:5px;border:0;background:transparent;color:#888;cursor:pointer;font-size:13px;padding:6px 10px;border-bottom:2px solid transparent;white-space:nowrap;margin-bottom:-1px}
   .s-db-tab:hover{color:#333;background:#00000006}
   .s-db-tab.on{color:#333;font-weight:600;border-bottom-color:#333}
@@ -95,6 +121,10 @@ export const SHOSAI_CSS = `
   /* ── 右: ブロックエディタ ── */
   .s-editor{flex:1;min-width:0;display:flex;flex-direction:column;border-left:1px solid #0001;overflow:hidden}
   .s-editor-head{display:flex;align-items:center;gap:8px;padding:12px 16px 6px}
+  .s-editor-close{flex:none;border:0;background:transparent;color:#bbb;cursor:pointer;font-size:18px;
+                  line-height:1;padding:2px 6px;font-family:inherit}
+  .s-editor-close:hover{color:#333}
+  [data-theme=dark] .s-editor-close:hover{color:#eee}
   .s-editor-body{flex:1;min-height:0;overflow-y:auto;padding:4px 16px 40vh}
   .s-blk{display:flex;align-items:flex-start;gap:4px;border-radius:5px}
   .s-blk:hover{background:#00000005}
@@ -139,6 +169,9 @@ export const SHOSAI_CSS = `
   .s-notion-src-m{font-size:11px;color:#aaa}
   .s-notion-progress{padding:8px 10px;margin:4px 6px 0;border-radius:6px;background:#4A90C214;font-size:12px}
   .s-notion-prog-line{color:#4A90C2}
+  .s-notion-stop{margin-top:6px;border:1px solid #0002;background:transparent;color:#c0392b;
+                 border-radius:5px;padding:3px 10px;font-size:11.5px;cursor:pointer;font-family:inherit}
+  .s-notion-stop:hover{border-color:#c0392b}
   .s-notion-prog-done{color:#2A7;font-weight:600}
   .s-notion-prog-err{color:#c0392b;font-weight:600}
   .s-notion-drop{margin-top:4px;color:#888;font-size:11.5px;line-height:1.5}
@@ -158,6 +191,9 @@ export const SHOSAI_CSS = `
                 padding:13px 16px;font-size:14px;color:#333;cursor:pointer;font-family:inherit}
   .s-sheet-item:hover{background:#00000008}
   .s-sheet-del{color:#c0392b}
+  .s-set-row{display:flex;align-items:center;gap:10px;padding:8px 16px}
+  .s-set-label{flex:none;font-size:13px;color:#666}
+  [data-theme=dark] .s-set-label{color:#aaa}
   .s-sheet-cancel{color:#888;border-top:1px solid #0001;margin-top:4px}
   [data-theme=dark] .s-sheet{background:#1c1e22;border-top-color:#ffffff22}
   [data-theme=dark] .s-sheet-item{color:#e6e6e6}

@@ -200,9 +200,9 @@ export function createNotionView(opts: {
     const blocks = st?.blocks ?? 0;
     progress.append(el('div', {
       class: 's-notion-prog-line',
-      text: `${title}: ${st?.phase ?? workflowStatus}`,
+      text: `${title}: ${rows} 行`,
     }));
-    progress.append(el('div', { class: 's-note', text: `${rows} 行 / ${blocks} ブロック` }));
+    void blocks;
     const fails = p?.failures ?? [];
     if (fails.length) {
       const head = el('div', { class: 's-notion-warn', text: `取りこぼし ${fails.length} 件（新しい順・「Notion 取り込みログ」に記録）` });
@@ -217,12 +217,24 @@ export function createNotionView(opts: {
   };
 
   const watchImport = (importId: string, title: string, databaseId: string): void => {
+    let stopped = false;
     progress.style.display = '';
     progress.innerHTML = '';
     const line = el('div', { class: 's-notion-prog-line', text: `${title} を取り込んでいます…` });
     progress.append(line);
+    const stop = el('button', { class: 's-notion-stop', text: '中止' });
+    stop.addEventListener('click', () => {
+      if (!confirm(`${title} の取り込みを中止しますか。ここまで入ったぶんは残ります。`)) return;
+      void guard(async () => {
+        await api.cancelImport(importId, databaseId);
+        stopped = true;
+        progress.innerHTML = '';
+        progress.append(el('div', { class: 's-notion-prog-err', text: `${title}: 中止しました` }));
+        opts.onImported();
+      });
+    });
+    progress.append(stop);
 
-    let stopped = false;
     const tick = async (): Promise<void> => {
       if (stopped) return;
       try {
@@ -279,7 +291,6 @@ export function createNotionView(opts: {
         // ワークフローの状態は running としか言わないので、DO に書かれた進捗を読む。
         // 左ペイン全体は描き直さない（点滅する）。この枠の中だけを書き換える。
         await paintProgress(databaseId, title, st);
-        opts.onProgress(databaseId);
       } catch {
         // 進捗の取得に失敗しても取り込み自体は続いている。監視だけ諦める。
         line.textContent = `${title}: 進捗を取得できません（取り込みは継続中）`;
