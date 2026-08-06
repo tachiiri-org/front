@@ -221,6 +221,7 @@ type Summary = {
   bySource: { source: string; billing_month: string; total: number }[];
   fixedCategories: string[];
   fixedShops: string[];
+  shopCycles: { shop_id: string; months: number }[];
   issuers: string[];
   byCard: { billing_month: string; issuer: string; card: string; total: number }[];
   multiCategoryShops: number;
@@ -379,22 +380,6 @@ async function renderSummary(host: HTMLElement): Promise<void> {
      * それ以外だけを経過日数で割り返して足し合わせる。
      * 費目が固定費でなくても店だけ固定ということがある（食費のうち定期便だけ、など）。
      */
-    const projShops = (shops: Map<string, Map<string, number>> | undefined): number => {
-      const [m0, m1, m2] = months;
-      let sum = 0;
-      for (const [shopId, mm] of shops ?? []) {
-        const a0 = mm.get(m0) ?? 0;
-        if (!isFixedShop(shopId, shopCatOf.get(shopId) ?? '')) { sum += Math.round(a0 * factor); continue; }
-        if (a0 > 0) { sum += a0; continue; }   // 今月ぶんが既に立っている
-        const a1 = mm.get(m1) ?? 0;
-        const a2 = mm.get(m2) ?? 0;
-        if (a1 > 0 && a2 > 0) sum += a1;
-        else if (a1 === 0 && a2 > 0) sum += a2;
-      }
-      return sum;
-    };
-    const projCat = (cat: string): number => projShops(byCatShop.get(cat));
-
     // カードは発行元ごとに1行。ヨドバシとビューカードは別の引き落としなので分けて見せる。
     const issuers = (s.issuers ?? []).length ? s.issuers : ['ヨドバシカード'];
     const issuerAt = new Map<string, Map<string, number>>();
@@ -408,6 +393,74 @@ async function renderSummary(host: HTMLElement): Promise<void> {
     for (const mm of issuerAt.values()) {
       for (const [m, v] of mm) cardAt.set(m, (cardAt.get(m) ?? 0) + v);
     }
+    const shopCatOf = new Map<string, string>();
+    for (const r of s.byShop) shopCatOf.set(r.shop_id, r.category);
+
+    const cycleOf = new Map<string, number>();
+    for (const c of s.shopCycles ?? []) cycleOf.set(c.shop_id, c.months);
+
+    // その発行元の明細がその月に1件でも入っているか。ビューカードは締め日を過ぎないと
+    // CSV が出ないので、月の途中は0件になる。0を日割りしても0にしかならないため、
+    // 取り込み前の月は実績ではなく過去の平均から見込む。
+    const issuerHasMonth = new Set<string>();
+    const issuerOfShop = new Map<string, string>();
+    for (const r of s.byShop) {
+      issuerHasMonth.add(`${r.issuer}\u0001${r.billing_month}`);
+      issuerOfShop.set(r.shop_id, r.issuer);
+    }
+
+    const monthDiff = (from: string, to: string): number =>
+      (Number(to.slice(0, 4)) - Number(from.slice(0, 4))) * 12
+      + (Number(to.slice(5, 7)) - Number(from.slice(5, 7)));
+
+    /**
+     * 店1つぶんの着地見込み。
+     *
+     *  周期あり  … 定期券のように数か月ごとに立つもの。最後に立った月からの経過が周期の
+     *              倍数になる月だけ、その額を見込む。前月・前々月しか見ない規則では拾えない。
+     *  固定費    … 周期を前月・前々月の有無から推測する（毎月／隔月）。
+     *  変動費    … 経過日数で割り返す。ただしその月の明細がまだ1件も無いカードは、
+     *              割り返す元が0なので、直近3か月の実績の平均を使う。
+     */
+    const projShop = (shopId: string, mm: Map<string, number>): number => {
+      const [m0, m1, m2] = months;
+      const a0 = mm.get(m0) ?? 0;
+      const cat = shopCatOf.get(shopId) ?? '';
+      const cycle = cycleOf.get(shopId);
+      const fixed = cycle !== undefined || isFixedShop(shopId, cat);
+      // 定額のものは今月ぶんが立っていればそれが確定額。増減しないので割り返さない。
+      if (fixed && a0 > 0) return a0;
+
+      if (cycle !== undefined && cycle > 0) {
+        let last = '';
+        for (const m of months) if (m !== m0 && (mm.get(m) ?? 0) > 0) { last = m; break; }
+        if (!last) return 0;
+        const gap = monthDiff(last, m0);
+        return gap > 0 && gap % cycle === 0 ? (mm.get(last) ?? 0) : 0;
+      }
+
+      if (fixed) {
+        const a1 = mm.get(m1) ?? 0;
+        const a2 = mm.get(m2) ?? 0;
+        if (a1 > 0 && a2 > 0) return a1;
+        if (a1 === 0 && a2 > 0) return a2;
+        return 0;
+      }
+
+      // 変動費。カードの明細が届いていない月は日割りできないので過去の平均で置く。
+      const issuer = issuerOfShop.get(shopId) ?? '';
+      if (issuerHasMonth.has(`${issuer}\u0001${m0}`)) return Math.round(a0 * factor);
+      const past = months.slice(1).filter((m) => (mm.get(m) ?? 0) > 0).slice(0, 3);
+      if (!past.length) return 0;
+      return Math.round(past.reduce((acc, m) => acc + (mm.get(m) ?? 0), 0) / past.length);
+    };
+
+    const projShops = (shops: Map<string, Map<string, number>> | undefined): number => {
+      let sum = 0;
+      for (const [shopId, mm] of shops ?? []) sum += projShop(shopId, mm);
+      return sum;
+    };
+    const projCat = (cat: string): number => projShops(byCatShop.get(cat));
 
     // カード単位 = 発行元。ただし1枚に複数名義が乗るカードは名義まで割る。
     // 「ビューカードの合計」より「駿のビューカード」「さやかのビューカード」で見たい。
@@ -459,8 +512,6 @@ async function renderSummary(host: HTMLElement): Promise<void> {
       mm.set(r.billing_month, (mm.get(r.billing_month) ?? 0) + r.total);
     }
 
-    const shopCatOf = new Map<string, string>();
-    for (const r of s.byShop) shopCatOf.set(r.shop_id, r.category);
     const ovr = new Map<string, { id: string; amount: number }>();
     for (const e of fx.entries) {
       if (e.override_of) ovr.set(`${e.override_of}\u0001${e.occurred_month}`, { id: e.entry_id, amount: e.amount_jpy });
