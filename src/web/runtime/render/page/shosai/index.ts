@@ -267,6 +267,21 @@ export async function renderShosai(container: HTMLElement): Promise<void> {
           openedDatabase?.(d.databaseId, d.title || 'データベース');
           void database.open(d.databaseId).then(refreshSide);
         });
+        // 取り込みが落ちたものは、開けるようにしたまま続きから始められるようにする。
+        // 一覧から消すと、そこまで取り込めた分に触れなくなる。
+        if (d.syncStatus === 'errored') {
+          const again = el('button', { class: 's-item-stop', text: '続きから', title: '落ちた取り込みを続きからやり直す' });
+          again.addEventListener('click', (ev) => {
+            ev.stopPropagation();
+            void (async () => {
+              try {
+                await api.resumeImport(d.databaseId);
+                await refreshSide();
+              } catch (e) { showError(e instanceof Error ? e.message : String(e)); }
+            })();
+          });
+          item.append(again);
+        }
         if (!managed) attachLongPress(item, () => openItemMenu('database', d.databaseId, d.title));
         listBox.append(item);
       }
@@ -280,7 +295,32 @@ export async function renderShosai(container: HTMLElement): Promise<void> {
         tx.append(el('div', { text: im.title || '無題' }));
         // 進み具合は文字で出す。ここが見えないと、止まっているのか進んでいるのかが
         // 分からない。実際「本文の取り込みに入ると何も見えなくなる」ことになっていた。
-        tx.append(el('div', { class: 's-item-sub', text: im.phase ?? '取り込んでいます' }));
+        const done = im.bodyDone ?? 0;
+        const total = im.bodyTotal ?? 0;
+        if (total > 0) {
+          const pct = Math.min(100, Math.round((done / total) * 100));
+          const bar = el('div', { class: 's-bar' });
+          const fill = el('div', { class: 's-bar-in' });
+          fill.style.width = `${pct}%`;
+          bar.append(fill);
+          tx.append(bar);
+          // 残り時間は、この取り込みが始まってからの実測から出す。見込みなので幅を持たせない
+          // かわりに、根拠のある間だけ出す（1件も進んでいないうちは出さない）。
+          const elapsed = im.startedAt && im.updatedAt ? im.updatedAt - im.startedAt : 0;
+          let eta = '';
+          if (done > 0 && elapsed > 20000) {
+            const perPage = elapsed / done;
+            const left = Math.round(((total - done) * perPage) / 60000);
+            eta = left <= 1 ? ' ・残り1分ほど' : left < 90 ? ` ・残り${left}分ほど`
+              : ` ・残り${Math.round(left / 60)}時間ほど`;
+          }
+          tx.append(el('div', { class: 's-item-sub', text: `${pct}%（${done}/${total} ページ）${eta}` }));
+        } else {
+          tx.append(el('div', { class: 's-item-sub', text: im.phase ?? '取り込んでいます' }));
+        }
+        if (im.attempt) {
+          tx.append(el('div', { class: 's-item-sub', text: `やり直し ${im.attempt} 回目` }));
+        }
         item.append(el('span', { class: 's-item-ic', text: '⟳' }), tx);
         const stop = el('button', { class: 's-item-stop', text: '中止', title: '取り込みを中止する' });
         stop.addEventListener('click', (ev) => {
