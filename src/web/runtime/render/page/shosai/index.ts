@@ -289,13 +289,13 @@ export async function renderShosai(container: HTMLElement): Promise<void> {
         })();
       }));
 
-      if (!userDbs.length) {
-        listBox.append(el('div', { class: 's-empty', text: 'まだありません' }));
-      }
       // 仕組みが持つもの（取り込みログ）は、ユーザーの作ったものと同じ並びに置かない。
       // 下部の「ツール」にまとめる。
       const userDbs = dbs.databases.filter((d) => !d.systemKind);
       const sysDbs = dbs.databases.filter((d) => d.systemKind);
+      if (!userDbs.length) {
+        listBox.append(el('div', { class: 's-empty', text: 'まだありません' }));
+      }
       for (const d of userDbs) {
         // 仕組みが持つもの（取り込みログ）は、ユーザーの作ったものと並べない。
         // 印を変え、消させない。
@@ -354,8 +354,6 @@ export async function renderShosai(container: HTMLElement): Promise<void> {
       settingItem.addEventListener('click', () => { void openSettings(); });
       toolBox.append(settingItem);
     } catch (e) {
-      // 一時的な調査用。原因の位置が分からないと直しようがない。
-      console.error('[shosai] refreshSide 失敗', e);
       showError(e instanceof Error ? e.message : String(e));
     }
   }
