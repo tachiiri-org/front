@@ -222,6 +222,7 @@ type Summary = {
   fixedCategories: string[];
   fixedShops: string[];
   issuers: string[];
+  byCard: { billing_month: string; issuer: string; card: string; total: number }[];
   multiCategoryShops: number;
 };
 
@@ -417,6 +418,16 @@ async function renderSummary(host: HTMLElement): Promise<void> {
       if (!mm) { mm = new Map(); shops.set(r.shop_id, mm); }
       mm.set(r.billing_month, (mm.get(r.billing_month) ?? 0) + r.total);
     }
+    // 発行元 → 名義 → 月 → 額
+    const cardRows = new Map<string, Map<string, Map<string, number>>>();
+    for (const r of s.byCard ?? []) {
+      let holders = cardRows.get(r.issuer);
+      if (!holders) { holders = new Map(); cardRows.set(r.issuer, holders); }
+      let mm = holders.get(r.card);
+      if (!mm) { mm = new Map(); holders.set(r.card, mm); }
+      mm.set(r.billing_month, (mm.get(r.billing_month) ?? 0) + r.total);
+    }
+
     const shopCatOf = new Map<string, string>();
     for (const r of s.byShop) shopCatOf.set(r.shop_id, r.category);
     const ovr = new Map<string, { id: string; amount: number }>();
@@ -619,6 +630,14 @@ async function renderSummary(host: HTMLElement): Promise<void> {
         const vals = months.map((m) => mm?.get(m) ?? 0);
         t.appendChild(totalRow(iss, vals,
           inProgress ? projShops(byIssuerShop.get(iss)) : null, false));
+        // 名義が複数あるカードは誰がいくらかを並べる。1人しかいないなら合計と同じなので出さない。
+        const holders = cardRows.get(iss);
+        if (holders && holders.size > 1) {
+          itemRows([...holders].map(([card, hm]) => {
+            const hv = months.map((m) => hm.get(m) ?? 0);
+            return { key: card, sub: '', vals: hv, total: hv.reduce((a, b) => a + b, 0) };
+          }), (r) => r.vals[0] ?? 0);
+        }
       }
       if (issuers.length > 1) {
         t.appendChild(totalRow('費目', cardTotals, inProgress ? cardProj : null, false));

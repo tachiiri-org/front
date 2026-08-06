@@ -26,8 +26,14 @@ await page.waitForSelector('.kk', { timeout: 30000 });
 
 const out = (await page.evaluate(`(async () => {
   const s = await (await fetch('/api/v1/kakeibo/summary')).json();
+  const bySrc = {};
+  for (const r of s.bySource || []) {
+    bySrc[r.source] = bySrc[r.source] || {};
+    bySrc[r.source][r.billing_month] = r.total;
+  }
   return { months: s.months.slice(0, 4), maxUsedOn: s.maxUsedOn,
-           fixedCategories: s.fixedCategories, fixedShops: (s.fixedShops || []).length };
+           fixedCategories: s.fixedCategories, fixedShops: (s.fixedShops || []).length,
+           issuers: s.issuers, bySource: bySrc };
 })()`)) as Record<string, unknown>;
 
 console.log(JSON.stringify(out));
