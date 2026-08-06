@@ -655,18 +655,34 @@ async function renderSummary(host: HTMLElement): Promise<void> {
   const shopId = new Map<string, string>();
   const shopCat = new Map<string, string>();
   const knownCats = [...new Set(s.byCategory.map((r) => r.category))].filter((c) => c !== '未分類').sort();
+  // カードで絞り込めるよう、発行元ごとにも持つ（'' が全カード）
+  const shopIssuers = new Set<string>();
   for (const r of s.byShop) {
-    const k = `${r.label}\u0001${r.billing_month}`;
-    shopAt.set(k, (shopAt.get(k) ?? 0) + r.total);
+    shopIssuers.add(r.issuer);
+    for (const iss of ['', r.issuer]) {
+      const k = `${iss}\u0001${r.label}\u0001${r.billing_month}`;
+      shopAt.set(k, (shopAt.get(k) ?? 0) + r.total);
+    }
     shopId.set(r.label, r.shop_id);
     shopCat.set(r.label, r.category);
   }
-  const allShopRows: Row[] = [...shopId.keys()].map((k) => {
-    const vals = months.map((m) => shopAt.get(`${k}\u0001${m}`) ?? 0);
-    const cat = shopCat.get(k) ?? '';
-    return { key: k, subs: [cat, isFixedShop(shopId.get(k) ?? '', cat) ? '固定費' : '変動費'],
-      vals, total: vals.reduce((a, b) => a + b, 0) };
-  });
+  // その発行元で使われた店だけを対象にする（全カードなら全部）
+  const shopsOf = new Map<string, Set<string>>();
+  for (const r of s.byShop) {
+    for (const iss of ['', r.issuer]) {
+      let set = shopsOf.get(iss);
+      if (!set) { set = new Set(); shopsOf.set(iss, set); }
+      set.add(r.label);
+    }
+  }
+  const shopRowsOf = (issuer: string): Row[] =>
+    [...(shopsOf.get(issuer) ?? [])].map((k) => {
+      const vals = months.map((m) => shopAt.get(`${issuer}\u0001${k}\u0001${m}`) ?? 0);
+      const cat = shopCat.get(k) ?? '';
+      return { key: k, subs: [cat, isFixedShop(shopId.get(k) ?? '', cat) ? '固定費' : '変動費'],
+        vals, total: vals.reduce((a, b) => a + b, 0) };
+    });
+  const allShopRows: Row[] = shopRowsOf('');
 
   const showDetail = async (label: string): Promise<void> => {
     const id = shopId.get(label);
@@ -738,14 +754,27 @@ async function renderSummary(host: HTMLElement): Promise<void> {
     filter.appendChild(o);
   }
   filter.value = '';
+
+  // カードでも絞れるようにする。1枚しか無いなら選択肢にならないので出さない。
+  const cardFilter = el('select', 'kk-in') as HTMLSelectElement;
+  for (const c of ['（カードで絞り込み）', ...[...shopIssuers].sort()]) {
+    const o = el('option', '', c) as HTMLOptionElement;
+    o.value = c === '（カードで絞り込み）' ? '' : c;
+    cardFilter.appendChild(o);
+  }
+  cardFilter.value = '';
+
   const drawShops = (): void => {
     shopHost.innerHTML = '';
-    const rows = filter.value ? allShopRows.filter((r) => r.subs?.[0] === filter.value) : allShopRows;
+    const base = shopRowsOf(cardFilter.value);
+    const rows = filter.value ? base.filter((r) => r.subs?.[0] === filter.value) : base;
     const ctrl = el('div', 'kk-row');
+    if (shopIssuers.size > 1) ctrl.appendChild(cardFilter);
     ctrl.appendChild(filter);
     shopHost.appendChild(matrix('店舗別', rows, ['費目', '区分'], (k) => void showDetail(k), ctrl));
   };
   filter.addEventListener('change', drawShops);
+  cardFilter.addEventListener('change', drawShops);
   drawShops();
 
   host.appendChild(shopHost);
