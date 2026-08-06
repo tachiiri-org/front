@@ -404,8 +404,10 @@ export async function renderShosai(container: HTMLElement): Promise<void> {
   }
 
   // 開いたものをタブとして登録する。ここが唯一の登録点。
-  openedDatabase = (id, title) => { openDb = { id, title }; goPane('main'); };
-  openedPage = (id, title) => { openPage = { id, title }; goPane('editor'); };
+  // goPane は同じペインなら何もしないので、タブの見出しは別に描き直す。
+  // これが無いと、開いているのは別のものなのにタブの名前が前のままになる。
+  openedDatabase = (id, title) => { openDb = { id, title }; goPane('main'); paintFoot(); };
+  openedPage = (id, title) => { openPage = { id, title }; goPane('editor'); paintFoot(); };
   closeTabByKey = closeTab;
 
   container.append(foot);
