@@ -238,7 +238,7 @@ export function createDatabaseView(opts: {
       const paintRefs = (refs: Array<{ id: string; title: string }>): void => {
         box.innerHTML = '';
         if (!refs.length) {
-          box.append(el('span', { class: 's-chip-empty', text: '＋ 選ぶ' }));
+          box.append(el('span', { class: 's-chip-empty', text: '＋' }));
         } else {
           for (const r of refs) {
             const link = el('a', { class: 's-ref', text: r.title || '（無題）', href: '#' });
@@ -325,7 +325,17 @@ export function createDatabaseView(opts: {
         rename();
       }
     });
-    const items: Array<[string, () => void]> = [['名前を変える', rename]];
+    const sortBy = (direction: SortRule['direction']): void => {
+      // 同じ列を選び直したら差し替える。段を増やしたいときは menu の「絞り込み・並べ替え」から。
+      localSorts = [{ property: prop.id, direction }, ...localSorts.filter((r) => r.property !== prop.id)];
+      paint();
+    };
+    const items: Array<[string, () => void]> = [
+      ['名前を変える', rename],
+      ['この列で絞り込む', () => openLocalEditor(anchor, prop.id)],
+      ['昇順で並べ替え', () => sortBy('ascending')],
+      ['降順で並べ替え', () => sortBy('descending')],
+    ];
     for (const t of TYPE_ORDER) {
       if (t === prop.type) continue;
       items.push([`種類を「${TYPE_LABEL[t]}」に変える`, () => {
@@ -345,8 +355,47 @@ export function createDatabaseView(opts: {
     openMenu(anchor, items, name);
   };
 
-  /** ビューのタブを押したときの menu。名前と削除。 */
-  const openViewMenu = (anchor: HTMLElement, view: { id: string; name: string }): void => {
+  /**
+   * ビューに保存しない、その場限りの絞り込みと並べ替え。
+   * ビューの条件（Notion と同じ形で保存する）とは別物なので、掛け合わせて使う。
+   */
+  const openLocalEditor = (anchor: HTMLElement, preselect?: string): void => {
+    openFilterEditor({
+      anchor,
+      // タイトルは列ではなく行そのものが持つが、並べ替えの相手としては列と同じ。
+      // ここだけ列のふりをさせる（評価器は 'title' を特別に扱う）。
+      properties: [{ id: 'title', name: 'タイトル', type: 'text', rank: null }, ...(detail?.properties ?? [])],
+      current: localFilters,
+      sorts: localSorts,
+      withSort: true,
+      keyBy: 'id',
+      preselect,
+      title: 'この表だけの絞り込み（保存しません）',
+      onSave: (f, srt) => {
+        localFilters = (f ?? {}) as Record<string, Record<string, unknown>>;
+        localSorts = srt ?? [];
+        paint();
+      },
+    });
+  };
+
+  /** ビューに保存する絞り込み。Notion と同じ形で持つので、取り込み直しても残る。 */
+  const openViewFilter = (anchor: HTMLElement, view: { id: string; quickFilters?: string | null }): void => {
+    openFilterEditor({
+      anchor,
+      properties: detail!.properties,
+      current: view.quickFilters ? (JSON.parse(view.quickFilters) as Record<string, Record<string, unknown>>) : {},
+      onSave: (quickFilters) => {
+        void guard(async () => {
+          await api.updateView(view.id, { quickFilters: quickFilters ?? null });
+          await reload();
+        });
+      },
+    });
+  };
+
+  /** ビューのタブを押したときの menu。絞り込みと、名前・削除。 */
+  const openViewMenu = (anchor: HTMLElement, view: { id: string; name: string; quickFilters?: string | null }): void => {
     const name = el('input', { class: 's-search', value: view.name }) as HTMLInputElement;
     name.value = view.name;
     const rename = (): void => {
@@ -361,7 +410,10 @@ export function createDatabaseView(opts: {
         rename();
       }
     });
+    const q = view.quickFilters ? Object.keys(JSON.parse(view.quickFilters) as object).length : 0;
     openMenu(anchor, [
+      [q ? `ビューの絞り込み（${q}）` : 'ビューの絞り込み', () => openViewFilter(anchor, view)],
+      ['この表だけの絞り込み・並べ替え', () => openLocalEditor(anchor)],
       ['名前を変える', rename],
       [`「${view.name}」を削除`, () => {
         if (!window.confirm(`ビュー「${view.name}」を消します。行は消えません。`)) return;
@@ -387,88 +439,46 @@ export function createDatabaseView(opts: {
       return;
     }
 
-    // ビューに保存しない、その場限りの絞り込みと並べ替え。ビューの条件とは別物なので
-    // 置き場所も分ける（こちらは表の上、ビューの条件はタブの列）。
-    const lcount = Object.keys(localFilters).length + localSorts.length;
-    const lbtn = el('button', { class: 's-head-btn', text: lcount ? `絞り込み・並べ替え ${lcount}` : '絞り込み・並べ替え' });
-    lbtn.addEventListener('click', () => {
-      openFilterEditor({
-        anchor: lbtn,
-        // タイトルは列ではなく行そのものが持つが、並べ替えの相手としては列と同じ。
-        // ここだけ列のふりをさせる（評価器は 'title' を特別に扱う）。
-        properties: [{ id: 'title', name: 'タイトル', type: 'text', rank: null }, ...detail!.properties],
-        current: localFilters,
-        sorts: localSorts,
-        withSort: true,
-        keyBy: 'id',
-        title: 'この表だけの絞り込み（保存しません）',
-        onSave: (f, srt) => {
-          localFilters = (f ?? {}) as Record<string, Record<string, unknown>>;
-          localSorts = srt ?? [];
-          paint();
-        },
-      });
-    });
-    headTools.append(lbtn);
-
-    // 検索は虫眼鏡に畳む。常に入力欄が出ていると、表より先に目が行ってしまう。
-    const findBtn = el('button', { class: 's-head-btn s-head-find', text: '🔍', title: 'この表の中を探す' });
+    // 検索は右上に出しっぱなしにする。畳むと、探せることに気づけない。
     const find = el('input', { class: 's-search s-head-search', placeholder: 'この表の中を探す' }) as HTMLInputElement;
     find.value = filterText;
-    find.style.display = findOpen ? '' : 'none';
     find.addEventListener('input', () => {
       filterText = find.value;
       paintRows();
       const again = head.querySelector('.s-head-search') as HTMLInputElement | null;
       if (again && again !== find) { again.value = filterText; again.focus(); }
     });
-    findBtn.addEventListener('click', () => {
-      findOpen = !findOpen;
-      find.style.display = findOpen ? '' : 'none';
-      if (findOpen) find.focus();
-      else if (filterText) { filterText = ''; find.value = ''; paintRows(); }
-    });
-    headTools.append(find, findBtn);
+    headTools.append(find);
 
-    if (detail.views.length) {
+    {
       const tabs = el('div', { class: 's-db-tabs' });
+      // 一番左はデータベースそのもの（＝ビューの絞り込みなし）。押すたびに menu を出すと
+      // 表が見られないので、選んでいるときだけ menu を開く。
+      const allOn = !activeViewId;
+      const all = el('button', {
+        class: `s-db-tab s-db-tab-all${allOn ? ' on' : ''}`, text: '▦',
+        title: allOn ? 'もう一度押すと、この表だけの絞り込み・並べ替え' : 'ビューの絞り込みを外して全部を見る',
+      });
+      all.addEventListener('click', () => {
+        if (allOn) { openLocalEditor(all); return; }
+        activeViewId = null;
+        void guard(reload);
+      });
+      tabs.append(all);
       for (const v of detail.views) {
         const on = activeViewId ? v.id === activeViewId : false;
         const t = el('button', { class: `s-db-tab${on ? ' on' : ''}`, text: v.name || v.type });
-        t.title = on ? 'もう一度押すと名前の変更・削除' : (v.quickFilters ? 'Notion の絞り込みが効いています' : '');
+        t.title = on ? 'もう一度押すと絞り込み・名前の変更・削除' : (v.quickFilters ? '絞り込みが効いています' : '');
         t.addEventListener('click', () => {
-          // 選んでいるタブをもう一度押したら、そのビューを直す menu を出す。
-          // 別のタブなら切り替える。押すたびに menu が出ると表が見られない。
-          if (on && !detail!.systemKind) { openViewMenu(t, { id: v.id, name: v.name || v.type }); return; }
+          // 選んでいるタブをもう一度押したら menu。別のタブなら切り替える。
+          if (on && !detail!.systemKind) {
+            openViewMenu(t, { id: v.id, name: v.name || v.type, quickFilters: v.quickFilters });
+            return;
+          }
           activeViewId = v.id;
           void guard(reload);
         });
         tabs.append(t);
-      }
-      // ビューの絞り込みを外して全件を見たいことがある。
-      const all = el('button', { class: `s-db-tab${activeViewId ? '' : ' on'}`, text: 'すべて' });
-      all.addEventListener('click', () => { activeViewId = null; void guard(reload); });
-      tabs.append(all);
-      // 絞り込みはビューに属する。ビューを選んでいるときだけ触れる。
-      const view = activeViewId ? detail.views.find((v) => v.id === activeViewId) ?? null : null;
-      if (view) {
-        const fbtn = el('button', { class: 's-db-filter', text: 'ビューの条件' });
-        const q = view.quickFilters ? Object.keys(JSON.parse(view.quickFilters) as object).length : 0;
-        if (q) fbtn.textContent = `ビューの条件 ${q}`;
-        fbtn.addEventListener('click', () => {
-          openFilterEditor({
-            anchor: fbtn,
-            properties: detail!.properties,
-            current: view.quickFilters ? (JSON.parse(view.quickFilters) as Record<string, Record<string, unknown>>) : {},
-            onSave: (quickFilters) => {
-              void guard(async () => {
-                await api.updateView(view.id, { quickFilters: quickFilters ?? null });
-                await reload();
-              });
-            },
-          });
-        });
-        tabs.append(fbtn);
       }
       body.append(tabs);
     }

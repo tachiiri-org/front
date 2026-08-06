@@ -44,6 +44,8 @@ export function openFilterEditor(opts: {
   /** 並べ替えも編集させるか。ビューの並びは Notion 側に合わせるので既定は編集しない。 */
   sorts?: SortRule[];
   withSort?: boolean;
+  /** 最初から選んでおく列。列の見出しから開いたときに、その列を選ばせ直さないため。 */
+  preselect?: string;
 }): void {
   const byId = opts.keyBy === 'id';
   const keyOf = (p: PropertyDef): string | null => (byId ? p.id : p.notionId ?? null);
@@ -99,6 +101,7 @@ export function openFilterEditor(opts: {
   };
   col.addEventListener('change', refreshOps);
   opSel.addEventListener('change', () => { valInput.style.display = NO_VALUE.has(opSel.value) ? 'none' : ''; });
+  if (opts.preselect && usable.some((p) => keyOf(p) === opts.preselect)) col.value = opts.preselect;
   refreshOps();
 
   const addBtn = el('button', { class: 's-btn', text: '条件を足す' });
@@ -148,6 +151,7 @@ export function openFilterEditor(opts: {
   const sortCol = el('select', { class: 's-filter-sel' }) as HTMLSelectElement;
   sortCol.append(el('option', { value: '', text: '列を選ぶ' }));
   for (const p of usable) sortCol.append(el('option', { value: keyOf(p) ?? '', text: p.name }));
+  if (opts.preselect && usable.some((p) => keyOf(p) === opts.preselect)) sortCol.value = opts.preselect;
   const sortDir = el('select', { class: 's-filter-sel' }) as HTMLSelectElement;
   sortDir.append(el('option', { value: 'ascending', text: '昇順' }), el('option', { value: 'descending', text: '降順' }));
   const sortBtn = el('button', { class: 's-btn', text: '並べ替えを足す' });
