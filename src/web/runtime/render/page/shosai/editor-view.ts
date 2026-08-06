@@ -6,6 +6,7 @@
 import * as api from './api';
 import type { BlockRow, BlockType, PageDetail } from './api';
 import { el } from './style';
+import { createCellInputs } from './cell-input';
 
 const MARKER: Partial<Record<BlockType, string>> = {
   bullet: '•',
@@ -44,6 +45,9 @@ export function createEditorView(opts: {
   const closeBtn = el('button', { class: 's-editor-close', text: '×', title: '閉じる' });
   closeBtn.addEventListener('click', () => opts.onClose?.());
   head.append(title, closeBtn);
+  // タイトルの下、本文の上にプロパティを出す（Notion と同じ置き方）。
+  // データベースの行を開いたときだけ中身が入る。
+  const propBox = el('div', { class: 's-props' });
   const body = el('div', { class: 's-editor-body' });
 
   // 編集の道具はタブのすぐ上に固定する。本文の末尾まで送らないと足せないのは面倒なので。
@@ -66,8 +70,9 @@ export function createEditorView(opts: {
   });
   // 足すときに種別を選べるようにする。段落を足してから種別を変えるのは手数が多い。
   const ADD_CHOICES: Array<[api.BlockType, string]> = [
-    ['paragraph', '段落'], ['heading', '見出し'], ['bullet', '箇条書き'],
+    ['heading', '見出し'], ['paragraph', '段落'], ['bullet', '箇条書き'],
     ['numbered', '番号付き'], ['todo', 'TODO'], ['quote', '引用'], ['code', 'コード'],
+    ['divider', '区切り'], ['table', '表'],
   ];
   const addBlock = el('button', { class: 's-tool', text: '＋ 追加' });
   addBlock.addEventListener('click', () => {
@@ -85,7 +90,18 @@ export function createEditorView(opts: {
         void guard(async () => {
           if (!pageId) return;
           const created = await api.createBlock({ parentId: pageId, type: key, text: '' });
-          focusAfterRender = created.id;
+          // 表は入れ子で持つ（表 > 行 > セル）。空の表だけ作っても書けないので、
+          // 2行2列を用意する。足りなければ行や列は後から足せる。
+          if (key === 'table') {
+            for (let r = 0; r < 2; r++) {
+              const row = await api.createBlock({ parentId: created.id, type: 'table_row', text: '' });
+              for (let c = 0; c < 2; c++) {
+                await api.createBlock({ parentId: row.id, type: 'table_cell', text: '' });
+              }
+            }
+          } else {
+            focusAfterRender = created.id;
+          }
           await reload();
         });
       });
@@ -137,7 +153,28 @@ export function createEditorView(opts: {
   });
   bar.append(addBlock, typeBtn, addImage, addDivider, picker);
 
-  root.append(head, body, bar);
+  root.append(head, propBox, body, bar);
+
+  const { cellInput } = createCellInputs({
+    onError: opts.onError,
+    onOpenPage: (id) => opts.onOpenLink?.(id),
+  });
+
+  /** プロパティを描く。列が無ければ何も出さない（単体のページには列が無い）。 */
+  const paintProps = async (id: string): Promise<void> => {
+    propBox.innerHTML = '';
+    let p: api.PageProperties | null = null;
+    try { p = await api.readPageProperties(id); } catch { return; }
+    if (!p.databaseId || !p.properties.length) return;
+    for (const prop of p.properties) {
+      const row = el('div', { class: 's-prop' });
+      row.append(el('div', { class: 's-prop-name', text: prop.name }));
+      const val = el('div', { class: 's-prop-val' });
+      val.append(cellInput(id, prop, p.cells[prop.id]));
+      row.append(val);
+      propBox.append(row);
+    }
+  };
 
   const guard = async (fn: () => Promise<void>): Promise<void> => {
     try { await fn(); } catch (e) {
@@ -222,6 +259,22 @@ export function createEditorView(opts: {
     }
 
     // 他のページへのリンク。押すとそのページを開く。
+    // 埋め込まれたデータベース。行き先が結ばれていればリンクにする。
+    // 結ばれていないと名前だけのブロックになり、開けない（そう見えていた）。
+    if (b.type === 'database') {
+      const row = el('div', { class: 's-blk s-blk-dblink' });
+      row.style.marginLeft = `${b.depth * 22}px`;
+      const mark = el('span', { class: 's-blk-mk', text: '▦' });
+      if (b.linkTargetId) {
+        const a = el('a', { class: 's-blk-link', text: b.text || b.linkTargetTitle || '（無題のデータベース）', href: '#' });
+        a.addEventListener('click', (e) => { e.preventDefault(); opts.onOpenLink?.(b.linkTargetId!); });
+        row.append(mark, a);
+      } else {
+        row.append(mark, el('span', { class: 's-note', text: `${b.text || '（無題のデータベース）'}（未取り込み）` }));
+      }
+      return row;
+    }
+
     if (b.type === 'page_link') {
       const a = el('a', { class: 's-blk-link', text: b.linkTargetTitle || b.text || '（無題のページ）', href: '#' });
       a.addEventListener('click', (e) => {
@@ -470,7 +523,9 @@ export function createEditorView(opts: {
     el: root,
     open: async (id: string) => {
       pageId = id;
+      propBox.innerHTML = '';
       await guard(reload);
+      await paintProps(id);
     },
     reload: () => guard(reload),
     currentPageId: () => pageId,

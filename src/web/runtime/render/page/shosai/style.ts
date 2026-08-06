@@ -109,6 +109,12 @@ export const SHOSAI_CSS = `
   .s-cell{width:100%;padding:5px 6px;border:1px solid transparent;border-radius:4px;background:transparent;color:inherit;font-size:12px;font-family:inherit;color-scheme:dark}
   .s-cell:hover,.s-cell:focus{border-color:#4A90C2;background:#00000008;outline:none}
   .s-cell-cb{margin:5px 7px}
+  /* プロパティ（タイトルの下・本文の上）。Notion と同じ置き方。 */
+  .s-props{padding:0 16px 8px;display:flex;flex-direction:column;gap:2px;flex:none;max-height:34vh;overflow-y:auto}
+  .s-prop{display:flex;align-items:flex-start;gap:8px}
+  .s-prop-name{flex:none;width:120px;font-size:12px;color:#888;padding:6px 0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+  .s-prop-val{flex:1;min-width:0}
+  .s-add-row-top{margin:0 0 4px}
   .s-add-row{margin-top:6px;border:0;background:transparent;color:#888;cursor:pointer;font-size:12.5px;padding:6px 8px;border-radius:5px;text-align:left;width:100%}
   .s-add-row:hover{background:#0000000a;color:#333}
 

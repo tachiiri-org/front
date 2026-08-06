@@ -85,11 +85,25 @@ export async function renderShosai(container: HTMLElement): Promise<void> {
     onTitleChange: () => { void refreshSide(); },
     onClose: () => closeTabByKey('editor'),
     onOpenLink: (blockId) => {
-      activePageId = blockId;
-      void editor.open(blockId).then(() => {
+      // 行き先がデータベースなら、エディタではなく表として開く。
+      // 埋め込まれたデータベース（Notion の child_database）がここへ来る。
+      void (async () => {
+        try {
+          const dbs = await api.listDatabases();
+          const hit = dbs.databases.find((d) => d.blockId === blockId);
+          if (hit) {
+            activeDatabaseId = hit.databaseId;
+            openedDatabase?.(hit.databaseId, hit.title || 'データベース');
+            await database.open(hit.databaseId);
+            await refreshSide();
+            return;
+          }
+        } catch { /* 引けなければページとして開く */ }
+        activePageId = blockId;
+        await editor.open(blockId);
         openedPage?.(blockId, editor.currentTitle());
-        void refreshSide();
-      });
+        await refreshSide();
+      })();
     },
   });
   // 「開く」やリレーションのリンクからエディタへ移る。移らないと、モバイルでは
