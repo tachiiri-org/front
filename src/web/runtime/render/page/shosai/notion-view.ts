@@ -9,6 +9,7 @@ import type { NotionConnection, NotionSource } from './api';
 import { el } from './style';
 
 const DROP_LABEL: Record<string, string> = {
+  '未共有のページへのリンク': '未共有のページへのリンク',
   people: '担当者', files: 'ファイル', formula: '数式', rollup: 'ロールアップ',
   created_by: '作成者', last_edited_by: '最終更新者', verification: '検証', button: 'ボタン',
   image: '画像', video: '動画', audio: '音声', file: 'ファイル', pdf: 'PDF',
@@ -30,6 +31,10 @@ function describeDropped(dropped: Record<string, number>): string[] {
   }
   const out: string[] = [];
   if (lost.length) out.push(`取り込めなかったもの: ${lost.join(' / ')}`);
+  // 共有不足は人が直せるので、直し方まで書く。
+  if (dropped['block:未共有のページへのリンク']) {
+    out.push('リンク先を Notion 側で連携に共有すると取り込めます（ページの ••• → 接続）');
+  }
   if (flattened.length) out.push(`段落に均したもの（中身は残っています）: ${flattened.join(' / ')}`);
   return out;
 }
