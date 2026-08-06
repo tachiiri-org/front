@@ -361,8 +361,13 @@ export async function renderShosai(container: HTMLElement): Promise<void> {
       }
 
       // 取り込みの途中のものは、データベースとしては出さない（中身が揃っていない表は
-      // 開いても使えない）。ただし隠さない。落ちたときにデータベースごと消えたように
-      // 見えてしまい、実際そう見えた。状況として出し、中止できるようにする。
+      // 開いても使えない）。ただし隠さない。NOTION の上に「取り込み中」として出し、
+      // 割合と残り時間、中止する手立てを添える。
+      const imports = dbs.imports ?? [];
+      runningKey = imports.map((i) => i.databaseId).sort().join(',');
+      paintImports(imports);
+      scheduleWatch(imports.length > 0);
+
       // ページの一覧は出さない。取り込みで入るページはデータベースの行か、
       // 本文からリンクされたものなので、データベースかリンク、検索から辿れる。
       // 一覧に並べると、リンク先のページが何十件も積み上がって邪魔になる。
