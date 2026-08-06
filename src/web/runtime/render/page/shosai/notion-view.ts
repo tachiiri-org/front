@@ -198,11 +198,9 @@ export function createNotionView(opts: {
     const st = p?.state;
     const rows = st?.rows ?? p?.rowsInDb ?? 0;
     const blocks = st?.blocks ?? 0;
-    progress.append(el('div', {
-      class: 's-notion-prog-line',
-      text: `${title}: ${rows} 行`,
-    }));
-    void blocks;
+    // 行数はここには出さない。取り込み中のものは左ペインに、割合と残り時間つきで出る。
+    // 同じことを二か所に書くと、片方だけ古い数字が残る。
+    void rows; void blocks; void title;
     const fails = p?.failures ?? [];
     if (fails.length) {
       for (const f of fails.slice(0, 5)) {
