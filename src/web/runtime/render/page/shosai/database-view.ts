@@ -5,6 +5,8 @@
 
 import * as api from './api';
 import type { DatabaseDetail, OptionDef, PropertyType } from './api';
+import { applyView } from './view-filter';
+import { openFilterEditor } from './filter-editor';
 import { el } from './style';
 
 const TYPE_LABEL: Record<PropertyType, string> = {
@@ -29,6 +31,13 @@ export function createDatabaseView(opts: {
   let databaseId: string | null = null;
   let detail: DatabaseDetail | null = null;
   let dbTitle = '';
+  let activeViewId: string | null = null;
+  let filterText = '';
+  // 相対日付（今週・先月）の起点。設定で変えられる。
+  let timeZone = 'Asia/Tokyo';
+  // 描き直しで横スクロールが左端に戻るのを防ぐ。取り込み中は数秒ごとに描き直すので、
+  // 位置を覚えていないと表を横に見ていられない。
+  let scrollLeft = 0;
 
   const root = el('div', { class: 's-main' });
   const head = el('div', { class: 's-main-head' });
@@ -247,6 +256,15 @@ export function createDatabaseView(opts: {
       return box;
     }
 
+    // URL が入っているテキストはリンクにする。取り込みログから元のページへ飛ぶため。
+    if (prop.type === 'text' && typeof raw === 'string' && /^https?:\/\//.test(raw)) {
+      const box = el('div', { class: 's-cell s-chips' });
+      const a = el('a', { class: 's-ref', href: raw, target: '_blank', rel: 'noopener noreferrer' });
+      a.textContent = raw.replace(/^https?:\/\/(www\.)?/, '').slice(0, 40);
+      box.append(a);
+      return box;
+    }
+
     const input = el('input', { class: 's-cell' }) as HTMLInputElement;
     if (prop.type === 'number') {
       input.type = 'number';
@@ -265,6 +283,10 @@ export function createDatabaseView(opts: {
   const paint = (): void => {
     body.innerHTML = '';
     titleEl.textContent = dbTitle || 'データベース';
+    if (detail?.systemKind) {
+      titleEl.textContent = `${dbTitle || 'データベース'}`;
+      titleEl.title = '仕組みが管理しているデータベースです';
+    }
     if (!detail) {
       body.append(el('div', { class: 's-note', text: '左からデータベースを選んでください。' }));
       return;
@@ -272,13 +294,57 @@ export function createDatabaseView(opts: {
 
     if (detail.views.length) {
       const tabs = el('div', { class: 's-db-tabs' });
-      detail.views.forEach((v, i) => {
-        const t = el('button', { class: `s-db-tab${i === 0 ? ' on' : ''}`, text: v.name || v.type });
-        // ビューの切り替え（フィルタ・ソート）はまだ持たせていない。タブは表示だけ。
+      for (const v of detail.views) {
+        const on = activeViewId ? v.id === activeViewId : false;
+        const t = el('button', { class: `s-db-tab${on ? ' on' : ''}`, text: v.name || v.type });
+        if (v.quickFilters) t.title = 'Notion の絞り込みが効いています';
+        t.addEventListener('click', () => {
+          activeViewId = v.id;
+          void guard(reload);
+        });
         tabs.append(t);
-      });
+      }
+      // ビューの絞り込みを外して全件を見たいことがある。
+      const all = el('button', { class: `s-db-tab${activeViewId ? '' : ' on'}`, text: 'すべて' });
+      all.addEventListener('click', () => { activeViewId = null; void guard(reload); });
+      tabs.append(all);
+      // 絞り込みはビューに属する。ビューを選んでいるときだけ触れる。
+      const view = activeViewId ? detail.views.find((v) => v.id === activeViewId) ?? null : null;
+      if (view) {
+        const fbtn = el('button', { class: 's-db-filter', text: '絞り込み' });
+        const q = view.quickFilters ? Object.keys(JSON.parse(view.quickFilters) as object).length : 0;
+        if (q) fbtn.textContent = `絞り込み ${q}`;
+        fbtn.addEventListener('click', () => {
+          openFilterEditor({
+            anchor: fbtn,
+            properties: detail!.properties,
+            current: view.quickFilters ? (JSON.parse(view.quickFilters) as Record<string, Record<string, unknown>>) : {},
+            onSave: (quickFilters) => {
+              void guard(async () => {
+                await api.updateView(view.id, { quickFilters: quickFilters ?? null });
+                await reload();
+              });
+            },
+          });
+        });
+        tabs.append(fbtn);
+      }
       body.append(tabs);
     }
+
+    // データベースの中を絞る。件数が多いと目で探せない。
+    const findWrap = el('div', { class: 's-db-find' });
+    const find = el('input', { class: 's-search', placeholder: 'この表の中を絞り込む' }) as HTMLInputElement;
+    find.value = filterText;
+    find.addEventListener('input', () => {
+      filterText = find.value;
+      paintRows();
+      // 入力欄が消えないよう、描き直しのあとで焦点を戻す。
+      const again = body.querySelector('.s-db-find input') as HTMLInputElement | null;
+      if (again && again !== find) { again.value = filterText; again.focus(); }
+    });
+    findWrap.append(find);
+    body.append(findWrap);
 
     const table = el('table', { class: 's-tbl' });
     const thead = el('thead');
@@ -290,16 +356,32 @@ export function createDatabaseView(opts: {
       th.append(el('span', { class: 's-col-kind', text: TYPE_LABEL[p.type] ?? p.type }));
       hr.append(th);
     }
+    // 仕組みが持つデータベース（取り込みログ）は列が決まっている。足せないようにする。
+    const managed = !!detail.systemKind;
     const addTh = el('th', { class: 's-col-add' });
-    const addBtn = el('button', { class: 's-col-add-btn', text: '＋', title: '列を追加' });
-    addBtn.addEventListener('click', () => openAddColumn(addBtn));
-    addTh.append(addBtn);
+    if (!managed) {
+      const addBtn = el('button', { class: 's-col-add-btn', text: '＋', title: '列を追加' });
+      addBtn.addEventListener('click', () => openAddColumn(addBtn));
+      addTh.append(addBtn);
+    }
     hr.append(addTh);
     thead.append(hr);
     table.append(thead);
 
     const tbody = el('tbody');
-    for (const row of detail.rows) {
+    // ビューの式（絞り込みと並び）を手元で解く。取り込んでいない列を参照する条件は
+    // 効かせず、そのことを画面に断る。
+    const activeView = activeViewId ? detail.views.find((v) => v.id === activeViewId) ?? null : null;
+    const applied = applyView(detail.rows, detail.properties, activeView, timeZone);
+    const q = filterText.trim();
+    const visible = q
+      ? applied.rows.filter((r) => {
+          if ((r.title || '').includes(q)) return true;
+          // セルの中身も見る。担当や状態で絞りたいことが多い。
+          return Object.values(r.cells).some((v) => JSON.stringify(v ?? '').includes(q));
+        })
+      : applied.rows;
+    for (const row of visible) {
       const tr = el('tr');
       const td = el('td', { class: 's-td-title' });
       // タイトル自体が開く導線。名前の変更は鉛筆で入力に切り替える。
@@ -350,17 +432,36 @@ export function createDatabaseView(opts: {
     // ブラウザが全体を縮小表示してしまい、固定フッターまで画面外へ行く。
     const scroller = el('div', { class: 's-tbl-scroll' });
     scroller.append(table);
+    scroller.addEventListener('scroll', () => { scrollLeft = scroller.scrollLeft; });
     body.append(scroller);
+    if (scrollLeft) requestAnimationFrame(() => { scroller.scrollLeft = scrollLeft; });
+    if (q && !visible.length) {
+      body.append(el('div', { class: 's-note', text: `「${q}」に当てはまる行はありません` }));
+    }
+    if (applied.unsupported.length) {
+      // 黙って全件出すと「絞り込めているつもり」になる。
+      body.append(el('div', {
+        class: 's-notion-warn',
+        text: `この列の条件は効かせられません（取り込んでいないため）: ${applied.unsupported.join(' / ')}`,
+      }));
+    }
 
-    const addRow = el('button', { class: 's-add-row', text: '＋ 行を追加' });
-    addRow.addEventListener('click', () => {
-      void guard(async () => {
-        await api.addRow(databaseId!, { title: '' });
-        opts.onChanged();
-        await reload();
+    if (!managed) {
+      const addRow = el('button', { class: 's-add-row', text: '＋ 行を追加' });
+      addRow.addEventListener('click', () => {
+        void guard(async () => {
+          await api.addRow(databaseId!, { title: '' });
+          opts.onChanged();
+          await reload();
+        });
       });
-    });
-    body.append(addRow);
+      body.append(addRow);
+    } else {
+      body.append(el('div', {
+        class: 's-note',
+        text: '取り込みの記録です。列と行は取り込みが作ります。元のページは「Notion リンク」から開けます。',
+      }));
+    }
 
     if (!detail.properties.length) {
       body.append(el('div', {
@@ -369,6 +470,8 @@ export function createDatabaseView(opts: {
       }));
     }
   };
+
+  const paintRows = (): void => paint();
 
   const reload = async (): Promise<void> => {
     if (!databaseId) return;
@@ -380,6 +483,13 @@ export function createDatabaseView(opts: {
     el: root,
     open: async (id: string) => {
       databaseId = id;
+      activeViewId = null;
+      filterText = '';
+      scrollLeft = 0;
+      try {
+        const st = await api.readSettings();
+        if (st.settings.timezone) timeZone = st.settings.timezone;
+      } catch { /* 既定のまま */ }
       const list = await api.listDatabases().catch(() => null);
       dbTitle = list?.databases.find((d) => d.databaseId === id)?.title ?? '';
       await guard(reload);

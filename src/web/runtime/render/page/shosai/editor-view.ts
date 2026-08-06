@@ -34,6 +34,8 @@ export function createEditorView(opts: {
   onTitleChange: (pageId: string, title: string) => void;
   /** ページへのリンクを押したとき。 */
   onOpenLink?: (blockId: string) => void;
+  /** 閉じるを押したとき。 */
+  onClose?: () => void;
 }): EditorView {
   let pageId: string | null = null;
   let detail: PageDetail | null = null;
@@ -44,7 +46,10 @@ export function createEditorView(opts: {
   const head = el('div', { class: 's-editor-head' });
   const title = el('input', { class: 's-title', placeholder: '無題' }) as HTMLInputElement;
   const typeNote = el('span', { class: 's-note' });
-  head.append(title, typeNote);
+  // 閉じる口を見出しに置く。モバイルはタブの × があるが、PC にはそれが無い。
+  const closeBtn = el('button', { class: 's-editor-close', text: '×', title: '閉じる' });
+  closeBtn.addEventListener('click', () => opts.onClose?.());
+  head.append(title, typeNote, closeBtn);
   const body = el('div', { class: 's-editor-body' });
 
   // 編集の道具はタブのすぐ上に固定する。本文の末尾まで送らないと足せないのは面倒なので。

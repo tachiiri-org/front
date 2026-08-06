@@ -5,6 +5,7 @@ import { TOOLS, callTool } from "./tools/authorize";
 import { GRAPH_TOOLS, callGraphTool } from "./tools/graph";
 import { URANAI_TOOLS, callUranaiTool } from "./tools/uranai";
 import { KAKEIBO_TOOLS, callKakeiboTool } from "./tools/kakeibo";
+import { SHOSAI_TOOLS, callShosaiTool } from "./tools/shosai";
 import { PRODUCT_TOOLS, callProductTool } from "./tools/product";
 
 type JsonRpcRequest = {
@@ -62,7 +63,7 @@ export async function handleMcp(request: Request, env: AuthorizeEnv): Promise<Re
       serverInfo: { name: "front", version: "1.0.0" },
     };
   } else if (body.method === "tools/list") {
-    result = { tools: [...TOOLS, ...GRAPH_TOOLS, ...URANAI_TOOLS, ...KAKEIBO_TOOLS, ...PRODUCT_TOOLS] };
+    result = { tools: [...TOOLS, ...GRAPH_TOOLS, ...URANAI_TOOLS, ...KAKEIBO_TOOLS, ...SHOSAI_TOOLS, ...PRODUCT_TOOLS] };
   } else if (body.method === "tools/call") {
     const { name, arguments: args } = body.params as {
       name: string;
@@ -74,6 +75,8 @@ export async function handleMcp(request: Request, env: AuthorizeEnv): Promise<Re
       ? await callUranaiTool(name, args, mcpEnv)
       : name.startsWith("kakeibo_")
       ? await callKakeiboTool(name, args, mcpEnv)
+      : name.startsWith("shosai_")
+      ? await callShosaiTool(name, args, mcpEnv)
       : name.startsWith("product_")
       ? await callProductTool(name, args, mcpEnv)
       : await callTool(name, args, mcpEnv, request);
