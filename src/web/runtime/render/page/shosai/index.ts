@@ -85,11 +85,25 @@ export async function renderShosai(container: HTMLElement): Promise<void> {
     onTitleChange: () => { void refreshSide(); },
     onClose: () => closeTabByKey('editor'),
     onOpenLink: (blockId) => {
-      activePageId = blockId;
-      void editor.open(blockId).then(() => {
+      // 行き先がデータベースなら、エディタではなく表として開く。
+      // 埋め込まれたデータベース（Notion の child_database）がここへ来る。
+      void (async () => {
+        try {
+          const dbs = await api.listDatabases();
+          const hit = dbs.databases.find((d) => d.blockId === blockId);
+          if (hit) {
+            activeDatabaseId = hit.databaseId;
+            openedDatabase?.(hit.databaseId, hit.title || 'データベース');
+            await database.open(hit.databaseId);
+            await refreshSide();
+            return;
+          }
+        } catch { /* 引けなければページとして開く */ }
+        activePageId = blockId;
+        await editor.open(blockId);
         openedPage?.(blockId, editor.currentTitle());
-        void refreshSide();
-      });
+        await refreshSide();
+      })();
     },
   });
   // 「開く」やリレーションのリンクからエディタへ移る。移らないと、モバイルでは
@@ -103,7 +117,9 @@ export async function renderShosai(container: HTMLElement): Promise<void> {
     onError: showError,
     onOpenPage: (blockId) => {
       activePageId = blockId;
-      void editor.open(blockId).then(() => {
+      // いま見ているデータベースを伝える。行のブロックは取り込み直すと複数の
+      // データベースに属するので、伝えないと古い方の列が出て値が空に見える。
+      void editor.open(blockId, activeDatabaseId ?? undefined).then(() => {
         openedPage?.(blockId, editor.currentTitle());
         void refreshSide();
       });

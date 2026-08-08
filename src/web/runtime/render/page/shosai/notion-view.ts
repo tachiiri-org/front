@@ -241,14 +241,8 @@ export function createNotionView(opts: {
           const out = res.status.output ?? {};
           progress.innerHTML = '';
           progress.append(el('div', { class: 's-notion-prog-done', text: `${title}: 完了` }));
-          const rows = out.rows ?? 0;
-          const blocks = out.blocks ?? 0;
-          progress.append(el('div', {
-            class: 's-note',
-            text: blocks === 0 && rows > 0
-              ? `${rows} 行（本文のあるページはありませんでした）`
-              : `${rows} 行 / ${blocks} ブロック`,
-          }));
+          // 行数・ブロック数はここには出さない。実体を引き継いだ回のものは 0 になり、
+          // 「0 行 / 0 ブロック」と嘘を言う。数はデータベースの一覧が持っている。
           for (const l of describeDropped(out.dropped ?? {})) {
             progress.append(el('div', { class: 's-notion-drop', text: l }));
           }
