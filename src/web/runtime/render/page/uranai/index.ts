@@ -1363,26 +1363,24 @@ function chartView(chart: Chart, birth: Birth | null | undefined, personId: stri
         };
         out.innerHTML = "";
         out.append(el("div", { className: "u-pat-comp", textContent:
-          `${ownOf("planet", "fortune") || ""}${zr.lot === "spirit" ? "スピリット" : "フォーチュン"}のロット（${SIGN_NAME[zr.lot_sign] ?? zr.lot_sign} ${fmtDeg(zr.lot_degree)}）を起点に、サインを順に解放する。各サインの年数はその支配星の小年数。第2層は同じ順を月で回し、一周すると起点の反対のサインへ飛ぶ（絆の解除）。` }));
-        for (const l1 of zr.periods.filter((p) => p.level === 1)) {
-          const head = el("div", { className: "u-pat-comp" + (l1.current ? " u-hit" : ""), textContent:
-            `第1層 ${l1.from_age}歳〜　${SIGN_NAME[l1.sign] ?? l1.sign}＝${houseCell(l1.house)}／${lordCell(l1)}　${l1.from} 〜 ${l1.to}${l1.current ? "　★現在" : ""}` });
-          out.append(head);
-          const subs = zr.periods.filter((p) => p.level === 2 && p.from >= l1.from && p.to <= l1.to);
-          const rowsOf = (list: ZodiacalRelease["periods"]) => list.map((p) => {
-            const es = hit(p.from, p.to);
-            return [
-              `${p.from_age}歳`,
-              `${p.from} 〜 ${p.to}`,
-              houseCell(p.house),
-              lordCell(p),
-              p.loosing_of_the_bond ? "絆の解除" : "",
-              es.map((e) => e.body ?? "").filter(Boolean).join("／") || "",
-            ];
-          });
-          const list = subs.length ? subs : [l1];
-          out.append(mkTable(["年齢", "期間", "舞台", "担当", "", "出来事"], rowsOf(list), [5]));
+          `${zr.lot === "spirit" ? "スピリット" : "フォーチュン"}のロット（${SIGN_NAME[zr.lot_sign] ?? zr.lot_sign} ${fmtDeg(zr.lot_degree)}）を起点に、サインを順に解放する。各サインの年数はその支配星の小年数。第2層は同じ順を月で回し、一周すると起点の反対のサインへ飛ぶ（絆の解除）。` }));
+        // 表は1つにまとめる。第1層ごとに分けると列幅が揃わない。
+        const rows: string[][] = [];
+        for (const p of zr.periods) {
+          const span = `${p.from} 〜 ${p.to}${p.loosing_of_the_bond ? "（絆の解除）" : ""}`;
+          const cells = [
+            p.level === 1 ? "第1層" : "",
+            `${p.from_age}歳`,
+            span,
+            houseCell(p.house),
+            lordCell(p),
+          ];
+          const es = p.level === 1 ? [] : hit(p.from, p.to); // 出来事は第2層にだけ並べる
+          if (!es.length) { rows.push([...cells, ""]); continue; }
+          // 出来事は1件1行。2件目以降は期間の列を空けて続ける。
+          es.forEach((e, k) => rows.push(k === 0 ? [...cells, e.body ?? ""] : ["", "", "", "", "", e.body ?? ""]));
         }
+        out.append(mkTable(["", "年齢", "期間", "ハウス", "支配星", "出来事"], rows, [5]));
       } catch (e) {
         out.innerHTML = "";
         out.append(el("div", { className: "u-status", textContent: `エラー: ${(e as Error).message}` }));
@@ -2399,7 +2397,7 @@ function chartView(chart: Chart, birth: Birth | null | undefined, personId: stri
     ...(usesPart("muntha") ? [{ label: "ムンタ", node: munthaNode() }] : []),
     ...(usesPart("ruling_planet") ? [{ label: "ルーリング・プラネット", node: rpNode() }] : []),
     ...(usesPart("chara_dasha") ? [{ label: "チャラ・ダシャー", node: charaNode() }] : []),
-    ...(usesPart("zodiacal_release") ? [{ label: "リリージング", node: zrNode() }] : []),
+    ...(usesPart("zodiacal_release") ? [{ label: "ゾディアカル・リリージング", node: zrNode() }] : []),
     ...(usesPart("tajika_aspect") || usesPart("mudda_dasha") ? [{ label: "タージカ", node: tajikaNode() }] : []),
     ...(usesPart("quadrant") ? [{ label: "象限", node: quadTbl }] : []),
     ...(usesPart("lunation") ? [{ label: "ルネーション", node: lunTbl }] : []),
