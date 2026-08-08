@@ -2175,9 +2175,25 @@ function chartView(chart: Chart, birth: Birth | null | undefined, personId: stri
         })
         .catch((e) => { rsStatus.textContent = `エラー: ${(e as Error).message}`; rsSave.disabled = false; });
     });
+    // 保存済みのチャートは読み取り時に作り直さないので、計算そのものが変わったとき
+    // （アスペクトの取り方を変えた等）は、設定を何も動かさずに作り直す口が要る。
+    const rsRecalc = el("button", { className: "u-btn u-btn-sm", type: "button", textContent: "再計算" });
+    rsRecalc.title = "いまの流派のまま、保存済みのチャートを計算し直す";
+    rsRecalc.addEventListener("click", () => {
+      rsRecalc.disabled = true;
+      rsStatus.textContent = "再計算中…";
+      void api(`/api/v1/uranai/astrology/person/${personId}/compute`, { method: "POST", body: "{}" })
+        .then(async () => {
+          clearMeanings();
+          rsStatus.textContent = "再計算しました";
+          await onSaved(label);
+        })
+        .catch((e) => { rsStatus.textContent = `エラー: ${(e as Error).message}`; })
+        .finally(() => { rsRecalc.disabled = false; });
+    });
     personSettingsNode.append(
       el("div", { className: "u-set-title", textContent: "この人物の流派" }),
-      el("div", { className: "u-set-grid" }, [el("div", { className: "u-set-row" }, [el("label", { textContent: "流派" }), rsSel, rsSave])]),
+      el("div", { className: "u-set-grid" }, [el("div", { className: "u-set-row" }, [el("label", { textContent: "流派" }), rsSel, rsSave, rsRecalc])]),
       lockedGrid, timingBox, partsBox, rsStatus,
     );
     void load();
