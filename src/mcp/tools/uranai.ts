@@ -128,7 +128,7 @@ export const URANAI_TOOLS = [
   {
     name: "uranai_set_events",
     description:
-      "Record life events for a person — the dated facts a ruleset's timing techniques get checked against. Events are person-scoped and shared across 流派 (they are facts, not readings). Pass one or more events; each needs `at` (YYYY-MM-DD) and `body` (what happened). `until` marks a span, `kind` is external/internal/quiet_external/quiet_internal, `weight` is 1-10. Omit `id` to create; pass the id from uranai_list_events to update. Bodies are stored encrypted: this writes personal data, so only call it when the user asked you to record something.",
+      "Record life events for a person — the dated facts a ruleset's timing techniques get checked against. Events are person-scoped and shared across 流派 (they are facts, not readings). Pass one or more events; each needs `at` (YYYY-MM-DD) and `body` (what happened). `until` marks a span, `kind` is external/internal/quiet_external/quiet_internal, `weight` is 1-10. Omit `id` to create; pass the id from uranai_list_events to update that event in place. `delete_ids` removes events outright. Bodies are stored encrypted: this writes personal data, so only call it when the user asked you to record something.",
     inputSchema: {
       type: "object",
       properties: {
@@ -150,8 +150,13 @@ export const URANAI_TOOLS = [
             required: ["at"],
           },
         },
+        delete_ids: {
+          type: "array",
+          description: "Event ids to delete outright",
+          items: { type: "string" },
+        },
       },
-      required: ["person_id", "events"],
+      required: ["person_id"],
     },
   },
   {
@@ -249,9 +254,27 @@ export async function callUranaiTool(
 
     if (name === "uranai_set_events") {
       const personId = String(args.person_id);
-      const events = Array.isArray(args.events) ? args.events : [];
-      if (!events.length) return { content: [{ type: "text", text: "events が空です" }], isError: true };
-      const res = await uranaiWrite(env, `/person/${encodeURIComponent(personId)}/event`, { events }, "POST");
+      const base = `/person/${encodeURIComponent(personId)}/event`;
+      const events = (Array.isArray(args.events) ? args.events : []) as Array<Record<string, unknown>>;
+      const deleteIds = (Array.isArray(args.delete_ids) ? args.delete_ids : []).map(String);
+      if (!events.length && !deleteIds.length) {
+        return { content: [{ type: "text", text: "events も delete_ids も空です" }], isError: true };
+      }
+      // 作成は一括 POST、更新は1件ずつ PUT。POST は常に新しい id を振るので、
+      // id 付きを混ぜると更新のつもりで重複が増える。
+      for (const id of deleteIds) {
+        const r = await uranaiWrite(env, `${base}/${encodeURIComponent(id)}`, {}, "DELETE");
+        if (!r.ok) throw new Error(`delete_event_failed:${r.status}`);
+      }
+      for (const ev of events.filter((e) => typeof e.id === "string" && e.id)) {
+        const { id, ...rest } = ev;
+        const r = await uranaiWrite(env, `${base}/${encodeURIComponent(String(id))}`, rest, "PUT");
+        if (!r.ok) throw new Error(`update_event_failed:${r.status}`);
+      }
+      const created = events.filter((e) => !e.id);
+      const res = created.length
+        ? await uranaiWrite(env, base, { events: created }, "POST")
+        : new Response("{}", { status: 200 });
       if (!res.ok) throw new Error(`set_events_failed:${res.status}`);
       const data = await readJson(env, `/person/${encodeURIComponent(personId)}/event`, "list_events");
       return { content: [{ type: "text", text: json(data) }] };
