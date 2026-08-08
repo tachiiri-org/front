@@ -1349,11 +1349,17 @@ function chartView(chart: Chart, birth: Birth | null | undefined, personId: stri
           api<{ events: LifeEvent[] }>(`/api/v1/uranai/person/${personId}/event`).catch(() => ({ events: [] })),
         ]);
         const events = ev.events ?? [];
-        // 期間と出来事の重なりで拾う。出来事は幅を持つので、どちらかが他方に掛かれば該当。
-        const hit = (from: string, to: string) => events.filter((e) => {
+        // 出来事は幅を持つので複数の期間にまたがる。全部の期間に出すと同じ行が並ぶので、
+        // 最初に重なった期間にだけ置き、その先へ続くものには印を付ける。
+        const firstIdx = new Map<string, number>();
+        for (const e of events) {
           const s0 = e.at, e0 = e.until ?? e.at;
-          return s0 < to && e0 >= from;
-        });
+          const i = zr.periods.findIndex((p) => p.level === 2 && s0 < p.to && e0 >= p.from);
+          if (i >= 0) firstIdx.set(e.id, i);
+        }
+        const startsAt = (idx: number, to: string) => events
+          .filter((e) => firstIdx.get(e.id) === idx)
+          .map((e) => `${e.body ?? ""}${(e.until ?? e.at) >= to ? "（継続）" : ""}`);
         const lordCell = (p: ZodiacalRelease["periods"][number]) =>
           `${bodyLabel(p.lord)}${p.lord_dignity ? `・${DIGNITY_JA[p.lord_dignity] ?? p.lord_dignity}` : ""}`;
         const houseCell = (h: string) => {
@@ -1366,7 +1372,7 @@ function chartView(chart: Chart, birth: Birth | null | undefined, personId: stri
           `${zr.lot === "spirit" ? "スピリット" : "フォーチュン"}のロット（${SIGN_NAME[zr.lot_sign] ?? zr.lot_sign} ${fmtDeg(zr.lot_degree)}）を起点に、サインを順に解放する。各サインの年数はその支配星の小年数。第2層は同じ順を月で回し、一周すると起点の反対のサインへ飛ぶ（絆の解除）。` }));
         // 表は1つにまとめる。第1層ごとに分けると列幅が揃わない。
         const rows: string[][] = [];
-        for (const p of zr.periods) {
+        zr.periods.forEach((p, idx) => {
           const span = `${p.from} 〜 ${p.to}${p.loosing_of_the_bond ? "（絆の解除）" : ""}`;
           const cells = [
             p.level === 1 ? "第1層" : "",
@@ -1375,11 +1381,11 @@ function chartView(chart: Chart, birth: Birth | null | undefined, personId: stri
             houseCell(p.house),
             lordCell(p),
           ];
-          const es = p.level === 1 ? [] : hit(p.from, p.to); // 出来事は第2層にだけ並べる
-          if (!es.length) { rows.push([...cells, ""]); continue; }
+          const es = p.level === 1 ? [] : startsAt(idx, p.to); // 出来事は第2層にだけ並べる
+          if (!es.length) { rows.push([...cells, ""]); return; }
           // 出来事は1件1行。2件目以降は期間の列を空けて続ける。
-          es.forEach((e, k) => rows.push(k === 0 ? [...cells, e.body ?? ""] : ["", "", "", "", "", e.body ?? ""]));
-        }
+          es.forEach((body, k) => rows.push(k === 0 ? [...cells, body] : ["", "", "", "", "", body]));
+        });
         out.append(mkTable(["", "年齢", "期間", "ハウス", "支配星", "出来事"], rows, [5]));
       } catch (e) {
         out.innerHTML = "";
