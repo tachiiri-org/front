@@ -31,11 +31,11 @@ async function readJson(env: AuthorizeEnv, resource: string, label: string): Pro
   return res.json();
 }
 
-/** [migration] Write path. Same tenant attribution as the reads; only concept notes use this. */
-async function uranaiWrite(env: AuthorizeEnv, resource: string, body: unknown): Promise<Response> {
+/** Write path. Same tenant attribution as the reads. */
+async function uranaiWrite(env: AuthorizeEnv, resource: string, body: unknown, method = "PUT"): Promise<Response> {
   return authorizeFetch(env, {
     path: `/api/v1/uranai${resource}`,
-    method: "PUT",
+    method,
     body: JSON.stringify(body),
     tenantContext: tenantCtx(env),
     scopes: env.actor?.scopes,
@@ -123,6 +123,35 @@ export const URANAI_TOOLS = [
         person_id: { type: "string", description: "Person id from uranai_list_persons" },
       },
       required: ["person_id"],
+    },
+  },
+  {
+    name: "uranai_set_events",
+    description:
+      "Record life events for a person — the dated facts a ruleset's timing techniques get checked against. Events are person-scoped and shared across 流派 (they are facts, not readings). Pass one or more events; each needs `at` (YYYY-MM-DD) and `body` (what happened). `until` marks a span, `kind` is external/internal/quiet_external/quiet_internal, `weight` is 1-10. Omit `id` to create; pass the id from uranai_list_events to update. Bodies are stored encrypted: this writes personal data, so only call it when the user asked you to record something.",
+    inputSchema: {
+      type: "object",
+      properties: {
+        person_id: { type: "string", description: "Person id from uranai_list_persons" },
+        events: {
+          type: "array",
+          description: "Events to create or update",
+          items: {
+            type: "object",
+            properties: {
+              id: { type: "string", description: "Existing event id. Omit to create a new one." },
+              at: { type: "string", description: "Date the event starts, YYYY-MM-DD" },
+              until: { type: "string", description: "End date for a span, YYYY-MM-DD. Omit for a point in time." },
+              kind: { type: "string", enum: ["external", "internal", "quiet_external", "quiet_internal"] },
+              weight: { type: "number", description: "How large it felt, 1-10" },
+              body: { type: "string", description: "What happened, in the user's own words" },
+              anchor: { type: "string", description: "Optional note on how the date was established" },
+            },
+            required: ["at"],
+          },
+        },
+      },
+      required: ["person_id", "events"],
     },
   },
   {
@@ -214,6 +243,16 @@ export async function callUranaiTool(
 
     if (name === "uranai_list_events") {
       const personId = String(args.person_id);
+      const data = await readJson(env, `/person/${encodeURIComponent(personId)}/event`, "list_events");
+      return { content: [{ type: "text", text: json(data) }] };
+    }
+
+    if (name === "uranai_set_events") {
+      const personId = String(args.person_id);
+      const events = Array.isArray(args.events) ? args.events : [];
+      if (!events.length) return { content: [{ type: "text", text: "events が空です" }], isError: true };
+      const res = await uranaiWrite(env, `/person/${encodeURIComponent(personId)}/event`, { events }, "POST");
+      if (!res.ok) throw new Error(`set_events_failed:${res.status}`);
       const data = await readJson(env, `/person/${encodeURIComponent(personId)}/event`, "list_events");
       return { content: [{ type: "text", text: json(data) }] };
     }
