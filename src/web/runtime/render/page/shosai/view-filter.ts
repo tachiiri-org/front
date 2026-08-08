@@ -172,8 +172,23 @@ export function applyView(
   // 鍵は Notion のプロパティ ID。ただし画面で組んだ条件は自前の列 ID で来る
   // （Notion 由来でない列にも条件を付けられるようにするため）。どちらも引けるようにする。
   const byNotionId = new Map<string, PropertyDef>();
+  // Notion はプロパティ id を、スキーマでは percent-encode した形（J%3CN%5C）で返し、
+  // ビューの式では素の形（J<N\）で使う。片方だけで引くと、記号を含む列の条件が
+  // 全て素通りする（実際、ビューを切り替えても全件のままになっていた）。
+  const put = (key: string | null | undefined, p: PropertyDef): void => {
+    if (!key) return;
+    byNotionId.set(key, p);
+    try {
+      const decoded = decodeURIComponent(key);
+      if (decoded !== key) byNotionId.set(decoded, p);
+    } catch { /* 不正な並びなら素のままだけで引く */ }
+    try {
+      const encoded = encodeURIComponent(key);
+      if (encoded !== key) byNotionId.set(encoded, p);
+    } catch { /* 同上 */ }
+  };
   for (const p of props) {
-    if (p.notionId) byNotionId.set(p.notionId, p);
+    put(p.notionId, p);
     byNotionId.set(p.id, p);
   }
   const unsupported = new Set<string>();

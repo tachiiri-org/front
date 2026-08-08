@@ -260,3 +260,14 @@ export const updateDatabase = (databaseId: string, patch: { titleName?: string }
 /** 落ちた取り込みを続きから。行と本文の済みは残っているので、残りだけを取り込む。 */
 export const resumeImport = (databaseId: string): Promise<{ importId: string }> =>
   post('/notion/import/resume', { databaseId });
+
+/** ページのプロパティ。エディタがタイトルの下に出す。行でなければ空で返る。 */
+export interface PageProperties {
+  databaseId: string | null;
+  databaseTitle?: string;
+  titleName?: string | null;
+  properties: PropertyDef[];
+  cells: Record<string, unknown>;
+}
+export const readPageProperties = (blockId: string, databaseId?: string): Promise<PageProperties> =>
+  call(`/page/${encodeURIComponent(blockId)}/properties${databaseId ? `?databaseId=${encodeURIComponent(databaseId)}` : ''}`);

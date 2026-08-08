@@ -68,7 +68,7 @@ const json = (v: unknown): string => JSON.stringify(v, null, 1);
 // backend/src/routes/v1/uranai.ts — a name missing here is simply unreachable from MCP.
 const TECHNIQUES = [
   "cycles", "progressed", "transit", "profection", "solar_arc",
-  "fixed_stars", "out_of_bounds", "firdaria", "rectification", "planet_cycle",
+  "fixed_stars", "out_of_bounds", "firdaria", "zodiacal_release", "rectification", "planet_cycle",
   "transit_search", "primary_direction", "time_lords", "dasha", "varga", "yoga",
   "jaimini", "kp", "muntha", "chara_dasha", "ruling_planets", "tajika",
   "synastry", "composite", "notes",
