@@ -160,6 +160,19 @@ export const URANAI_TOOLS = [
     },
   },
   {
+    name: "uranai_compute_chart",
+    description:
+      "Compute and store a person's chart for one 流派. Chart facts are stored per (person × ruleset), so a person can hold several 流派 side by side; computing one never clears another. Pass `ruleset` to compute a school the person is not currently set to — their default is untouched. Omit it to recompute the current one, which is what you want after the calculation itself changed. Reads (uranai_read_chart) return stored facts and never recompute, so nothing appears for a 流派 until this has run for it.",
+    inputSchema: {
+      type: "object",
+      properties: {
+        person_id: { type: "string", description: "Person id from uranai_list_persons" },
+        ruleset: { type: "string", description: "Ruleset id (流派). Omit to use the person's own setting." },
+      },
+      required: ["person_id"],
+    },
+  },
+  {
     name: "uranai_read_technique",
     description:
       "Read one derived or time-based technique for a person: progressions, transits, profection, solar arc, planetary cycles, transit search, primary directions, time lords, Vimshottari dasha, vargas, yogas, Jaimini, KP, muntha, chara dasha, ruling planets, Tajika, synastry, composite, or the user's own interpretation notes. Most take `date`; some take extra params (e.g. planet_cycle: until_age; dasha: levels; synastry/composite: the partner's person id). Pass them through `params`. Check the technique is in the ruleset's part list first (uranai_read_reference) — the API will compute it regardless. For technique 'notes', pass params {note_type:'event'|'concept'} to fetch a single tab/view; each note also carries its own note_type and period (at/until).",
@@ -278,6 +291,17 @@ export async function callUranaiTool(
       if (!res.ok) throw new Error(`set_events_failed:${res.status}`);
       const data = await readJson(env, `/person/${encodeURIComponent(personId)}/event`, "list_events");
       return { content: [{ type: "text", text: json(data) }] };
+    }
+
+    if (name === "uranai_compute_chart") {
+      const personId = String(args.person_id);
+      const ruleset = typeof args.ruleset === "string" && args.ruleset ? args.ruleset : undefined;
+      const res = await uranaiWrite(env, `/astrology/person/${encodeURIComponent(personId)}/compute`,
+        ruleset ? { ruleset } : {}, "POST");
+      if (!res.ok) throw new Error(`compute_failed:${res.status}`);
+      const d = (await res.json()) as Record<string, unknown>;
+      const n = Array.isArray(d.placements) ? d.placements.length : 0;
+      return { content: [{ type: "text", text: `計算しました（流派: ${String(d.ruleset ?? ruleset ?? "既定")} / 配置 ${n} 件）` }] };
     }
 
     if (name === "uranai_read_technique") {
