@@ -131,6 +131,7 @@ export type Chart = {
                         final: boolean; mutual: string | null }>;
   chart_ruler?: { asc_sign: string; ruler: string | null; ruler_sign: string | null; ruler_house: string | null } | null;
   sect?: { day: boolean; light: string; in_sect: string[]; out_of_sect: string[] } | null;
+  aversions?: Array<{ a: string; b: string }>;
   hemisphere?: { above: number; below: number; east: number; west: number } | null;
   stations?: Array<{ planet: string; speed: number; stationary: boolean }>;
   derived_points?: Array<{ planet: string;
@@ -463,3 +464,17 @@ export type LifeEvent = { id: string; at: string; until: string | null;
   kind: "external" | "internal" | "quiet_external" | "quiet_internal";
   weight: number | null; circular: boolean;
   body: string | null; anchor: string | null };
+
+/** ゾディアカル・リリージング。舞台（ハウス）・担当（支配星）・品位・年齢まで API が付けて返す。 */
+export type ZodiacalRelease = {
+  day: boolean;
+  lot: string;
+  lot_sign: string;
+  lot_degree: number;
+  levels: number;
+  periods: Array<{
+    level: number; sign: string; lord: string; from: string; to: string;
+    current: boolean; loosing_of_the_bond: boolean;
+    house: string; lord_dignity: string | null; from_age: number;
+  }>;
+};

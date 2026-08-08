@@ -1,6 +1,6 @@
 // ウラナイ画面のルート描画とフォーム類。定数・型・ヘルパは ./parts、ホイール描画は ./wheel に分割。
 import {
-  SIGN_ORDER, SIGN_GLYPH, SIGN_NAME, SIGN_ELEMENT, SIGN_QUALITY, ELEMENT_CHAR, QUALITY_CHAR, PLANET_GLYPH, PLANET_ORDER, PLANET_NAME_LINES, ASPECT_INFO, ASPECT_ORDER, PATTERN_INFO, PATTERN_ORDER, SHAPE_INFO, SHAPE_ORDER, Person, Prefill, Settings, SETTING_FIELDS, Chart, Derived, Cycles, Profection, SolarArc, FixedStars, OutOfBounds, Firdaria, Synastry, Composite, Rectification, PlanetCycle, TransitSearch, PrimaryDirection, TimeLords, Dasha, VargaCharts, Yogas, Jaimini, KpSubs, Muntha, RulingPlanets, CharaDasha, Tajika, LifeEvent, optionsOf, nameOf, ownOf, setOwn, usesPart, partsOn, allParts, setParts, isImplemented, loadMeanings, meaningOf, conventionOf, sabianReady, sabianCountOf, usesTiming, timingPrimaryOf, allTimingShapes, setTiming, rulesetIsEditable, rulesetNoteOf, roleOf, clearMeanings, UranaiView, api, lonOf, fmtDeg, Birth, HOUSE_SYSTEM_JA, IANA_ZONES, FALLBACK_ZONES, CC_ZONE, offsetFromZone, el, selectEl, loadSettings,
+  SIGN_ORDER, SIGN_GLYPH, SIGN_NAME, SIGN_ELEMENT, SIGN_QUALITY, ELEMENT_CHAR, QUALITY_CHAR, PLANET_GLYPH, PLANET_ORDER, PLANET_NAME_LINES, ASPECT_INFO, ASPECT_ORDER, PATTERN_INFO, PATTERN_ORDER, SHAPE_INFO, SHAPE_ORDER, Person, Prefill, Settings, SETTING_FIELDS, Chart, Derived, Cycles, Profection, SolarArc, FixedStars, OutOfBounds, Firdaria, Synastry, Composite, Rectification, PlanetCycle, TransitSearch, PrimaryDirection, TimeLords, Dasha, VargaCharts, Yogas, Jaimini, KpSubs, Muntha, RulingPlanets, CharaDasha, Tajika, LifeEvent, ZodiacalRelease, optionsOf, nameOf, ownOf, setOwn, usesPart, partsOn, allParts, setParts, isImplemented, loadMeanings, meaningOf, conventionOf, sabianReady, sabianCountOf, usesTiming, timingPrimaryOf, allTimingShapes, setTiming, rulesetIsEditable, rulesetNoteOf, roleOf, clearMeanings, UranaiView, api, lonOf, fmtDeg, Birth, HOUSE_SYSTEM_JA, IANA_ZONES, FALLBACK_ZONES, CC_ZONE, offsetFromZone, el, selectEl, loadSettings,
 } from "./parts";
 import { drawWheelPro } from "./wheel";
 
@@ -1334,6 +1334,64 @@ function chartView(chart: Chart, birth: Birth | null | undefined, personId: stri
     return box;
   };
 
+  // ゾディアカル・リリージング。第1層の中に第2層を入れ子にして、各期間に
+  // その時期に起きた出来事を並べる。技法が出すのは「舞台（ハウス）と担当（支配星）」
+  // までで、良し悪しは言っていない。品位は担当の状態として添えるだけ。
+  const zrNode = (): HTMLElement => {
+    const box = el("div", {});
+    const out = el("div", {});
+    const load = async () => {
+      out.innerHTML = "";
+      out.append(el("div", { className: "u-pat-empty", textContent: "算出中…" }));
+      try {
+        const [zr, ev] = await Promise.all([
+          api<ZodiacalRelease>(`/api/v1/uranai/astrology/person/${personId}/zodiacal_release?levels=2`),
+          api<{ events: LifeEvent[] }>(`/api/v1/uranai/person/${personId}/event`).catch(() => ({ events: [] })),
+        ]);
+        const events = ev.events ?? [];
+        // 期間と出来事の重なりで拾う。出来事は幅を持つので、どちらかが他方に掛かれば該当。
+        const hit = (from: string, to: string) => events.filter((e) => {
+          const s0 = e.at, e0 = e.until ?? e.at;
+          return s0 < to && e0 >= from;
+        });
+        const lordCell = (p: ZodiacalRelease["periods"][number]) =>
+          `${bodyLabel(p.lord)}${p.lord_dignity ? `・${DIGNITY_JA[p.lord_dignity] ?? p.lord_dignity}` : ""}`;
+        const houseCell = (h: string) => {
+          const n = h.replace("house_", "");
+          const own = ownOf("house", h) || meaningOf("house", h);
+          return `${n}室${own ? ` ${own}` : ""}`;
+        };
+        out.innerHTML = "";
+        out.append(el("div", { className: "u-pat-comp", textContent:
+          `${ownOf("planet", "fortune") || ""}${zr.lot === "spirit" ? "スピリット" : "フォーチュン"}のロット（${SIGN_NAME[zr.lot_sign] ?? zr.lot_sign} ${fmtDeg(zr.lot_degree)}）を起点に、サインを順に解放する。各サインの年数はその支配星の小年数。第2層は同じ順を月で回し、一周すると起点の反対のサインへ飛ぶ（絆の解除）。` }));
+        for (const l1 of zr.periods.filter((p) => p.level === 1)) {
+          const head = el("div", { className: "u-pat-comp" + (l1.current ? " u-hit" : ""), textContent:
+            `第1層 ${l1.from_age}歳〜　${SIGN_NAME[l1.sign] ?? l1.sign}＝${houseCell(l1.house)}／${lordCell(l1)}　${l1.from} 〜 ${l1.to}${l1.current ? "　★現在" : ""}` });
+          out.append(head);
+          const subs = zr.periods.filter((p) => p.level === 2 && p.from >= l1.from && p.to <= l1.to);
+          const rowsOf = (list: ZodiacalRelease["periods"]) => list.map((p) => {
+            const es = hit(p.from, p.to);
+            return [
+              `${p.from_age}歳`,
+              `${p.from} 〜 ${p.to}`,
+              houseCell(p.house),
+              lordCell(p),
+              p.loosing_of_the_bond ? "絆の解除" : "",
+              es.map((e) => e.body ?? "").filter(Boolean).join("／") || "",
+            ];
+          });
+          const list = subs.length ? subs : [l1];
+          out.append(mkTable(["年齢", "期間", "舞台", "担当", "", "出来事"], rowsOf(list), [5]));
+        }
+      } catch (e) {
+        out.innerHTML = "";
+        out.append(el("div", { className: "u-status", textContent: `エラー: ${(e as Error).message}` }));
+      }
+    };
+    box.append(out); void load();
+    return box;
+  };
+
   // タージカのアスペクトとムッダ・ダシャー。
   const tajikaNode = (): HTMLElement => {
     const box = el("div", {});
@@ -2341,6 +2399,7 @@ function chartView(chart: Chart, birth: Birth | null | undefined, personId: stri
     ...(usesPart("muntha") ? [{ label: "ムンタ", node: munthaNode() }] : []),
     ...(usesPart("ruling_planet") ? [{ label: "ルーリング・プラネット", node: rpNode() }] : []),
     ...(usesPart("chara_dasha") ? [{ label: "チャラ・ダシャー", node: charaNode() }] : []),
+    ...(usesPart("zodiacal_release") ? [{ label: "リリージング", node: zrNode() }] : []),
     ...(usesPart("tajika_aspect") || usesPart("mudda_dasha") ? [{ label: "タージカ", node: tajikaNode() }] : []),
     ...(usesPart("quadrant") ? [{ label: "象限", node: quadTbl }] : []),
     ...(usesPart("lunation") ? [{ label: "ルネーション", node: lunTbl }] : []),
