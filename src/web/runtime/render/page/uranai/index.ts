@@ -356,7 +356,7 @@ function settingsView(settings: Settings, onSaved: () => void | Promise<void>): 
 }
 
 // ───────────────────────── チャート表示（タブ: チャート/表/基本情報） ─────────────────────────
-function chartView(chart: Chart, birth: Birth | null | undefined, personId: string, label: string | null, onSaved: (newLabel: string | null) => void | Promise<void>, reportHost?: HTMLElement): HTMLElement {
+function chartView(chart: Chart, birth: Birth | null | undefined, personId: string, label: string | null, onSaved: (newLabel: string | null) => void | Promise<void>, reportHost?: HTMLElement, onViewRuleset?: (ruleset: string) => void | Promise<void>): HTMLElement {
   const wrap = el("div", { className: "u-chart" });
   // データ準備
   const storedCusps = (chart.cusps ?? []).filter((c) => c.system === (chart.house_system ?? "whole_sign")).sort((a, b) => a.index - b.index);
@@ -2175,25 +2175,28 @@ function chartView(chart: Chart, birth: Birth | null | undefined, personId: stri
         })
         .catch((e) => { rsStatus.textContent = `エラー: ${(e as Error).message}`; rsSave.disabled = false; });
     });
-    // 保存済みのチャートは読み取り時に作り直さないので、計算そのものが変わったとき
-    // （アスペクトの取り方を変えた等）は、設定を何も動かさずに作り直す口が要る。
-    const rsRecalc = el("button", { className: "u-btn u-btn-sm", type: "button", textContent: "再計算" });
-    rsRecalc.title = "いまの流派のまま、保存済みのチャートを計算し直す";
-    rsRecalc.addEventListener("click", () => {
-      rsRecalc.disabled = true;
-      rsStatus.textContent = "再計算中…";
-      void api(`/api/v1/uranai/astrology/person/${personId}/compute`, { method: "POST", body: "{}" })
+    // チャートは人物×流派で保存されるので、1人が複数の流派を同時に持てる。人物の既定を
+    // 変えずに別の流派で計算して見るための口。既定と同じ流派を選べば単なる再計算になり、
+    // 計算そのものを変えたとき（アスペクトの取り方を変えた等）の作り直しにも使える。
+    const rsView = el("button", { className: "u-btn u-btn-sm", type: "button", textContent: "この流派で計算・表示" });
+    rsView.title = "人物の既定は変えずに、選んだ流派で計算して表示する";
+    rsView.addEventListener("click", () => {
+      rsView.disabled = true;
+      rsStatus.textContent = "計算中…";
+      const target = rsSel.value || defaultRuleset;
+      void api(`/api/v1/uranai/astrology/person/${personId}/compute`,
+        { method: "POST", body: JSON.stringify({ ruleset: target }) })
         .then(async () => {
           clearMeanings();
-          rsStatus.textContent = "再計算しました";
-          await onSaved(label);
+          rsStatus.textContent = "";
+          if (onViewRuleset) await onViewRuleset(target); else await onSaved(label);
         })
         .catch((e) => { rsStatus.textContent = `エラー: ${(e as Error).message}`; })
-        .finally(() => { rsRecalc.disabled = false; });
+        .finally(() => { rsView.disabled = false; });
     });
     personSettingsNode.append(
       el("div", { className: "u-set-title", textContent: "この人物の流派" }),
-      el("div", { className: "u-set-grid" }, [el("div", { className: "u-set-row" }, [el("label", { textContent: "流派" }), rsSel, rsSave, rsRecalc])]),
+      el("div", { className: "u-set-grid" }, [el("div", { className: "u-set-row" }, [el("label", { textContent: "流派" }), rsSel, rsSave, rsView])]),
       lockedGrid, timingBox, partsBox, rsStatus,
     );
     void load();
@@ -2750,16 +2753,20 @@ export async function renderUranai(container: HTMLElement): Promise<void> {
     );
   };
   // 既存人物の出生データを取得して編集フォームを事前入力で開く。
-  const showChart = async (personId: string, label?: string | null, push = true) => {
+  const showChart = async (personId: string, label?: string | null, push = true, ruleset?: string) => {
     main.innerHTML = ""; main.append(el("div", { textContent: "読み込み中…" }));
-    let chart = await api<Chart>(`/api/v1/uranai/astrology/person/${personId}/chart`);
+    // ruleset を渡すと、人物の既定ではなくその流派で読む。チャートは人物×流派で
+    // 保存されているので、1人が複数の流派を並行して持てる。
+    const rsQ = ruleset ? `?ruleset=${encodeURIComponent(ruleset)}` : "";
+    const rsBody = JSON.stringify(ruleset ? { ruleset } : {});
+    let chart = await api<Chart>(`/api/v1/uranai/astrology/person/${personId}/chart${rsQ}`);
     const birth = await api<Birth>(`/api/v1/uranai/person/${personId}/birth`).catch(() => null);
     // 流派を切り替えた直後は、その流派での計算がまだ無く配置が空になる。
     // 出生データがあるなら作る。無いときだけ入力フォームへ回す。
     if (chart.placements.length === 0 && birth?.born_at) {
       main.innerHTML = ""; main.append(el("div", { textContent: "この流派で計算中…" }));
-      await api(`/api/v1/uranai/astrology/person/${personId}/compute`, { method: "POST", body: "{}" }).catch(() => {});
-      chart = await api<Chart>(`/api/v1/uranai/astrology/person/${personId}/chart`);
+      await api(`/api/v1/uranai/astrology/person/${personId}/compute`, { method: "POST", body: rsBody }).catch(() => {});
+      chart = await api<Chart>(`/api/v1/uranai/astrology/person/${personId}/chart${rsQ}`);
     }
     main.innerHTML = "";
     if (chart.placements.length === 0) { showForm(personId, { label }, push); return; }
@@ -2768,8 +2775,10 @@ export async function renderUranai(container: HTMLElement): Promise<void> {
     await loadMeanings(chart.ruleset);
     if (push) history.pushState({ uranai: { kind: "chart", personId, label: label ?? null } as UranaiView }, "");
     // 保存後は一覧のラベル更新＋再描画（画面遷移せず反映）。
-    const onSaved = async (newLabel: string | null) => { await refreshList(personId); void showChart(personId, newLabel ?? label, false); };
-    main.append(el("div", { className: "u-chart-head" }, [el("div", { className: "u-title", textContent: label ?? "" })]), chartView(chart, birth, personId, label ?? null, onSaved, report.querySelector(".u-report-body") as HTMLElement));
+    const onSaved = async (newLabel: string | null) => { await refreshList(personId); void showChart(personId, newLabel ?? label, false, ruleset); };
+    // 選んだ流派で見直す。人物の既定は動かさないので、同じ人物を複数の流派で並べて追える。
+    const onViewRuleset = async (rs: string) => { void showChart(personId, label, false, rs); };
+    main.append(el("div", { className: "u-chart-head" }, [el("div", { className: "u-title", textContent: label ?? "" })]), chartView(chart, birth, personId, label ?? null, onSaved, report.querySelector(".u-report-body") as HTMLElement, onViewRuleset));
     // モバイルで人物を選んだら情報へ移る（フッターの選択も追従させる）。
     if (window.matchMedia("(max-width: 640px)").matches) setPane("main");
   };
